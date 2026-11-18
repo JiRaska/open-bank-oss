@@ -18,6 +18,7 @@ import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.CaseOrigin
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.micrometer.core.instrument.MeterRegistry
@@ -77,6 +78,7 @@ class AmlCaseService(
             idempotencyKey = command.idempotencyKey,
             requestHash = command.requestHash,
             origin = command.origin,
+            movementService = command.movementService,
             partyId = command.partyId,
             accountId = command.accountId,
             transactionId = command.transactionId,
@@ -178,7 +180,7 @@ class AmlCaseService(
         }
 
         // ADR-0050: the transition and its status-changed event commit atomically via the outbox.
-        return amlCaseRepository.update(updated, statusChangedEvent(amlCase, updated))
+        return amlCaseRepository.update(updated, objectMapper.statusChangedEvent(amlCase, updated))
     }
 
     private fun initialStatus(riskLevel: com.openbank.aml.domain.model.AmlRiskLevel): AmlCaseStatus = when (riskLevel) {
@@ -195,28 +197,6 @@ class AmlCaseService(
         aggregateId = amlCase.id,
         eventType = EVENT_CASE_CREATED,
         payload = objectMapper.writeValueAsString(amlCase.toCreatedEvent(now)),
-    )
-
-    private fun statusChangedEvent(previous: AmlCase, current: AmlCase): OutboxMessage = OutboxMessage(
-        eventId = UUID.randomUUID(),
-        aggregateId = current.id,
-        eventType = EVENT_STATUS_CHANGED,
-        payload = objectMapper.statusChangedPayload(
-            AmlCaseStatusChangedEvent(
-                caseId = current.id,
-                partyId = current.partyId,
-                previousStatus = previous.status,
-                newStatus = current.status,
-                decisionReason = current.decisionReason,
-                assignedAnalyst = current.assignedAnalyst,
-                decidedBy = current.decidedBy,
-                occurredAt = current.updatedAt,
-                transactionId = current.transactionId,
-                alertCode = current.alertCode,
-                idempotencyKey = current.idempotencyKey,
-                origin = current.origin?.takeIf { it == CaseOrigin.PAYMENT_HOLD_INTAKE }?.name,
-            ),
-        ),
     )
 
     companion object {
@@ -240,3 +220,26 @@ internal fun ObjectMapper.statusChangedPayload(event: AmlCaseStatusChangedEvent)
     tree.remove("origin")
     return writeValueAsString(tree)
 }
+
+/** The status-changed event of a transition from [previous] to [current]; `origin` only for the hold intake's case. */
+internal fun ObjectMapper.statusChangedEvent(previous: AmlCase, current: AmlCase): OutboxMessage = OutboxMessage(
+    eventId = Ids.newId(),
+    aggregateId = current.id,
+    eventType = AmlCaseService.EVENT_STATUS_CHANGED,
+    payload = statusChangedPayload(
+        AmlCaseStatusChangedEvent(
+            caseId = current.id,
+            partyId = current.partyId,
+            previousStatus = previous.status,
+            newStatus = current.status,
+            decisionReason = current.decisionReason,
+            assignedAnalyst = current.assignedAnalyst,
+            decidedBy = current.decidedBy,
+            occurredAt = current.updatedAt,
+            transactionId = current.transactionId,
+            alertCode = current.alertCode,
+            idempotencyKey = current.idempotencyKey,
+            origin = current.origin?.takeIf { it == CaseOrigin.PAYMENT_HOLD_INTAKE }?.name,
+        ),
+    ),
+)

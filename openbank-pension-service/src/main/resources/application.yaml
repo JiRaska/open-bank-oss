@@ -363,6 +363,8 @@ authz:
   quarkus:
     tls:
       catalog-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -373,6 +375,8 @@ authz:
             certs: /mnt/catalog-tls/ca.crt
         protocols: TLSv1.3
       account-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -383,6 +387,8 @@ authz:
             certs: /mnt/account-tls/ca.crt
         protocols: TLSv1.3
       party-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -393,6 +399,8 @@ authz:
             certs: /mnt/party-tls/ca.crt
         protocols: TLSv1.3
       sca-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -403,6 +411,8 @@ authz:
             certs: /mnt/sca-tls/ca.crt
         protocols: TLSv1.3
       sdd-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -413,6 +423,8 @@ authz:
             certs: /mnt/sdd-tls/ca.crt
         protocols: TLSv1.3
       domestic-payment-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -423,6 +435,8 @@ authz:
             certs: /mnt/domestic-payment-tls/ca.crt
         protocols: TLSv1.3
       standing-order-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -433,6 +447,8 @@ authz:
             certs: /mnt/standing-order-tls/ca.crt
         protocols: TLSv1.3
       fund-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -442,6 +458,28 @@ authz:
           pem:
             certs: /mnt/fund-tls/ca.crt
         protocols: TLSv1.3
+    http:
+      # East-west mTLS on the 8443 listener: tax-reporting presents
+      # tax-reporting-internal-tls (ADR-0337 pattern, as treasury). `quarkus.http.ssl.client-auth`
+      # is BUILD-TIME, so it lives in the file the image is built from; %prod only, because with
+      # quarkus.http.ssl.* set and no certificate Quarkus refuses to start in dev and @QuarkusTest.
+      # The manifest supplies the server certificate and the openbank-ca trust store
+      # (QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES) in the same change.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port: with client-auth REQUIRED Quarkus otherwise drops it, and the
+      # probes and existing in-cluster callers use it until their own HTTPS cutover.
+      insecure-requests: enabled
+      # Listener parity: with client-auth on, Quarkus also registers its mTLS mechanism, which
+      # turns a trusted client certificate into a SecurityIdentity of its own. The certificate is
+      # transport authentication only — /api/* accepts the OIDC bearer OPA decides on, on both
+      # listeners. ListenerAuthParityIT holds both to 401 without a bearer.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: authenticated
+            auth-mechanism: bearer
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority

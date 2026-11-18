@@ -182,4 +182,40 @@ class CaseScreeningTest {
         assertThat(CaseScreening(hit).requiresReview).isTrue()
         assertThat(CaseScreening(pep).requiresReview).isTrue()
     }
+
+    @Test
+    fun `identities carry the register country, dates of birth and nationality, merged for a person listed twice`() {
+        val base = extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, emptyList())
+        val ex = base.copy(
+            representatives = listOf(
+                Representative("Ing. Jana Nováková", java.time.LocalDate.of(1980, 1, 2), "jednatelé", "jednatel", null),
+            ),
+        )
+        val owners = listOf(
+            owner("NOVÁKOVÁ Jana").copy(nationality = "CZ", countryOfResidence = "SK"),
+            owner("Holding Alfa a.s.", corporate = true).copy(countryRegistered = "CY"),
+        )
+        val subjects = CaseScreening.subjectsOf(ex, owners).associateBy { it.kind }
+        val ids = CaseScreening.identitiesOf(ex, owners)
+
+        assertThat(ids.getValue(subjects.getValue(ScreeningSubjectKind.ENTITY).key).single().country).isEqualTo("CZ")
+        val jana = ids.getValue(subjects.getValue(ScreeningSubjectKind.REPRESENTATIVE).key).single()
+        assertThat(jana.dateOfBirth).isEqualTo(java.time.LocalDate.of(1980, 1, 2))
+        assertThat(jana.nationality).isEqualTo("CZ")
+        assertThat(jana.country).isEqualTo("SK")
+        assertThat(ids.getValue(subjects.getValue(ScreeningSubjectKind.BENEFICIAL_OWNER).key).single().country)
+            .isEqualTo("CY")
+    }
+
+    @Test
+    fun `contradicting listings under one name stay separate identities instead of merging first-wins`() {
+        val ex = extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, emptyList())
+        val owners = listOf(
+            owner("Jan Dvořák").copy(countryOfResidence = "CZ"),
+            owner("DVOŘÁK Jan").copy(countryOfResidence = "IR"),
+        )
+        val key = CaseScreening.subjectsOf(ex, owners).single { it.kind == ScreeningSubjectKind.BENEFICIAL_OWNER }.key
+        assertThat(CaseScreening.identitiesOf(ex, owners).getValue(key).map { it.country })
+            .containsExactly("CZ", "IR")
+    }
 }

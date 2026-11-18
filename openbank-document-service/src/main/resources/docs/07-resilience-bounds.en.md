@@ -35,3 +35,19 @@ Configured values:
 - `max-size: 20`
 
 
+
+## Seal certificate expiry
+
+The institutional PAdES seal certificate is loaded once at boot from the organizational PKCS#12
+keystore. Its expiry is exported as
+`openbank_document_seal_certificate_expiry_timestamp_seconds{identity="keystore"|"ephemeral"}`
+(`SealCertificateExpiryMetrics`). Only public certificate metadata is exported: no subject, serial
+or key material.
+
+- `identity="keystore"`: the organizational certificate. `SealCertificateExpiring` warns 45 days
+  before its notAfter, because renewal is a manual ceremony
+  (`docs/runbooks/0008-openbao-document-signing-pki.md`).
+- `identity="ephemeral"`: the DEV-ONLY fallback. It is never alerted on, and the admin-ui
+  Keys & Certificates page shows it as a development seal, not as a healthy countdown.
+
+A renewed keystore is picked up on restart only, so roll the pods after replacing it.

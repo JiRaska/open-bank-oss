@@ -10,7 +10,7 @@ ADR-0032 documents the synchronous AML/sanctions screening gate. Reviewed in PR.
 
 - **Status:** Draft (first pass, written alongside the real-feed-registration wiring; §6 added
   with the review-path persistence fix)
-- **Last reviewed:** 2026-10-29
+- **Last reviewed:** 2026-11-18 (machine principals excluded from operator-sanctions-write)
 - **Owner:** sanctions/AML CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0032 (synchronous AML/sanctions screening gate),
   ADR-0100 (injected Clock, Layer 1 determinism), ADR-0116 (KYC engine — `SANCTIONS_SCREENING`
@@ -218,6 +218,76 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
 
 ## 7. Change log
 
+- **2026-11-18 (follow-up to #16593):** **EoP closed: a machine principal can no longer act as the
+  four-eyes CHECKER.** `operator-sanctions-write` granted every `sanctions.*` action, including
+  `sanctions.approval.decide`, to any `HUMAN`-typed principal holding `ROLE_OPERATOR`/`ROLE_ADMIN`.
+  Keycloak service-accounts are classified `HUMAN`, and the docker/CI realms give the shared
+  `service-account-openbank-services` `ROLE_OPERATOR` (the deployed realm gives it to
+  `service-account-openbank-edge`), so in those environments a machine could decide a paused
+  `sanctions.clear` and the maker/checker split reduced to two service identities. The rule now
+  carries `not principal_is_machine` (staff only; an absent `service_account` marker also counts as
+  machine). **Caller inventory** (every REST client targeting sanctions-service): account,
+  domestic-payment, sepa-payment, sepa-instant, fx, swift, sdd, kyc, kyb call `POST .../screen`
+  and kyb `PUT/DELETE .../monitored-subjects` — all `sanctions.create`, granted to machines by base
+  `rest.rego`'s `m2m-sanctions-screening`, unaffected; agent-service reads and submits
+  `sanctions.clear` as maker through its own named rules, unaffected; admin-ui relays the signed-in
+  operator's token (human), unaffected. No machine calls `sanctions.update`, `.trigger` or
+  `.approval.decide`. `sanctions_rest_ext_test.rego` pins must-DENY for a `ROLE_OPERATOR` machine
+  (marker present and absent) on decide/clear/update/trigger, and must-ALLOW for a human operator's
+  decide and the machine's screen; the deny cases fail against the previous rule. Checked with
+  `opa eval` against the regenerated `sanctions-opa-bundle` ConfigMap. This closes the residual
+  recorded in the 2026-10-08 entry. Rollback: revert the one-line condition and regenerate the bundle.
+
+- **2026-11-17 (#16593, follow-up to #16455):** Trust-boundary change on the same surface
+  (`POST /api/v3/sanctions/review`, agent path). Three controls tightened, no new caller:
+  (1) `X-Approval-Id` is read from the request headers, not a method parameter — as a parameter it
+  entered the four-eyes request fingerprint, so the agent's retry never matched its approval and
+  minted a new pending one each time (fail-closed, but the agent path never executed);
+  (2) **the approval is bound to the request that consumed it**: `@Authorize` records the approval
+  it consumed for THIS call (libs-runtime `FourEyesConsumption`, request-scoped) and the resource
+  accepts only that id, and `checkerOf` accepts `EXECUTED` only. **Tampering/EoP closed:** before
+  this, an approval consumed by an earlier call (EXECUTED, same check, same maker) would have
+  authorised a replayed CLEAR had the policy ever stopped flagging `four_eyes_required`;
+  (3) `AgentReviewGuard` refuses a review body whose target method or caller cannot be resolved,
+  instead of passing it to `@Authorize`. Evidence: `AgentClearFourEyesFlowIT` (202 → human decide →
+  200 with the human as reviewer → replay 202 → replay with the gate off 403), each step sabotaged
+  red; `sanctions_rest_ext_test.rego` pins the OPA grant (allow + four-eyes for the agent's clear,
+  deny for decide/update/trigger, another machine and a name-only impostor). **Open:** v1 `/review`
+  is protected from the agent only by `@RolesAllowed` (the agent holds `ROLE_API` only in every
+  realm file), because the OPA grant is keyed on the action, not the path.
+
+- **2026-11-16 (#16381):** Trust-boundary change. `POST /api/v3/sanctions/review` (`sanctions.clear`)
+  now admits `ROLE_API` at the `@RolesAllowed` layer so that ONE machine principal,
+  `service-account-openbank-agent`, reaches OPA, which grants it `sanctions.clear` only (rule
+  `service-agent-sanctions-review-maker`), never `sanctions.approval.decide`, `.update` or `.trigger`.
+  Every other `ROLE_API` service-account is still denied by OPA (measured with `opa eval` on the
+  regenerated bundle: agent clear = allow with `four_eyes_required`; agent decide/update/trigger and
+  another service-account's clear = deny). With `AUTHZ_FOUR_EYES_ENFORCE="true"` the agent's review is
+  paused until a distinct human approves it, so the decision of record is the human checker's.
+  **Tampering/EoP risk:** if four-eyes enforcement were switched off, the agent's review would execute
+  directly; pinned by agent-service `AgentMachineGrantCharterAlignmentTest`. v1 `/review` is unchanged
+  (human only). The agent identity may only submit `CLEAR`: `SanctionsResourceV3` answers 403 for any
+  other status from `service-account-openbank-agent`, server-side, independent of the agent tool.
+
+  **ACCEPTED RISK (decided by the owner, 2026-11-16): four-eyes = agent service account as maker +
+  ONE human checker.** The person who instructed the agent can approve that same agent-made review,
+  so a single person can clear a hit. An on-behalf-of binding that refused the instructing person as
+  checker was implemented and reverted: the sandbox has a sole human operator, so it would leave
+  every agent review unapprovable. Rationale for accepting: (1) one human operator in the sandbox;
+  (2) a human remains the final approver of every agent-made clear, nothing executes on the agent's
+  word alone; (3) the agent is limited to `CLEAR` server-side and never holds
+  `sanctions.approval.decide`. **Revisit** before any environment with more than one operator or real
+  customer data: bind the instructing person to the approval and refuse them as its checker.
+  **Guard placement (#16455 review):** `AgentReviewGuard` (a JAX-RS `ReaderInterceptor`) refuses the
+  agent identity while the body is read, BEFORE `@Authorize`: any `newStatus` other than CLEAR, and
+  every request while `authz.four-eyes.enforce` is not `true` (the code default is `false`, so the
+  agent path fails closed without relying on the gitops value). A refused agent request therefore
+  never creates a pending approval; `AgentReviewGuardHttpTest` proves the order over real HTTP (403
+  where reaching the interceptor would have answered 503). The resource repeats both checks at the
+  point of effect. **Reviewer of record:** on an approved agent review, `reviewedBy` is the HUMAN
+  checker who approved it (read from the approval store), and the note records the agent as maker.
+  Rollback: revert.
+
 - **2026-11-14** — **Ongoing monitoring switched on in the sandbox deployment
   (`SANCTIONS_MONITORING_ENABLED=true`).** The surface of section 6b is now live there: the
   registration operations accept requests instead of answering 503, and the delta and sweep run
@@ -259,6 +329,27 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   matches anything and the queue trigger writes nothing because the registry is empty.
 
 - **2026-11-12** — **Reviewer identity comes from the token (#15748, C8).** The review endpoints no longer bind a client-supplied `reviewedBy`; it is ignored and the authenticated principal is recorded. This also fixes the admin-ui decision action, whose body never carried the field and was answered 400.
+- **2026-11-11** — **Four-eyes ENFORCED on `sanctions.clear` (`AUTHZ_FOUR_EYES_ENFORCE=true`, #15748).**
+  Until now OPA flagged every hit disposition `four_eyes_required` and the interceptor recorded
+  `required_not_enforced` and executed it on one operator, so section 6's maker-checker control
+  existed in code and in the UI but never stopped anything. The manifest now sets the flag: the
+  maker's `POST /review` answers 202 with an `approvalId`, a DIFFERENT operator decides it from the
+  admin-ui checker queue (`GET/PATCH /api/v1/sanctions/approvals`), and the maker's retry carries
+  `X-Approval-Id`, consumed once (completing the second approval through the admin-ui review form is not verified end to end; tracked separately).
+  **STRIDE-E/R:** a lone operator can no longer clear a true positive; the self-approval guard in
+  the Redis store refuses maker == checker. **No machine path is paused:** `sanctions.clear` has no
+  `ROLE_API`, no service rule grants it to a `service-account-*`, and the screening callers use
+  `sanctions.create`. The residual noted 2026-10-08 (a service account holding `ROLE_OPERATOR`)
+  is narrowed, not closed: the sanctions rule `operator-sanctions-write` has no machine exclusion,
+  so a service account holding `ROLE_OPERATOR` (one per realm today) still passes OPA for
+  `sanctions.clear`, but no service code calls `POST /review`, and with enforcement on such a call
+  parks at 202 and needs a different checker. Excluding machines from that rule is a follow-up. **Availability
+  dependency:** the approval queue now depends on `redis.sanctions.svc`; if it is down an
+  operator's clear fails instead of proceeding — correct for this control. Residual: approvals
+  are Redis records with the interceptor TTL, not durable audit; the disposition audit trail is
+  unchanged. No real-HTTP maker/checker IT exists for this service yet (follow-up on #15748).
+  Rollback: set the env to `"false"` and add a dated `rules.yaml: four_eyes_enforcement.allowlist`
+  entry, or the `four-eyes-enforce-deployed` gate fails.
 - **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
   review band for customer names (#15723).** V22 loads the EU list of high-risk third countries
   (Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29;
@@ -275,6 +366,17 @@ written in one transaction and leave on `openbank.sanctions.screening.event` as
   threshold (0.85) as its floor for every caller, so `POTENTIAL_HIT` was unreachable from a name
   and a near-miss spelling of a listed person screened CLEAR. `profile=CUSTOMER` now searches
   down to 0.65 and returns such a name as `POTENTIAL_HIT` (PEP entries: `pepStatus`).
+  Whole-string trigram similarity also over-matched: a shared given name plus two surname
+  letters scored 0.64 against unrelated PEPs. Candidates are now capped by a part-aligned score
+  (`NameTokenScore.decide`, never raises a score). Fail-closed: a candidate is removed only when
+  the structure score is below the review floor; between that floor and a HIT-floor profile's
+  search floor the trigram HIT stands, so PAYMENT cannot be softened from BLOCK to REVIEW/CLEAR;
+  and a trigram score at or above the HIT threshold is never removed nor lowered below that
+  threshold on ANY profile, because the part score under-scores some real variants (a short
+  part under the part floor: `Choe Ryong He`/`Choe Ryong Hae`, trigram 0.857, structure 0.67).
+  Until #16258's follow-up such a name was held at CUSTOMER's 0.65 search floor, so a HIT was
+  reported as `POTENTIAL_HIT`. Particles are
+  scored both separate and fused (`bin Laden`/`Binladen`, `Abd el Aziz`/`Abdelaziz`).
   **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
   identity on the check, and a jurisdiction match was identified by list and country only — so
   a clearance recorded while a country was `HIGH_RISK` went on to whitelist the same country
@@ -505,3 +607,34 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-15 - New inbound caller: sdd-service screens collections before release (ADR-0032)
+
+sdd-service now calls `POST /api/v1/sanctions/screen` for the debtor and creditor of each
+collection before it is released. It calls over the private-CA mTLS listener (8443, client
+certificate required, TLSv1.3) with its own service-account bearer, not over the plain 8123 port;
+the sanctions-namespace NetworkPolicy admits the sdd namespace on the same ports as the other
+declared callers. Spoofing: as in S3, the client certificate is transport authentication only and
+the bearer stays the identity `@RolesAllowed` and OPA decide on; any fleet-CA certificate still
+passes the handshake. Elevation: no authorization rule changes here; the call is `sanctions.create`,
+which `m2m-sanctions-screening` already grants every `service-account-*`, so sdd gains the screen
+call and nothing else. Information disclosure: the request carries party names the caller already
+holds, now encrypted in transit. Denial of service: sdd treats an unavailable screen as not screened
+and holds the collection (fail-closed), so an outage here stops collections rather than releasing
+them unscreened. Rollback: revert the sdd change and drop the sdd namespace from the ingress
+rule; unsetting `SANCTIONS_SERVICE_URL` alone would fail closed and hold every collection.
+
+## 2026-11-15 - New inbound caller: swift-service screens MT103s before release (ADR-0032)
+
+swift-service now calls `POST /api/v1/sanctions/screen` for the debtor and the beneficiary of each
+MT103 before it is released. It calls the plain 8123 listener from the payments namespace, which
+the ingress rule already admits for the other payment rails, so no NetworkPolicy changes for this
+caller. Spoofing: the edge is plaintext in-cluster like the other payments callers still on 8123
+(S3: the plain port stays open until each caller is migrated to 8443), so caller identity rests on
+the NetworkPolicy and swift's own service-account bearer. Elevation: no authorization rule
+changes; the call is `sanctions.create`, already granted to every `service-account-*` by
+`m2m-sanctions-screening`. Information disclosure: the request carries party names the caller
+already holds, in plaintext on the cluster network, the same exposure as the other 8123 callers.
+Denial of service: swift treats an unavailable screen as not screened and holds the MT103
+(fail-closed). Rollback: revert the swift change; unsetting `SANCTIONS_SERVICE_URL` alone would
+fail closed and hold every MT103, not release them unscreened.

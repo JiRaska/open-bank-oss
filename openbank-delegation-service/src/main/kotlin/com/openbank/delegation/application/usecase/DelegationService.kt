@@ -40,8 +40,10 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.GrantorSigningEvidence
+import com.openbank.libs.domain.event.DomainEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -80,21 +82,38 @@ class DelegationResourceOwnershipException(message: String) : RuntimeException(m
  *
  * `approvalPolicy` other than SOLO remains refused, unchanged: nothing counts approvals.
  *
- * `exposure` remains persisted for audit of historical grants but is refused on new offers until
- * document delivery can create a transformed artifact and atomically enforce every declared view
- * constraint. Returning the original object bytes with a redaction, watermark or view-count field
- * merely echoed would be a confidentiality defect.
+ * `exposure` remains persisted for audit of historical grants and is refused on new offers — and
+ * ADR-0375 D6 makes that refusal the DECLARED END STATE rather than a gap waiting to be closed.
+ * Returning the original object bytes with a redaction, watermark or view-count field merely
+ * echoed is a confidentiality defect that reads, from the grantor's screen, exactly like an
+ * enforced control, and `maxViews` on a streaming route could never be atomic anyway.
+ *
+ * The mechanism is not missing, it is elsewhere: a redacted, watermarked, view-counted share is a
+ * rendered sealed artifact delivered as an `ExternalDisclosure`, whose view consumption is a
+ * locked read-modify-write inside one transaction. `check-delegation-exposure-sealed.py` keeps
+ * both halves honest — the refusal here, and the absence of any live-read consumer anywhere.
  */
 class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
     companion object {
         const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
         const val CODE_APPROVAL_POLICY_UNSUPPORTED = "APPROVAL_POLICY_UNSUPPORTED"
 
+        /** ADR-0383 D3 dormancy guard: MCP_CLIENT grants may not be written until consumers skip them. */
+        const val CODE_MCP_CLIENT_GRANTEE_DORMANT = "MCP_CLIENT_GRANTEE_DORMANT"
+
         /** ADR-0249 D5 — a spend capability with no cumulative ceiling at all. */
         const val CODE_SPEND_WITHOUT_CEILING = "SPEND_WITHOUT_CEILING"
 
         /** Exposure needs transformed-artifact and atomic view-count enforcement before it can be offered. */
         const val CODE_EXPOSURE_UNSUPPORTED = "EXPOSURE_UNSUPPORTED"
+
+        /**
+         * ADR-0375 D5+D6 — the resource type cannot be delivered, so it cannot be offered.
+         * Distinct from an ownership failure on purpose: this one is a property of the TYPE and no
+         * amount of verification changes it, so a grantor retrying with a different resource id
+         * learns nothing from an ownership error.
+         */
+        const val CODE_RESOURCE_TYPE_NOT_OFFERABLE = "RESOURCE_TYPE_NOT_OFFERABLE"
     }
 }
 
@@ -179,13 +198,14 @@ class DelegationService(
             createdAt = now,
             updatedAt = now,
         )
-        return delegationRepository.save(
-            grant,
+        return persist(grant) {
             DelegationOffered(
                 aggregateId = grant.id,
                 lifecycleRevision = grant.lifecycleRevision,
                 grantorPartyId = grant.grantorPartyId,
                 granteePartyId = grant.granteePartyId,
+                granteeType = grant.granteeType,
+                granteeClientId = grant.granteeClientId,
                 resourceType = grant.resourceType,
                 resourceId = grant.resourceId,
                 capabilities = grant.capabilities,
@@ -197,8 +217,8 @@ class DelegationService(
                 validTo = grant.validTo,
                 perTransactionLimit = EventMoney.from(grant.perTransactionLimit),
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     override suspend fun preview(
@@ -216,6 +236,7 @@ class DelegationService(
     }
 
     private suspend fun validateCandidate(command: DelegationCandidate): ValidatedCandidate {
+        rejectUnofferableResourceType(command)
         rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
         val actorPartyId = resolveGrantorActor(command)
@@ -278,13 +299,33 @@ class DelegationService(
         command.actorPartyId ?: command.grantorPartyId
     }
 
+    /**
+     * ADR-0375 D5+D6. PAYMENT and STATEMENT have no ownership oracle AND no delivery mechanism —
+     * the sealed disclosure accepts DOCUMENT only — so they are refused here, before the ownership
+     * lookup that would also have refused them. Checked in `validateCandidate`, which offer and
+     * preview share, so preview cannot promise what offer will refuse.
+     */
+    private fun rejectUnofferableResourceType(command: DelegationCandidate) {
+        if (command.resourceType !in DelegationGrant.OFFERABLE_RESOURCE_TYPES) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_RESOURCE_TYPE_NOT_OFFERABLE,
+                message = "resourceType ${command.resourceType} cannot be offered: it has no " +
+                    "ownership oracle and no delivery mechanism (ADR-0375 D5/D6). Share a statement " +
+                    "as the DOCUMENT its render produces, or use ACCOUNT_DOWNLOAD_STATEMENTS for " +
+                    "ongoing access to an account's statements. Historical grants of this type stay " +
+                    "readable for audit.",
+            )
+        }
+    }
+
     private fun rejectUnsupportedExposure(command: DelegationCandidate) {
         if (command.exposure != null) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
-                message = "exposure is not supported: this platform cannot yet transform the shared object " +
-                    "or atomically enforce redaction, watermark or maxViews. Omit exposure; existing " +
-                    "historical exposure grants remain readable for audit but never authorize access.",
+                message = "exposure is not a grant-level control (ADR-0375 D6): redaction, watermark and " +
+                    "maxViews are enforced by issuing a sealed external disclosure over the document, not by " +
+                    "shaping a live read. Omit exposure; historical exposure grants remain readable for audit " +
+                    "but never authorize access.",
             )
         }
     }
@@ -293,8 +334,9 @@ class DelegationService(
         if (grant.exposure != null) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED,
-                message = "this historical grant carries unsupported exposure metadata and cannot be activated " +
-                    "or reinstated until transformed-artifact enforcement exists",
+                message = "this historical grant carries grant-level exposure metadata, which is never " +
+                    "enforced (ADR-0375 D6), so it cannot be activated or reinstated; re-offer without it and " +
+                    "issue a sealed external disclosure if the share needs view controls",
             )
         }
     }
@@ -308,6 +350,9 @@ class DelegationService(
     ): DelegationGrant {
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
+        // Before the SCA step, which SPENDS the customer's challenge: an MCP_CLIENT grant is never
+        // accepted by a party (ADR-0383 D1), so it must not cost them a ceremony to find that out.
+        requirePartyGrantee(grant)
         rejectLegacyExposure(grant)
         verifyIssuedAuthority(grant)
         val actor = actorPartyId ?: granteePartyId
@@ -319,13 +364,14 @@ class DelegationService(
             errorPrefix = "accept SCA",
         )
         val accepted = grant.accept(scaSessionId, OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            accepted,
+        return persist(accepted) {
             DelegationActivated(
                 aggregateId = accepted.id,
                 lifecycleRevision = accepted.lifecycleRevision,
                 grantorPartyId = accepted.grantorPartyId,
                 granteePartyId = accepted.granteePartyId,
+                granteeType = accepted.granteeType,
+                granteeClientId = accepted.granteeClientId,
                 resourceType = accepted.resourceType,
                 resourceId = accepted.resourceId,
                 capabilities = accepted.capabilities,
@@ -337,8 +383,8 @@ class DelegationService(
                 validTo = accepted.validTo,
                 perTransactionLimit = EventMoney.from(accepted.perTransactionLimit),
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     private suspend fun verifyIssuedAuthority(grant: DelegationGrant) {
@@ -362,16 +408,17 @@ class DelegationService(
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
         val declined = grant.decline(OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            declined,
+        return persist(declined) {
             DelegationDeclined(
                 aggregateId = declined.id,
                 lifecycleRevision = declined.lifecycleRevision,
                 grantorPartyId = declined.grantorPartyId,
                 granteePartyId = declined.granteePartyId,
+                granteeType = declined.granteeType,
+                granteeClientId = declined.granteeClientId,
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     override suspend fun renounce(
@@ -382,18 +429,19 @@ class DelegationService(
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
         val renounced = grant.renounce(OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            renounced,
+        return persist(renounced) {
             DelegationRenounced(
                 aggregateId = renounced.id,
                 lifecycleRevision = renounced.lifecycleRevision,
                 grantorPartyId = renounced.grantorPartyId,
                 granteePartyId = renounced.granteePartyId,
+                granteeType = renounced.granteeType,
+                granteeClientId = renounced.granteeClientId,
                 resourceType = renounced.resourceType,
                 resourceId = renounced.resourceId,
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     /**
@@ -412,40 +460,42 @@ class DelegationService(
             throw DelegationNotGrantorException(command.delegationId, command.revokedBy)
         }
         val revoked = grant.revoke(command.revokedBy, command.reason, OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            revoked,
+        return persist(revoked) {
             DelegationRevoked(
                 aggregateId = revoked.id,
                 lifecycleRevision = revoked.lifecycleRevision,
                 grantorPartyId = revoked.grantorPartyId,
                 granteePartyId = revoked.granteePartyId,
+                granteeType = revoked.granteeType,
+                granteeClientId = revoked.granteeClientId,
                 resourceType = revoked.resourceType,
                 resourceId = revoked.resourceId,
                 capabilities = revoked.capabilities,
                 reason = command.reason,
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     override suspend fun suspend(command: SuspendDelegationCommand): DelegationGrant {
         val grant = delegationRepository.findById(command.delegationId)
             ?: throw DelegationNotFoundException(command.delegationId)
         val suspended = grant.suspend(command.reason, OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            suspended,
+        return persist(suspended) {
             DelegationSuspended(
                 aggregateId = suspended.id,
                 lifecycleRevision = suspended.lifecycleRevision,
                 grantorPartyId = suspended.grantorPartyId,
                 granteePartyId = suspended.granteePartyId,
+                granteeType = suspended.granteeType,
+                granteeClientId = suspended.granteeClientId,
                 resourceType = suspended.resourceType,
                 resourceId = suspended.resourceId,
                 capabilities = suspended.capabilities,
                 reason = command.reason,
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     override suspend fun reinstate(delegationId: UUID): DelegationGrant {
@@ -453,13 +503,14 @@ class DelegationService(
             ?: throw DelegationNotFoundException(delegationId)
         rejectLegacyExposure(grant)
         val reinstated = grant.reinstate(OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            reinstated,
+        return persist(reinstated) {
             DelegationReinstated(
                 aggregateId = reinstated.id,
                 lifecycleRevision = reinstated.lifecycleRevision,
                 grantorPartyId = reinstated.grantorPartyId,
                 granteePartyId = reinstated.granteePartyId,
+                granteeType = reinstated.granteeType,
+                granteeClientId = reinstated.granteeClientId,
                 resourceType = reinstated.resourceType,
                 resourceId = reinstated.resourceId,
                 capabilities = reinstated.capabilities,
@@ -471,8 +522,8 @@ class DelegationService(
                 validTo = reinstated.validTo,
                 perTransactionLimit = EventMoney.from(reinstated.perTransactionLimit),
                 occurredAt = clock.instant(),
-            ),
-        )
+            )
+        }
     }
 
     /**
@@ -635,6 +686,27 @@ class DelegationService(
             "requiredApprovals is server-derived from approvalGroupId"
         }
         return ResolvedApproval(group.id, group.revision, group.threshold)
+    }
+
+    /**
+     * The only way this service writes a grant. ADR-0383 D3 dormancy guard: until every consumer of
+     * `openbank.delegation.events` ignores `granteeType != PARTY`, no MCP_CLIENT grant may be
+     * persisted or published by offer, accept, decline, renounce, revoke, suspend or reinstate.
+     * Their projections know only parties, so an MCP grant on the stream would read as a grant to a
+     * party with that id. Lift this in the PR that makes the consumers skip.
+     */
+    private suspend fun persist(grant: DelegationGrant, event: () -> DomainEvent): DelegationGrant {
+        requirePartyGrantee(grant)
+        return delegationRepository.save(grant, event())
+    }
+
+    private fun requirePartyGrantee(grant: DelegationGrant) {
+        if (grant.granteeType != DelegationGranteeType.PARTY) {
+            throw DelegationUnsupportedConstraintException(
+                DelegationUnsupportedConstraintException.CODE_MCP_CLIENT_GRANTEE_DORMANT,
+                "MCP_CLIENT grants are not yet supported on this path (ADR-0383 D3): consumers must skip them first",
+            )
+        }
     }
 
     private fun unsupportedApproval(message: String): Nothing = throw DelegationUnsupportedConstraintException(

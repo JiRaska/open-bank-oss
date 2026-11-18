@@ -8,8 +8,8 @@ import com.openbank.domestic.domain.event.PaymentHeldEvent
 import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.libs.persistence.outbox.ClaimFencedOutboxRepositoryV2
 import com.openbank.libs.persistence.outbox.OutboxMessage
-import com.openbank.libs.persistence.outbox.OutboxRepository
 import java.time.Instant
 import java.util.UUID
 
@@ -152,7 +152,7 @@ interface DomesticPaymentRepository {
 }
 
 /** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */
-interface DomesticPaymentOutboxRepository : OutboxRepository
+interface DomesticPaymentOutboxRepository : ClaimFencedOutboxRepositoryV2
 
 /** A HELD payment and the moment its hold began. */
 data class HeldPaymentRef(val paymentId: UUID, val heldAt: Instant)

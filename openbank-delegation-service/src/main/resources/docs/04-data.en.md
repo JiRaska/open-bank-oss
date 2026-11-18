@@ -1,6 +1,6 @@
 # Data
 
-This page currently documents only the outbox lifecycle; the rest of the data model is not yet written up.
+This page documents the outbox lifecycle and selected parts of the data model; the rest is not yet written up.
 
 ## Outbox retention (SENT rows)
 
@@ -86,3 +86,25 @@ write is dead-lettered, to `openbank.dlq.delegation.domestic-payment-events-in`.
 The consumer is off until `OPENBANK_DELEGATION_PAYMENT_OUTCOME_CONSUMER_ENABLED=true`; while off,
 the channel does not exist. Switch-on order: this consumer, then the rail's reservation binding,
 then the edge stops confirming on the rail's 2xx.
+
+## MCP client grantees (ADR-0383 D3) — dormant
+
+A grant names its grantee class in `grantee_type` (V34): `PARTY` (the default; every grant before
+V34) or `MCP_CLIENT`, a customer-admitted third-party MCP client.
+
+- An `MCP_CLIENT` grant records the client id (`grantee_client_id`, the token's `azp`) and the DPoP
+  key thumbprint (`grantee_key_thumbprint`, `cnf.jkt`) at grant time. Database CHECKs pin the shape:
+  both bindings present for `MCP_CLIENT`, both absent for `PARTY`. Its `grantee_party_id` is a
+  name-based (version 3) UUID derived from the client id, and a `PARTY` grant may never use that
+  shape.
+- Capabilities are an allow-list: the account reads (`ACCOUNT_READ_BALANCES`,
+  `ACCOUNT_READ_TRANSACTIONS`, `ACCOUNT_VIEW_DETAILS`, `ACCOUNT_DOWNLOAD_STATEMENTS`) and
+  `ACCOUNT_PROPOSE_PAYMENT`. Anything executing or managing is refused whatever the ceilings.
+- It is never accepted by a party. `accept()` refuses it; activation belongs to the future
+  SCA-bound connect flow in the bank app (ADR-0383 D1).
+- Lifecycle events carry optional `granteeType` (absent = `PARTY`) and `granteeClientId`
+  (AsyncAPI 1.7.0). Consumers must ignore a grant whose `granteeType` is not `PARTY`.
+- **Dormant today:** every write path refuses an `MCP_CLIENT` grant
+  (`400 MCP_CLIENT_GRANTEE_DORMANT`) and no lifecycle event can be built for one, because the
+  current consumers (account-service, card-issuance-service, context-service) know only parties.
+  The guard is lifted only after they skip non-PARTY grants.

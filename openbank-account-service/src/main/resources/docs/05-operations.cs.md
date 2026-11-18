@@ -173,3 +173,12 @@ role operátora není potřeba. Odmítnutí autorizace dál zablokuje otevření
 katalog. Před aktivací ověřte čtení publikované revize běžnou identitou služby; změna zdrojů
 ani testovací token nedokládají živou konfiguraci. Při návratu odeberte společně grant pro
 čtení, scope a výběr klienta. Již uložené vazby účtů na revize zůstanou zachované.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.

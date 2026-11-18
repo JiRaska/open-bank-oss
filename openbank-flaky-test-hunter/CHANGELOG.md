@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.6...flaky-test-hunter-v0.16.0) (2026-11-14)
+
+
+### Features
+
+* **flaky-test-hunter:** target a seeded qualification branch for the phase-3 write proof ([#16131](https://github.com/JiRaska/open-bank-oss/issues/16131)) ([819a4a9](https://github.com/JiRaska/open-bank-oss/commit/819a4a91439a570435b52c47dbd28ed26d7174f5))
+
 ## [0.15.6](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.5...flaky-test-hunter-v0.15.6) (2026-11-11)
 
 

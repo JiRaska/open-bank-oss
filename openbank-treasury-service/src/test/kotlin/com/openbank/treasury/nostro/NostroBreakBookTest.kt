@@ -4,10 +4,15 @@
 
 package com.openbank.treasury.nostro
 
+import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.ActorNotPermittedException
+import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.domain.model.BreakChanges
+import com.openbank.treasury.domain.model.BreakResolutionKind
 import com.openbank.treasury.domain.model.BreakSide
 import com.openbank.treasury.domain.model.BusinessDays
+import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LedgerNostroLine
 import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroBreakBook
@@ -18,6 +23,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -113,6 +119,176 @@ class NostroBreakBookTest {
         assertThat(c.reopened).hasSize(2)
         assertThat(c.reopened.map { it.firstSeenOn }).containsOnly(day1)
         assertThat(c.opened).isEmpty()
+    }
+
+    // --- four-eyes manual resolution ---
+
+    private val anna = Actor("anna.approver", ActorType.HUMAN)
+    private val sara = Actor("sara.senior", ActorType.HUMAN)
+    private val reason = "  Synthetic E2E demo item, investigated: no real cash movement.  "
+    private val at = Instant.parse("2026-10-05T10:00:00Z")
+
+    private fun aBreak() = observe(emptyList(), lines, day1).opened.single { it.side == BreakSide.STATEMENT }
+
+    private fun closed(): NostroBreak = aBreak().proposeResolution(reason, anna, at).approveResolution(sara, day1, at)
+
+    @Test
+    fun `a proposal leaves the break open and ageing, a different person's approval closes it as MANUAL`() {
+        val policy = BreakAlertPolicy(ageDays = 1, minAmount = BigDecimal.ZERO)
+        val later = day1.plusDays(10)
+        val proposed = aBreak().proposeResolution(reason, anna, at)
+
+        assertThat(proposed.open).isTrue()
+        assertThat(proposed.resolutionProposed).isTrue()
+        assertThat(policy.isAged(proposed, later)).isTrue()
+        assertThat(proposed.resolutionReason).isEqualTo(reason.trim())
+
+        val r = proposed.approveResolution(sara, later, at)
+        assertThat(r.open).isFalse()
+        assertThat(r.resolvedOn).isEqualTo(later)
+        assertThat(r.resolutionKind).isEqualTo(BreakResolutionKind.MANUAL)
+        assertThat(r.proposedBy).isEqualTo("anna.approver")
+        assertThat(r.resolvedBy).isEqualTo("sara.senior")
+        assertThat(policy.isAged(r, later)).isFalse()
+    }
+
+    @Test
+    fun `approving a proposal other than the one read is a conflict`() {
+        val proposed = aBreak().proposeResolution(reason, anna, at)
+        assertThatThrownBy { proposed.approveResolution(sara, day1, at.plusSeconds(1)) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("changed since it was read")
+    }
+
+    @Test
+    fun `the proposer may not approve their own proposal`() {
+        val proposed = aBreak().proposeResolution(reason, anna, at)
+        assertThatThrownBy {
+            proposed.approveResolution(anna, day1, at)
+        }.isInstanceOf(FourEyesViolationException::class.java)
+    }
+
+    @Test
+    fun `approving without a proposal, approving twice, or proposing twice is a conflict`() {
+        assertThatThrownBy {
+            aBreak().approveResolution(sara, day1, at)
+        }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy {
+            closed().approveResolution(sara, day1, at)
+        }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy {
+            closed().proposeResolution(reason, anna, at)
+        }.isInstanceOf(IllegalStateException::class.java)
+        val proposed = aBreak().proposeResolution(reason, anna, at)
+        assertThatThrownBy {
+            proposed.proposeResolution(reason, sara, at)
+        }.isInstanceOf(IllegalStateException::class.java)
+        val matched = aBreak().matched(day1)
+        assertThatThrownBy {
+            matched.proposeResolution(reason, anna, at)
+        }.isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `a rejection clears the proposal and the break stays open for a new one`() {
+        val rejected = aBreak().proposeResolution(
+            reason,
+            anna,
+            at,
+        ).rejectResolution("Not explained yet, ask again.", sara)
+        assertThat(rejected.open).isTrue()
+        assertThat(rejected.resolutionProposed).isFalse()
+        assertThat(rejected.resolutionReason).isNull()
+        assertThatThrownBy { aBreak().rejectResolution("Nothing to reject here.", sara) }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(rejected.proposeResolution(reason, sara, at).proposedBy).isEqualTo("sara.senior")
+    }
+
+    @Test
+    fun `a reason shorter than 10 or longer than 500 characters after trimming is refused`() {
+        val brk = aBreak()
+        listOf("", "   short  ", "123456789", "x".repeat(501)).forEach { bad ->
+            assertThatThrownBy { brk.proposeResolution(bad, anna, at) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("reason")
+        }
+        assertThat(brk.proposeResolution("1234567890", anna, at).resolutionReason).isEqualTo("1234567890")
+        assertThat(brk.proposeResolution("x".repeat(500), anna, at).resolutionReason).hasSize(500)
+    }
+
+    @Test
+    fun `only a person may propose or approve, never an agent or a service-account`() {
+        val machines =
+            listOf(
+                Actor.fromPrincipalName("agent:treasury-dealing-assistant"),
+                Actor.fromPrincipalName("service-account-x"),
+            )
+        machines.forEach { m ->
+            assertThatThrownBy {
+                aBreak().proposeResolution(reason, m, at)
+            }.isInstanceOf(ActorNotPermittedException::class.java)
+            assertThatThrownBy { aBreak().proposeResolution(reason, anna, at).approveResolution(m, day1, at) }
+                .isInstanceOf(ActorNotPermittedException::class.java)
+        }
+    }
+
+    @Test
+    fun `a manual resolution cannot be half-recorded or self-approved by construction`() {
+        val brk = aBreak()
+        assertThatThrownBy { brk.copy(resolvedOn = day1, resolutionKind = BreakResolutionKind.MANUAL) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        val proposed = brk.proposeResolution(reason, anna, at)
+        assertThatThrownBy {
+            proposed.copy(resolvedOn = day1, resolutionKind = BreakResolutionKind.MANUAL, resolvedBy = "anna.approver")
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { brk.copy(resolutionKind = BreakResolutionKind.MATCHED) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a manually resolved break listed again by a later reconciliation stays resolved (sticky)`() {
+        val first = observe(emptyList(), lines, day1).applyTo(emptyList())
+        val closedAll = first.map {
+            it.proposeResolution(reason, anna, at).approveResolution(sara, day1.plusDays(1), at)
+        }
+
+        // The same statement re-reconciled with the same ledger: both items are listed again.
+        val c = observe(closedAll, lines, day1.plusDays(5))
+
+        assertThat(c.reopened).isEmpty()
+        assertThat(c.opened).isEmpty()
+        assertThat(c.resolved).isEmpty()
+    }
+
+    @Test
+    fun `a match while a proposal is pending resolves it as MATCHED and clears the proposal`() {
+        val first = observe(emptyList(), lines, day1).applyTo(emptyList())
+        val pending = first.map { it.proposeResolution(reason, anna, at) }
+        val late = NostroFixtures.line("5000.00", Side.DEBIT, description = "late booking SYNTH-SVCR-0003")
+        val c = observe(pending, lines.take(2) + late, day1.plusDays(4))
+        assertThat(c.resolved).isNotEmpty()
+        c.resolved.forEach {
+            assertThat(it.resolutionKind).isEqualTo(BreakResolutionKind.MATCHED)
+            assertThat(it.proposedBy).isNull()
+        }
+    }
+
+    @Test
+    fun `a matched break that is unmatched again reopens with every resolution field cleared`() {
+        val first = observe(emptyList(), lines, day1).applyTo(emptyList())
+        val late = NostroFixtures.line("5000.00", Side.DEBIT, description = "late booking SYNTH-SVCR-0003")
+        val matched = observe(first, lines.take(2) + late, day1.plusDays(4)).applyTo(first)
+        assertThat(matched.filter { !it.open }.map { it.resolutionKind }).containsOnly(BreakResolutionKind.MATCHED)
+
+        val c = observe(matched, lines, day1.plusDays(6))
+
+        assertThat(c.reopened).isNotEmpty()
+        c.reopened.forEach {
+            assertThat(it.open).isTrue()
+            assertThat(it.resolutionKind).isNull()
+            assertThat(it.resolvedBy).isNull()
+            assertThat(it.firstSeenOn).isEqualTo(day1)
+        }
     }
 
     @Test

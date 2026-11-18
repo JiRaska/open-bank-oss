@@ -10,8 +10,8 @@ libs-runtime `OutboxSentRetentionJob` deletes them, but only for CDI beans of ty
 nothing at runtime can tell "no rows old enough" from "never looked".
 
 So: a dispatcher owner must declare, on a non-comment line in `src/main`, a class whose
-supertypes include `SentOutboxRetention` or the kernel base `AbstractPanacheOutboxRepository<`
-(which implements it). Detection is by SUPERTYPE, never by file or method name.
+supertypes include `SentOutboxRetention` or one of the kernel repository bases that implement it.
+Detection is by SUPERTYPE, never by file or method name.
 
 Exemptions are by module with a REASON, because each one is an outbox whose SENT rows something
 still reads. The set may only shrink and fails in both directions: an uncovered module it does
@@ -34,7 +34,9 @@ DISPATCHER_SUPERTYPE = re.compile(r":\s*AbstractOutboxDispatcher\s*\(")
 # UNINDENTED line, i.e. the next top-level declaration. Not "the next blank line": a comment inside
 # the supertype list is a blank line once comments are stripped (incentive's header, #11902).
 CLASS_HEADER = re.compile(r"\bclass\s+\w+(?:(?!\n(?=[^\s}]))[^{])*", re.S)
-RETENTION_SUPERTYPE = re.compile(r"\bSentOutboxRetention\b|\bAbstractPanacheOutboxRepository\s*<")
+RETENTION_SUPERTYPE = re.compile(
+    r"\bSentOutboxRetention\b|\b(?:AbstractPanacheOutboxRepository|AbstractClaimFencedOutboxRepository)\s*<"
+)
 RETENTION_EXEMPT_OVERRIDE = re.compile(
     r"\boverride\s+val\s+sentRetentionExempt\s*:\s*Boolean\s*=\s*true\b"
 )
@@ -151,6 +153,11 @@ def self_test() -> int:
         # v2 opt-in via the kernel base, body-less class (case-coordinator's shape).
         write("openbank-e/src/main/kotlin/D.kt", disp)
         write("openbank-e/src/main/kotlin/R.kt", "@ApplicationScoped\nclass ERepo(c: Clock) :\n    AbstractPanacheOutboxRepository<E>(\n        S,\n        c,\n    ),\n    PanacheRepository<E>\n")
+        write("openbank-g/src/main/kotlin/D.kt", disp)
+        write(
+            "openbank-g/src/main/kotlin/R.kt",
+            "class GRepo(c: Clock) : AbstractClaimFencedOutboxRepository<E>(S, E::class.java, c), GPort {\n}\n",
+        )
         # v1 opt-in by delegation, with a comment block inside the supertype list (incentive's shape).
         write("openbank-f/src/main/kotlin/D.kt", disp)
         write(
@@ -187,7 +194,7 @@ def self_test() -> int:
         ]
         for name, ex, expect in cases:
             findings, subjects = check(root, ex)
-            if bool(findings) != expect or subjects != 5:
+            if bool(findings) != expect or subjects != 6:
                 print(f"SELF-TEST FAIL: {name}: findings={findings} subjects={subjects}")
                 ok = False
     print("self-test: " + ("pass" if ok else "FAIL"))

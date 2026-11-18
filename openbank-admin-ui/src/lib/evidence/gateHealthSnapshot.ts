@@ -18,6 +18,8 @@ export interface GateHealthGate {
   mode: string
   status: string
   lastRed: { runId: number; sha: string; createdAt: string } | null
+  /** Newest observed pass (ADR-0379). Absent in snapshots collected before the field existed. */
+  lastOk?: { runId: number; sha: string; createdAt: string } | null
   flaky: boolean
   selftestDeclared: boolean
   minSubjects: number | null
@@ -75,6 +77,7 @@ export function validateGateHealthSnapshotData(value: unknown, nowMs = Date.now(
     if (typeof gate.flaky !== 'boolean' || typeof gate.selftestDeclared !== 'boolean' || !finiteNumber(gate.runsObserved)) return false
     for (const key of ['minSubjects', 'budgetSeconds']) if (gate[key] !== null && !finiteNumber(gate[key])) return false
     if (gate.lastRed !== null && (!isRecord(gate.lastRed) || !finiteNumber(gate.lastRed.runId) || typeof gate.lastRed.sha !== 'string' || !iso(gate.lastRed.createdAt))) return false
+    if (gate.lastOk !== undefined && gate.lastOk !== null && (!isRecord(gate.lastOk) || !finiteNumber(gate.lastOk.runId) || typeof gate.lastOk.sha !== 'string' || !iso(gate.lastOk.createdAt))) return false
   }
   if (value.estate !== null) {
     const estate = value.estate

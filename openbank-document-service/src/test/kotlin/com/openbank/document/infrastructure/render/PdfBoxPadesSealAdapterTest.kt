@@ -138,6 +138,45 @@ class PdfBoxPadesSealAdapterTest {
             .hasMessageContaining("DEV-ONLY ephemeral identity")
     }
 
+    // ---- expiry gauge (#16292): the seal certificate's notAfter must be visible outside the JVM --
+
+    @Test
+    fun `the expiry gauge reports the organizational keystore certificate's notAfter`() {
+        val keystore = writeThrowawayKeystore()
+        val expected = java.security.KeyStore.getInstance("PKCS12").run {
+            java.nio.file.Files.newInputStream(keystore).use { load(it, KEYSTORE_PASSWORD.toCharArray()) }
+            (getCertificate("seal") as java.security.cert.X509Certificate).notAfter.toInstant().epochSecond
+        }
+        val registry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+
+        com.openbank.document.infrastructure.observability.SealCertificateExpiryMetrics(
+            adapter(keystorePath = Optional.of(keystore.toString()), keystorePassword = Optional.of(KEYSTORE_PASSWORD)),
+            registry,
+        )
+
+        val gauge = registry.get(
+            com.openbank.document.infrastructure.observability.SealCertificateExpiryMetrics.METRIC,
+        ).gauge()
+        assertThat(gauge.id.getTag("identity")).isEqualTo("keystore")
+        assertThat(gauge.value().toLong()).isEqualTo(expected)
+    }
+
+    @Test
+    fun `the expiry gauge labels the DEV-ONLY fallback as ephemeral, so nothing reads it as a real seal`() {
+        val registry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
+
+        com.openbank.document.infrastructure.observability.SealCertificateExpiryMetrics(
+            adapter(keystorePath = Optional.empty()),
+            registry,
+        )
+
+        val gauge = registry.get(
+            com.openbank.document.infrastructure.observability.SealCertificateExpiryMetrics.METRIC,
+        ).gauge()
+        assertThat(gauge.id.getTag("identity")).isEqualTo("ephemeral")
+        assertThat(gauge.value()).isGreaterThan(Instant.now().epochSecond.toDouble())
+    }
+
     // ---- helpers ---------------------------------------------------------------------------
 
     private fun adapter(

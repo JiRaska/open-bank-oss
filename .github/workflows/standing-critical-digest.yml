@@ -1,8 +1,14 @@
 name: Standing critical alert digest
 
 on:
-  schedule:
-    - cron: "30 8 * * *"
+  # Schedule DISABLED 2026-11-14 (issue #6432, review by 2027-01-15). Every run since creation
+  # failed on missing ALERTMANAGER_* secrets, and supplying them cannot fix it: Alertmanager is
+  # reachable from outside the cluster only through the admin-ui cookie gate, which no bearer
+  # token from a GitHub-hosted runner can pass. Reading it in-cluster from the ARC pool was
+  # rejected: the Alertmanager API also accepts POST /silences, so admitting the runner namespace
+  # would let any CI job mute alerts. The decision left for #6432 is a read-only path (an
+  # authenticating GET-only proxy route, or an in-cluster CronJob that produces the digest).
+  # Manual dispatch stays so the path can be proven once it exists.
   workflow_dispatch:
 
 permissions:
