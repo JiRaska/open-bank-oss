@@ -6103,6 +6103,28 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: trace-contract-heap
+    name: "trace-contract modules declare an explicit test JVM heap (2026-11-18 OOMs, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      A *TraceContractIT boots its own Quarkus app under TraceContractProfile, so the module's
+      test fork carries a second augmentation and boot. At Gradle's default 512 MiB test heap
+      that measured as OutOfMemoryError (loyalty, copilot, referral red in CI on 2026-11-18;
+      referral hung 45 minutes when the instrumentation agent could no longer allocate and the
+      Kafka testcontainer never started). The fix is one line — tasks.test { maxHeapSize = "2g" }
+      (statement-service convention) — and each fixed module also needed an authored docs note
+      for the docs-freshness gate. Six modules are baselined under issue #16805; new occurrences
+      fail, covered entries are reported stale.
+    review_after: '2027-05-18'
+    min_subjects: 30
+    selftest: python3 .github/scripts/check-trace-contract-heap.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-trace-contract-heap.py"]
+    run: |
+      python3 .github/scripts/check-trace-contract-heap.py --root .
+
   - id: metric-name-prefix
     name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
     group: kotlin
