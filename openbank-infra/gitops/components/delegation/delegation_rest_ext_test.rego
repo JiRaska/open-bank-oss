@@ -277,3 +277,30 @@ test_operator_gets_no_write_reason_for_signing if {
 test_operator_is_prohibited_from_business_signing if {
 	prohibited with input as {"principal": operator, "action": "delegation.signing.approval.sign"}
 }
+
+# --- ADR-0383 D3: mcp-service resolving a customer's MCP_CLIENT grants ---
+
+mcp_m2m := {"service_account": true, "client_id": "openbank-mcp", "type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+resolve := {"action": "delegation.mcp-client.resolve"}
+
+test_mcp_service_may_resolve_mcp_client_grants if {
+	allow with input as object.union(resolve, {"principal": mcp_m2m})
+}
+
+test_shared_backend_identity_may_not_resolve_mcp_client_grants if {
+	not allow with input as object.union(resolve, {"principal": services_m2m})
+}
+
+test_edge_may_not_resolve_mcp_client_grants if {
+	not allow with input as object.union(resolve, {"principal": edge})
+}
+
+test_staff_operator_may_not_resolve_mcp_client_grants if {
+	not allow with input as object.union(resolve, {"principal": operator})
+}
+
+# A machine wearing mcp-service's principal name on another client's token borrows nothing.
+test_renamed_machine_may_not_resolve_mcp_client_grants if {
+	not allow with input as object.union(resolve, {"principal": object.union(mcp_m2m, {"client_id": "openbank-services"})})
+}
