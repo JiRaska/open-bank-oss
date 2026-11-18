@@ -237,4 +237,28 @@ class DpopProofVerifierTest {
             DpopPolicy(futureSkew = Duration.ofSeconds(-1))
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `check is stateless - a bound proof touches no replay store until claim`() {
+        val store = RecordingStore()
+        val verifier = DpopProofVerifier({ valid }, store)
+        val checked = verifier.check(request, now)
+        assertThat(checked).isEqualTo(DpopCheck.Bound(jkt, checkNotNull(valid.jti)))
+        assertThat(store.calls).isZero()
+        runBlocking {
+            assertThat(verifier.claim(checked as DpopCheck.Bound, now)).isEqualTo(DpopResult.VALID)
+            assertThat(verifier.claim(checked, now)).isEqualTo(DpopResult.REPLAYED)
+        }
+        assertThat(store.calls).isEqualTo(2)
+    }
+
+    @Test
+    fun `check rejects exactly what verify rejects, without a store call`() {
+        val store = RecordingStore()
+        val verifier = DpopProofVerifier({ valid.copy(signatureValid = false) }, store)
+        assertThat(verifier.check(request, now)).isEqualTo(DpopCheck.Rejected(DpopResult.BAD_SIGNATURE))
+        assertThat(verifier.check(request.copy(dpopHeaderValues = emptyList()), now))
+            .isEqualTo(DpopCheck.Rejected(DpopResult.MISSING_PROOF))
+        assertThat(store.calls).isZero()
+    }
 }

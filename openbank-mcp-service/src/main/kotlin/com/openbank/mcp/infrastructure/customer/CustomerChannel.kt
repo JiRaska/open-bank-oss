@@ -86,9 +86,8 @@ class CustomerChannel @Inject constructor(
                 allowlist.clients.values.count { it.enabled },
                 allowlist.resource,
             )
-            val parser = Jose4jDpopProofParser()
-            val verifier = DpopProofVerifier(parser, InMemoryDpopReplayStore())
-            return CustomerChannelAdmission(iss, allowlist, verifier, Clock.systemUTC(), parser)
+            val verifier = DpopProofVerifier(Jose4jDpopProofParser(), InMemoryDpopReplayStore())
+            return CustomerChannelAdmission(iss, allowlist, verifier, Clock.systemUTC())
         }
 
         private fun read(location: String): String? = if (location.startsWith(CLASSPATH_PREFIX)) {
