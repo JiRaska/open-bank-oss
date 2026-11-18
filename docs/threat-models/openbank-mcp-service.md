@@ -455,12 +455,15 @@ a stub (T-T2/T-D2).
   - *Boot gate.* `CustomerChannel` is `@Startup`: with the channel on, a missing issuer or a
     missing/malformed allowlist stops the service from starting.
   - *Review hardening (same PR).* The fleet NUL guard now runs before the customer branch and the
-    audience check, so no path echoes a U+0000 id. Before the DPoP check, only budgets keyed on what
-    the CALLER controls are spent: the proof header key's thumbprint and a coarse per-client cap. They
-    bound replay-store fill before any claim. The victim's per-(subject, client) window (D5.3) is spent
-    only after the proof is VALID, so a leaked access token sent with junk proofs cannot throttle its
-    owner (targeted-DoS finding in review). Refused customer calls write at most one audit row per
-    subject per minute, and that audit-window check also prunes closed windows. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
+    audience check, so no path echoes a U+0000 id. Admission order (re-review of #16721): token
+    and structural checks, then the STATELESS proof check (`DpopProofVerifier.check`: signature over
+    the header key, `htm`, `htu` against the published resource, `iat`, `ath`, proof key == `cnf.jkt`),
+    then — only for a proof signed by the token's own key — the proof-key bucket and a coarse
+    per-client cap (minute-only), then the replay claim, then the per-(subject, client) window. A
+    missing, duplicate or unparseable proof, a proof from another key, or a junk proof carrying a
+    victim's PUBLIC key therefore spends no one's budget and writes nothing; raw volume before that
+    point is the edge's per-IP limit (D5.1), since nothing stateful has happened yet. Refused customer calls write at most one audit row per
+    subject per minute, and that audit-window check also prunes closed windows, at most one full scan per minute. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
     any parser failure (including a YAML syntax error). Measured with real signed tokens: Quarkus's
     issuer resolver returns no tenant for an unknown `iss` and the request FALLS BACK to the default
     (staff) tenant, so a foreign or forged issuer is stopped by that tenant's signature and issuer
@@ -469,8 +472,11 @@ a stub (T-T2/T-D2).
   - **Residual, and why the channel must stay off:** the replay store is the single-pod
     in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
     D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
-    by all of a client's customers, so a flood of rotating junk keys can still exhaust it (a coarse
-    cap by design, sized well above one customer's budget); an admitted customer reaches NO
+    by all of a client's customers and is spent only by proofs signed by a key some token of that
+    client is bound to, so exhausting it needs many valid tokens (a coarse cap by design, sized well
+    above one customer's budget); the tenant-level DPoP check compares `htu` with the request URL,
+    so the edge must forward the external scheme and host (proved end to end in
+    `McpCustomerTenantResolutionIT` with `X-Forwarded-*`); an admitted customer reaches NO
     tool (empty `tools/list`, refused `tools/call`), because the `MCP_CLIENT` grant lookup (P2/D3)
     and downstream party enforcement (P5) do not exist; the customers tenant config is not yet
     verified against a live Keycloak (P3).

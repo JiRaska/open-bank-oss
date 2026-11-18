@@ -30,7 +30,6 @@ class CustomerChannelAdmissionTest {
         allowlist,
         DpopProofVerifier(Jose4jDpopProofParser(), replayStore),
         Clock.systemUTC(),
-        Jose4jDpopProofParser(),
     )
 
     /** No budget anywhere: every gate except the throttles is what is under test. */
@@ -43,7 +42,7 @@ class CustomerChannelAdmissionTest {
     }
 
     /** The real shared limiter behind the three budgets, as McpCustomerBranch wires it. */
-    private class LimiterThrottles(val limiter: McpRateLimiter = McpRateLimiter.withDefaults()) :
+    private class LimiterThrottles(val limiter: McpRateLimiter = pinnedLimiter()) :
         CustomerChannelAdmission.Throttles {
         val spent = mutableListOf<String>()
 
@@ -195,16 +194,57 @@ class CustomerChannelAdmissionTest {
     }
 
     @Test
-    fun `a leaked token with junk proofs cannot exhaust the victim's window`() {
+    fun `a leaked token with proofs from another key spends no budget at all`() {
         // Attacker holds the victim's access token but not its key: every proof is signed by another key.
         val budgets = LimiterThrottles()
         val attacker = DpopTestProofs.newKey()
-        val outcomes = (1..100).map { admit(dpop = listOf(DpopTestProofs.proof(attacker)), throttles = budgets) }
-        assertThat(outcomes.filterIsInstance<Outcome.Refused>().map { it.status }).contains(429)
-        // The victim's (subject, client) window was never spent by any of those 100 calls...
-        assertThat(budgets.spent).noneMatch { it.startsWith("customer:") }
-        // ...so the victim's own proof-bearing call is still admitted.
+        repeat(100) { admit(dpop = listOf(DpopTestProofs.proof(attacker)), throttles = budgets) }
+        assertThat(budgets.spent).isEmpty()
         assertThat(admit(throttles = budgets)).isInstanceOf(Outcome.Admitted::class.java)
+    }
+
+    @Test
+    fun `a junk proof carrying the victim's PUBLIC key costs nothing`() {
+        // jwk header = the victim's public key (thumbprint == cnf.jkt), signature by someone else.
+        val budgets = LimiterThrottles()
+        val attacker = DpopTestProofs.newKey()
+        repeat(100) {
+            val r = admit(dpop = listOf(DpopTestProofs.proof(attacker, headerKey = key)), throttles = budgets)
+            assertThat((r as Outcome.Refused).reason).contains("BAD_SIGNATURE")
+        }
+        assertThat(budgets.spent).isEmpty()
+        assertThat(admit(throttles = budgets)).isInstanceOf(Outcome.Admitted::class.java)
+    }
+
+    @Test
+    fun `a header-less flood from one valid token cannot starve other subjects of the same client`() {
+        val budgets = LimiterThrottles(pinnedLimiter().apply { sharedCallsPerMinute = SMALL_CLIENT_CAP })
+        repeat(SMALL_CLIENT_CAP * 2) {
+            assertThat(admit(dpop = emptyList(), throttles = budgets)).isInstanceOf(Outcome.Refused::class.java)
+        }
+        assertThat(budgets.spent).isEmpty()
+        val other = DpopTestProofs.newKey()
+        val outcome = admit(
+            jwt = token(sub = "another-subject-of-the-same-client", jkt = DpopTestProofs.jkt(other)),
+            dpop = listOf(DpopTestProofs.proof(other)),
+            throttles = budgets,
+        )
+        assertThat(outcome).isInstanceOf(Outcome.Admitted::class.java)
+    }
+
+    @Test
+    fun `the per-client cap is minute-only - the 1001st distinct subject in a day is admitted`() {
+        val budgets = LimiterThrottles(pinnedLimiter().apply { sharedCallsPerMinute = 5_000 })
+        val outcomes = (1..DAILY_BUDGET + 1).map { i ->
+            val k = DpopTestProofs.newKey()
+            admit(
+                jwt = token(sub = "subject-$i", jkt = DpopTestProofs.jkt(k)),
+                dpop = listOf(DpopTestProofs.proof(k)),
+                throttles = budgets,
+            )
+        }
+        assertThat(outcomes.last()).isInstanceOf(Outcome.Admitted::class.java)
+        assertThat(outcomes).allMatch { it is Outcome.Admitted }
     }
 
     @Test
@@ -240,14 +280,26 @@ class CustomerChannelAdmissionTest {
     }
 
     @Test
-    fun `an unparseable proof spends only the client cap`() {
+    fun `an unparseable proof spends no budget`() {
         val budgets = LimiterThrottles()
         admit(dpop = listOf("not-a-jws"), throttles = budgets)
-        assertThat(budgets.spent).containsExactly("customer-client:mcp-local-test")
+        assertThat(budgets.spent).isEmpty()
     }
 
     private companion object {
+        /**
+         * A limiter on a FIXED clock: counted floods must not straddle a minute boundary, or the
+         * window splits in two and fewer calls are throttled than the test asserts.
+         */
+        fun pinnedLimiter() = McpRateLimiter.withDefaults().apply {
+            clock = Clock.fixed(Instant.parse("2026-11-18T10:00:30Z"), java.time.ZoneOffset.UTC)
+        }
+
         /** `McpRateLimiter.withDefaults()` per-minute budget (the documented default). */
         const val PER_MINUTE = 60
+
+        /** `McpRateLimiter.withDefaults()` per-caller daily budget. */
+        const val DAILY_BUDGET = 1_000
+        const val SMALL_CLIENT_CAP = 50
     }
 }

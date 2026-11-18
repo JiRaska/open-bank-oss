@@ -33,6 +33,8 @@ object DpopTestProofs {
         iat: Instant = Instant.now(),
         jti: String = UUID.randomUUID().toString(),
         token: String = ACCESS_TOKEN,
+        /** The key whose PUBLIC half goes in the `jwk` header; defaults to the signing key. */
+        headerKey: PublicJsonWebKey = key,
     ): String {
         val claims = JwtClaims()
         claims.setStringClaim("htm", htm)
@@ -44,7 +46,7 @@ object DpopTestProofs {
         jws.payload = claims.toJson()
         jws.algorithmHeaderValue = AlgorithmIdentifiers.ECDSA_USING_P256_CURVE_AND_SHA256
         jws.setHeader("typ", "dpop+jwt")
-        jws.headers.setObjectHeaderValue("jwk", key.toParams(JsonWebKey.OutputControlLevel.PUBLIC_ONLY))
+        jws.headers.setObjectHeaderValue("jwk", headerKey.toParams(JsonWebKey.OutputControlLevel.PUBLIC_ONLY))
         jws.key = key.privateKey
         return jws.compactSerialization
     }

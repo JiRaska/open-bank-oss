@@ -4,7 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.customer
 
-import com.openbank.libs.security.DpopProofParser
+import com.openbank.libs.security.DpopCheck
 import com.openbank.libs.security.DpopProofVerifier
 import com.openbank.libs.security.DpopRequest
 import com.openbank.libs.security.DpopResult
@@ -14,7 +14,6 @@ import jakarta.json.JsonString
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URI
 import java.time.Clock
-import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Admission of one customer-realm call (ADR-0383 D1/D2, ADR-0385 D1). Pure apart from the replay
@@ -37,20 +36,16 @@ class CustomerChannelAdmission(
     val allowlist: McpClientAllowlist,
     private val verifier: DpopProofVerifier,
     private val clock: Clock,
-    /** The same JOSE front-end the verifier uses; read here only for the proof key's thumbprint. */
-    private val proofParser: DpopProofParser,
 ) {
     /**
-     * The three ADR-0383 D5.3 budgets, split by WHAT EACH ONE KNOWS (review of #16721). Each returns
-     * the refusal reason, or null when within budget, and spends one slot when called.
+     * The three ADR-0383 D5.3 budgets. Each returns the refusal reason, or null when within budget,
+     * and spends one slot when called. NONE is spent before the proof is shown to be signed by the
+     * key the token is bound to (review of #16721): an unauthenticated flood, a header-less flood
+     * or a junk proof carrying a victim's PUBLIC key therefore costs no one's budget. Raw volume
+     * before that point is the edge's per-IP limit (D5.1), because nothing stateful happens yet.
      *
-     * - [proofKey] and [client] run BEFORE the DPoP check, so they are keyed only on what the CALLER
-     *   controls: the thumbprint of the key in the proof header (unverified, computed from the parsed
-     *   header) and the client id. A leaked access token without its private key can exhaust only
-     *   the attacker's own proof-key bucket, never the victim's. Together they bound how fast anyone
-     *   can fill the replay store before a claim: per key, and per client across key rotation.
-     * - [subject] runs only AFTER the proof is VALID, i.e. after possession of the bound key is
-     *   proven, so only the token's holder can spend the victim's (subject, client) window.
+     * Order, after the stateless check: [proofKey] (the verified `cnf.jkt`), then [client] (a coarse
+     * per-client cap, minute-only), then the replay claim, then [subject].
      */
     interface Throttles {
         fun proofKey(thumbprint: String): String?
@@ -103,35 +98,17 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
-        preVerifyRefusal(dpopHeaders, client.clientId, throttles)?.let { return throttled(it) }
-
-        val result = verifier.verify(
-            DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt),
-            clock.instant(),
-        )
+        val now = clock.instant()
+        val checked = verifier.check(DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt), now)
+        if (checked is DpopCheck.Rejected) return outcomeOf(checked.result, subject, client)
+        val bound = checked as DpopCheck.Bound
+        // Only a proof signed by the token's own key reaches here; budgets keyed on it are the holder's.
+        (throttles.proofKey(bound.jkt) ?: throttles.client(client.clientId))?.let { return throttled(it) }
+        val result = verifier.claim(bound, now)
         if (result == DpopResult.VALID) {
             throttles.subject(subject, client.clientId)?.let { return throttled(it) }
         }
         return outcomeOf(result, subject, client)
-    }
-
-    /**
-     * Pre-verify budgets: the proof key's own bucket when its thumbprint can be read, then the
-     * client's shared cap. A proof whose header cannot be parsed spends only the client cap and is
-     * then rejected MALFORMED by the verifier, which never reaches the replay store.
-     */
-    private fun preVerifyRefusal(dpopHeaders: List<String>, clientId: String, throttles: Throttles): String? {
-        val thumbprint = dpopHeaders.singleOrNull()?.trim()?.let(::thumbprintOrNull)
-        return thumbprint?.let(throttles::proofKey) ?: throttles.client(clientId)
-    }
-
-    @Suppress("TooGenericExceptionCaught") // a parser defect must never escape admission; verify() decides
-    private fun thumbprintOrNull(compact: String): String? = try {
-        proofParser.parse(compact)?.jwkThumbprint?.takeIf { it.isNotBlank() }
-    } catch (e: CancellationException) {
-        throw e
-    } catch (_: Exception) {
-        null
     }
 
     private fun throttled(reason: String) = Outcome.Refused(STATUS_TOO_MANY, null, reason, throttled = true)
