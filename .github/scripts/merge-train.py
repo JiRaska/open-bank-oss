@@ -1066,19 +1066,32 @@ def gate_level_evidence(main_records: dict[str, list | None] | None,
         for r in red:
             gid = str(r.get("id") or "?")
             hs = index.get(gid, [])
-            oks = [h for h in hs if h.get("status") == "ok"]
-            if oks:
-                if r.get("status") == "unfalsified" and all(h.get("selftest_skipped") for h in oks):
-                    return (f"self-test of gate `{gid}` failed on main and the head's gate results say it was skipped there",
-                            FIX_JOB_LEVEL, "")
-                continue
+            # RED first: any red record for this id on the head refuses, whatever else the head says —
+            # a second `ok` record (a duplicate id across shards) never overrides a red one.
             reds = [h for h in hs if h.get("status") in RED_GATE_STATES]
             if reds:
                 return f"gate `{gid}` red on main is red on the head too ({reds[0].get('status')})", FIX_JOB_LEVEL, ""
-            if r.get("status") == "unfalsified" and hs:
-                return f"self-test of gate `{gid}` failed on main and the head skipped the gate", FIX_JOB_LEVEL, ""
-            level, _ = FIX_JOB_LEVEL, notes.append(f"gate `{gid}` {'skipped' if hs else 'absent'} on the head")
+            if r.get("status") == "unfalsified" and not any(h.get("status") == "ok" and not h.get("selftest_skipped") for h in hs):
+                # The self-test rule (#16675) applies to skipped AND absent: a self-test the head did not
+                # run cannot be shown fixed by that head.
+                return f"self-test of gate `{gid}` failed on main and the head did not run it ({'skipped' if hs else 'absent'})", FIX_JOB_LEVEL, ""
+            if hs and all(h.get("status") == "ok" for h in hs):
+                continue   # verified: EVERY record for this id on the head is ok
+            level, _ = FIX_JOB_LEVEL, notes.append(f"gate `{gid}` {'not ok everywhere' if hs else 'absent'} on the head")
     return None, level, "gate-verified" if level >= FIX_GATE_VERIFIED else "job-level: " + "; ".join(notes)
+
+
+def trusted_head_records(head_records: dict[str, list | None] | None, main_jobs: dict[str, str | None] | None,
+                         head_jobs: dict[str, str | None] | None) -> dict[str, list | None] | None:
+    """Only artifacts the TRUSTED side vouches for: a shard slug counts when the base run (main's own
+    CI, `main_jobs`) has a `gates (<slug>)` job — the base shard set, never anything the head's tree
+    declares — and the head's run has that same job completed `success` (an artifact with no green job
+    behind it is not evidence). Everything else is dropped as unreadable."""
+    if head_records is None:
+        return None
+    base = {m.group(1) for n in (main_jobs or {}) for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m}
+    return {slug: recs for slug, recs in head_records.items()
+            if slug in base and (head_jobs or {}).get(f"gates ({slug})") in OK_STATES}
 
 
 def parse_gate_scripts(text: str) -> dict[str, set[str]]:
@@ -4252,7 +4265,9 @@ def selftest_skip_fix_self_test(check) -> None:
           gh.reads == 1 and fix_contexts(gh, mk_git(["openbank-y/Foo.kt"]), mb, {"number": 8, "head_sha": head},
                                          {MR: main_c, "gates (data)": main_c}, cache) == [] and gh.reads == 1, str(gh.reads))
     got, why, gh, _c = live(unf, [".github/scripts/check-g1.py"])
-    check("live: a head that changed the gate's declared input (its self-test ran) is the fix", got == [MR], f"{got} {why}")
+    check("live: a head that changed the red gate's OWN script passes the self-test rule but is refused as a fix by the "
+          "judge rule (security review of 7ca5c4a1): it is merged by a human, never by its own verdict",
+          got == [] and "changes the judge" in why, f"{got} {why}")
     got, why, gh, _c = live(unf, ["openbank-x/src/k/E.kt"])
     check("live: a block-list declared directory counts", got == [MR], f"{got} {why}")
     got, why, gh, _c = live(content, ["openbank-y/Foo.kt"])
@@ -4306,7 +4321,11 @@ def gate_level_fix_self_test(check) -> None:
     for label, main, head, want_why, want_level, want_word in [
         ("red gate ok on the head -> fix, gate-verified", red, ok, None, V, "gate-verified"),
         ("red gate skipped on the head (full-fleet green job) -> still a fix, job-level", red,
-         {"data": [{"id": "adr-registry", "status": "skipped"}]}, None, J, "skipped on the head"),
+         {"data": [{"id": "adr-registry", "status": "skipped"}]}, None, J, "not ok everywhere"),
+        ("duplicate records for the id, one ok and one failed -> RED wins, not a fix", red,
+         {"data": [{"id": "adr-registry", "status": "ok"}], "kotlin": [{"id": "adr-registry", "status": "failed"}]}, "red on the head too", None, None),
+        ("duplicate records for the id, one ok and one skipped -> not verified, job-level", red,
+         {"data": [{"id": "adr-registry", "status": "ok"}], "kotlin": [{"id": "adr-registry", "status": "skipped"}]}, None, J, "not ok everywhere"),
         ("red gate absent from the head's results -> still a fix, job-level", red, {"data": [{"id": "other", "status": "ok"}]},
          None, J, "absent on the head"),
         ("red gate moved to another shard and ok there -> gate-verified", red,
@@ -4317,29 +4336,43 @@ def gate_level_fix_self_test(check) -> None:
         ("MEDIUM-1: a red main shard whose records name no failed gate -> job-level, never verified",
          {"data": [{"id": "adv", "status": "warned"}]}, ok, None, J, "names no failed gate"),
         ("an unreadable main shard -> job-level, never verified", {"data": None}, ok, None, J, "unreadable on main"),
-        ("self-test red on main, head ok but its self-test skipped -> not a fix", red_self, ok_skipped_st, "skipped there", None, None),
+        ("self-test red on main, head ok but its self-test skipped -> not a fix", red_self, ok_skipped_st, "did not run it", None, None),
         ("self-test red on main, head skipped the gate -> not a fix (the #16675 rule)", red_self,
-         {"data": [{"id": "adr-registry", "status": "skipped"}]}, "skipped the gate", None, None),
-        ("self-test red on main, gate absent on the head -> job-level, not a refusal", red_self,
-         {"data": [{"id": "other", "status": "ok"}]}, None, J, "absent on the head"),
+         {"data": [{"id": "adr-registry", "status": "skipped"}]}, "did not run it (skipped)", None, None),
+        ("self-test red on main, gate ABSENT on the head -> not a fix either (the rule covers absent)", red_self,
+         {"data": [{"id": "other", "status": "ok"}]}, "did not run it (absent)", None, None),
         ("self-test red on main, head ok with its self-test run -> gate-verified", red_self, ok, None, V, "gate-verified"),
         ("two red gates, one ok and one skipped -> job-level (the weakest wins)",
          {"data": [{"id": "a", "status": "failed"}, {"id": "b", "status": "failed"}]},
-         {"data": [{"id": "a", "status": "ok"}, {"id": "b", "status": "skipped"}]}, None, J, "gate `b` skipped"),
+         {"data": [{"id": "a", "status": "ok"}, {"id": "b", "status": "skipped"}]}, None, J, "gate `b` not ok everywhere"),
     ]:
         why, level, word = gate_level_evidence(main, head)
         check(f"gate evidence: {label}", (why is None and level == want_level and want_word in word) if want_why is None
               else (why is not None and want_why in why), f"why={why} level={level} word={word}")
 
-    # Live path (fix_contexts -> fix_evidence) over a stubbed GitHub and git: four heads.
-    A, B, C, D = "a" * 40, "b" * 39 + "1", "c" * 40, "d" * 40
+    base_jobs = {MR: "failure", "gates (data)": "failure", "gates (kotlin)": "success"}
+    hjobs = {MR: "success", "gates (data)": "success", "gates (kotlin)": "success"}
+    arts = {"data": ok["data"], "kotlin": [{"id": "x", "status": "ok"}], "rogue": [{"id": "adr-registry", "status": "ok"}]}
+    kept = trusted_head_records(arts, base_jobs, hjobs)
+    check("artifact trust: a shard outside the BASE shard set is ignored even though the head uploaded it",
+          kept is not None and set(kept) == {"data", "kotlin"}, str(kept))
+    check("artifact trust: a shard whose `gates (<slug>)` job is not green on the head is ignored",
+          set(trusted_head_records(arts, base_jobs, {**hjobs, "gates (kotlin)": "failure"})) == {"data"})
+    check("artifact trust: unreadable stays unreadable; no base jobs -> nothing trusted",
+          trusted_head_records(None, base_jobs, hjobs) is None and trusted_head_records(arts, None, hjobs) == {})
+    check("artifact trust: a red gate ok only in a rogue shard is not verified",
+          gate_level_evidence(red, trusted_head_records({"rogue": [{"id": "adr-registry", "status": "ok"}]}, base_jobs, hjobs))[1] == J)
+
+    # Live path (fix_contexts -> fix_evidence) over a stubbed GitHub and git.
+    A, B, C, D, E, G = "a" * 40, "b" * 39 + "1", "c" * 40, "d" * 40, "e" * 40, "f" * 40
     gates_text = "gates:\n  - id: adr-registry\n    run: python3 .github/scripts/check-adr-registry.py\n"
 
     class _R:
         def __init__(self, rc=0, out=""):
             self.returncode, self.stdout = rc, out
 
-    files = {A: "docs/adr/0001-x.md", B: "perf/scenarios.yaml", C: "docs/adr/0002-y.md", D: ".github/scripts/check-adr-registry.py"}
+    files = {A: "docs/adr/0001-x.md", B: "perf/scenarios.yaml", C: "docs/adr/0002-y.md", D: ".github/scripts/check-adr-registry.py",
+             E: ".github/workflows/ci.yml", G: "docs/adr/0003-z.md"}
 
     def git(*a, **_k):
         if a[0] == "merge-base":
@@ -4368,7 +4401,7 @@ def gate_level_fix_self_test(check) -> None:
         def extra_checks(self, _sha, _gates):
             return {}
 
-        def gate_shard_records(self, sha, _ctx, slugs):
+        def gate_shard_records(self, sha, _ctx, slugs):   # noqa: D401
             self.reads.append(sha)
             recs = red if sha == main_c else self.heads.get(sha)
             if recs is None:
@@ -4378,21 +4411,27 @@ def gate_level_fix_self_test(check) -> None:
     heads = {A: {"data": [{"id": "adr-registry", "status": "ok"}]},          # #16690: ran and passed the gate
              B: {"data": [{"id": "adr-registry", "status": "skipped"}]},     # full-fleet CI, gate skipped
              C: None,                                                         # artifacts unreadable
-             D: {"data": [{"id": "adr-registry", "status": "ok"}]}}          # ok, but edits the gate's script
+             D: {"data": [{"id": "adr-registry", "status": "ok"}]},          # ok, but edits the gate's script
+             E: {"data": [{"id": "adr-registry", "status": "ok"}]},          # ok, but edits a workflow
+             G: {"rogue": [{"id": "adr-registry", "status": "ok"}]}}         # ok only in a shard main never ran
     gh, cache = _Gh(heads), {}
     def claim(n, head):
         return fix_contexts(gh, git, mb, {"number": n, "head_sha": head, "created_at": f"2026-01-{n:02d}"}, {MR: main_c}, cache)
     def rec(head):
         return cache.get((FIX_STRENGTH_KEY, head, MR), (None, ""))
-    got_a, got_b, got_c, got_d = claim(2, A), claim(1, B), claim(3, C), claim(4, D)
+    got_a, got_b, got_c, got_d, got_e, got_g = claim(2, A), claim(1, B), claim(3, C), claim(4, D), claim(5, E), claim(6, G)
     check("live: the head that ran the red gate green is the fix, gate-verified",
           got_a == [MR] and rec(A) == (V, "gate-verified"), f"{got_a} {rec(A)}")
     check("live: the full-fleet head whose green job skipped the red gate stays a fix, job-level, not refused",
-          got_b == [MR] and rec(B)[0] == J and "skipped on the head" in rec(B)[1] and 1 not in cache.get(NOT_FIX_KEY, {}), f"{got_b} {rec(B)}")
+          got_b == [MR] and rec(B)[0] == J and "not ok everywhere" in rec(B)[1] and 1 not in cache.get(NOT_FIX_KEY, {}), f"{got_b} {rec(B)}")
     check("live: unreadable head artifacts fall back to the job rule unchanged, job-level",
           got_c == [MR] and rec(C)[0] == J and "unreadable" in rec(C)[1], f"{got_c} {rec(C)}")
-    check("LOW-3: a head that edits the red gate's own script is capped at job-level even though the gate is ok",
-          got_d == [MR] and rec(D)[0] == J and "changes the judge" in rec(D)[1], f"{got_d} {rec(D)}")
+    nf = cache.get(NOT_FIX_KEY, {})
+    check("judge: a head that edits the red gate's own script is REFUSED as a fix even though the gate is ok",
+          got_d == [] and "changes the judge" in nf.get(4, ""), f"{got_d} {nf.get(4)}")
+    check("judge: a head that edits a workflow is REFUSED as a fix", got_e == [] and "changes the judge" in nf.get(5, ""), f"{got_e} {nf.get(5)}")
+    check("artifact trust (live): a red gate ok only in a shard outside the base set is job-level, not verified",
+          got_g == [MR] and rec(G)[0] == J and "absent" in rec(G)[1], f"{got_g} {rec(G)}")
     check("live: main's records are read once, each head's once", gh.reads.count(main_c) == 1 and gh.reads.count(A) == 1
           and gh.reads.count(C) == 1, str(gh.reads))
     strict = [("green", {"number": 1, "head_sha": B, "created_at": "2026-01-01"}),
@@ -5168,17 +5207,20 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
     # Gate-level evidence: the gate red on main should be `ok` somewhere in the head's own gate results
     # (all shards: a gate may move), not skipped inside a green shard job — a full-fleet CI run of an
     # unrelated PR passes the job rule for every job. Skipped/absent caps the strength; red refuses.
-    why, level, word = gate_level_evidence(main_records, cached_gate_records(gh, head, ctx, None, cache))
-    if why is None and level >= FIX_GATE_VERIFIED:
-        # A head that changes the judge (gates.yaml, the runner, or a red gate's own script) cannot be
-        # verified BY that judge: its `ok` may be the edit talking. Job-level, like an unreadable artifact.
-        red_ids = {str(r.get("id")) for recs in (main_records or {}).values() if isinstance(recs, list)
-                   for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
-        scripts = parse_gate_scripts(gates_text) if gates_text is not None else {}
-        judge = {GATES_YAML, ".github/scripts/run-gates.py"} | {s for gid in red_ids for s in scripts.get(gid, ())}
-        touched = sorted(set(head_files) & judge)
-        if touched:
-            level, word = FIX_JOB_LEVEL, f"job-level: the head changes the judge ({touched[0]})"
+    # A head that changes the judge — gates.yaml, the runner, any workflow, or a red gate's own scripts —
+    # cannot be verified BY that judge: its green may be the edit talking. Refused outright (security
+    # review of 7ca5c4a1), not capped: such a fix is merged by a human, never by its own verdict.
+    red_ids = {str(r.get("id")) for recs in (main_records or {}).values() if isinstance(recs, list)
+               for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
+    scripts = parse_gate_scripts(gates_text) if gates_text is not None else {}
+    judge = {GATES_YAML, ".github/scripts/run-gates.py"} | {s for gid in red_ids for s in scripts.get(gid, ())}
+    touched = sorted(f for f in head_files if f in judge or f.startswith(".github/workflows/"))
+    if touched:
+        return f"the head changes the judge ({touched[0]}): its own green cannot verify a fix"
+    # Head artifacts count only for the BASE shard set with a green `gates (<slug>)` job behind each.
+    head_records = trusted_head_records(cached_gate_records(gh, head, ctx, None, cache), main_jobs,
+                                        cached_ctx_jobs(gh, head, ctx, cache))
+    why, level, word = gate_level_evidence(main_records, head_records)
     if cache is not None:
         cache[(FIX_STRENGTH_KEY, head, ctx)] = (level, word)
     return why
@@ -5214,6 +5256,18 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
     return out
 
 
+def masked_no_worse(gh, ctx: str, head: str, main_commit: str, cache: dict | None) -> bool:
+    """Whether `head`, red on `ctx` like main at `main_commit`, fails no job for it that main did not:
+    the head's failing jobs for the context are a subset of main's. Unreadable on either side = False
+    (no masking without evidence)."""
+    mj, hj = cached_ctx_jobs(gh, main_commit, ctx, cache), cached_ctx_jobs(gh, head, ctx, cache)
+    if not mj or not hj:
+        return False
+    def failing(jobs):
+        return {n for n, v in jobs.items() if v is not None and v not in FIX_JOB_OK}
+    return failing(hj) <= failing(mj)
+
+
 def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: dict[str, str | None],
                    app: dict | None, modes: list[str], main_red: dict[str, str] | None,
                    cache: dict | None = None, extra: dict[str, str] | None = None) -> tuple[str | None, list[str], str]:
@@ -5240,7 +5294,11 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
     claimed = fix_contexts(gh, git, base, {**view, "head_sha": claim_from}, main_red, cache, head_checks=claim_checks)
     if not claimed:
         return None, [], "claims no main-red context"
-    masked = {c: ("success" if c in main_red and c not in claimed and v == "failure" else v) for c, v in checks.items()}
+    # An unclaimed context red on main AND on the head is masked only when the head is independently no
+    # worse there: every job it fails for that context failed on main too (masked_no_worse). A job-level
+    # fix for one context can therefore never hide a breakage of its own under another main-red context.
+    masked = {c: ("success" if c in main_red and c not in claimed and v == "failure"
+                  and masked_no_worse(gh, c, head, main_red[c], cache) else v) for c, v in checks.items()}
     ok, why = qualifies(view, member, masked, app, untrainable=lambda _f: False, extra=extra)
     if ok and claim_from != head:
         # The combined head is what merges: it must have run the failing jobs too, not only the claim.
@@ -11097,8 +11155,8 @@ def self_test() -> int:
             def two_fixes(rec36, rec88, slug36="data"):
                 open_only("pW", "pW2", "pP1")
                 main_breaks(base_red=True)
-                gh.jobs[base0] = {"gates (data)": "failure"}
-                gh.head_jobs["gates (data)"] = "success"
+                gh.jobs[base0] = {"gates (data)": "failure", "gates (kotlin)": "success"}   # both shards exist on the base run
+                gh.head_jobs.update({"gates (data)": "success", "gates (kotlin)": "success"})
                 gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
                 gh.gate_records_by[(base0, "data")] = [{"id": "g-one", "status": "failed", "failure_kind": "content"}]
                 for n, rec, slug in ((36, rec36, slug36), (88, rec88, "data")):
@@ -11128,6 +11186,24 @@ def self_test() -> int:
             check("equal evidence: the older fix is served first", updates == [36], f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(None, None)
             check("both heads unreadable: the job rule stands and age decides, as before", updates == [36], f"updates={updates}")
+            # Judge change: a fix candidate that edits a workflow is refused outright (security review).
+            open_only("pW", "pJ2")
+            main_breaks(base_red=True)
+            gh.jobs[base0] = {"gates (data)": "failure"}
+            gh.head_jobs["gates (data)"] = "success"
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            s = settle_now()
+            check("judge change: a green PR editing .github/workflows/ is refused as a fix, not update-branched",
+                  gh.updates == [] and "changes the judge" in (s.get("not_fix") or {}).get(82, ""), f"updates={gh.updates} not_fix={s.get('not_fix')}")
+            gh.gate_records_by.clear()
+            main_red_done()
+            # Independent masking: an unclaimed context red on main may be masked on the combined head only
+            # when the head fails no job for it that main did not.
+            s1, s2 = fix_behind({MR: "success", "gates (data)": "failure"}, main_also_red=("gates (data)",),
+                                tamper=lambda _p: gh.head_jobs.update({"Admin UI": "failure"}))
+            check("masking: a combined head that fails an EXTRA job under an unclaimed main-red context is not merged",
+                  gh.updates == [36] and gh.merged == [], f"merged={gh.merged} updates={gh.updates} {s2}")
+            main_red_done()
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches
             # .github/scripts — the merge above), and refuses everything strict_lane_state refuses.
