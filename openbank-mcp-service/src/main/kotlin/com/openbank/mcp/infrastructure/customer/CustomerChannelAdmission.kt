@@ -48,11 +48,11 @@ class CustomerChannelAdmission(
      * per-client cap, minute-only), then the replay claim, then [subject].
      */
     interface Throttles {
-        fun proofKey(thumbprint: String): String?
+        suspend fun proofKey(thumbprint: String): String?
 
-        fun client(clientId: String): String?
+        suspend fun client(clientId: String): String?
 
-        fun subject(subject: String, clientId: String): String?
+        suspend fun subject(subject: String, clientId: String): String?
     }
 
     sealed interface Outcome {
@@ -98,7 +98,13 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
-        return admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+        // Fail closed (#16590): a shared replay store or bucket that cannot answer is a 503, never an
+        // admission and never a 429 the client would read as "slow down and retry the same proof".
+        return try {
+            admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+        } catch (e: SharedStoreUnavailableException) {
+            Outcome.Refused(STATUS_UNAVAILABLE, null, e.message ?: "shared store unavailable")
+        }
     }
 
     /** Everything the proof steps need, in one parameter. */

@@ -437,6 +437,29 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-18 (ADR-0383 P4 / D5.3, #16590)** — Shared, fail-closed customer-channel state. Still
+  **off by default**; this closes the first residual of the entry below.
+  - *Replay across replicas / pod rolls.* `mcp.customer.shared-store=valkey` puts the DPoP `jti`
+    claim in Valkey (`SET key 1 NX PX <proof window>`), so a proof admitted by one replica is
+    REPLAYED on every other one and a roll does not reopen the window. The non-mutating peek is a
+    real `EXISTS` (not the interface's `false` default), so the "refuse a replay before spending the
+    victim's budget" ordering holds across pods too. Proven by `ValkeyCustomerStoresIT` with two
+    independent clients against a real Valkey: cross-pod replay refused, 50 concurrent claims of one
+    `jti` across two pods admit exactly one.
+  - *Budget multiplication (D5.3).* The proof-key, per-client and per-(subject, client) windows move
+    to shared Valkey counters (one Lua `INCR` + first-hit `PEXPIRE`, so no counter is left without a
+    TTL); N replicas no longer give a caller N budgets. Same IT: the limit holds for the sum of two pods.
+  - *Fail closed.* Any store failure (refused, timeout after `shared-store-timeout-ms`, odd reply) on
+    the peek, the claim or a budget is a **503** and never an admission; there is no per-pod fallback.
+    The Valkey client has no readiness check, so the outage is contained to the customer channel.
+  - *Boot gate.* With the channel on, `shared-store` must be set; in a production launch
+    (`LaunchMode.NORMAL`) anything but `valkey`, or `valkey` with no Redis client, refuses to boot.
+    `memory` remains for tests and dev.
+  - **Residual:** no Valkey is wired for mcp-service in GitOps yet (declared as a prerequisite, not
+    provisioned), so the channel cannot be enabled in a cluster until it is — the boot gate makes
+    that a refusal rather than a silent per-pod store; the replay TTL runs on the Valkey clock while
+    `iat` is checked on the pod clock, so pod/Valkey skew beyond the 5 s grace narrows the window;
+    no per-key replay quota in Valkey (memory is bounded by the proof-key bucket that runs first).
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`
@@ -473,8 +496,9 @@ a stub (T-T2/T-D2).
     checks — with the issuer check off (`token.issuer=any`) a third-issuer token signed by the staff
     key is accepted. Production relies on the discovered issuer for that check.
   - **Residual, and why the channel must stay off:** the replay store is the single-pod
-    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
-    D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window; superseded by the shared
+    Valkey store above when `shared-store=valkey`); no server nonce; the
+    D5.3 windows are the in-process limiter, not the shared Valkey bucket (likewise superseded); the per-client cap is shared
     by all of a client's customers and is spent only by proofs signed by a key some token of that
     client is bound to, so exhausting it needs many valid tokens (a coarse cap by design, sized well
     above one customer's budget); the tenant-level DPoP check compares `htu` with the request URL,

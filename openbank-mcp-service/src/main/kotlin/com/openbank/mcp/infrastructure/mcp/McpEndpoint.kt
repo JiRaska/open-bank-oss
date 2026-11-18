@@ -133,7 +133,9 @@ class McpEndpoint(
 
     private val customerBranch by lazy {
         if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
-        customerChannel.admission?.let { McpCustomerBranch(it, auditor, metrics, rateLimiter) }
+        customerChannel.admission?.let {
+            McpCustomerBranch(it, auditor, metrics, rateLimiter, customerChannel.sharedThrottles)
+        }
     }
 
     /**

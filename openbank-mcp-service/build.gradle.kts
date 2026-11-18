@@ -25,6 +25,9 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.kotlinx.coroutines.core)
+    // ADR-0383 P4 (#16590): the customer channel's shared DPoP replay store and D5.3 budgets, so
+    // replicas share one replay window. The fleet's existing Valkey client (customer-edge, vop, ...).
+    implementation(libs.quarkus.redis.client)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     // Apache-2.0 shared libs — copyleft may consume permissive (ADR-0136). The shared ADR-0034 PDP

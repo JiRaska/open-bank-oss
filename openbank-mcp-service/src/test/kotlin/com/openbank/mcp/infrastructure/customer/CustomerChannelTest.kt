@@ -2,7 +2,19 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.mcp.infrastructure.customer
 
+import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import io.mockk.every
+import io.mockk.mockk
+import io.quarkus.redis.datasource.ReactiveRedisDataSource
+import io.quarkus.runtime.LaunchMode
+import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThat
+import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import io.mockk.every
+import io.mockk.mockk
+import io.quarkus.redis.datasource.ReactiveRedisDataSource
+import io.quarkus.runtime.LaunchMode
+import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -13,11 +25,76 @@ import java.util.Optional
 /** The boot gate (ADR-0385 D1): with the channel on, a bad allowlist means the bean cannot be built. */
 class CustomerChannelTest {
 
-    private fun channel(enabled: Boolean?, issuer: String?, location: String?) = CustomerChannel(
+    private fun channel(
+        enabled: Boolean?,
+        issuer: String?,
+        location: String?,
+        store: String? = CustomerChannel.STORE_MEMORY,
+        launchMode: LaunchMode = LaunchMode.TEST,
+        redis: Instance<ReactiveRedisDataSource> = noRedis(),
+    ) = CustomerChannel(
         Optional.ofNullable(enabled),
         Optional.ofNullable(issuer),
         Optional.ofNullable(location),
+        Optional.ofNullable(store),
+        Optional.of(TIMEOUT_MS),
+        redis,
+        McpRateLimiter.withDefaults(),
+        launchMode,
     )
+
+    private fun noRedis(): Instance<ReactiveRedisDataSource> =
+        mockk<Instance<ReactiveRedisDataSource>> { every { isResolvable } returns false }
+
+    private fun enabledIn(launchMode: LaunchMode, store: String?, redis: Instance<ReactiveRedisDataSource> = noRedis()) =
+        channel(true, DpopTestProofs.ISSUER, ALLOWLIST, store = store, launchMode = launchMode, redis = redis)
+
+    @Test
+    fun `a production launch refuses the in-memory store, and an unset one`() {
+        assertThatThrownBy { enabledIn(LaunchMode.NORMAL, CustomerChannel.STORE_MEMORY) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("requires mcp.customer.shared-store=valkey")
+        assertThatThrownBy { enabledIn(LaunchMode.NORMAL, null) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("shared-store is not set")
+    }
+
+    @Test
+    fun `valkey without a configured Redis client refuses to start, in any launch mode`() {
+        assertThatThrownBy { enabledIn(LaunchMode.NORMAL, CustomerChannel.STORE_VALKEY) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no Redis client")
+        assertThatThrownBy { enabledIn(LaunchMode.TEST, CustomerChannel.STORE_VALKEY) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no Redis client")
+    }
+
+    @Test
+    fun `valkey with a Redis client boots in production and shares its budgets`() {
+        val ds = mockk<ReactiveRedisDataSource>(relaxed = true)
+        val redis = mockk<Instance<ReactiveRedisDataSource>> {
+            every { isResolvable } returns true
+            every { get() } returns ds
+        }
+        val c = enabledIn(LaunchMode.NORMAL, "Valkey", redis)
+        assertThat(c.enabled).isTrue()
+        assertThat(c.sharedThrottles).isInstanceOf(ValkeyCustomerThrottles::class.java)
+    }
+
+    @Test
+    fun `an unknown store name refuses to start, and memory is allowed outside production`() {
+        assertThatThrownBy { enabledIn(LaunchMode.TEST, "postgres") }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("must be 'valkey' or 'memory'")
+        val dev = enabledIn(LaunchMode.DEVELOPMENT, CustomerChannel.STORE_MEMORY)
+        assertThat(dev.enabled).isTrue()
+        assertThat(dev.sharedThrottles).isNull()
+    }
+
+    private companion object {
+        const val TIMEOUT_MS = 250L
+        const val ALLOWLIST = "classpath:test-mcp-client-allowlist.yaml"
+    }
 
     @Test
     fun `off by default - absent flag means no admission and no allowlist read`() {
