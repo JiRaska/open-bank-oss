@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.21.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.0...admin-ui-v4.21.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore security excellence evidence ([#16493](https://github.com/JiRaska/open-bank-oss/issues/16493)) ([19698b6](https://github.com/JiRaska/open-bank-oss/commit/19698b6dd1984e30799d59afd17418b699e744ca))
+
 ## [4.21.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.20.0...admin-ui-v4.21.0) (2026-11-17)
 
 

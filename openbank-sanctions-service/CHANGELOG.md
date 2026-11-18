@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.3...sanctions-service-v0.21.4) (2026-11-18)
+
+
+### Bug Fixes
+
+* **sanctions:** bind the agent CLEAR approval to the request that consumed it ([#16593](https://github.com/JiRaska/open-bank-oss/issues/16593)) ([e129475](https://github.com/JiRaska/open-bank-oss/commit/e1294759059046e9218d1cc805373e84c21f125c))
+
 ## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.2...sanctions-service-v0.21.3) (2026-11-17)
 
 
