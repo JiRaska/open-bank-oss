@@ -42,7 +42,11 @@ class CustomerChannelBootGuardIT {
 
     private val allowlist: File by lazy {
         Files.createTempFile("mcp-client-allowlist", ".yaml").toFile().apply {
-            writeText(CustomerChannelBootGuardIT::class.java.classLoader.getResource("test-mcp-client-allowlist.yaml")!!.readText())
+            writeText(
+                CustomerChannelBootGuardIT::class.java.classLoader.getResource(
+                    "test-mcp-client-allowlist.yaml",
+                )!!.readText(),
+            )
         }
     }
 

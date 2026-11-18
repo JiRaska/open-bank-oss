@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.api.Timeout
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
@@ -33,6 +34,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * The customer channel's SHARED state against a real Valkey (ADR-0383 P4, #16590). "Two pods" are
@@ -202,6 +204,7 @@ class ValkeyCustomerStoresIT {
     }
 
     @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS) // an unbounded wait must fail the test, not hang the build
     fun `a hung Valkey (container paused) answers 503 within the timeout, never admits`(): Unit = runBlocking {
         val hung = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(6379)
         hung.start()
