@@ -6,13 +6,20 @@ import { validateGateHealthSnapshotData } from '../../openbank-admin-ui/src/lib/
 import { isReadinessSnapshot } from '../../openbank-admin-ui/src/lib/evidence/readinessSnapshot.ts'
 import { validateTestIntelligenceSnapshot, testIntelligenceCollectedAt } from '../../openbank-admin-ui/src/lib/evidence/testIntelligenceSnapshot.ts'
 
+import { SECURITY_KPI_MAX_AGE_MS } from '../../openbank-admin-ui/src/lib/security/kpiFreshness.ts'
 import { validateSecurityKpiSnapshot, securityKpiCollectedAt } from '../../openbank-admin-ui/src/lib/security/kpiSnapshot.ts'
 
 export const DATASETS = Object.freeze({
   'gate-health': { validateSnapshot: validateGateHealthSnapshotData, collectedAt: value => value.collectedAt },
   readiness: { validateSnapshot: isReadinessSnapshot, collectedAt: value => value.collected_at, snapshotSourceSha: value => value.source_sha },
   'test-intelligence': { validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt },
-  'security-kpis': { validateSnapshot: validateSecurityKpiSnapshot, collectedAt: securityKpiCollectedAt },
+  // KPI observations arrive weekly. A missed half-hour republish must not expire
+  // the selector while the observations are current. Readers still check data age.
+  'security-kpis': {
+    validateSnapshot: validateSecurityKpiSnapshot,
+    collectedAt: securityKpiCollectedAt,
+    pointerTtlMs: SECURITY_KPI_MAX_AGE_MS,
+  },
   // Content validation imports the UI's YAML/Zod schema. Load it only for content
   // publication so the dependency-free governance publisher tests remain standalone.
   content: { collectedAt: value => value.collectedAt, snapshotSourceSha: value => value.sourceSha },
