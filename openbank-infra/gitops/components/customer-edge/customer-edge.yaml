@@ -433,7 +433,7 @@ spec:
               memory: 192Mi
             limits:
               cpu: 500m
-              memory: 384Mi
+              memory: 512Mi
         # OPA policy-decision sidecar (ADR-0034 D5). Serves data.openbank.rest.allow on
         # localhost:8181 — the default opa.url AuthorizeInterceptor queries for every
         # @Authorize CustomerEdgeResource endpoint. Without it, authz.enforce=true fails
