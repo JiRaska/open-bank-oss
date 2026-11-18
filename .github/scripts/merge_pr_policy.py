@@ -83,6 +83,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'd6740b723531449f329c61dd26120e8840e3652d',
     # merge-train.py of the #16290 follow-up (cross-module test reads are not shareable).
     'bc0c3a48a9c1508194982f8538e3efd1ba2b94f9',
+    # merge-train.py of #16675 (unfalsified gates cannot back a fix claim), reviewed with that PR.
+    '67d8f953ed7ccf43ad395711306b457f95388de1',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
