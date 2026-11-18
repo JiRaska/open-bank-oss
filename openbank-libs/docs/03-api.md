@@ -54,6 +54,16 @@ iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
 
+`Iban.isValid` ověřuje podle ISO 13616: země z registru SWIFT, přesná délka pro danou zemi,
+kontrolní číslice 02..98, BBAN jen `[A-Z0-9]` a mod-97 == 1. Na chybný vstup vrací `false`,
+nikdy nevyhodí výjimku.
+
+## identity — RodneCislo
+
+`RodneCislo.parse` vrací `Parsed` (kanonický tvar, datum narození, pohlaví) nebo `Invalid`.
+Odmítá čísla, která nikdy nebyla vydána: 9místný tvar po roce 1953, výjimku „zbytek 10 → 0“
+po roce 1985 a měsíc +20/+70 před rokem 2004.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin
