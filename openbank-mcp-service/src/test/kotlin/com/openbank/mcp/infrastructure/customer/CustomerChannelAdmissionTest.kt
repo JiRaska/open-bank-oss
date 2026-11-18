@@ -302,4 +302,21 @@ class CustomerChannelAdmissionTest {
         const val DAILY_BUDGET = 1_000
         const val SMALL_CLIENT_CAP = 50
     }
+
+    @Test
+    fun `replaying one captured proof cannot drain the victim's proof-key bucket`() {
+        val budgets = LimiterThrottles()
+        val captured = DpopTestProofs.proof(key)
+        assertThat(admit(dpop = listOf(captured), throttles = budgets)).isInstanceOf(Outcome.Admitted::class.java)
+        repeat(100) {
+            val r = admit(dpop = listOf(captured), throttles = budgets) as Outcome.Refused
+            assertThat(r.reason).contains("REPLAYED")
+            assertThat(r.status).isEqualTo(401)
+        }
+        // Only the one genuine use spent the proof-key bucket; the 100 replays spent nothing.
+        assertThat(budgets.spent.count { it.startsWith("customer-dpop-jkt:") }).isEqualTo(1)
+        repeat(PER_MINUTE - 1) {
+            assertThat(admit(throttles = budgets)).isInstanceOf(Outcome.Admitted::class.java)
+        }
+    }
 }

@@ -82,6 +82,14 @@ fun interface DpopProofParser {
  */
 fun interface DpopReplayStore {
     suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim
+
+    /**
+     * Non-mutating peek: true when (`jkt`, `jti`) is already claimed and still live at [now]. Writes
+     * nothing and never evicts. A store that cannot answer cheaply keeps the default `false`, which
+     * only means "not known to be replayed"; [firstUse] stays the authority. Lets a caller refuse a
+     * replayed proof BEFORE spending any budget on it.
+     */
+    suspend fun isUsed(jkt: String, jti: String, now: Instant): Boolean = false
 }
 
 /**
@@ -117,8 +125,13 @@ data class DpopPolicy(
 sealed interface DpopCheck {
     data class Rejected(val result: DpopResult) : DpopCheck
 
-    /** Bound to the token's key; [jkt] is the verified proof-key thumbprint (== `cnf.jkt`). */
-    data class Bound(val jkt: String, val jti: String) : DpopCheck
+    /**
+     * Bound to the token's key; [jkt] is the verified proof-key thumbprint (== `cnf.jkt`). Only
+     * [DpopProofVerifier.check] creates one: the constructor (and `copy`) are internal, so
+     * [DpopProofVerifier.claim] can never be handed a value that skipped the checks.
+     */
+    @ConsistentCopyVisibility
+    data class Bound internal constructor(val jkt: String, val jti: String) : DpopCheck
 }
 
 /**
@@ -166,6 +179,15 @@ class DpopProofVerifier(
         return rejection?.let(DpopCheck::Rejected)
             ?: DpopCheck.Bound(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti))
     }
+
+    /**
+     * Non-mutating: true when this bound proof's `jti` is already claimed. Run it before spending
+     * any budget, so a captured proof replayed on a victim's token costs the victim nothing. It is
+     * a pre-check, not the authority: two concurrent copies of one proof can both see `false` and
+     * both reach [claim], which still admits only one.
+     */
+    suspend fun isReplayed(bound: DpopCheck.Bound, now: Instant): Boolean =
+        replayStore.isUsed(bound.jkt, bound.jti, now)
 
     /** The replay claim for a proof [check] bound; VALID exactly once per (`jkt`, `jti`). */
     suspend fun claim(bound: DpopCheck.Bound, now: Instant): DpopResult =
