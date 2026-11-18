@@ -50,6 +50,12 @@ call them separately:
   thumbprint, equal to the token's `cnf.jkt`.
 - `claim(bound, now)` makes the replay claim and returns the same results `verify` would.
 
+`isReplayed(bound, now)` is a non-mutating peek (`DpopReplayStore.isUsed`, default `false`). Call
+it before spending a budget, so a replayed proof costs nothing; `claim` remains the authority, and
+two concurrent copies of one proof can both pass the peek. Only `check` can create a
+`DpopCheck.Bound`: its constructor and `copy` are internal, so `claim` cannot be handed one that
+skipped the checks.
+
 Run the limiter between the two. A junk proof, or one carrying someone else's public key, is then
 rejected by `check` before it can spend anyone's budget, and the budget is still spent before the
 replay store is written to.

@@ -98,10 +98,36 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
+        return admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+    }
+
+    /** Everything the proof steps need, in one parameter. */
+    private class ProofRequest(
+        val subject: String,
+        val client: McpClientAllowlist.Client,
+        val presented: String,
+        val jkt: String,
+        val dpopHeaders: List<String>,
+    )
+
+    /**
+     * Steps 2-5 of admission: the stateless proof check, the replay peek, the bound-proof budgets,
+     * the replay claim and the subject window — in that order, see [Throttles].
+     */
+    @Suppress("ReturnCount") // each early return is one fail-closed step, in order
+    private suspend fun admitProof(req: ProofRequest, throttles: Throttles): Outcome {
+        val subject = req.subject
+        val client = req.client
+        val presented = req.presented
+        val jkt = req.jkt
+        val dpopHeaders = req.dpopHeaders
         val now = clock.instant()
         val checked = verifier.check(DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt), now)
         if (checked is DpopCheck.Rejected) return outcomeOf(checked.result, subject, client)
         val bound = checked as DpopCheck.Bound
+        // A captured proof replayed on the victim's token passes check(); refuse it before any budget,
+        // so replays cannot drain the victim's proof-key bucket. claim() below stays the authority.
+        if (verifier.isReplayed(bound, now)) return outcomeOf(DpopResult.REPLAYED, subject, client)
         // Only a proof signed by the token's own key reaches here; budgets keyed on it are the holder's.
         (throttles.proofKey(bound.jkt) ?: throttles.client(client.clientId))?.let { return throttled(it) }
         val result = verifier.claim(bound, now)
