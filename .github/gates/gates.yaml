@@ -7067,6 +7067,26 @@ gates:
       # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
       # which is why the output is read and not the exit code.
       python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
+  - id: mcp-customer-channel-propose-only
+    name: "MCP REST clients are GET-only unless allow-listed (ADR-0383 D6, enforced)"
+    group: security
+    mode: enforced
+    rationale: "ADR-0383 D6 makes the customer MCP channel propose-only: MCP may create a proposal and the customer authorises it in the bank app. A tool-layer promise is not that rule; a REST client that can POST is the capability itself. Allow-list model, never keyword matching (a path-keyword draft failed open on camelCase routes, non-literal paths and unknown config keys), and fail-closed on anything the parser cannot read."
+    review_after: "2027-05-17"
+    verified: "2026-11-17 — self-test 26 cases. Known-positives: Allman-brace interfaces (bare and with a supertype; proven by the POST finding itself), a body-less header followed by non-declaration text, camelCase POST with no protected keyword, non-literal @Path, generic method, backtick method, POST inherited from a same-named interface in another package (FQCN), Java client, @RegisterRestClient on a non-interface (count mismatch), unknown method annotation, custom @HttpMethod, unresolvable supertype, supertype on the line after a trailing colon, bounded generic type parameter, where clause, a header that never closes, two funs on one line, a raw java.net.http client, an allow-listed method whose verb changed, an overload of an allow-listed method, a write in a generated API tag. Known-negatives: GET-only Kotlin and Java clients (with @POST in comments), an allow-listed POST, a write in a non-generated tag. Stale allow-list/baseline entries are findings. Self-test falsified (POST/PUT/PATCH/DELETE treated as safe -> self-test FAILED). Sabotage on the real tree (an @POST added to the payment read clients) exited 1."
+    budget_seconds: 30
+    min_subjects: 7
+    selftest: python3 .github/scripts/check-mcp-customer-channel-propose-only.py --self-test
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-mcp-customer-channel-propose-only.py"
+    run: |
+      # Subjects are DERIVED: every @RegisterRestClient interface under openbank-mcp-service/src/main
+      # (*.kt and *.java), and the annotation count must equal the parsed-client count. Any non-GET
+      # method, declared or inherited (supertypes by FQCN, generated openbank-client-* APIs from the
+      # provider openapi.yaml), is a finding unless allow-listed in the script. The inherited
+      # baseline may only shrink.
+      python3 .github/scripts/check-mcp-customer-channel-propose-only.py
   - id: value-movement-admission-coverage
     name: "every value-moving module is classified, and an instructed one binds the admission chain with a real FRAUD check (ADR-0377 D2, enforced)"
     group: kotlin
