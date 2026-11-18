@@ -35,3 +35,17 @@ Configured values:
 - `max-size: 20`
 
 
+## Test JVM heap budget
+
+The trace-contract IT boots its own Quarkus application under a distinct test
+profile, so the module's test fork hosts two augmentations and boots where the
+rest of the suite hosts one. The sibling services that took this shape first
+(loyalty, copilot, referral) measured `OutOfMemoryError` at Gradle's default
+512 MiB test heap — referral's suite hung 45 minutes when the instrumentation
+agent could no longer allocate and the Kafka testcontainer never started. This
+module sets the budget up front rather than after its own outage.
+
+`tasks.test { maxHeapSize = "2g" }` (the statement-service convention) leaves
+the measured headroom. Re-measure with `./gradlew :openbank-campaign-service:test`
+after adding any further profile-booting IT; a green single-class run is not
+evidence, the OOM only surfaced with the full suite resident.
