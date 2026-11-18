@@ -39,8 +39,8 @@ import java.util.UUID
  * two independent Redis clients, two stores and two [CustomerChannelAdmission]s — nothing in memory
  * is shared between them except what Valkey holds.
  *
- * Guard-removal proofs (PR evidence): `NX` dropped from the SET makes the cross-pod replay and the
- * race tests red; `isUsed` reverted to `false` makes the peek test red; the try/catch around
+ * Guard-removal proofs (PR evidence): `NX` dropped from the SET makes the race test red (the cross-pod
+ * replay test stays green there because the `EXISTS` peek refuses it first); `isUsed` reverted to `false` makes the peek test red; the try/catch around
  * `admitProof` removed makes the store-down test red (the exception escapes instead of a 503); the
  * Valkey throttles replaced by per-instance counters makes the shared-bucket test red.
  */
@@ -138,21 +138,20 @@ class ValkeyCustomerStoresIT {
     }
 
     @Test
-    fun `the claim carries the proof window as its TTL, and the peek sees it from the other pod`(): Unit =
-        runBlocking {
-            val a = ValkeyDpopReplayStore(podA, TIMEOUT)
-            val b = ValkeyDpopReplayStore(podB, TIMEOUT)
-            val ttl = DpopPolicy().replayTtl
+    fun `the claim carries the proof window as its TTL, and the peek sees it from the other pod`(): Unit = runBlocking {
+        val a = ValkeyDpopReplayStore(podA, TIMEOUT)
+        val b = ValkeyDpopReplayStore(podB, TIMEOUT)
+        val ttl = DpopPolicy().replayTtl
 
-            assertThat(b.isUsed("jkt", "j1", Instant.now())).isFalse()
-            assertThat(podA.execute("EXISTS", ValkeyDpopReplayStore.key("jkt", "j1")).awaitSuspending().toLong())
-                .`as`("the peek writes nothing").isZero()
-            assertThat(a.firstUse("jkt", "j1", ttl, Instant.now())).isEqualTo(ReplayClaim.FIRST_USE)
-            assertThat(b.isUsed("jkt", "j1", Instant.now())).isTrue()
+        assertThat(b.isUsed("jkt", "j1", Instant.now())).isFalse()
+        assertThat(podA.execute("EXISTS", ValkeyDpopReplayStore.key("jkt", "j1")).awaitSuspending().toLong())
+            .`as`("the peek writes nothing").isZero()
+        assertThat(a.firstUse("jkt", "j1", ttl, Instant.now())).isEqualTo(ReplayClaim.FIRST_USE)
+        assertThat(b.isUsed("jkt", "j1", Instant.now())).isTrue()
 
-            val pttl = podB.execute("PTTL", ValkeyDpopReplayStore.key("jkt", "j1")).awaitSuspending().toLong()
-            assertThat(pttl).isBetween(ttl.toMillis() - SLACK_MS, ttl.toMillis())
-        }
+        val pttl = podB.execute("PTTL", ValkeyDpopReplayStore.key("jkt", "j1")).awaitSuspending().toLong()
+        assertThat(pttl).isBetween(ttl.toMillis() - SLACK_MS, ttl.toMillis())
+    }
 
     @Test
     fun `budgets are shared across pods - the limit holds for the sum, not per pod`(): Unit = runBlocking {

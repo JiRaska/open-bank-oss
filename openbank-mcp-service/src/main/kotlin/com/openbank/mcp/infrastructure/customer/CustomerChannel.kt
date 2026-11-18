@@ -108,7 +108,9 @@ class CustomerChannel @Inject constructor(
                 return SharedState(mode, InMemoryDpopReplayStore(), null)
             }
             val timeout = timeoutMs.filter { it > 0 }.map(Duration::ofMillis).orElseThrow {
-                IllegalStateException("mcp.customer.shared-store=valkey but mcp.customer.shared-store-timeout-ms is not set")
+                IllegalStateException(
+                    "mcp.customer.shared-store=valkey but mcp.customer.shared-store-timeout-ms is not set",
+                )
             }
             check(redis.isResolvable) {
                 "mcp.customer.shared-store=valkey but no Redis client is configured (quarkus.redis.hosts)"

@@ -40,8 +40,11 @@ class CustomerChannelTest {
     private fun noRedis(): Instance<ReactiveRedisDataSource> =
         mockk<Instance<ReactiveRedisDataSource>> { every { isResolvable } returns false }
 
-    private fun enabledIn(launchMode: LaunchMode, store: String?, redis: Instance<ReactiveRedisDataSource> = noRedis()) =
-        channel(true, DpopTestProofs.ISSUER, ALLOWLIST, store = store, launchMode = launchMode, redis = redis)
+    private fun enabledIn(
+        launchMode: LaunchMode,
+        store: String?,
+        redis: Instance<ReactiveRedisDataSource> = noRedis(),
+    ) = channel(true, DpopTestProofs.ISSUER, ALLOWLIST, store = store, launchMode = launchMode, redis = redis)
 
     @Test
     fun `a production launch refuses the in-memory store, and an unset one`() {
