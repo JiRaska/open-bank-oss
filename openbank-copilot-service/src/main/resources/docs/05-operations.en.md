@@ -66,7 +66,3 @@ before it expires; without a reload period the process would keep presenting the
 the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
 After a renewal the new certificate is in use within an hour, with no restart. The
 `tls-certificate-reload` gate keeps every such configuration covered.
-
-## Proposal input validation (#16748)
-
-`propose_payment` checks the payee IBAN with libs-domain `Iban.isValid` and the currency with `CurrencyCode.isCanonical`. An absent currency defaults to CZK; a present but unknown or withdrawn one is an error and is never replaced with CZK. `propose_fx_conversion` applies the same currency check.

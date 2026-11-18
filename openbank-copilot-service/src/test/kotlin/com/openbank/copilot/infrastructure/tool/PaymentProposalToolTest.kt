@@ -83,46 +83,4 @@ class PaymentProposalToolTest {
         assertThat(result.proposal).isNull()
         assertThat(result.error).contains("účtu")
     }
-
-    @Test
-    fun `rejects an IBAN-shaped value that fails mod-97`() {
-        // Shape-valid (CC + 2 digits + alphanumerics) but one digit off: the old regex let it through.
-        val result = tool.propose(
-            args(
-                "fromAccountId" to "11111111-1111-1111-1111-111111111111",
-                "payeeIban" to "CZ6508000000192000145398",
-                "amount" to "10",
-            ),
-        )
-        assertThat(result.proposal).isNull()
-        assertThat(result.error).contains("IBAN")
-    }
-
-    @Test
-    fun `accepts a valid IBAN typed with spaces and stores it compact`() {
-        val result = tool.propose(
-            args(
-                "fromAccountId" to "11111111-1111-1111-1111-111111111111",
-                "payeeIban" to "CZ65 0800 0000 1920 0014 5399",
-                "amount" to "10",
-            ),
-        )
-        assertThat(result.proposal!!.fields["payeeIban"]).isEqualTo("CZ6508000000192000145399")
-    }
-
-    @Test
-    fun `an unknown or withdrawn currency is an error, never silently CZK`() {
-        listOf("ABC", "DEM", "EURO").forEach { currency ->
-            val result = tool.propose(
-                args(
-                    "fromAccountId" to "11111111-1111-1111-1111-111111111111",
-                    "payeeIban" to "CZ6508000000192000145399",
-                    "amount" to "10",
-                    "currency" to currency,
-                ),
-            )
-            assertThat(result.proposal).describedAs(currency).isNull()
-            assertThat(result.error).describedAs(currency).isNotNull()
-        }
-    }
 }

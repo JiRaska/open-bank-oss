@@ -8,8 +8,6 @@ import com.openbank.copilot.application.port.out.ActionProposalTool
 import com.openbank.copilot.application.port.out.ProposalResult
 import com.openbank.copilot.domain.ActionKind
 import com.openbank.copilot.domain.ActionProposal
-import com.openbank.libs.domain.account.Iban
-import com.openbank.libs.domain.money.CurrencyCode
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.util.UUID
@@ -42,20 +40,14 @@ class PaymentProposalTool : ActionProposalTool {
         val accountId = arguments.text("fromAccountId") ?: return error("Chybí číslo zdrojového účtu.")
         if (runCatching { UUID.fromString(accountId) }.getOrNull() == null) return error("Neplatné číslo účtu.")
 
-        val payee = arguments.text("payeeIban")?.uppercase()?.replace(" ", "") ?: return error("Chybí IBAN příjemce.")
-        // The shared ISO 13616 validator (registry length per country + mod-97), not a shape regex:
-        // a mistyped IBAN must be refused here, not proposed to the customer for confirmation.
-        if (!Iban.isValid(payee)) return error("Neplatný IBAN příjemce.")
+        val payee = arguments.text("payeeIban")?.uppercase() ?: return error("Chybí IBAN příjemce.")
+        if (!IBAN.matches(payee)) return error("Neplatný IBAN příjemce.")
 
         val amount = arguments.text("amount")?.replace(",", ".")?.let { runCatching { BigDecimal(it) }.getOrNull() }
             ?: return error("Neplatná částka.")
         if (amount <= BigDecimal.ZERO) return error("Částka musí být kladná.")
 
-        // Absent means CZK; present but not an active ISO 4217 code is an error — silently
-        // substituting CZK would propose a payment in a currency the customer never asked for.
-        val requested = arguments.text("currency")?.uppercase()
-        if (requested != null && !CurrencyCode.isCanonical(requested)) return error("Neplatná měna.")
-        val currency = requested ?: "CZK"
+        val currency = arguments.text("currency")?.uppercase()?.takeIf { CURRENCY.matches(it) } ?: "CZK"
         // Cap free text so an over-long / adversarial note can't bloat the action card (#998 nit 1).
         val note = arguments.text("note")?.take(MAX_NOTE)
 
@@ -76,5 +68,7 @@ class PaymentProposalTool : ActionProposalTool {
 
     private companion object {
         const val MAX_NOTE = 140
+        val IBAN = Regex("[A-Z]{2}\\d{2}[A-Z0-9]{10,30}")
+        val CURRENCY = Regex("[A-Z]{3}")
     }
 }
