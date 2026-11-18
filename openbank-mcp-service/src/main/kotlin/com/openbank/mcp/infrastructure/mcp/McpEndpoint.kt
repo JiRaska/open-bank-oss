@@ -28,7 +28,9 @@ import com.openbank.mcp.application.protocol.ServerInfo
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
+import com.openbank.mcp.infrastructure.customer.CustomerChannel
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -111,11 +113,27 @@ class McpEndpoint(
     @Inject
     lateinit var toolsCatalog: PolicyFilteredToolCatalog
 
+    /**
+     * Field-injected for the same reason as [metrics]. The customer MCP channel (ADR-0383/0385);
+     * off unless `mcp.customer.enabled`. Plain unit tests that construct this class leave it unset,
+     * which reads as "off".
+     */
+    @Inject
+    lateinit var customerChannel: CustomerChannel
+
+    /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
+    @Inject
+    lateinit var httpRequest: HttpServerRequest
+
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
     private val throttle by lazy { McpThrottleSupport(auditor, metrics, rateLimiter) }
 
     private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
+
+    private val customerBranch by lazy {
+        customerChannel.admission?.let { McpCustomerBranch(it, auditor, metrics) }
+    }
 
     @POST
     @Suppress("ReturnCount")
@@ -127,6 +145,20 @@ class McpEndpoint(
         // Bounded before it becomes a tag: `method` is a caller-supplied string on a public agent
         // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
         metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
+
+        // ADR-0383 D1 / ADR-0385 D1: while the customer channel is on, a call with no token gets the
+        // RFC 9728 401 and a customers-realm token is admitted (or refused) on its own branch — it
+        // never reaches the staff audience check, the agent/OBO resolver, or a staff tool.
+        if (::customerChannel.isInitialized && ::httpRequest.isInitialized) {
+            customerBranch?.handle(
+                callerResolver.token,
+                httpRequest.getHeader(AUTHORIZATION_HEADER),
+                httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
+                method,
+                id,
+                params,
+            )?.let { return it }
+        }
 
         // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
         // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
@@ -452,6 +484,9 @@ class McpEndpoint(
     private companion object {
         /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
         const val RATE_LIMITED = -32029
+
+        const val DPOP_HEADER = "DPoP"
+        const val AUTHORIZATION_HEADER = "Authorization"
 
         const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 

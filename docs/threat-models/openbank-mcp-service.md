@@ -437,6 +437,30 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
+  default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
+  - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`
+    (`quarkus.oidc.customers`, issuer resolution enabled only with the channel). A customers-realm
+    token is decided ONLY by `CustomerChannelAdmission`; `CallerContextResolver` returns null for it
+    before the `agent:` prefix or OBO path is inspected, so a customer token shaped like an agent
+    token cannot reach a staff charter's tools (unit + IT, both proven red with the guard removed).
+    A staff-realm token is never admitted as a customer, whatever its `azp`/`cnf`.
+  - *Token theft / replay.* Admission requires `aud` = this server, an `azp` declared AND enabled in
+    the MCP client allowlist (tier from the allowlist, never from the token), `cnf.jkt`, the `DPoP`
+    authorization scheme, and an RFC 9449 proof verified by the ADR-0320 P2 primitive (`htm`, `htu`
+    against the allowlist's published resource rather than the request's `Host`, `iat` window,
+    `ath`, `cnf.jkt`, `jti` replay). Tier H bearer tokens are NOT admitted in this slice.
+  - *Discovery.* RFC 9728 metadata at `/.well-known/oauth-protected-resource[/mcp]`, 404 while off;
+    an unauthenticated call gets 401 with `resource_metadata`. Values come from config, never the request.
+  - *Boot gate.* `CustomerChannel` is `@Startup`: with the channel on, a missing issuer or a
+    missing/malformed allowlist stops the service from starting.
+  - **Residual, and why the channel must stay off:** the replay store is the single-pod
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; no
+    per-(party, azp) limiter runs before the replay claim (D5.3); an admitted customer reaches NO
+    tool (empty `tools/list`, refused `tools/call`), because the `MCP_CLIENT` grant lookup (P2/D3)
+    and downstream party enforcement (P5) do not exist; the customers tenant config is not yet
+    verified against a live Keycloak (P3).
+
 - **2026-09-03** — Doc correction, no behavior change: the ADR-0181 phase-2 entry said
   "`propose_payment` / `StubProposalPort` were deliberately left untouched". `StubProposalPort` no
   longer exists — `git grep -n "class StubProposalPort" -- '*.kt'` returns nothing, and the four

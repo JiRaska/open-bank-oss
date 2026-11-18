@@ -14,6 +14,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.time.Clock
 import java.time.Instant
+import java.util.Optional
 
 /**
  * Resolves the acting agent + presented PSD2 consent from the caller's validated OAuth 2.1 access
@@ -42,7 +43,22 @@ class CallerContextResolver @Inject constructor(
     private val oboEnabled: Boolean = false,
     private val sessions: AgentSessionRepository? = null,
     private val clock: Clock = Clock.systemUTC(),
+    /**
+     * The customers-realm issuer (ADR-0383 D1). A token from it is NEVER resolved here — not as an
+     * `agent:` token, not as OBO — whatever its `sub` or claims say; only the customer channel
+     * branch admits it. Absent means no customers tenant is configured.
+     */
+    @ConfigProperty(name = "mcp.customer.issuer")
+    private val customerIssuer: Optional<String> = Optional.empty(),
 ) {
+
+    /** The validated token, for the customer-channel branch (which reads `iss`, `azp`, `cnf`). */
+    val token: JsonWebToken get() = jwt
+
+    private fun isCustomerRealmToken(): Boolean {
+        val iss = jwt.issuer ?: return false
+        return customerIssuer.map { it.isNotBlank() && it == iss }.orElse(false)
+    }
 
     /**
      * @return the caller's [ConsentContext] when an `agent:` bearer token is present — or, with
@@ -52,6 +68,8 @@ class CallerContextResolver @Inject constructor(
      */
     suspend fun resolveOrNull(): ConsentContext? {
         val subject = jwt.subject ?: return null
+        // ADR-0383 D1.1/D1.2: issuer selects the path BEFORE the subject is inspected.
+        if (isCustomerRealmToken()) return null
         if (subject.startsWith(AGENT_PREFIX)) {
             // RFC 8707 / ADR-0383 D1: an agent token must be issued FOR this server. Checked here as
             // well as in McpEndpoint (which answers 401 first) so that a caller reaching the
