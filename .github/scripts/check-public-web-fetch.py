@@ -261,6 +261,13 @@ NON_INTERNET = tuple(
               "fc00::/7", "fe80::/10", "::1/128")
 )
 REQUIRED_EXCEPT_NETS = tuple(ipaddress.ip_network(n) for n in REQUIRED_EXCEPT)
+# What the BROKER's internet rule must leave unreachable, both families. IPv6 is judged by effect
+# rather than forbidden: nothing in this repo pins the cluster's IP family, so a v6 block is
+# allowed only when it reaches none of ULA, link-local, loopback or IPv4-mapped space (which
+# would carry every IPv4 private range back in).
+BROKER_FORBIDDEN_NETS = REQUIRED_EXCEPT_NETS + tuple(
+    ipaddress.ip_network(n) for n in ("fc00::/7", "fe80::/10", "::1/128", "::ffff:0:0/96")
+)
 
 
 class PolicyError(ValueError):
@@ -339,9 +346,33 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
         if docs is None:
             findings.append(f"{path}: cannot be parsed — a manifest this gate cannot read cannot be cleared")
     all_docs = [d for ds in docs_by_path.values() if ds for d in ds if isinstance(d, dict)]
-    pods = agent_plane_pods(all_docs, modules)
-    broker_pods = [(ns, lb) for ns, lb in pods if lb.get("app.kubernetes.io/name") == BROKER]
-    other_pods = [(ns, lb) for ns, lb in pods if lb.get("app.kubernetes.io/name") != BROKER]
+    del all_docs
+    # Broker identity is the WORKLOAD, never a label: a manifest under BROKER_DIR whose
+    # metadata.name is the broker and whose every openbank image is the broker module. Any other
+    # workload wearing the broker's name is itself a finding and counts as an "other" pod, so a
+    # look-alike cannot borrow the broker's internet egress.
+    broker_pods: list[tuple[str, dict]] = []
+    other_pods: list[tuple[str, dict]] = []
+    for path, docs in sorted(docs_by_path.items()):
+        for doc in docs or []:
+            if not isinstance(doc, dict) or doc.get("kind") not in WORKLOAD_KINDS:
+                continue
+            meta = doc.get("metadata") or {}
+            tpl = _pod_template(doc)
+            labels = (tpl.get("metadata") or {}).get("labels") or {}
+            pspec = tpl.get("spec") or {}
+            mods = {_image_module(str(c.get("image", ""))) for c in
+                    (pspec.get("containers") or []) + (pspec.get("initContainers") or []) if isinstance(c, dict)}
+            app_mods = {m for m in mods if m.startswith("openbank-")}
+            ns = meta.get("namespace", "default")
+            if path.startswith(BROKER_DIR) and meta.get("name") == BROKER and app_mods == {BROKER}:
+                broker_pods.append((ns, labels))
+                continue
+            wears_name = BROKER in (labels.get("app.kubernetes.io/name"), meta.get("name"))
+            if wears_name:
+                findings.append(f"{path}: {doc.get('kind')}/{meta.get('name')} carries the broker's name but is not the broker workload")
+            if wears_name or mods & modules:
+                other_pods.append((ns, labels))
     broker_ns = {ns for ns, _ in broker_pods}
     broker_seen = False
     for path, docs in sorted(docs_by_path.items()):
@@ -383,7 +414,7 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
                 if open_to:
                     findings.append(f"{path}: {name} has an egress rule with no `to` — every destination, no except")
                     continue
-                leaked = sorted({str(r) for r in REQUIRED_EXCEPT_NETS for n in nets
+                leaked = sorted({str(r) for r in BROKER_FORBIDDEN_NETS for n in nets
                                  if n.version == r.version and n.overlaps(r)})
                 if leaked:
                     findings.append(f"{path}: {name} internet egress does not except {leaked}")
@@ -578,6 +609,20 @@ def self_test() -> int:
         ("broker no ports (= all ports)", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel, [{"to": [ipb("0.0.0.0/0", full)]}])]}, 1),
         ("broker UDP 443", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
                                                             [{"to": [ipb("0.0.0.0/0", full)], "ports": [{"protocol": "UDP", "port": 443}]}])]}, 1),
+        # 6. IPv6 on the broker is judged by what it reaches
+        ("broker ::/0 with no except", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                        [{"to": [ipb("0.0.0.0/0", full), ipb("::/0")], "ports": t443}])]}, 1),
+        ("broker ::/0 leaving IPv4-mapped space", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                                   [{"to": [ipb("::/0", ["fc00::/7", "fe80::/10", "::1/128"])], "ports": t443}])]}, 1),
+        ("broker global-unicast 2000::/3 only", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                                 [{"to": [ipb("2000::/3")], "ports": t443}])]}, 0),
+        # 7. broker identity is the workload, not a label
+        ("look-alike agent wearing the broker label", {**bwl, bdir + "np.yaml": [good_broker],
+                                                       "x/w.yaml": [wl(BROKER, "fetch-broker", "openbank-docs-truth-agent")]}, 1),
+        ("look-alike non-agent image wearing the broker label", {**bwl, bdir + "np.yaml": [good_broker],
+                                                                 "x/w.yaml": [wl(BROKER, "fetch-broker", "busybox")]}, 1),
+        ("broker-named workload in broker dir with a foreign image",
+         {bdir + "w.yaml": [wl(BROKER, "fetch-broker", "openbank-docs-truth-agent")], bdir + "np.yaml": [good_broker]}, 1),
         # 5. fail closed
         ("unparseable manifest", {"x/broken.yaml": None}, 1),
     ]
