@@ -74,6 +74,10 @@ C_72.00 reports market and pre-cap Article 9 values, including Level 2 at r0220 
 
 Use `isDataGap` and `gapReason` to distinguish unavailable inputs or classifications from a measured zero. The model does not provide regulatory deposit classifications or the borrower sector for its loan factor. It also lacks the 90% and exempt inflow categories. The previews cover a subset of regulatory cells and are for internal analysis.
 
+## Tracing
+
+The service carries `quarkus-opentelemetry`, so each inbound request opens a server span and its database work joins that trace. The deployed manifest supplies the OTLP endpoint and sampler; with no endpoint set, export is a no-op and boot is unaffected. `FinrepTraceContractIT` pins the trace contract: the request span and its INSERT share one trace and record no error span.
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
