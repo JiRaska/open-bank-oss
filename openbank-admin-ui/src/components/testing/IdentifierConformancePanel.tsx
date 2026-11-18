@@ -28,14 +28,14 @@ function resultTone(result: string): Tone {
 /** Shown wherever fuzz evidence appears: a crash-free fuzzer is not a correctness proof. */
 export function RobustnessOnlyLabel() {
   const { t } = useLanguage()
-  return <StatusBadge tone="warning" label={t('jen robustnost — není důkaz shody', 'robustness only — not conformance evidence')} />
+  return <StatusBadge status={null} tone="warning" label={t('jen robustnost — není důkaz shody', 'robustness only — not conformance evidence')} />
 }
 
 export function IdentifierConformancePanel({ evidence }: { evidence: IdentifierConformanceEvidence | undefined }) {
   const { t, language } = useLanguage()
   if (!evidence || evidence.state !== 'present') {
     return <div role="status" data-testid="identifier-conformance-absent" style={{ padding: 16, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-2)', color: 'var(--text-secondary)', fontSize: 12 }}>
-      <StatusBadge tone="neutral" label={t('Žádný důkaz', 'No evidence')} />{' '}
+      <StatusBadge status={null} tone="neutral" label={t('Žádný důkaz', 'No evidence')} />{' '}
       {t('Tento snapshot nenese matici shody identifikátorů z běhu na main; shoda se specifikací není prokázána.', 'This snapshot carries no identifier-conformance matrix from a main run; spec conformance is not evidenced.')}
     </div>
   }
@@ -53,14 +53,14 @@ export function IdentifierConformancePanel({ evidence }: { evidence: IdentifierC
       </tr></thead>
       <tbody>{evidence.validators.map(row => <tr key={`${row.identifier}:${row.module}:${row.symbol}`} data-testid={`conformance-${row.identifier}-${row.module}`}>
         <td style={td}><strong>{row.identifier}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{row.module} · {row.symbol}</div></td>
-        <td style={td}><StatusBadge tone={rowTone(row)} withDot label={row.status === 'unverified-ad-hoc-copy'
+        <td style={td}><StatusBadge status={null} tone={rowTone(row)} withDot label={row.status === 'unverified-ad-hoc-copy'
           ? t('Neověřeno (ad-hoc kopie)', 'Unverified (ad-hoc copy)')
           : row.status === 'known-defect' && row.state !== 'failed' ? t('Známá vada', 'Known defect') : stateLabel(row.state, language)} /></td>
-        <td style={td}>{row.vectors.count}{row.vectors.count > 0 && <> · <StatusBadge tone={resultTone(row.vectors.result)} label={row.vectors.result} /></>}
+        <td style={td}>{row.vectors.count}{row.vectors.count > 0 && <> · <StatusBadge status={null} tone={resultTone(row.vectors.result)} label={row.vectors.result} /></>}
           {row.vectors.sources.length > 0 && <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{row.vectors.sources.map(source => <div key={source}>{source}</div>)}</div>}</td>
         <td style={td}>{row.differential.result === 'no-reference'
-          ? <StatusBadge tone="neutral" label={t('bez reference', 'no reference')} />
-          : <StatusBadge tone={resultTone(row.differential.result)} label={row.differential.result} />}
+          ? <StatusBadge status={null} tone="neutral" label={t('bez reference', 'no reference')} />
+          : <StatusBadge status={null} tone={resultTone(row.differential.result)} label={row.differential.result} />}
           {row.differential.reference && <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{row.differential.reference}</div>}</td>
         <td style={td}>{row.lastRun.at ? format(row.lastRun.at) : '—'}{row.lastRun.url && <div><a href={row.lastRun.url} target="_blank" rel="noreferrer">{t('běh', 'run')}</a></div>}</td>
         <td style={td}>{row.fuzz.fuzzer ?? '—'}{row.fuzz.robustnessOnly && <div><RobustnessOnlyLabel /></div>}</td>
