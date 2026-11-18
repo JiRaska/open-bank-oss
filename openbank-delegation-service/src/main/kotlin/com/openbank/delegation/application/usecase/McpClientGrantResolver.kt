@@ -41,7 +41,7 @@ class McpClientGrantResolver(private val delegationRepository: DelegationReposit
         // defence in depth, so a query regression cannot hand back another party's grant.
         return delegationRepository.findActiveMcpClientGrants(grantorPartyId, clientId, keyThumbprint).filter { grant ->
             grant.granteePartyId == granteeId &&
-            grant.granteeType == DelegationGranteeType.MCP_CLIENT &&
+                grant.granteeType == DelegationGranteeType.MCP_CLIENT &&
                 grant.grantorPartyId == grantorPartyId &&
                 grant.granteeClientId == clientId &&
                 sameThumbprint(grant.granteeKeyThumbprint, keyThumbprint) &&

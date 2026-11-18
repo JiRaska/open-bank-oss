@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.filter.InteractionFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import com.fasterxml.jackson.databind.SerializationFeature
@@ -70,10 +71,10 @@ import java.util.UUID
  * former delegate must cross the equivalent of a 403 boundary instead of retaining access.
  */
 @Provider("openbank-delegation-service")
-// Messages only: mcp-service's HTTP pact (states naming an MCP_CLIENT grant) is replayed against the
-// running service by DelegationMcpClientGrantPactFolderProviderVerificationTest. Every message
-// interaction carries a provider state, so this negative filter excludes exactly the HTTP ones.
-@PactFilter("^(?!.*MCP_CLIENT grant exists for the pact party).*$")
+// Messages only: pact-jvm's @PactFilter defaults to matching provider-STATE names; this filters by
+// interaction TYPE instead, so it does not depend on how states are named. mcp-service's HTTP pact is
+// replayed against the running service by DelegationMcpClientGrantPactFolderProviderVerificationTest.
+@PactFilter(value = ["Asynchronous/Messages"], filter = InteractionFilter.ByInteractionType::class)
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")

@@ -31,7 +31,11 @@ interface DelegationRepository {
      * `idx_delegation_mcp_client_binding`), so another customer's grant to the same client is never
      * loaded at all.
      */
-    suspend fun findActiveMcpClientGrants(grantorPartyId: UUID, clientId: String, keyThumbprint: String): List<DelegationGrant>
+    suspend fun findActiveMcpClientGrants(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+    ): List<DelegationGrant>
 
     fun findExpiredActive(threshold: OffsetDateTime): Uni<List<DelegationGrant>>
     fun markExpired(

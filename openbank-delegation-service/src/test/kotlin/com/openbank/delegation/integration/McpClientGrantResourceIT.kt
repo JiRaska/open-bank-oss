@@ -43,7 +43,14 @@ class McpClientGrantResourceIT {
 
     @Test
     @TestSecurity(user = MCP, roles = ["ROLE_API"])
-    @OidcSecurity(claims = [Claim(key = "sub", value = SUB), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP)])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
     fun `mcp-service gets only this customer's active grant, never another customer's grant to the same client`() {
         seed(customer, account, "ACTIVE")
         seed(other, UUID.randomUUID(), "ACTIVE")
@@ -58,7 +65,14 @@ class McpClientGrantResourceIT {
 
     @Test
     @TestSecurity(user = SERVICES, roles = ["ROLE_OPERATOR"])
-    @OidcSecurity(claims = [Claim(key = "sub", value = SUB), Claim(key = "azp", value = "openbank-services"), Claim(key = "preferred_username", value = SERVICES)])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-services"), Claim(key = "preferred_username", value = SERVICES),
+        ],
+    )
     fun `another service account is refused 403`() {
         seed(customer, account, "ACTIVE")
         post(body()).statusCode(403)
@@ -66,14 +80,28 @@ class McpClientGrantResourceIT {
 
     @Test
     @TestSecurity(user = MCP, roles = ["ROLE_API"])
-    @OidcSecurity(claims = [Claim(key = "sub", value = SUB), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP)])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
     fun `a request carrying the customer-party header is refused 403`() {
         post(body(), partyHeader = customer).statusCode(403)
     }
 
     @Test
     @TestSecurity(user = MCP, roles = ["ROLE_API"])
-    @OidcSecurity(claims = [Claim(key = "sub", value = SUB), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP)])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
     fun `a missing body or a malformed thumbprint is 400`() {
         post(null).statusCode(400)
         post(body(jkt = "short")).statusCode(400)
@@ -99,7 +127,9 @@ class McpClientGrantResourceIT {
             s.setString(7, status)
             s.executeUpdate()
         }
-        c.prepareStatement("insert into delegation_capabilities (grant_id, capability) values (?, 'ACCOUNT_READ_BALANCES')").use { s ->
+        c.prepareStatement(
+            "insert into delegation_capabilities (grant_id, capability) values (?, 'ACCOUNT_READ_BALANCES')",
+        ).use { s ->
             s.setObject(1, id)
             s.executeUpdate()
         }
