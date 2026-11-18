@@ -47,6 +47,7 @@
 
 import argparse
 import ipaddress
+import json
 import pathlib
 import re
 import sys
@@ -353,6 +354,7 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
     # look-alike cannot borrow the broker's internet egress.
     broker_pods: list[tuple[str, dict]] = []
     other_pods: list[tuple[str, dict]] = []
+    all_other_pods: list[tuple[str, dict]] = []
     for path, docs in sorted(docs_by_path.items()):
         for doc in docs or []:
             if not isinstance(doc, dict) or doc.get("kind") not in WORKLOAD_KINDS:
@@ -371,6 +373,9 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
             wears_name = BROKER in (labels.get("app.kubernetes.io/name"), meta.get("name"))
             if wears_name:
                 findings.append(f"{path}: {doc.get('kind')}/{meta.get('name')} carries the broker's name but is not the broker workload")
+            # EVERY non-broker workload is an "other" pod for the broker selector check; the
+            # agent-plane subset decides which other policies this gate judges at all.
+            all_other_pods.append((ns, labels))
             if wears_name or mods & modules:
                 other_pods.append((ns, labels))
     broker_ns = {ns for ns, _ in broker_pods}
@@ -384,14 +389,14 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
             sel = (doc.get("spec") or {}).get("podSelector")
             hits_other = any(pns == ns and _selects(sel, labels) for pns, labels in other_pods)
             hits_broker = any(pns == ns and _selects(sel, labels) for pns, labels in broker_pods)
-            if not (hits_other or hits_broker):
+            is_broker = path.startswith(BROKER_DIR) and name == BROKER_EGRESS
+            if not (hits_other or hits_broker or is_broker):
                 continue
             try:
                 rules = _internet_rules(doc)
             except PolicyError as e:
                 findings.append(f"{path}: {ns}/{name}: {e}")
                 continue
-            is_broker = path.startswith(BROKER_DIR) and name == BROKER_EGRESS
             if not is_broker:
                 if rules:
                     findings.append(
@@ -404,10 +409,12 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
             match_labels = (sel or {}).get("matchLabels") or {}
             if ns not in broker_ns:
                 findings.append(f"{path}: {name} is in namespace {ns}, the broker runs in {sorted(broker_ns)}")
-            if not match_labels or (sel or {}).get("matchExpressions"):
-                findings.append(f"{path}: {name} must select the broker by matchLabels only, not {sel!r}")
-            if hits_other:
-                findings.append(f"{path}: {name} also selects other agent-plane pods — internet egress would reach them")
+            if match_labels.get("app.kubernetes.io/name") != BROKER or (sel or {}).get("matchExpressions"):
+                findings.append(f"{path}: {name} must select by matchLabels including app.kubernetes.io/name: {BROKER}, not {sel!r}")
+            if not hits_broker:
+                findings.append(f"{path}: {name} selects no identified broker workload")
+            if any(pns == ns and _selects(sel, labels) for pns, labels in all_other_pods):
+                findings.append(f"{path}: {name} also selects a workload that is not the broker — internet egress would reach it")
             if not rules:
                 findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
             for nets, ports, open_to in rules:
@@ -570,6 +577,12 @@ def self_test() -> int:
             b["except"] = except_
         return {"ipBlock": b}
 
+    def tagged(w):
+        """A copy of workload w whose pods also carry part-of=fetch-broker."""
+        w = json.loads(json.dumps(w))
+        w["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/part-of"] = "fetch-broker"
+        return w
+
     awl = {"x/w.yaml": [agent_wl]}
     bwl = {bdir + "w.yaml": [broker_wl]}
     ncases += [
@@ -623,6 +636,20 @@ def self_test() -> int:
                                                                  "x/w.yaml": [wl(BROKER, "fetch-broker", "busybox")]}, 1),
         ("broker-named workload in broker dir with a foreign image",
          {bdir + "w.yaml": [wl(BROKER, "fetch-broker", "openbank-docs-truth-agent")], bdir + "np.yaml": [good_broker]}, 1),
+        ("unrelated workload in broker ns with the broker's full matchLabels",
+         {**bwl, bdir + "np.yaml": [good_broker],
+          "y/w.yaml": [{"kind": "Deployment", "metadata": {"name": "sidecar-job", "namespace": "fetch-broker"},
+                        "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/name": BROKER}},
+                                              "spec": {"containers": [{"image": "docker.io/library/busybox:1"}]}}}}]}, 1),
+        ("unrelated workload matching a broad broker selector (no name label)",
+         {bdir + "w.yaml": [tagged(broker_wl)], "y/w.yaml": [tagged(wl("cache", "fetch-broker", "redis"))],
+          bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", {"matchLabels": {"app.kubernetes.io/part-of": "fetch-broker"}},
+                                    [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
+        ("broker selector missing the name label", {bdir + "w.yaml": [tagged(broker_wl)],
+                                                    bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker",
+                                                                              {"matchLabels": {"app.kubernetes.io/part-of": "fetch-broker"}},
+                                                                              [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
+        ("tagged broker with the exact name selector is clean", {bdir + "w.yaml": [tagged(broker_wl)], bdir + "np.yaml": [good_broker]}, 0),
         # 5. fail closed
         ("unparseable manifest", {"x/broken.yaml": None}, 1),
     ]
