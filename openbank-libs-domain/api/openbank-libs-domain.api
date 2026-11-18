@@ -1035,6 +1035,13 @@ public final class com/openbank/libs/domain/account/CzechAccountNumber {
 	public final fun isValidPrefix (Ljava/lang/String;)Z
 }
 
+public final class com/openbank/libs/domain/account/CzechPaymentSymbol {
+	public static final field INSTANCE Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
+	public static final field MAX_LENGTH I
+	public final fun isValid (Ljava/lang/String;)Z
+	public final fun requireValid (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+}
+
 public final class com/openbank/libs/domain/account/Iban {
 	public static final field Companion Lcom/openbank/libs/domain/account/Iban$Companion;
 	public fun <init> (Ljava/lang/String;)V
@@ -1054,6 +1061,12 @@ public final class com/openbank/libs/domain/account/Iban {
 public final class com/openbank/libs/domain/account/Iban$Companion {
 	public final fun isValid (Ljava/lang/String;)Z
 	public final fun of (Ljava/lang/String;)Lcom/openbank/libs/domain/account/Iban;
+}
+
+public final class com/openbank/libs/domain/account/IbanCheckDigits {
+	public static final field INSTANCE Lcom/openbank/libs/domain/account/IbanCheckDigits;
+	public final fun build (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/domain/account/Iban;
+	public final fun compute (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
 }
 
 public final class com/openbank/libs/domain/calendar/AccountingClock {
@@ -2230,6 +2243,7 @@ public final class com/openbank/libs/domain/money/CurrencyCode$Companion {
 	public final fun getGBP ()Lcom/openbank/libs/domain/money/CurrencyCode;
 	public final fun getUSD ()Lcom/openbank/libs/domain/money/CurrencyCode;
 	public final fun invoke (Ljava/lang/String;)Lcom/openbank/libs/domain/money/CurrencyCode;
+	public final fun isCanonical (Ljava/lang/String;)Z
 	public final fun of (Ljava/lang/String;)Lcom/openbank/libs/domain/money/CurrencyCode;
 }
 
