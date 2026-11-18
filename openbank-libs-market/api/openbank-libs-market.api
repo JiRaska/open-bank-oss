@@ -15,19 +15,42 @@ public final class com/openbank/libs/market/BookingContext {
 	public fun toString ()Ljava/lang/String;
 }
 
-public final class com/openbank/libs/market/BranchPaymentCurrency : java/lang/Enum {
-	public static final field CZK Lcom/openbank/libs/market/BranchPaymentCurrency;
+public abstract class com/openbank/libs/market/BranchPaymentCurrency {
 	public static final field Companion Lcom/openbank/libs/market/BranchPaymentCurrency$Companion;
-	public static final field EUR Lcom/openbank/libs/market/BranchPaymentCurrency;
-	public static final field GBP Lcom/openbank/libs/market/BranchPaymentCurrency;
-	public static final field USD Lcom/openbank/libs/market/BranchPaymentCurrency;
-	public static fun getEntries ()Lkotlin/enums/EnumEntries;
-	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/market/BranchPaymentCurrency;
-	public static fun values ()[Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public final fun getCode ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/market/BranchPaymentCurrency$CZK : com/openbank/libs/market/BranchPaymentCurrency {
+	public static final field INSTANCE Lcom/openbank/libs/market/BranchPaymentCurrency$CZK;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/market/BranchPaymentCurrency$Companion {
 	public final fun of (Ljava/lang/String;)Lcom/openbank/libs/market/BranchPaymentCurrency;
+	public final fun supportedCodes ()Ljava/util/Set;
+}
+
+public final class com/openbank/libs/market/BranchPaymentCurrency$EUR : com/openbank/libs/market/BranchPaymentCurrency {
+	public static final field INSTANCE Lcom/openbank/libs/market/BranchPaymentCurrency$EUR;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/market/BranchPaymentCurrency$GBP : com/openbank/libs/market/BranchPaymentCurrency {
+	public static final field INSTANCE Lcom/openbank/libs/market/BranchPaymentCurrency$GBP;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/market/BranchPaymentCurrency$USD : com/openbank/libs/market/BranchPaymentCurrency {
+	public static final field INSTANCE Lcom/openbank/libs/market/BranchPaymentCurrency$USD;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface class com/openbank/libs/market/IdentityVerification {

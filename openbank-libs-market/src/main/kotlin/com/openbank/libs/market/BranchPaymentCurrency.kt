@@ -5,19 +5,22 @@
 package com.openbank.libs.market
 
 /**
- * Currencies backed by the reference branch-payment posting plan, shared by admission and Ledger.
- * A valid ISO code or a product denomination alone does not imply an available accounting route.
- * Ledger maps these exhaustively; adding a currency also requires its GL mapping and accounts.
+ * A closed accounting capability, not an HTTP API's general currency vocabulary.
+ * A valid ISO code or a product denomination alone does not imply an available posting route.
+ * Ledger maps these exhaustively; adding a capability requires its GL mapping and accounts.
  */
-enum class BranchPaymentCurrency {
-    CZK,
-    EUR,
-    USD,
-    GBP,
-    ;
+sealed class BranchPaymentCurrency private constructor(val code: String) {
+    data object CZK : BranchPaymentCurrency("CZK")
+    data object EUR : BranchPaymentCurrency("EUR")
+    data object USD : BranchPaymentCurrency("USD")
+    data object GBP : BranchPaymentCurrency("GBP")
 
     companion object {
-        fun of(code: String): BranchPaymentCurrency = entries.firstOrNull { it.name == code }
+        private val supported: List<BranchPaymentCurrency> by lazy { listOf(CZK, EUR, USD, GBP) }
+
+        fun of(code: String): BranchPaymentCurrency = supported.firstOrNull { it.code == code }
             ?: throw IllegalArgumentException("No branch payment accounts for currency")
+
+        fun supportedCodes(): Set<String> = supported.map { it.code }.toSet()
     }
 }
