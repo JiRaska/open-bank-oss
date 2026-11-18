@@ -106,14 +106,16 @@ spec:
         # requests fail the same way and are the earliest witness when real traffic is sparse.
         # A refusal only exists when the customer channel is enabled and receiving requests, so
         # the series' presence is the "channel enabled" condition.
-        # Self-delta with `or vector(0)`, not increase(): Micrometer registers the counter on its
-        # first increment, so the series is born at 1 and increase() would read 0 on the first
-        # outage after a restart. Absent series (t=0, channel off) -> 0 - 0 -> silent.
+        # increase() PER SERIES, then sum: a pod replaced mid-outage resets its own counter, and a
+        # sum-then-offset self-delta goes negative across the churn and silences the alert (review
+        # of #16779). Per-series increase() handles the reset. [2m] window + for: 5m means refusals
+        # in every 2-minute window for 5 minutes: a sustained outage, not a single refusal. A counter
+        # born at 1 contributes nothing until its second increment, which a real outage (every
+        # customer request refused) supplies within a scrape or two. Absent series (t=0, channel
+        # off) -> empty -> silent.
         - alert: McpCustomerReplayStoreUnavailable
           expr: |
-            (sum(openbank_mcp_customer_rejected_total{reason="replay_store_unavailable"}) or vector(0))
-            -
-            (sum(openbank_mcp_customer_rejected_total{reason="replay_store_unavailable"} offset 5m) or vector(0)) > 0
+            sum(increase(openbank_mcp_customer_rejected_total{reason="replay_store_unavailable"}[2m])) > 0
           for: 5m
           labels:
             severity: critical

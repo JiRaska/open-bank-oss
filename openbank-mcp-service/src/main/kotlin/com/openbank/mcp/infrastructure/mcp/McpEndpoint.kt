@@ -289,15 +289,8 @@ class McpEndpoint(
                 decision,
                 result,
                 Duration.ofNanos(System.nanoTime() - startedAt),
-                // ADR-0384 D1: derived from how the caller was resolved on this path, never a claim.
-                // /mcp serves agents and OBO staff; the customer channel is a separate path (ADR-0383).
-                if (ctx.principalType ==
-                    "HUMAN"
-                ) {
-                    McpMetricsPort.ChannelTags.OPERATOR
-                } else {
-                    McpMetricsPort.ChannelTags.AGENT
-                },
+                // ADR-0384 D1: the channel the resolver's admitting branch recorded, never a claim.
+                McpMetricsPort.ChannelTags(ctx.channel),
             )
         }
 

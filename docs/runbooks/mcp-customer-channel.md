@@ -24,7 +24,9 @@ Warning. Over 20% of one client's real requests fail DPoP for 10m (nonce handsha
 1. Split by `reason`: `stale_iat` suggests clock skew, `htu_mismatch` / `bad_sig` a client release,
    `replay` / `jkt_mismatch` a replayed or stolen proof.
 2. A replay or key-mismatch pattern on one client is a candidate for the single-actor client
-   suspension (ADR-0384 D4, not yet built: until then, remove the client from the allowlist).
+   suspension (ADR-0384 D4). That action does not exist yet, and there is no in-service block for
+   one client. Escalate to the platform on-call and the MCP channel owner, and record the client
+   and the reason mix.
 
 ## McpCustomerClientErrorRate
 

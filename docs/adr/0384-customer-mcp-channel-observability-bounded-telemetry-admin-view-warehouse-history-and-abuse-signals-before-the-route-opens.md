@@ -404,7 +404,7 @@ A `Customer MCP` page under the existing `/delegations` area. Every request goes
 PrometheusRules, warning unless stated, each with a runbook line:
 - `McpCustomerReplayStoreDown` — `replay_store_up == 0` for 2m, **critical** (the channel is
   failing closed: every customer request is rejected).
-- `McpCustomerDpopRejectSpike` — DPoP rejects per client over 5m above a ratio of that client's
+- `McpCustomerDpopRejectSpike` — DPoP rejects per client over 10m above a ratio of that client's
   calls (excluding `nonce_required`, which is normal protocol).
 - `McpCustomerClientErrorRate` — one client's `downstream` + `policy` reject ratio above the
   others' by a fixed factor.
@@ -608,6 +608,13 @@ Not built yet, follow-ups under #16605:
 - D6: `McpCustomerReplayStoreDown`, `McpCustomerProposalRejectionHigh`,
   `McpCustomerGrantProjectionStale`, the `mcp-customer-read` journey and the SLO schema.
 - The enforcement gate `mcp-customer-channel-observable`.
+- Allowlist source: `mcp.customer.client-allowlist` is not wired yet. It must come from the same
+  allowlist that ADR-0383 admission reads (`mcp-client-allowlist.yaml`, #16664, and the customer
+  tenant, #16721; both are unmerged). The customer branch of #16721 must also set
+  `channel = CUSTOMER` on the context it admits. Until then every customer label would be
+  `unlisted`.
+- Registration tooling that refuses a 26th client. The service-side boot cap is built; the
+  tooling-side refusal is not.
 
 ## Compliance impact
 

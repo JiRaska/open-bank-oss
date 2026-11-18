@@ -106,12 +106,20 @@ tests:
                 others' before acting.
 
   - interval: 1m
-    name: "replay store: absent series silent; born-at-1 then sustained refusals fire; a one-off blip does not"
+    name: "replay store: t=0, no series, is silent"
     input_series:
-      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false"}'
-        values: "_x10 1+1x30 31x30"
-      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="blip",synthetic="true"}'
-        values: "_x70"
+      - series: 'openbank_mcp_tool_calls_total{channel="agent",client="none",synthetic="false",tool="list_accounts"}'
+        values: "0+50x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: McpCustomerReplayStoreUnavailable
+        exp_alerts: []
+
+  - interval: 1m
+    name: "replay store: born at 1 then a sustained outage fires; recovery clears it"
+    input_series:
+      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false",pod="a"}'
+        values: "_x10 1+5x30 151x30"
     alert_rule_test:
       - eval_time: 9m
         alertname: McpCustomerReplayStoreUnavailable
@@ -129,19 +137,67 @@ tests:
                 mcp-service has refused customer requests with reason replay_store_unavailable
                 continuously for 5m: the DPoP replay store cannot be reached, so every customer
                 request is answered 503. Staff and agent traffic is unaffected by design (no
-                readiness check on the store), so nothing else will show this. Check the Valkey pods
-                and mcp-service's connection errors.
+                readiness check on the store), so nothing else will show this. Check the Valkey
+                pods and mcp-service's connection errors.
       - eval_time: 60m
         alertname: McpCustomerReplayStoreUnavailable
         exp_alerts: []
 
   - interval: 1m
-    name: "replay store: a single refusal on a fresh pod is not a sustained outage"
+    name: "replay store: a single real refusal is not an outage"
     input_series:
-      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false"}'
-        values: "_x10 1x50"
+      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false",pod="a"}'
+        values: "0x10 1x50"
     alert_rule_test:
-      - eval_time: 13m
+      - eval_time: 11m
+        alertname: McpCustomerReplayStoreUnavailable
+        exp_alerts: []
+      - eval_time: 20m
         alertname: McpCustomerReplayStoreUnavailable
         exp_alerts: []
 
+  - interval: 1m
+    name: "replay store: pod A dies mid-outage, pod B keeps refusing (review repro of #16779)"
+    input_series:
+      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false",pod="a"}'
+        values: "1000x20 _x60"
+      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false",pod="b"}'
+        values: "0+5x80"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: McpCustomerReplayStoreUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerreplaystoreunavailable
+              summary: "Customer MCP admission is failing closed: DPoP replay store unavailable"
+              description: >-
+                mcp-service has refused customer requests with reason replay_store_unavailable
+                continuously for 5m: the DPoP replay store cannot be reached, so every customer
+                request is answered 503. Staff and agent traffic is unaffected by design (no
+                readiness check on the store), so nothing else will show this. Check the Valkey
+                pods and mcp-service's connection errors.
+
+  - interval: 1m
+    name: "replay store: control, pod B alone"
+    input_series:
+      - series: 'openbank_mcp_customer_rejected_total{layer="dpop",reason="replay_store_unavailable",client="acme",synthetic="false",pod="b"}'
+        values: "0+5x80"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: McpCustomerReplayStoreUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerreplaystoreunavailable
+              summary: "Customer MCP admission is failing closed: DPoP replay store unavailable"
+              description: >-
+                mcp-service has refused customer requests with reason replay_store_unavailable
+                continuously for 5m: the DPoP replay store cannot be reached, so every customer
+                request is answered 503. Staff and agent traffic is unaffected by design (no
+                readiness check on the store), so nothing else will show this. Check the Valkey
+                pods and mcp-service's connection errors.
