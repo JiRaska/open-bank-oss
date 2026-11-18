@@ -82,17 +82,17 @@ socket or a provider token.
    enforced twice in the application layer — OPA on the tool call, `SafeHttpClient` after DNS
    resolution in the broker. A hostname-aware egress proxy is a later hardening, not a premise.
    The Browser Run API token lives in OpenBao via ESO, mounted only into the broker.
-9. **Liveness and evidence of effect.** The broker registers the shared workflow-liveness gauge
+8. **Liveness and evidence of effect.** The broker registers the shared workflow-liveness gauge
    (ADR-0237) and records success only on a fetch that returned content; it exports per-host
    counts of `fetched`, `denied`, `not_renderable` (ADR-0253). A source that cannot be read is
    reported as UNVERIFIED, never as "unchanged" — the same rule ADR-0366 applies to CI artifacts.
-10. **Placement and licence.** The broker is an agent-plane module and joins
+9. **Placement and licence.** The broker is an agent-plane module and joins
     `rules.yaml: agpl_modules` (ADR-0197). It is not on the money path; a SaaS renderer is
     consistent with ADR-0027, which forbids FaaS in the money path only.
-11. **Injection is tested, not assumed.** The ADR-0148 evals for each consuming charter include
+10. **Injection is tested, not assumed.** The ADR-0148 evals for each consuming charter include
     a fetched page carrying embedded instructions; the expected output is a finding that quotes
     it, never a tool call it asked for (ADR-0235 adversarial replay).
-8. **Third party.** Cloudflare Browser Run is entered in the ADR-0174 register as **non-critical**,
+11. **Third party.** Cloudflare Browser Run is entered in the ADR-0174 register as **non-critical**,
    no personal data, exit = disable the Kitesurf adapter (pages fall back to plain HTTP or the
    finding reports "not renderable"). Beta status is acceptable only because of that classification.
 
