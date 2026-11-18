@@ -62,13 +62,10 @@ spec:
         app.kubernetes.io/name: product-catalog
         app.kubernetes.io/part-of: accounts
       annotations:
-        # OTel auto-instrumentation pilot (Dynatrace-parity #3). The operator
-        # injects the OTel Java agent (init-container) using the `openbank`
-        # Instrumentation CR in this namespace — zero image rebuild. This is the
-        # ONLY annotated workload; watch Tempo for product-catalog to confirm the
-        # agent adds depth (JDBC/library spans) without duplicating the Quarkus
-        # SDK's spans before annotating any other service.
-        instrumentation.opentelemetry.io/inject-java: "openbank"
+        # Keep the optional Java-agent pilot disabled within this workload's existing
+        # memory budget. Application telemetry configuration stays unchanged.
+        # Re-enable only after measuring total process memory, including native overhead.
+        instrumentation.opentelemetry.io/inject-java: "false"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "5dac9f20299d0817"
