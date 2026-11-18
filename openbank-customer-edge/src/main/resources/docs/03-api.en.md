@@ -224,3 +224,7 @@ account, supply the original CZK `amount` when several grants cover the account.
 `FOUND` contains the durable `paymentId` and current `status`. `UNKNOWN` means the
 edge could not establish the original instruction. Keep the pending warning and never start a
 new payment from this result. This lookup consumes no SCA and sends no payment.
+
+## Payment symbols (#16748)
+
+`variableSymbol`, `specificSymbol` and `constantSymbol` must each be 1-10 ASCII digits (libs-domain `CzechPaymentSymbol`). Anything else is refused with 400 before the request goes further.

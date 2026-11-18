@@ -218,3 +218,7 @@ původní částku v CZK jako `amount`.
 `FOUND` obsahuje trvalé `paymentId` a aktuální `status`. Při `UNKNOWN` ponechte
 upozornění na neověřený stav a nezadávejte novou platbu. Dohledání nespotřebovává SCA
 a nevytváří platební příkaz.
+
+## Platební symboly (#16748)
+
+`variableSymbol`, `specificSymbol` a `constantSymbol` musí mít každý 1-10 číslic ASCII (`CzechPaymentSymbol` z libs-domain). Cokoli jiného je odmítnuto s 400 dřív, než požadavek pokračuje.

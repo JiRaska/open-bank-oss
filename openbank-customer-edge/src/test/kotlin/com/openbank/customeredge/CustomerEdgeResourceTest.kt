@@ -906,6 +906,27 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
+    fun `buildDomesticRequest refuses a malformed payment symbol and keeps a ten-digit one`() {
+        fun build(field: String, value: String) = CustomerEdgeResource.buildDomesticRequest(
+            mapper,
+            """{"amount":"10.00","creditorName":"A","$field":"$value"}""",
+            "d",
+            "da",
+            "db",
+            "dn",
+            "ca",
+            "cb",
+        )
+        listOf("variableSymbol", "specificSymbol", "constantSymbol").forEach { field ->
+            // Boundary: ten digits pass, eleven or any non-digit is refused (-> 400 at the caller).
+            assertThat(build(field, "1234567890")).describedAs(field).isNotNull()
+            assertThat(build(field, "12345678901")).describedAs(field).isNull()
+            assertThat(build(field, "12A4")).describedAs(field).isNull()
+            assertThat(build(field, "12 34")).describedAs(field).isNull()
+        }
+    }
+
+    @Test
     fun `buildDomesticRequest returns null when a required field is missing`() {
         assertThat(
             CustomerEdgeResource.buildDomesticRequest(
