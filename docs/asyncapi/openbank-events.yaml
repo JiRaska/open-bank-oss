@@ -125,6 +125,8 @@ channels:
         $ref: '#/components/messages/AccountClosed'
       SavingsWithdrawalApproved:
         $ref: '#/components/messages/SavingsWithdrawalApproved'
+      AccountNumberReissued:
+        $ref: '#/components/messages/AccountNumberReissued'
 
   ledger-journal-posted:
     address: openbank.ledger.journal.posted
@@ -141,7 +143,19 @@ channels:
       `OutboxMessage`, the body from the class's `override val` — and this document does not
       assert they are equal. Prefer the header.
     messages:
-      JournalPosted:
+      AccountNumberReissued:
+      name: AccountNumberReissued
+      title: Account Number Reissued
+      description: >-
+        OUTBOX-relayed. Written by Flyway V35 when an account's Czech number failed the ČNB mod-11
+        checksum and was replaced (#16748). Body `eventType` = `AccountNumberReissued`. A projection
+        keyed on the IBAN should re-key from `previousAccountNumber` to `accountNumber`; the account
+        id is unchanged.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AccountNumberReissuedPayload'
+
+    JournalPosted:
         $ref: '#/components/messages/JournalPosted'
       JournalReversed:
         $ref: '#/components/messages/JournalReversed'
@@ -1314,6 +1328,22 @@ components:
                 irRevisionHash: { type: [string, 'null'] }
                 irVersion: { type: [integer, 'null'] }
                 pinnedAt: { type: string, format: date-time }
+
+    AccountNumberReissuedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          required: [previousAccountNumber, accountNumber, reason]
+          properties:
+            previousAccountNumber:
+              type: string
+            accountNumber:
+              type: string
+            reason:
+              type: string
+              enum: [CZ_MOD11_INVALID]
+            sourceService:
+              type: string
 
     AccountStatusChangedPayload:
       allOf:

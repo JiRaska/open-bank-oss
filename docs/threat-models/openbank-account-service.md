@@ -1214,3 +1214,38 @@ Rollback: revert the commit; nothing is migrated and nothing calls the route.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
+
+## 2026-11-18 - Re-issue of mod-11-invalid Czech account numbers (#16748)
+
+Flyway V35 replaces every compact Czech IBAN in `accounts.account_number` whose prefix or base fails
+the ČNB mod-11 checksum. These were issued before `IbanGenerator` enforced `CzechAccountNumber`;
+domestic-payment is about to reject them, so they must be valid first.
+
+No new route, principal, topic or network edge. The migration runs at boot under the Flyway role,
+in one transaction, and is idempotent (a second pass selects nothing).
+
+STRIDE delta:
+- **Tampering / Repudiation.** A number change on a money-path account is an identity change for
+  every counterparty. Every change writes `account_number_reissue` (account id, previous, new,
+  reason, time), and both columns are UNIQUE, so an old number can never be silently re-used or
+  re-mapped twice. The replacement is derived deterministically from the old number (bank code and
+  a valid prefix kept, nine base digits kept, check digit solved), so the result is reproducible
+  and reviewable from the audit row alone.
+- **Spoofing (number re-use).** A freed old number is not re-issuable: the generator only emits
+  mod-11-valid numbers and every old number here is mod-11-invalid, so the two sets are disjoint.
+  Collision with an existing valid number is checked before each assignment.
+- **Information disclosure.** The `AccountNumberReissued` outbox event carries the old and new IBAN
+  and the account id, the same data class `AccountCreated` already puts on this topic. No name or
+  party data is added.
+- **Denial of service.** A payment already in flight against an old number fails at domestic-payment
+  lookup after the switch. Accepted: those numbers are exactly the ones domestic-payment will reject
+  under #16772 anyway, and the account id, balances and authorizations do not move.
+
+Residual risk: IBAN-keyed projections in other services (tax-reporting CEU register, statement,
+document) keep the old number until they consume `AccountNumberReissued`; none does yet. Tracked as
+a follow-up; until then they show a stale number. domestic-payment resolves IBAN to account id
+live (`findAccountIdByIban` over REST), so it follows immediately; ledger keys on account id.
+
+Tests: `AccountNumberReissueMigrationIT` (V1..V34 then V35 on real Postgres; seeds both sides of
+the boundary, a prefix-only failure, a collision, a non-Czech IBAN; asserts with
+`CzechAccountNumber`, not the migration's own SQL). Rollback: in the V35 header.

@@ -49,6 +49,7 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
