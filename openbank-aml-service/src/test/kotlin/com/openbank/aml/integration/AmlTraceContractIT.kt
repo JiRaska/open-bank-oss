@@ -120,26 +120,25 @@ class AmlTraceContractIT {
         }
     }
 
-    private fun seedBookedMovement(partyId: UUID, journalEntryId: UUID, accountId: UUID) =
-        jdbc().use { connection ->
-            connection.prepareStatement(
-                """
+    private fun seedBookedMovement(partyId: UUID, journalEntryId: UUID, accountId: UUID) = jdbc().use { connection ->
+        connection.prepareStatement(
+            """
                 INSERT INTO aml_booked_movement
                   (journal_entry_id, account_id, currency, direction, amount, transaction_id,
                    entry_date, booked_at, recorded_at, party_id, rail, counted_at)
                 VALUES (?, ?, 'CZK', 'IN', 1, ?, CURRENT_DATE, ?, ?, ?, 'DOMESTIC', ?)
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, journalEntryId)
-                statement.setObject(2, accountId)
-                statement.setObject(3, UUID.randomUUID())
-                statement.setTimestamp(4, Timestamp.from(Instant.now()))
-                statement.setTimestamp(5, Timestamp.from(Instant.now()))
-                statement.setObject(6, partyId)
-                statement.setTimestamp(7, Timestamp.from(Instant.now()))
-                statement.executeUpdate()
-            }
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, journalEntryId)
+            statement.setObject(2, accountId)
+            statement.setObject(3, UUID.randomUUID())
+            statement.setTimestamp(4, Timestamp.from(Instant.now()))
+            statement.setTimestamp(5, Timestamp.from(Instant.now()))
+            statement.setObject(6, partyId)
+            statement.setTimestamp(7, Timestamp.from(Instant.now()))
+            statement.executeUpdate()
         }
+    }
 
     private fun jdbc() = DriverManager.getConnection(
         config("quarkus.datasource.jdbc.url"),
