@@ -8,6 +8,7 @@ import com.openbank.treasury.domain.model.BreakChanges
 import com.openbank.treasury.domain.model.LedgerNostroLine
 import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroStatement
+import com.openbank.treasury.domain.model.ResolutionStep
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -58,6 +59,12 @@ interface NostroStatementRepository {
 /** Raised when a break listing names an IBAN that is not a configured nostro account. Mapped to 404. */
 class NostroAccountNotFoundException(iban: String) : NoSuchElementException("nostro account $iban is not configured")
 
+/** No break with this id on this nostro account (a break of ANOTHER account is the same 404). */
+class NostroBreakNotFoundException(id: UUID) : NoSuchElementException("nostro break $id not found")
+
+/** A manual resolution already recorded under a client's Idempotency-Key: what it resolved, and the request's hash. */
+data class RecordedBreakResolution(val breakId: UUID, val fingerprint: String)
+
 /**
  * Persisted reconciliation breaks (ADR-0315 D7). The break key is unique, so a concurrent
  * observation of the same reconciliation cannot open an item twice.
@@ -76,6 +83,28 @@ interface NostroBreakRepository {
     suspend fun byIban(iban: String, includeResolved: Boolean): List<NostroBreak>
 
     suspend fun open(): List<NostroBreak>
+
+    suspend fun find(breakId: UUID): NostroBreak?
+
+    /**
+     * Stores [after] — one four-eyes [step] of a manual resolution — only if the stored row is still
+     * open with the proposer [before] had (the claim), and in the SAME transaction appends the step
+     * (actor, reason, time, [commandKey], [fingerprint]) to the append-only resolution history.
+     * false when the row moved meanwhile — then nothing is written.
+     */
+    suspend fun applyResolutionStep(
+        before: NostroBreak,
+        after: NostroBreak,
+        step: ResolutionStep,
+        actor: String,
+        reason: String?,
+        at: Instant,
+        commandKey: String,
+        fingerprint: String,
+    ): Boolean
+
+    /** The resolution step recorded under [commandKey], if any. */
+    suspend fun recordedResolution(commandKey: String): RecordedBreakResolution?
 
     /**
      * Stamps [alertedAt] on the break if it has none yet and, in the SAME transaction, writes the

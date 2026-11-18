@@ -57,3 +57,16 @@ Stream (`POST /api/v1/copilot/chat/stream`): the same marker is sent as response
 event (API contract 1.7.0, additive). Headers are used because existing stream clients render every
 `data:` line as reply text, so an inline element would be shown to the customer, while an unread header is
 ignored. Not done yet: localisation of the disclosure, and reading the headers in the mobile app.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.
+
+## Proposal input validation (#16748)
+
+`propose_payment` checks the payee IBAN with libs-domain `Iban.isValid` and the currency with `CurrencyCode.isCanonical`. An absent currency defaults to CZK; a present but unknown or withdrawn one is an error and is never replaced with CZK. `propose_fx_conversion` applies the same currency check.

@@ -99,4 +99,32 @@ class CurrencyCodeTest {
     fun `equality by code`() {
         assertThat(CurrencyCode.of("CZK")).isEqualTo(CurrencyCode.CZK)
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(
+        strings = ["DEM", "FRF", "ITL", "HRK", "SKK", "VEF", "SLL", "ZWL", "ANG", "ESP"],
+    )
+    fun `withdrawn ISO 4217 codes the JDK still knows are rejected`(code: String) {
+        assertThatThrownBy { CurrencyCode.of(code) }
+            .isInstanceOf(InvalidMoneyException::class.java)
+            .hasMessageContaining("withdrawn")
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(
+        strings = ["EUR", "VES", "VED", "SLE", "ZWG", "XCG", "STN", "MRU", "BYN"],
+    )
+    fun `the successors of withdrawn codes stay accepted`(code: String) {
+        assertThat(CurrencyCode.of(code).code).isEqualTo(code)
+    }
+
+    @Test
+    fun `isCanonical accepts only the exact canonical form`() {
+        assertThat(CurrencyCode.isCanonical("EUR")).isTrue()
+        assertThat(CurrencyCode.isCanonical("eur")).isFalse()
+        assertThat(CurrencyCode.isCanonical("DEM")).isFalse()
+        assertThat(CurrencyCode.isCanonical("XAU")).isFalse()
+        assertThat(CurrencyCode.isCanonical("ABC")).isFalse()
+        assertThat(CurrencyCode.isCanonical("EURO")).isFalse()
+    }
 }

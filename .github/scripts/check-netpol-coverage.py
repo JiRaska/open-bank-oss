@@ -53,6 +53,7 @@ KNOWN_UNCOVERED = {
     "sbom-drift-scanner": "scanner job, no inbound traffic",
     "temporal": "workflow engine, hand-authored policies (temporal-network-policies.yaml)",
     "vpa-objects": "recommender CRDs, no pods of its own",
+    "alert-digest": "CronJob producer (ADR-0382), no inbound traffic; its hand-written policy denies all ingress",
     "volumeattachment-reaper": "CronJob actuator (API server only), no inbound traffic",
 }
 

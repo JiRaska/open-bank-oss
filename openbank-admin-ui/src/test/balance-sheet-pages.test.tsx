@@ -672,6 +672,25 @@ describe('Liquidity forecast (survival horizon)', () => {
     expect(calls.some(c => c.url.includes('/liquidity-forecast') && c.url.includes('horizonDays=365'))).toBe(true)
   })
 
+  it('shows snapshot runoff only when the engine confirms the requested mode', async () => {
+    const defaultRoute = route(FORECAST(null, true))
+    const runoff = FORECAST(1, false)
+    runoff.assumptions.push({ key: 'planned-treasury-flows-excluded', statement: 'Live planned treasury flows are excluded.' })
+    router = url => url.includes('includePlanned=false') ? json(runoff) : defaultRoute(url)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    const toggle = screen.getByRole('checkbox', { name: /Include planned treasury flows|Zahrnout plánované treasury toky/ })
+    await act(async () => { fireEvent.click(toggle) })
+    await screen.findByText('Live planned treasury flows are excluded.')
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/day 1|1\. den/)
+
+    router = defaultRoute
+    await act(async () => { fireEvent.click(toggle) })
+    await screen.findByTestId('survival-CZK')
+    await act(async () => { fireEvent.click(toggle) })
+    expect(screen.queryByTestId('survival-CZK')).toBeNull()
+  })
+
   it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
     router = route({ error: 'UNTIED', runId: 'run-6', mismatches: [] }, 409)
     await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)

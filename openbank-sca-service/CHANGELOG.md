@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.22.1...sca-service-v0.23.0) (2026-11-18)
+
+
+### Features
+
+* **sca:** add MCP_CLIENT_CONNECT purpose with context-linked approval ([#16658](https://github.com/JiRaska/open-bank-oss/issues/16658)) ([ae3dbf4](https://github.com/JiRaska/open-bank-oss/commit/ae3dbf4ce2a95438ae270b852309c58f52daf40d))
+
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.22.0...sca-service-v0.22.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **pension,risk-engine,sca:** reload outbound mTLS client certificates ([#16416](https://github.com/JiRaska/open-bank-oss/issues/16416)) ([9f9c926](https://github.com/JiRaska/open-bank-oss/commit/9f9c926541a8af2e84dcad9e9d5a4059048f3d31))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.21.4...sca-service-v0.22.0) (2026-10-16)
 
 

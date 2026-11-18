@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.persistence.entity
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
@@ -43,6 +44,17 @@ class DelegationGrantEntity : PanacheEntityBase() {
 
     @Column(name = "grantee_party_id", nullable = false)
     lateinit var granteePartyId: UUID
+
+    /** ADR-0383 D3 — V34 defaults existing rows to PARTY. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "grantee_type", nullable = false, length = 16)
+    var granteeType: DelegationGranteeType = DelegationGranteeType.PARTY
+
+    @Column(name = "grantee_client_id", length = DelegationGrant.CLIENT_ID_MAX_LENGTH)
+    var granteeClientId: String? = null
+
+    @Column(name = "grantee_key_thumbprint", length = JKT_LENGTH)
+    var granteeKeyThumbprint: String? = null
 
     /** Nullable by design — see [DelegationGrant.grantorName] (issue #3604). */
     @Column(name = "grantor_name", length = NAME_MAX_LENGTH)
@@ -166,6 +178,9 @@ class DelegationGrantEntity : PanacheEntityBase() {
         id = id,
         grantorPartyId = grantorPartyId,
         granteePartyId = granteePartyId,
+        granteeType = granteeType,
+        granteeClientId = granteeClientId,
+        granteeKeyThumbprint = granteeKeyThumbprint,
         grantorName = grantorName,
         granteeName = granteeName,
         resourceType = resourceType,
@@ -232,10 +247,16 @@ class DelegationGrantEntity : PanacheEntityBase() {
         /** Matches the `varchar(200)` in V3__delegation_counterparty_names.sql. */
         const val NAME_MAX_LENGTH = 200
 
+        /** Matches the `varchar(43)` of `grantee_key_thumbprint` in V34. */
+        const val JKT_LENGTH = 43
+
         fun fromDomain(g: DelegationGrant): DelegationGrantEntity = DelegationGrantEntity().apply {
             id = g.id
             grantorPartyId = g.grantorPartyId
             granteePartyId = g.granteePartyId
+            granteeType = g.granteeType
+            granteeClientId = g.granteeClientId
+            granteeKeyThumbprint = g.granteeKeyThumbprint
             grantorName = g.grantorName?.take(NAME_MAX_LENGTH)
             granteeName = g.granteeName?.take(NAME_MAX_LENGTH)
             resourceType = g.resourceType

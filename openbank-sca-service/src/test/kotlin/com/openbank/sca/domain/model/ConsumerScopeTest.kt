@@ -68,6 +68,30 @@ class ConsumerScopeTest {
         assertThat(statutory.permits(wrongPurpose)).isFalse()
     }
 
+    // --- ADR-0385 D3: MCP_CLIENT_CONNECT ---
+    private val mcp = ConsumerScope.Reserved(ReservedNamespace.MCP_CONNECT)
+
+    @Test
+    fun `a general consumer may not spend an MCP_CLIENT_CONNECT challenge, whatever id it was signed with`() {
+        listOf("mcp-connect:req-1", "req-1", null)
+            .forEach { assertThat(general.permits(connect(it))).`as`(it.toString()).isFalse() }
+        assertThat(general.permits(approval("mcp-connect:req-1"))).isFalse()
+    }
+
+    @Test
+    fun `the MCP connect consumer spends only well-formed connect challenges`() {
+        assertThat(mcp.permits(connect("mcp-connect:req-1"))).isTrue()
+        listOf("mcp-connect:", "mcp-connect:a b", "req-1", null)
+            .forEach { assertThat(mcp.permits(connect(it))).`as`(it.toString()).isFalse() }
+        ScaPurpose.entries.filter { it != ScaPurpose.MCP_CLIENT_CONNECT }.forEach { purpose ->
+            assertThat(mcp.permits(connect("mcp-connect:req-1").copy(purpose = purpose))).`as`(purpose.name).isFalse()
+        }
+        assertThat(pension.permits(connect("pension-exit:abc"))).isFalse()
+    }
+
+    private fun connect(approvalRequestId: String?) =
+        approval(approvalRequestId).copy(purpose = ScaPurpose.MCP_CLIENT_CONNECT)
+
     private fun approval(approvalRequestId: String?) = ScaChallenge(
         partyId = UUID.randomUUID(),
         purpose = ScaPurpose.APPROVAL,

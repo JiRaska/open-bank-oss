@@ -195,12 +195,21 @@ class RiskResource {
         @PathParam("id") id: UUID,
         @QueryParam("curveSetId") curveSetId: String?,
         @QueryParam("horizonDays") horizonDays: String?,
+        @QueryParam("includePlanned") includePlanned: String?,
     ): Response {
         val horizon = horizonDays?.takeIf { it.isNotBlank() }?.let {
             val parsed = it.trim().toIntOrNull()
             requireNotNull(parsed) { "query parameter 'horizonDays' must be an integer" }
         } ?: LiquidityForecast.DEFAULT_HORIZON_DAYS
-        return Response.ok(liquidityForecast.forecast(id, parseCurveSetId(curveSetId), horizon).toResponse()).build()
+        val planned = if (includePlanned == null) {
+            true
+        } else {
+            requireNotNull(includePlanned.toBooleanStrictOrNull()) {
+                "query parameter 'includePlanned' must be true or false"
+            }
+        }
+        val forecast = liquidityForecast.forecast(id, parseCurveSetId(curveSetId), horizon, planned)
+        return Response.ok(forecast.toResponse()).build()
     }
 
     /**

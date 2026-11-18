@@ -5,9 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Activity, BarChart3, Dna, FlaskConical,
+  Activity, BarChart3, Dna, FlaskConical, MonitorCheck, Smartphone,
   Bot, Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useLanguage, type Language } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import {
@@ -752,7 +753,7 @@ export default function TestIntelligencePage() {
       icon={<FlaskConical size={19} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
       title={t('Test Intelligence', 'Test Intelligence')}
       subtitle={t('Co jsme ověřili, s jakým výsledkem a co potřebuje pozornost.', 'Understand what was tested, the outcome and what needs attention.')}
-      actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
+      actions={<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Link href="/system/tests/mobile" className="btn btn-secondary btn-sm"><Smartphone size={13} aria-hidden="true" />{t('Jak testujeme appku', 'How we test the app')}</Link><Link href="/system/tests/web" className="btn btn-secondary btn-sm"><MonitorCheck size={13} aria-hidden="true" />{t('Jak testujeme portál', 'How we test the portal')}</Link><button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button></div>}
     />
     {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <TestIntelligenceWorkspace
       report={report}

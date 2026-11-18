@@ -102,6 +102,19 @@ class CredentialAlreadyEnrolledException(credentialId: String) :
 class InvalidDeviceAssertionException(id: UUID) : RuntimeException("Invalid device assertion for challenge: $id")
 
 /**
+ * ADR-0385 D2.3: a device enrolled less than [MCP_CONNECT_MIN_DEVICE_AGE] ago cannot approve an
+ * [ScaPurpose.MCP_CLIENT_CONNECT] — a freshly (re-)enrolled device is what an account takeover
+ * produces first, and connecting an assistant is the thing it would do next.
+ */
+class DeviceTooRecentlyEnrolledException(credentialId: String) :
+    RuntimeException("Device credential enrolled too recently to approve this operation: $credentialId")
+
+private const val MCP_CONNECT_MIN_DEVICE_AGE_HOURS = 72L
+
+/** Minimum age of the approving device for [ScaPurpose.MCP_CLIENT_CONNECT] (ADR-0385 D2.3). */
+val MCP_CONNECT_MIN_DEVICE_AGE: java.time.Duration = java.time.Duration.ofHours(MCP_CONNECT_MIN_DEVICE_AGE_HOURS)
+
+/**
  * #10281 item 1: a device credential may only be enrolled to a natural person. Carries the party
  * type the register answered (null when the register has no such party) — never the party's name.
  */
@@ -184,6 +197,7 @@ class ScaService(
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
         if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
         requireApprovalLinking(command)
+        requireMcpConnectLinking(command)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 
@@ -396,6 +410,14 @@ class ScaService(
             ?: throw DeviceNotEnrolledException(command.credentialId)
         if (device.revokedAt != null) throw DeviceRevokedException(command.credentialId)
         if (device.partyId != challenge.partyId) throw DeviceOwnershipMismatchException(command.credentialId)
+        // ADR-0385 D2.3: refused BEFORE the signature is checked or anything is recorded, so the
+        // challenge stays PENDING for an older device. A denial from any device is still accepted.
+        if (challenge.purpose == ScaPurpose.MCP_CLIENT_CONNECT &&
+            command.decision == DeviceDecisionType.APPROVED &&
+            device.createdAt.isAfter(now.minus(MCP_CONNECT_MIN_DEVICE_AGE))
+        ) {
+            throw DeviceTooRecentlyEnrolledException(command.credentialId)
+        }
 
         // Dynamic linking (RTS Art. 5): the device must have signed THIS challenge's amount+payee.
         val payload = challenge.dynamicLinkingPayload(command.decision)
@@ -577,6 +599,42 @@ class ScaService(
         }
     }
 
+    /**
+     * ADR-0385 D3: an MCP_CLIENT_CONNECT challenge must be bound to ONE authorization request — its
+     * PAR request id in the reserved `mcp-connect:` namespace — and to the SHA-256 of that request's
+     * canonical context, or an approval for one connect could release another. It signs no payment,
+     * document or card, so those fields are refused rather than silently carried.
+     */
+    private fun requireMcpConnectLinking(command: InitiateScaCommand) {
+        val dl = command.dynamicLinkingData
+        if (command.purpose != ScaPurpose.MCP_CLIENT_CONNECT) {
+            // No other purpose may sign itself into the connect namespace: a challenge spendable by
+            // nobody today would become spendable by the authorization server the day it is declared.
+            require(dl?.approvalRequestId?.startsWith(ReservedNamespace.MCP_CONNECT.prefix) != true) {
+                "approvalRequestId prefix ${ReservedNamespace.MCP_CONNECT.prefix} is reserved to MCP_CLIENT_CONNECT"
+            }
+            return
+        }
+        val approvalRequestId = dl?.approvalRequestId
+        val payloadSha256 = dl?.payloadSha256
+        require(!approvalRequestId.isNullOrBlank() && payloadSha256 != null) {
+            "MCP_CLIENT_CONNECT challenge requires dynamicLinkingData.approvalRequestId and payloadSha256"
+        }
+        require(SHA256_HEX.matches(payloadSha256)) { "payloadSha256 must be 64 hex characters" }
+        require(ReservedNamespace.MCP_CONNECT.isWellFormed(approvalRequestId)) {
+            "MCP_CLIENT_CONNECT approvalRequestId must be ${ReservedNamespace.MCP_CONNECT.prefix}<request id>"
+        }
+        require(
+            dl.amount == null &&
+                dl.currency == null &&
+                dl.creditorIban == null &&
+                dl.documentSha256 == null &&
+                dl.ceremonyId == null &&
+                dl.cardId == null &&
+                dl.cardAction == null,
+        ) { "MCP_CLIENT_CONNECT challenge carries no payment, document or card linking" }
+    }
+
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {
         val dl = command.dynamicLinkingData
         val base = listOf(
@@ -600,7 +658,8 @@ class ScaService(
         } else {
             emptyList()
         }
-        // Same rule for an APPROVAL: challenges for different approval requests (or for an edited
+        // Same rule for an APPROVAL and an MCP_CLIENT_CONNECT (ADR-0385 D3: two concurrent connect
+        // flows must get two challenges): challenges for different approval requests (or for an edited
         // payload) must never collapse to one replayed challenge.
         val approvalSegments = if (dl?.approvalRequestId != null || dl?.payloadSha256 != null) {
             listOf(dl.approvalRequestId, dl.payloadSha256?.lowercase())
@@ -664,4 +723,7 @@ internal val STATIC_PUSH_MESSAGES: Map<ScaPurpose, String> = mapOf(
     ScaPurpose.DELEGATION_ACCEPT to "Potvrďte přijetí sdíleného přístupu",
     ScaPurpose.DELEGATION_APPROVAL_GROUP to "Potvrďte změnu skupiny schvalovatelů",
     ScaPurpose.SAVINGS_WITHDRAW_APPROVAL to "Potvrďte výběr ze spořicího cíle",
+    // Neutral on purpose (ADR-0385 D3): the app renders the connect screen only from the
+    // device-signed context, never from push text.
+    ScaPurpose.MCP_CLIENT_CONNECT to "Potvrďte připojení aplikace k vašemu účtu",
 )

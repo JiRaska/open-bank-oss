@@ -6,11 +6,19 @@ package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.swift.application.port.`in`.SendSwiftCommand
+import com.openbank.swift.application.port.out.AmlCasePort
+import com.openbank.swift.application.port.out.OpenAmlCaseCommand
+import com.openbank.swift.application.port.out.SanctionsScreeningPort
 import com.openbank.swift.application.port.out.SchemeGatewayPort
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.swift.application.port.out.SchemeSubmissionOutcome
+import com.openbank.swift.application.port.out.ScreeningUnavailableException
 import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
@@ -45,6 +53,13 @@ class SwiftServiceTest {
     private val redrive = mockk<SwiftSettlementRedrivePort>().also {
         coEvery { it.stop(any(), any(), any()) } returns true
     }
+    private val screeningPort = mockk<SanctionsScreeningPort>().also {
+        coEvery { it.screen(any(), any(), any()) } answers {
+            ScreeningResult(firstArg(), secondArg(), ScreeningMatchStatus.CLEAR, 0.0, null)
+        }
+    }
+    private val amlCasePort = mockk<AmlCasePort>().also { coEvery { it.openCase(any()) } returns Unit }
+    private val screening = SwiftSanctionsScreening(screeningPort, amlCasePort)
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
     private val service = SwiftService(
         repo,
@@ -53,6 +68,7 @@ class SwiftServiceTest {
         objectMapper,
         clock,
         redrive,
+        screening,
         schemeSubmissionEnabled = false,
     )
     private val serviceWithFlag = SwiftService(
@@ -62,6 +78,7 @@ class SwiftServiceTest {
         objectMapper,
         clock,
         redrive,
+        screening,
         schemeSubmissionEnabled = true,
     )
 
@@ -250,6 +267,73 @@ class SwiftServiceTest {
     }
 
     @Test
+    fun `a sanctions HIT on the beneficiary rejects the MT103 before the scheme and opens a CRITICAL case`(): Unit =
+        runBlocking {
+            coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+            coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+            coEvery { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } answers {
+                ScreeningResult(firstArg(), ScreeningRole.CREDITOR, ScreeningMatchStatus.HIT, 0.97, "LISTED PARTY")
+            }
+            val case = slot<OpenAmlCaseCommand>()
+            coEvery { amlCasePort.openCase(capture(case)) } returns Unit
+            coEvery { repo.saveWithOutbox(any(), any()) } answers { firstArg() }
+
+            val result = serviceWithFlag.send(command())
+
+            assertThat(result.status).isEqualTo(SwiftStatus.REJECTED)
+            assertThat(result.rejectionReason).isEqualTo(SwiftService.SANCTIONS_REJECTION_REASON)
+            coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+            coVerify(exactly = 0) { settlementPort.settle(any()) }
+            coVerify(exactly = 1) { repo.saveWithOutbox(match { it.status == SwiftStatus.REJECTED }, any()) }
+            coVerify(exactly = 1) { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) }
+            assertThat(case.captured.riskLevel).isEqualTo(AmlCaseSeverity.CRITICAL)
+            assertThat(case.captured.matchedEntity).isEqualTo("LISTED PARTY")
+        }
+
+    @Test
+    fun `a potential hit holds the MT103 in VALIDATED and never reaches the scheme`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } answers {
+            ScreeningResult(firstArg(), ScreeningRole.DEBTOR, ScreeningMatchStatus.POTENTIAL_HIT, 0.7, "NEAR MATCH")
+        }
+
+        val result = serviceWithFlag.send(command())
+
+        assertThat(result.status).isEqualTo(SwiftStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 1) { amlCasePort.openCase(match { it.riskLevel == AmlCaseSeverity.HIGH }) }
+    }
+
+    @Test
+    fun `a blank ordering customer name holds the MT103 instead of skipping the debtor screen`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { repo.save(any()) } answers { firstArg() }
+
+        val result = serviceWithFlag.send(command(orderingCustomerName = "  "))
+
+        assertThat(result.status).isEqualTo(SwiftStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
+        coVerify(exactly = 1) { amlCasePort.openCase(match { it.alertCode == "PARTY_UNSCREENABLE" }) }
+    }
+
+    @Test
+    fun `sanctions-service unavailable fails closed - the MT103 stays VALIDATED`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { screeningPort.screen(any(), any(), any()) } throws
+            ScreeningUnavailableException(RuntimeException("connection refused"))
+
+        val result = serviceWithFlag.send(command())
+
+        assertThat(result.status).isEqualTo(SwiftStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 1) { amlCasePort.openCase(match { it.alertCode == "SCREENING_UNAVAILABLE" }) }
+    }
+
+    @Test
     fun `send with flag on advances MT103 to COMPLETED after ACSC and settlement (ADR-0108)`(): Unit = runBlocking {
         val txId = UUID.randomUUID()
         coEvery { repo.findByIdempotencyKey("idem-1") } returns null
@@ -433,6 +517,7 @@ class SwiftServiceTest {
         receiverBic: String = "IJKLMNOP",
         messageType: SwiftMessageType = SwiftMessageType.MT103,
         valueDate: String = "20260527",
+        orderingCustomerName: String? = "Alice",
     ) = SendSwiftCommand(
         idempotencyKey = "idem-1",
         messageType = messageType,
@@ -444,7 +529,7 @@ class SwiftServiceTest {
         amount = SwiftMessage.moneyOfMinorUnits(1000, "EUR"),
         orderingCustomerAccount = "DE89370400440532013000",
         orderingCustomerAccountId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-        orderingCustomerName = "Alice",
+        orderingCustomerName = orderingCustomerName,
         beneficiaryAccount = "GB33BUKB20201555555555",
         beneficiaryName = "Bob",
         remittanceInfo = "Invoice 1",

@@ -83,6 +83,29 @@ young = {e["service"]: e for e in mod.enrich(
 check("money-path lag under N days does not escalate", not young["openbank-account-service"]["escalate"])
 check("no log means no consumers invented", young["openbank-account-service"]["blocked_consumers"] == [])
 
+# Stale holds: a hold whose tracking issue is no longer OPEN keeps a service off main while
+# nothing is left to wait for (2026-11-14: card-processing held 27 days on a CLOSED issue).
+STATES = {"#1": "CLOSED", "#2": "OPEN", "#3": "CLOSED"}
+st = {e["service"]: e for e in mod.enrich(report, RULES, LOG, 3, KNOWN, STATES)["entries"]}
+sl = st["openbank-ledger-service"]
+check("closed condition of an all_of hold is named stale", sl["stale_holds"] == ["#1"])
+check("hold with one live condition stays a hold", sl["blocker"] == "hold")
+sa = st["openbank-aml-service"]
+check("hold whose every issue is closed becomes stale-hold", sa["blocker"] == "stale-hold" and sa["escalate"])
+unk = {e["service"]: e for e in mod.enrich(report, RULES, LOG, 3, KNOWN, {})["entries"]}
+check("unknown issue state is never called stale", unk["openbank-aml-service"]["stale_holds"] == []
+      and unk["openbank-aml-service"]["blocker"] == "hold")
+# can-i-deploy refusal classes, named per service, from annotation lines only.
+GLOG = (P + "##[warning][openbank-account-service] blocked by can-i-deploy [NOT_ASKED] - no source\n"
+        + P + "##[error][openbank-ledger-service] MONEY-PATH service blocked by can-i-deploy [PROVIDER_UNVERIFIED] - x\n"
+        + P + "[openbank-aml-service] blocked by can-i-deploy [NOT_ASKED] plain text\n"
+        + P + "##[warning][openbank-evil-service] blocked by can-i-deploy [NOT_ASKED] - x\n")
+gr = {e["service"]: e for e in mod.enrich(report, RULES, GLOG, 3, KNOWN)["entries"]}
+check("NOT_ASKED refusal is attributed", gr["openbank-account-service"]["gate_refusal"] == "NOT_ASKED")
+check("money-path error-form refusal is attributed",
+      gr["openbank-ledger-service"]["gate_refusal"] == "PROVIDER_UNVERIFIED")
+check("non-annotation refusal line is not parsed", gr["openbank-aml-service"]["gate_refusal"] is None)
+
 # Unreadable input must fail loudly (exit 2), never print an empty clean report.
 with tempfile.TemporaryDirectory() as d:
     rules_p = pathlib.Path(d, "r.yaml")

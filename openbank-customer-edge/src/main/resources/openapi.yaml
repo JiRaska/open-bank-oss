@@ -62,9 +62,11 @@ info:
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
   # 1.92.0 -> 1.94.0 (#15669): additive synthetic transfer canary route (1.93.x claimed by open PRs).
-  # 1.94.0 -> 1.97.0: document the accepting human for organization delegation acceptance
-  # (1.95.0 and 1.96.0 claimed by #16166 and #15737).
-  # 1.97.0 -> 1.98.0: statutory delegation issue and acceptance signature routes.
+  # 1.94.0 -> 1.95.0 (#16000): additive — documents the 409 PAYMENT_NOT_ACCEPTED and the 503
+  # PAYMENT_TEMPORARILY_UNAVAILABLE / PAYMENT_STATUS_UNKNOWN that POST /domestic-payments answers for a DELEGATED payment
+  # once the reservation-bound create is switched on. Request shape unchanged.
+  # 1.96.0 -> 1.97.0 (#15681): document the accepting human for organization delegation acceptance.
+  # 1.97.0 -> 1.98.0 (#15682): statutory delegation issue and acceptance signature routes.
   version: 1.98.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
@@ -3747,10 +3749,23 @@ paths:
             `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
             hold the grant, so naming their own limit is not an oracle; how much headroom remains
             is deliberately not echoed.
+        '409':
+          description: >-
+            Delegated payment only, with the reservation-bound create switched on (#16000):
+            `code: PAYMENT_NOT_ACCEPTED`. The payment rail refused to bind the payment to its spend
+            reservation; the edge gives the headroom back only when the rail proves nothing was
+            bound, otherwise delegation-service settles it from the payment's outcome. The reason is
+            deliberately neutral and is kept in the audit trail.
         '503':
           description: >-
-            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
-            payment is refused rather than sent with a single signature.
+            Under X-Acting-For: the company's signing policy could not be evaluated, so the
+            payment is refused rather than sent with a single signature. Delegated payment with the
+            reservation-bound create switched on: `code: PAYMENT_TEMPORARILY_UNAVAILABLE` with
+            `Retry-After` — the rail could not accept the payment yet, nothing was created and the
+            headroom was released; retry with a NEW Idempotency-Key, since the one used is spent.
+            Or `code: PAYMENT_STATUS_UNKNOWN` — the rail's answer was lost, the payment may exist,
+            and the headroom stays held for its outcome; retry with the SAME Idempotency-Key, which
+            replays rather than duplicates.
 
   /domestic-payments/submissions/lookup:
     post:
@@ -3833,6 +3848,15 @@ paths:
                     enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
         '404':
           description: Payment not found, or not owned by the caller (no existence oracle)
+        '503':
+          description: The payment status service is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: {type: string}
 
   /sepa-payments:
     post:

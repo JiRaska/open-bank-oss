@@ -37,6 +37,7 @@ import com.openbank.sca.application.usecase.CredentialAlreadyEnrolledException
 import com.openbank.sca.application.usecase.DeviceNotEnrolledException
 import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
 import com.openbank.sca.application.usecase.DeviceRevokedException
+import com.openbank.sca.application.usecase.DeviceTooRecentlyEnrolledException
 import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
 import com.openbank.sca.application.usecase.NonNaturalPersonEnrolmentException
 import com.openbank.sca.application.usecase.PartyRegisterUnavailableException
@@ -534,6 +535,13 @@ class DeviceRevokedMapper : ExceptionMapper<DeviceRevokedException> {
 class DeviceOwnershipMismatchMapper : ExceptionMapper<DeviceOwnershipMismatchException> {
     override fun toResponse(e: DeviceOwnershipMismatchException): Response =
         Response.status(403).entity(err(ErrorCode.FORBIDDEN, e.message ?: "Device ownership mismatch")).build()
+}
+
+@Provider
+class DeviceTooRecentlyEnrolledMapper : ExceptionMapper<DeviceTooRecentlyEnrolledException> {
+    override fun toResponse(e: DeviceTooRecentlyEnrolledException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Device enrolled too recently")).build()
 }
 
 @Provider
