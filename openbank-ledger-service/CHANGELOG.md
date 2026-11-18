@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.47.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.46.0...ledger-service-v1.47.0) (2026-11-18)
+
+
+### Features
+
+* **ledger:** adopt claim-fenced outbox v2 ([#15643](https://github.com/JiRaska/open-bank-oss/issues/15643)) ([6821f69](https://github.com/JiRaska/open-bank-oss/commit/6821f694badbc5834bf80b934f7659710000c836))
+
 ## [1.46.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.1...ledger-service-v1.46.0) (2026-11-13)
 
 

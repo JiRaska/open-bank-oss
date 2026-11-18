@@ -44,7 +44,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       # Derived-coverage list: `--coverage` fails if a workflow reads a *_PAT/*_TOKEN secret
       # that is neither here nor excluded with a reason in the script.
-      CREDENTIALS: "RULESET_AUDIT_TOKEN OPENBANK_APP_RO_TOKEN GOVERNANCE_GH_PAT"
+      CREDENTIALS: "RULESET_AUDIT_TOKEN OPENBANK_APP_RO_TOKEN GOVERNANCE_GH_PAT SECURITY_KPI_DEPENDABOT_READ_TOKEN"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -61,6 +61,7 @@ jobs:
           RULESET_AUDIT_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
           OPENBANK_APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
           GOVERNANCE_GH_PAT: ${{ secrets.GOVERNANCE_GH_PAT }}
+          SECURITY_KPI_DEPENDABOT_READ_TOKEN: ${{ secrets.SECURITY_KPI_DEPENDABOT_READ_TOKEN }}
         run: |
           set +e
           python3 .github/scripts/check-credential-expiry.py > "$RUNNER_TEMP/cred.txt"
