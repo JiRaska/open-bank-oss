@@ -267,7 +267,14 @@ REQUIRED_EXCEPT_NETS = tuple(ipaddress.ip_network(n) for n in REQUIRED_EXCEPT)
 # allowed only when it reaches none of ULA, link-local, loopback or IPv4-mapped space (which
 # would carry every IPv4 private range back in).
 BROKER_FORBIDDEN_NETS = REQUIRED_EXCEPT_NETS + tuple(
-    ipaddress.ip_network(n) for n in ("fc00::/7", "fe80::/10", "::1/128", "::ffff:0:0/96")
+    ipaddress.ip_network(n)
+    for n in (
+        "fc00::/7", "fe80::/10", "::1/128", "::/128",
+        # IPv4-embedding and translation prefixes: each can carry a private or link-local IPv4
+        # destination inside an IPv6 address (mapped, translated, NAT64 well-known and local-use,
+        # 6to4, discard-only).
+        "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "100::/64",
+    )
 )
 
 
@@ -627,8 +634,17 @@ def self_test() -> int:
                                                                         [{"to": [ipb("0.0.0.0/0", full), ipb("::/0")], "ports": t443}])]}, 1),
         ("broker ::/0 leaving IPv4-mapped space", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
                                                                                    [{"to": [ipb("::/0", ["fc00::/7", "fe80::/10", "::1/128"])], "ports": t443}])]}, 1),
-        ("broker global-unicast 2000::/3 only", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
-                                                                                 [{"to": [ipb("2000::/3")], "ports": t443}])]}, 0),
+        ("broker 2000::/3 still reaches 6to4", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                                [{"to": [ipb("2000::/3")], "ports": t443}])]}, 1),
+        ("broker 2000::/3 excepting 6to4", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                            [{"to": [ipb("2000::/3", ["2002::/16"])], "ports": t443}])]}, 0),
+        ("broker ::/0 reaching NAT64", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                        [{"to": [ipb("::/0", ["fc00::/7", "fe80::/10", "::1/128", "::/128", "::ffff:0:0/96",
+                                                                                              "::ffff:0:0:0/96", "2002::/16", "100::/64"])], "ports": t443}])]}, 1),
+        ("broker ::/0 excepting every forbidden prefix", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+                                                                                          [{"to": [ipb("::/0", ["fc00::/7", "fe80::/10", "::1/128", "::/128", "::ffff:0:0/96",
+                                                                                                                "::ffff:0:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48",
+                                                                                                                "2002::/16", "100::/64"])], "ports": t443}])]}, 0),
         # 7. broker identity is the workload, not a label
         ("look-alike agent wearing the broker label", {**bwl, bdir + "np.yaml": [good_broker],
                                                        "x/w.yaml": [wl(BROKER, "fetch-broker", "openbank-docs-truth-agent")]}, 1),
