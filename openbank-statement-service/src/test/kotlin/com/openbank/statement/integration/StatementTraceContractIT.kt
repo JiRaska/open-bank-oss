@@ -56,7 +56,9 @@ class StatementTraceContractIT {
     class StatementTraceProfile : TraceContractProfile() {
         override fun disableGlobalTestResources() = true
 
-        override fun testResources() = listOf(QuarkusTestProfile.TestResourceEntry(StatementTraceKafkaResource::class.java))
+        override fun testResources() = listOf(
+            QuarkusTestProfile.TestResourceEntry(StatementTraceKafkaResource::class.java),
+        )
 
         override fun extraConfigOverrides(): Map<String, String> = mapOf(
             // The deployed channel subscribes via the singular `topic` key, so the IT overrides
