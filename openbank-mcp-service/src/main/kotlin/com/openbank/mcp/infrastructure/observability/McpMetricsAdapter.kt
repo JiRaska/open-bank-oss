@@ -107,6 +107,29 @@ class McpMetricsAdapter(private val registry: MeterRegistry?) : McpMetricsPort {
         }
     }
 
+    override fun requestThrottled(surface: McpMetricsPort.ThrottleSurface, caller: McpMetricsPort.ThrottleCaller) {
+        registry?.let { r ->
+            Counter.builder("openbank.mcp.throttled")
+                .tag("service", SERVICE)
+                .tag("surface", surface.name.lowercase())
+                .tag("caller", caller.name.lowercase())
+                .description("MCP requests refused by the rate window or in-flight cap (ADR-0383)")
+                .register(r)
+                .increment()
+        }
+    }
+
+    override fun inputRefused(reason: McpMetricsPort.InputRefusal) {
+        registry?.let { r ->
+            Counter.builder("openbank.mcp.input_refused")
+                .tag("service", SERVICE)
+                .tag("reason", reason.name.lowercase())
+                .description("MCP JSON-RPC requests refused by an input bound before dispatch (#16628)")
+                .register(r)
+                .increment()
+        }
+    }
+
     companion object {
         private const val SERVICE = "mcp"
     }
