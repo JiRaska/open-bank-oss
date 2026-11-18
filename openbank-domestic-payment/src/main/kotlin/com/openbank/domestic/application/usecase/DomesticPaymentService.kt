@@ -23,6 +23,7 @@ import com.openbank.domestic.application.workflow.PaymentAdmissionConfig
 import com.openbank.domestic.application.workflow.ScreeningRedriveConfig
 import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.error.DomesticSchemeRules
+import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DomesticPayment
@@ -251,7 +252,7 @@ class DomesticPaymentService(
             )
         }
 
-        refuseDelegatedAuthority(authority, snapshot)?.let { return it }
+        refuseUnlessBoundReplay(authority, binding, normalizedCommand.idempotencyKey)?.let { return it }
 
         val trustedCommand = normalizedCommand.copy(
             debtorAccountId = snapshot.resourceId,
@@ -268,6 +269,24 @@ class DomesticPaymentService(
             // compares this proof with the stored grantor before any write can commit.
             debitOwnerPartyId = resolvedOwnerPartyId,
         )
+    }
+
+    /**
+     * A withdrawn authority refuses a NEW debit, never the replay of one already made. A BOUND
+     * binding whose payment is exactly the one this idempotency key names is that replay: the
+     * money moved while the grant was live, and answering WITHDRAWN would tell the caller that a
+     * committed payment did not happen. Any other request against a BOUND reservation (a new key)
+     * is still decided, so revocation keeps refusing everything it is meant to refuse. The replay
+     * itself is still fingerprint-checked by [createPaymentInternal].
+     */
+    private suspend fun refuseUnlessBoundReplay(
+        lookup: DelegationFactsLookup,
+        binding: DelegatedSpendBinding,
+        idempotencyKey: String,
+    ): DelegatedDomesticPaymentResult? {
+        val replayOfBoundPayment = binding.bindingState == DelegatedSpendBindingState.BOUND &&
+            paymentRepository.findByIdempotencyKey(idempotencyKey)?.id == binding.paymentId
+        return if (replayOfBoundPayment) null else refuseDelegatedAuthority(lookup, binding.snapshot)
     }
 
     /**

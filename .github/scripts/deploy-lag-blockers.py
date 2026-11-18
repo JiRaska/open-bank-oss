@@ -19,9 +19,14 @@ WHAT IT ADDS to each report entry
   blocked_consumers  consumers the auto-deploy can-i-deploy step blocked because THIS
                      service has to deploy first (parsed from that run's log; the line does
                      not carry the block class, so it may be REGRESSION or a transient wait)
-  blocker            "hold" | "unexplained"
-  escalate           money-path and older than --money-path-days with no hold recorded:
-                     nothing in governance explains the lag, so it is a pipeline defect.
+  stale_holds        hold issues whose tracker is no longer OPEN (from --issue-states). A
+                     hold outlives its reason silently: on 2026-11-14 card-processing had been
+                     held 27 days on #13231, CLOSED, with nothing left to wait for.
+  gate_refusal       the class the last Auto deploy can-i-deploy step refused this service
+                     with (NOT_ASKED, PROVIDER_UNVERIFIED, ...), or null
+  blocker            "hold" | "stale-hold" (every hold issue closed) | "unexplained"
+  escalate           money-path and older than --money-path-days with no live hold, or any
+                     stale-hold: nothing in governance explains the lag any more.
 
   The log is UNTRUSTED data: only warning-annotation lines are parsed, and only names in
   the --services allowlist (the repo's own service set) are accepted. Entries are only
@@ -30,6 +35,7 @@ WHAT IT ADDS to each report entry
 Usage: deploy-lag-blockers.py --report lag.json --rules rules.yaml
                               [--deploy-log can-i-deploy.log] [--money-path-days 3]
                               [--services openbank-a,openbank-b]
+                              [--issue-states states.json]   # {"#123": "OPEN"|"CLOSED"|...}
 Prints the enriched report as JSON on stdout. Exit 2 on unreadable input — a watch that
 cannot read its input must not report a clean bill.
 """
@@ -45,6 +51,11 @@ import yaml
 
 BLOCKED_RE = re.compile(
     r"(?:^|\s)(?:##\[warning\]|::warning::)\[(openbank-[a-z0-9-]+)\] is blocked on (openbank-[a-z0-9-]+), which is NOT part of this run",
+    re.MULTILINE,
+)
+REFUSAL_RE = re.compile(
+    r"(?:^|\s)(?:##\[(?:warning|error)\]|::(?:warning|error)::)\[(openbank-[a-z0-9-]+)\] "
+    r"(?:MONEY-PATH service )?blocked by can-i-deploy \[([A-Z_]+)\]",
     re.MULTILINE,
 )
 
@@ -68,19 +79,40 @@ def blocked_map(log_text: str, known: set[str] | None) -> dict[str, list[str]]:
     return out
 
 
+def refusal_map(log_text: str, known: set[str] | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for svc, klass in REFUSAL_RE.findall(log_text):
+        if known is None or svc in known:
+            out[svc] = klass
+    return out
+
+
 def enrich(report: dict, rules: dict, log_text: str, money_path_days: float,
-           known: set[str] | None = None) -> dict:
+           known: set[str] | None = None, issue_states: dict[str, str] | None = None) -> dict:
     money = set(rules.get("money_path_services") or [])
     blocked = blocked_map(log_text, known)
+    refused = refusal_map(log_text, known)
+    states = issue_states or {}
     entries = list(report.get("entries") or [])
     for e in entries:
         svc = e["service"]
         e["holds"] = holds_for(rules, svc)
         e["money_path"] = svc in money
         e["blocked_consumers"] = blocked.get(svc, [])
-        e["blocker"] = "hold" if e["holds"] else "unexplained"
+        e["gate_refusal"] = refused.get(svc)
+        # Only an explicitly fetched non-OPEN state is stale; an unknown state is not evidence.
+        e["stale_holds"] = [h["issue"] for h in e["holds"]
+                            if states.get(h["issue"]) not in (None, "OPEN")]
+        live = [h for h in e["holds"] if h["issue"] not in e["stale_holds"]]
+        if live:
+            e["blocker"] = "hold"
+        elif e["holds"]:
+            e["blocker"] = "stale-hold"
+        else:
+            e["blocker"] = "unexplained"
         age = float(e.get("oldest_src_age_hours") or 0)
-        e["escalate"] = bool(e["money_path"] and not e["holds"] and age >= money_path_days * 24)
+        e["escalate"] = bool(e["blocker"] == "stale-hold"
+                             or (e["money_path"] and not live and age >= money_path_days * 24))
     out = dict(report)
     out["entries"] = entries
     out["money_path_days"] = money_path_days
@@ -94,6 +126,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--deploy-log")
     ap.add_argument("--money-path-days", type=float, default=3.0)
     ap.add_argument("--services", help="comma-separated allowlist of known service names")
+    ap.add_argument("--issue-states", help='JSON map {"#123": "OPEN"} of hold issue states')
     a = ap.parse_args(argv)
     try:
         with open(a.report, encoding="utf-8") as f:
@@ -104,6 +137,12 @@ def main(argv: list[str]) -> int:
         if a.deploy_log:
             with open(a.deploy_log, encoding="utf-8", errors="replace") as f:
                 log_text = f.read()
+        issue_states = None
+        if a.issue_states:
+            with open(a.issue_states, encoding="utf-8") as f:
+                issue_states = json.load(f)
+            if not isinstance(issue_states, dict):
+                raise ValueError("issue states must be a JSON object")
     except (OSError, ValueError, yaml.YAMLError) as exc:
         print(f"deploy-lag-blockers: cannot read input: {exc}", file=sys.stderr)
         return 2
@@ -111,7 +150,8 @@ def main(argv: list[str]) -> int:
         print("deploy-lag-blockers: malformed report or rules", file=sys.stderr)
         return 2
     json.dump(enrich(report, rules, log_text, a.money_path_days,
-                     set(filter(None, a.services.split(","))) if a.services else None), sys.stdout, indent=2)
+                     set(filter(None, a.services.split(","))) if a.services else None,
+                     issue_states), sys.stdout, indent=2)
     print()
     return 0
 

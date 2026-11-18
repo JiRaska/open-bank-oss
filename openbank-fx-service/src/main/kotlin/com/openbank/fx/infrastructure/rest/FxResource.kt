@@ -37,6 +37,10 @@ import java.util.UUID
  * under, which let the caller choose that name. The screen now uses the names party-service holds
  * for [partyId]; the field is still accepted so existing callers keep working, and is neither
  * screened, stored nor logged.
+ *
+ * [accountId] is DEPRECATED and ignored for the same reason: nothing checked that the account
+ * belongs to [partyId], so a caller could attribute the conversion's fraud score and AML case to
+ * any account. No caller in this repository sends it; it is accepted, never used.
  */
 data class ConvertRequest(
     val partyId: UUID,
@@ -176,7 +180,8 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
             ConvertCommand(
                 idempotencyKey = key,
                 partyId = req.partyId,
-                accountId = req.accountId,
+                // Ignored, never trusted: see [ConvertRequest.accountId].
+                accountId = null,
                 fromCurrency = req.fromCurrency,
                 toCurrency = req.toCurrency,
                 fromAmountMinorUnits = req.fromAmountMinorUnits,

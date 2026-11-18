@@ -109,3 +109,10 @@ Každá mutace a každé akceptované inkaso vytvoří doménovou událost zapsa
 - ✅ Odolné eventování: circuit breaker + omezený retry + terminální parking `DEAD` pro poison řádky
 - ⚠️ Money-path zaúčtování (provedení odepsání/refundu): **v v1 neimplementováno** — delegováno; fast-follow, který je přidá, bude money-path a bude vyžadovat threat model (ADR-0030)
 - ⚠️ Tokenizace IBAN: neimplementováno; IBAN je uložen v čitelné podobě v řádku mandátu a v události `collection.authorised` (evidováno jako riziko regulačního auditu, konzistentně se zbytkem flotily)
+
+## Sankční screening před uvolněním (ADR-0032)
+
+Před uvolněním inkasa se jména plátce i příjemce prověří přes `openbank-sanctions-service`.
+Brána je fail-closed: výpadek screeningu inkaso pozdrží, místo aby ho uvolnil neprověřené.
+Potenciální nebo potvrzená shoda inkaso pozdrží či zablokuje a otevře AML případ
+v `openbank-aml-service` pod vlastní strojovou identitou sdd-service.

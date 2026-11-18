@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "203dda2900f3deac"
+    openbank.tech/policy-checksum: "f089bb112a342435"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -853,6 +853,9 @@ data:
     #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
     #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
     #                                               balance; it is still back-office evidence, #10896)
+    #   treasury.nostro.break.propose-resolution  — ROLE_TREASURY_APPROVER (four-eyes step 1, ADR-0315 D7)
+    #   treasury.nostro.break.approve-resolution, .reject-resolution — ROLE_TREASURY_SENIOR_APPROVER
+    #                                               (step 2; the domain refuses the proposer, #14770)
     #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
     #                                               tax-reporting's OWN client (ADR-0337 amendment)
     #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
@@ -987,6 +990,23 @@ data:
     	treasury_staff
     	"ROLE_TREASURY_APPROVER" in input.principal.roles
     	input.action == "treasury.nostro.upload"
+    }
+
+    # ADR-0315 D7 (#14770): an investigated nostro break that will never match is closed by FOUR EYES.
+    # An approver PROPOSES with a reason; the break stays open. A SENIOR approver approves or rejects —
+    # closing a break silences the aged-break alert, the control that surfaces it, so the deciding step
+    # takes the senior role. Distinct people are enforced in the domain and the database
+    # (nostro_breaks_four_eyes): this file only decides who may attempt each step. Nothing is posted.
+    allowed_reasons contains "treasury-nostro-break-propose-resolution" if {
+    	treasury_staff
+    	"ROLE_TREASURY_APPROVER" in input.principal.roles
+    	input.action == "treasury.nostro.break.propose-resolution"
+    }
+
+    allowed_reasons contains "treasury-nostro-break-decide-resolution" if {
+    	treasury_staff
+    	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+    	input.action in {"treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"}
     }
 
     # ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role
@@ -1411,6 +1431,8 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1440,6 +1462,8 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*
@@ -2047,8 +2071,12 @@ data:
                                              # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
         - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                              # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
-                                             # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
-                                             # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+                                             # separation. ONE documented M2M caller, deliberately paused (#16381/#16455):
+                                             # service-account-openbank-agent on POST /api/v3/sanctions/review, CLEAR only, as the
+                                             # four-eyes MAKER. Being paused is the point for that caller, so the GUARDRAIL below
+                                             # (no automated caller may be stalled) does not apply to it; it never holds
+                                             # sanctions.approval.decide. Every other caller is ROLE_OPERATOR/ROLE_ADMIN (no
+                                             # ROLE_SERVICE); /api/v1/sanctions/review stays human-only.
         # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
         # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
         # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world
@@ -2242,6 +2270,10 @@ data:
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read
+        # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+        # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+        # only; the generic operator/admin list rule must not reach it.
+        - kyb.monitoring.queue.list
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
@@ -2427,6 +2459,7 @@ data:
             - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
             - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
             - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+            - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
         ROLE_AUDITOR:
           grant:
             - audit.trail.inspect

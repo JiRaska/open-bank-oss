@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.21.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.3...sanctions-service-v0.21.4) (2026-11-18)
+
+
+### Bug Fixes
+
+* **sanctions:** bind the agent CLEAR approval to the request that consumed it ([#16593](https://github.com/JiRaska/open-bank-oss/issues/16593)) ([e129475](https://github.com/JiRaska/open-bank-oss/commit/e1294759059046e9218d1cc805373e84c21f125c))
+
+## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.2...sanctions-service-v0.21.3) (2026-11-17)
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.1...sanctions-service-v0.21.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** never demote a whole-name HIT on token structure ([#16284](https://github.com/JiRaska/open-bank-oss/issues/16284)) ([a7b2cfb](https://github.com/JiRaska/open-bank-oss/commit/a7b2cfb02a51b10b44b0f79ca0a21c7b324e2702))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.21.0...sanctions-service-v0.21.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **sanctions:** stop a shared given name from matching unrelated listed persons ([#16258](https://github.com/JiRaska/open-bank-oss/issues/16258)) ([4dba082](https://github.com/JiRaska/open-bank-oss/commit/4dba0828e08465f48d5f6be6197921bc49421166))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.20.0...sanctions-service-v0.21.0) (2026-11-14)
 
 

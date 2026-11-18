@@ -35,4 +35,11 @@ Configured values:
 - `max-lifetime: 30M`
 - `max-size: 20`
 
+## Client certificate reload (outbound mTLS)
 
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

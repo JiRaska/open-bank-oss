@@ -86,9 +86,11 @@ class SanctionsMonitoringServiceTest {
     private fun entry() = ListedEntry(
         SanctionsListType.OFAC_SDN,
         "ext-1",
-        "Listed Person",
+        // The listed name is the monitored subject's, so the name-structure check (NameTokenScore)
+        // confirms the stubbed candidate instead of telling the two names apart.
+        "Zorvath Quellinbrook",
         emptyList(),
-        "listed person",
+        "zorvath quellinbrook",
         true,
         "v-names",
     )
@@ -145,7 +147,7 @@ class SanctionsMonitoringServiceTest {
         coEvery { work.pendingCount() } returns 1
         coEvery { work.claimPending(any(), any()) } returns listOf(change())
         coEvery { work.findEntry(any()) } returns entry()
-        coEvery { subjects.findMatching("listed person", 0.65, 3) } returns
+        coEvery { subjects.findMatching("zorvath quellinbrook", 0.65, 3) } returns
             listOf(MonitoredSubjectCandidate(cleared, 0.9), MonitoredSubjectCandidate(open, 0.9))
         every { screening.customerMatch(any(), any(), any(), any(), any()) } returns match(0.9)
         coEvery { screening.isCleared(match { it.idempotencyKey == "monitoring:${cleared.id}" }, any()) } returns true

@@ -159,6 +159,8 @@ profile. Only the `CUSTOMER` profile also returns names scoring 0.65–0.85, as 
 spelling to. `PAYMENT` and profile-less screens do not search below 0.85, so such a name screens
 `CLEAR` there — a payment has no held state to wait for a review in yet (#15724).
 
+Below 0.85 a per-part name comparison also prunes candidates that share only one name part (for example a common given name with a different surname). It never lowers a whole-name score of 0.85 or more: such a candidate stays a `HIT` on every profile, including `CUSTOMER` and the monitoring delta (#16284).
+
 `/api/v1` is frozen: it rejects all three inputs with 400, and a check created with them is not
 readable through `/api/v1`.
 
@@ -179,6 +181,16 @@ Authorization: Bearer <token>
 `newStatus` ∈ `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`
 
 The reviewer recorded on the decision is the authenticated principal (the token's `preferred_username`). Do not send a reviewer in the body: a `reviewedBy` field is accepted for compatibility but ignored.
+
+**Agent identity (four-eyes maker).** `service-account-openbank-agent` (agent-service's
+`sanctions_review_check` MCP tool) may call this endpoint, and only with `newStatus: CLEAR`; any
+other status answers 403. Four-eyes pauses its call (`202` + `approvalId`) until a human checker
+approves it in `/api/v1/sanctions/approvals/{id}`; the agent then retries the identical request with
+`X-Approval-Id`. The reviewer recorded is that human checker. While four-eyes is not enforced the
+agent is refused outright. The agent identity is never granted `sanctions.approval.decide`. `/api/v1/.../review`
+stays human-only.
+
+**Binding of the approval (#16593).** The agent's retry is executed only with the approval that four-eyes consumed for that same request. `X-Approval-Id` is a header read from the request context, never part of the request fingerprint, and an approval consumed by an earlier call is refused (403) even if the policy no longer gates the action.
 
 ### Get a specific check
 

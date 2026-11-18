@@ -28,4 +28,15 @@ class ConsumerScopesTest {
             null,
         ).forEach { assertThat(ConsumerScopes.forPrincipal(it)).`as`(it.toString()).isEqualTo(ConsumerScope.General) }
     }
+
+    /**
+     * ADR-0385 D3: the MCP_CONNECT namespace is reserved but no principal holds it until the
+     * authorization server's own consumer exists — so today nobody can spend a connect challenge.
+     * Granting it is a reviewed change here plus rules.yaml `scoped_sca_consumers` (parity test).
+     */
+    @Test
+    fun `no principal holds the MCP connect namespace yet`() {
+        assertThat(ConsumerScopes.reservedPrincipals().map { ConsumerScopes.forPrincipal(it) })
+            .doesNotContain(ConsumerScope.Reserved(ReservedNamespace.MCP_CONNECT))
+    }
 }

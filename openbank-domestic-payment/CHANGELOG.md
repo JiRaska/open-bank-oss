@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.2...domestic-payment-v1.9.0) (2026-11-18)
+
+
+### Features
+
+* **domestic-payment:** adopt claim-fenced outbox v2 ([#15665](https://github.com/JiRaska/open-bank-oss/issues/15665)) ([b636fe3](https://github.com/JiRaska/open-bank-oss/commit/b636fe368ac0c9a7a76d414109237e1601ab3c56))
+
+## [1.8.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.1...domestic-payment-v1.8.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** replay a bound delegated payment after revocation ([#16589](https://github.com/JiRaska/open-bank-oss/issues/16589)) ([ec4e56a](https://github.com/JiRaska/open-bank-oss/commit/ec4e56af5b6e32a9e101b7e6c5bddb7cc6363905))
+
+## [1.8.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.0...domestic-payment-v1.8.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **delegation,domestic-payment,finrep:** reload outbound mTLS client certificates ([#16413](https://github.com/JiRaska/open-bank-oss/issues/16413)) ([cbd1aeb](https://github.com/JiRaska/open-bank-oss/commit/cbd1aeb831abe581bfd0d317808ca6d49cbf3d11))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.7.0...domestic-payment-v1.8.0) (2026-11-14)
 
 

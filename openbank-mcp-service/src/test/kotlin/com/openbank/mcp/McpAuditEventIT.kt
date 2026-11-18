@@ -64,7 +64,12 @@ class McpAuditEventIT {
     @Test
     @TestSecurity(user = "agent:test-agent")
     @OidcSecurity(
-        claims = [Claim(key = "sub", value = "agent:test-agent"), Claim(key = "consent_id", value = TEST_CONSENT_ID)],
+        claims = [
+            Claim(
+                key = "sub",
+                value = "agent:test-agent",
+            ), Claim(key = "aud", value = "openbank-mcp-service"), Claim(key = "consent_id", value = TEST_CONSENT_ID),
+        ],
     )
     fun `an allowed tool call emits an AI-attributed audit event`() {
         toolsCall(TestPolicyDecisionPoint.ALLOWED_TOOL)
@@ -85,7 +90,12 @@ class McpAuditEventIT {
     @Test
     @TestSecurity(user = "agent:test-agent")
     @OidcSecurity(
-        claims = [Claim(key = "sub", value = "agent:test-agent"), Claim(key = "consent_id", value = TEST_CONSENT_ID)],
+        claims = [
+            Claim(
+                key = "sub",
+                value = "agent:test-agent",
+            ), Claim(key = "aud", value = "openbank-mcp-service"), Claim(key = "consent_id", value = TEST_CONSENT_ID),
+        ],
     )
     fun `a denied tool call emits a DENIED audit event carrying the policy reason`() {
         toolsCall(TestPolicyDecisionPoint.DENIED_TOOL)
@@ -102,7 +112,12 @@ class McpAuditEventIT {
     @Test
     @TestSecurity(user = "agent:test-agent")
     @OidcSecurity(
-        claims = [Claim(key = "sub", value = "agent:test-agent"), Claim(key = "consent_id", value = TEST_CONSENT_ID)],
+        claims = [
+            Claim(
+                key = "sub",
+                value = "agent:test-agent",
+            ), Claim(key = "aud", value = "openbank-mcp-service"), Claim(key = "consent_id", value = TEST_CONSENT_ID),
+        ],
     )
     fun `the audit event records argument key names but never their values`() {
         toolsCall(TestPolicyDecisionPoint.DENIED_TOOL, """{"accountId":"CZ6508000000192000145399"}""")
@@ -135,7 +150,7 @@ class McpAuditEventIT {
     @TestSecurity(user = "agent:domain-metadata")
     @OidcSecurity(
         claims = [
-            Claim(key = "sub", value = "agent:domain-metadata"),
+            Claim(key = "sub", value = "agent:domain-metadata"), Claim(key = "aud", value = "openbank-mcp-service"),
             Claim(key = "consent_id", value = TEST_CONSENT_ID),
         ],
     )

@@ -37,9 +37,8 @@ spec:
       labels:
         app.kubernetes.io/name: keycloak
       annotations:
-        # Bumped by gen-theme-configmap.sh so a theme/PNG change rolls the pod
-        # (subPath ConfigMap mounts don't hot-update).
-        openbank.dev/theme-checksum: "a3f57e76dc8d7abb"
+        # Bumped by gen-theme-configmap.sh when a login theme changes.
+        openbank.dev/theme-checksum: "1c4591e58a46aab1"
         # Single-replica IdP: forbid Karpenter from voluntarily evicting this pod
         # for consolidation ("Evicted pod: Underutilized"). Even with the optimized
         # image (~10s start) a consolidation still lands a cold pod on a possibly
@@ -61,7 +60,7 @@ spec:
           # live in the Dockerfile now and MUST NOT be re-set as env below, or
           # `--optimized` aborts on a build-option mismatch. Bump = rebuild via
           # openbank-infra/scripts/build-push-keycloak.sh, then bump this tag.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.1-optimized-b9cfb2907c9b@sha256:524409594515c6b488a87d85bdf12b34b13564c9c0f062e22dc4af405ebf6904
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.1-optimized-fa2356eb19f3@sha256:10ef7cae6bb848d032407162de46a6b6220d9c774c78122c77359ebe08c949d4
           args: ["start", "--optimized", "--import-realm"]
           env:
             # --- front/back-channel hostname split ---
@@ -138,6 +137,9 @@ spec:
               mountPath: /opt/keycloak/themes/openbank/login/resources/img/openbank-vault.png
               subPath: openbank-vault.png
               readOnly: true
+            - name: theme-openbank-admin
+              mountPath: /opt/keycloak/themes/openbank-admin/login
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -176,6 +178,20 @@ spec:
         - name: theme-openbank
           configMap:
             name: keycloak-theme-openbank
+        - name: theme-openbank-admin
+          configMap:
+            name: keycloak-theme-openbank-admin
+            items:
+              - key: theme.properties
+                path: theme.properties
+              - key: openbank-admin.css
+                path: resources/css/openbank-admin.css
+              - key: messages_en.properties
+                path: messages/messages_en.properties
+              - key: messages_cs.properties
+                path: messages/messages_cs.properties
+              - key: explorer-prague-lion.webp
+                path: resources/img/explorer-prague-lion.webp
 ---
 apiVersion: v1
 kind: Service

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.1...kyb-service-v0.11.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **fx,interest,kyb:** reload outbound mTLS client certificates ([#16414](https://github.com/JiRaska/open-bank-oss/issues/16414)) ([afceb60](https://github.com/JiRaska/open-bank-oss/commit/afceb607acaadd6a5d4e44619795f5fabf18f63c))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.0...kyb-service-v0.11.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **kyb:** screen related parties with registration country, birth date and nationality ([#16215](https://github.com/JiRaska/open-bank-oss/issues/16215)) ([dfba096](https://github.com/JiRaska/open-bank-oss/commit/dfba0963ba2070d605dfb2757015a4859eae3f36))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.10.0...kyb-service-v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.9.0...kyb-service-v0.10.0) (2026-11-13)
 
 
