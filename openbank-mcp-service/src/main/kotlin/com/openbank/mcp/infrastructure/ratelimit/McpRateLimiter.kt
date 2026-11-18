@@ -87,6 +87,15 @@ class McpRateLimiter @Inject constructor(
     fun checkAnonymous(): Outcome = consume(ANONYMOUS_KEY, anonymousCallsPerMinute)
 
     /**
+     * Consumes one slot of a coarse SHARED bucket (e.g. one customer-MCP client across all its
+     * users and proof keys, ADR-0383 D5.3) with its own, larger per-minute budget. Own key namespace.
+     */
+    fun checkShared(key: String): Outcome = consume("s:$key", sharedCallsPerMinute)
+
+    /** Per-minute budget of a [checkShared] bucket. Not injected: overridden by tests. */
+    var sharedCallsPerMinute: Int = DEFAULT_SHARED_PER_MINUTE
+
+    /**
      * Reserves one in-flight slot for [agentId]; false when the caller already holds
      * [maxInFlight]. Every true MUST be paired with exactly one [release] (use try/finally).
      */
@@ -120,6 +129,9 @@ class McpRateLimiter @Inject constructor(
     fun shouldAuditThrottle(agentId: String?): Boolean {
         val now = Instant.now(clock).epochSecond
         val key = agentId?.let { "c:$it" } ?: ANONYMOUS_KEY
+        // Refusal-only traffic reaches this without ever calling consume(): prune here too, or a
+        // flood of distinct refused subjects grows the map without bound (review of #16721).
+        pruneExpired(now)
         return hit("$key|t|${now / SECONDS_PER_MINUTE}") == 1L
     }
 
@@ -137,6 +149,9 @@ class McpRateLimiter @Inject constructor(
             else -> Outcome.ALLOWED
         }
     }
+
+    /** Live window counters held; for the bounded-growth test. */
+    internal fun trackedWindows(): Int = counters.size
 
     private fun hit(key: String): Long = counters.computeIfAbsent(key) { AtomicLong() }.incrementAndGet()
 
@@ -164,6 +179,9 @@ class McpRateLimiter @Inject constructor(
     val inFlightReason: String get() = "too many concurrent calls"
 
     companion object {
+        /** Coarse per-client cap on the customer channel's pre-verify path (ADR-0383 D5.3). */
+        const val DEFAULT_SHARED_PER_MINUTE = 600
+
         /** The documented defaults, for code that builds a limiter outside CDI (tests). */
         fun withDefaults() = McpRateLimiter(
             enabled = true,
