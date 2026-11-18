@@ -355,3 +355,13 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 - `CurrencyCode.of` rejects ISO 4217 codes withdrawn from circulation (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...) even though `java.util.Currency` still resolves them. `CurrencyCode.isCanonical(code)` answers "is this exact string an active, upper-case code" for validators that store the string.
 - `IbanCheckDigits.compute/build` is the single ISO 7064 MOD 97-10 generator; validation stays in `Iban.isValid`.
 - `CzechPaymentSymbol.isValid` / `requireValid`: variable, specific and constant symbols are 1-10 ASCII digits.
+
+## Test trace contracts (openbank-libs-testing)
+
+`TraceContract.requiresSameTraceAs(referenceSpan, vararg spanNames)` anchors the same-trace
+assertion to the trace of the ONE span named `referenceSpan` instead of measuring every
+same-named span in the recorder. Real services generate sibling traffic that lands on the
+same tables and operations the contract anchors on, so `requiresSameTrace` alone can measure
+a fixture's own request traces rather than the delivery under test. The reference must be
+unambiguous in the recorder (for a Kafka contract: a dedicated topic, so exactly one consume
+span).
