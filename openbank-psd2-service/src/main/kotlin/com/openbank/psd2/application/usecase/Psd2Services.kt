@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.application.usecase
 
+import com.openbank.libs.domain.account.CzechPaymentSymbol
 import com.openbank.psd2.application.port.`in`.AccountInformationUseCase
 import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
@@ -207,6 +208,7 @@ class PaymentInitiationService(
         } else {
             command.payment
         }
+        requireValidPaymentSymbols(payment)
         val valid = consentClient.validateConsent(
             command.consentId,
             command.tppId,
@@ -290,5 +292,26 @@ class PaymentInitiationService(
         is DomesticCzPayment -> payment.debtorAccount.iban
         is SipoPayment -> payment.debtorAccount.iban
         else -> null
+    }
+}
+
+/**
+ * VS/SS/KS are 1-10 ASCII digits (libs-domain [CzechPaymentSymbol]). Checked before consent, like
+ * the CZK rule, so a malformed symbol is a 400 and never joins the remittance string downstream.
+ */
+internal fun requireValidPaymentSymbols(payment: Any) {
+    val symbols = when (payment) {
+        is DomesticCzPayment -> listOf(
+            "variableSymbol" to payment.variableSymbol,
+            "specificSymbol" to payment.specificSymbol,
+            "constantSymbol" to payment.constantSymbol,
+        )
+        is SipoPayment -> listOf("variableSymbol" to payment.variableSymbol)
+        else -> emptyList()
+    }
+    for ((field, value) in symbols) {
+        if (value != null && !CzechPaymentSymbol.isValid(value)) {
+            throw Psd2RequestFormatException("$field must be 1-${CzechPaymentSymbol.MAX_LENGTH} digits")
+        }
     }
 }
