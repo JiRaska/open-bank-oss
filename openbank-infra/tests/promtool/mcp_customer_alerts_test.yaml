@@ -131,6 +131,7 @@ tests:
               severity: critical
               team: platform
             exp_annotations:
+              subject_period: continuous
               runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerreplaystoreunavailable
               summary: "Customer MCP admission is failing closed: DPoP replay store unavailable"
               description: >-
@@ -171,6 +172,7 @@ tests:
               severity: critical
               team: platform
             exp_annotations:
+              subject_period: continuous
               runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerreplaystoreunavailable
               summary: "Customer MCP admission is failing closed: DPoP replay store unavailable"
               description: >-
@@ -193,6 +195,7 @@ tests:
               severity: critical
               team: platform
             exp_annotations:
+              subject_period: continuous
               runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerreplaystoreunavailable
               summary: "Customer MCP admission is failing closed: DPoP replay store unavailable"
               description: >-
