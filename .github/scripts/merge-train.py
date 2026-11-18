@@ -119,6 +119,15 @@ TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 STRICT_TRAIN_BRANCH_RE = re.compile(r"^train/strict-[0-9]+-[0-9]+$")
 STRICT_BATCH_CAP_DEFAULT = 8      # members per strict carrier; 1 = today's behaviour (update-branch, one PR per slot)
 STRICT_CARRIER_DESC = "strict lane: verified on strict carrier #{carrier} over main {base}"
+# Disjoint judge batching (ADR-0343 amendment 2026-11-15): a JUDGE member (judge_path) no longer rides
+# alone by default. It shares a strict carrier only with members whose changed path sets are pairwise
+# DISJOINT from every other member's (no shared file, so no shared gates.yaml / rules.yaml entry and no
+# shared workflow), and such a carrier holds at most this many members. The carrier is verified as one
+# tree under its own final configuration — exactly the tree and configuration main holds after its last
+# member merges, which is also what serial processing in ANY order reaches and verifies at its last
+# step. Measured 2026-11-14/15: every queued strict PR was a judge member, so each carrier held one PR
+# and the strict lane drained at ~1 PR per 30-40 min carrier. 1 = the rides-alone rule as before.
+STRICT_JUDGE_BATCH_CAP_DEFAULT = 4
 GATES_YAML = ".github/gates/gates.yaml"
 GATE_ID_RE = re.compile(r"^\s*-\s+id:\s*([^\s#]+)")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -374,10 +383,11 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
 # JUDGE paths (strict carrier): everything CI or gate configuration READS to decide a verdict — every
 # workflow and action (a member editing ci.yml or a reusable workflow can neuter a required check), the
 # gate declarations, the governance rules, CODEOWNERS, the privileged gate code above and the train's own
-# script, workflow and carrier library. A member touching any of these RIDES ALONE: a strict carrier of
-# one, verified exactly as today's update-branch head is, so it can never turn a co-member green. Only
-# non-judge strict members (a plain `.github/scripts/*.py` no privileged workflow runs, for instance) are
-# batched together (review of #14891).
+# script, workflow and carrier library. A member touching any of these rode ALONE (review of #14891);
+# since the ADR-0343 amendment of 2026-11-15 it shares a strict carrier only with members whose changed
+# paths are pairwise disjoint (STRICT_JUDGE_BATCH_CAP_DEFAULT) — unless it configures a verdict
+# (config_judge_path) or is the train's own code (train_code_paths): those still ride alone.
+# Non-judge strict members batch together as before.
 JUDGE_CODE = PRIVILEGED_GATE_CODE + (
     ".github/scripts/merge-train.py",
     ".github/scripts/merge_train_carrier.py",
@@ -386,6 +396,32 @@ JUDGE_CODE = PRIVILEGED_GATE_CODE + (
 JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")
 WORKFLOWS_DIR = ".github/workflows"
 JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governance/rules.yaml", ".github/CODEOWNERS")
+# CONFIGURATION judges (ADR-0343 amendment 2026-11-15, after review of #16290): a judge path that can
+# change what a gate DECIDES — anything under `.github/` that judge_path flags (a workflow, an action, a
+# checker script a workflow or gates.yaml names, gates.yaml, CODEOWNERS), the governance rules, and the
+# build and lint configuration a gate reads. A member touching one rides a strict carrier ALONE: paired
+# with an older member B, a relaxing J would turn B green where oldest-first serial processing judges B
+# under main's configuration, and a tightening J would make a carrier red that neither half is alone.
+# Only PRODUCTION sources share: since the security review of #16357 a test-shaped file (anything under
+# src/ that is not src/main/, so src/test, integrationTest, testFixtures, ... alike) rides alone, so no
+# denylist of ways a test can read another module is a safety boundary for what a member CHANGES.
+# Disjoint batching is for the remaining judge members only, and that set is an ALLOW-LIST (security
+# reviews of #16290): a judge path is configuration UNLESS it is Kotlin/Java source or a test under
+# src/main or src/test of a LEAF module (shareable_modules: an `openbank-*` module no Gradle build file
+# depends on and whose name is no analysis/rule/governance module). build-logic, buildSrc, the libs,
+# detekt rule sets and architecture tests that other modules consume never qualify, and neither does any
+# doc (diff-scoped gates read a carrier's UNION diff, so a threat model or ADR in one member would satisfy
+# the gate for another member's code — masking by companion file). Members of such a carrier must also
+# sit in DIFFERENT modules (disjoint_key), for the same reason inside a module: one member's test must
+# not satisfy a "src/main change needs a test" gate for another member's code. Everything else (scanner allowlists, lint and build files, application.yaml, any dotfile, any
+# path nobody thought of) rides alone. A test is shareable only inside a module whose tests read no
+# other module's files and whose files no other module's test reads (shareable_modules derives both from
+# `../openbank-<m>` and `"openbank-<m>/` references under */src/test/): such tests judge another module's
+# code — HasActiveConsentScopeProducerPinTest in campaign-service reads consent-service's source — so
+# both ends of a cross-module read ride alone.
+SHAREABLE_JUDGE_RE = re.compile(r"^(?!(?:.*/)?\.)openbank-[a-z0-9-]+/(?:[A-Za-z0-9_.-]+/)*src/main/(?:kotlin|java)/(?:[A-Za-z0-9_.-]+/)*"
+                                r"[A-Za-z0-9_-]+\.(?:kt|java)$")
+TRAIN_CODE_RE = re.compile(r"^\.github/(scripts|workflows)/(test-)?merge[-_]train[-_.A-Za-z0-9]*$")
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
 SECURITY_SUPPRESSION_PATHS = (".gitleaksignore", ".gitleaks.toml", ".trivyignore", ".semgrep.yml", ".semgrep.yaml")
@@ -901,6 +937,87 @@ INCONCLUSIVE_GATE_KINDS = frozenset({"budget", "not_evaluated"})
 GATE_SHARD_JOB_RE = re.compile(r"^gates \(([a-z0-9-]+)\)$")   # ci.yml `gates (${{ matrix.slug }})`
 GATE_AGGREGATE_JOB = "Validate manifests"                      # red exactly when a shard is red
 GATE_ARTIFACT_PREFIX = "gate-results-"                         # ci.yml uploads gate-results-<slug>-a<attempt>
+# Mirror of run-gates.py UNIVERSAL_SELFTEST_INPUTS: a pull request touching any of these re-runs EVERY
+# self-test. The train runs alone under `python3 -I -S` from $RUNNER_TEMP, so it cannot import the
+# runner; the self-test holds this tuple equal to the runner's on any checkout that carries it.
+UNIVERSAL_SELFTEST_INPUTS = (
+    ".github/gates/gates.yaml",
+    ".github/scripts/run-gates.py",
+    ".github/scripts/gatelib.py",
+    ".github/scripts/selftest_input_trace.py",
+    ".github/gates/selftest-undeclared-inputs.baseline",
+)
+SELFTEST_INPUTS_RE = re.compile(r"^\s+selftest_inputs:\s*(\[(.*)\])?\s*(#.*)?$")
+
+
+def parse_selftest_inputs(text: str) -> dict[str, list[str]]:
+    """gate id -> its declared `selftest_inputs` from gates.yaml text, by line scan (no YAML under
+    `python3 -I -S`): a flow list on the key's line, or a block list of `- path` lines under it. A gate
+    with no declaration maps to []: run-gates runs its self-test on every pull request."""
+    out: dict[str, list[str]] = {}
+    gid, block = None, False
+    for ln in text.splitlines():
+        m = GATE_ID_RE.match(ln)
+        if m:
+            gid, block = m.group(1), False
+            out.setdefault(gid, [])
+            continue
+        if gid is None:
+            continue
+        m = SELFTEST_INPUTS_RE.match(ln)
+        if m:
+            block = m.group(1) is None
+            if not block:
+                out[gid] = [p.strip().strip("\"'") for p in m.group(2).split(",") if p.strip()]
+            continue
+        if block:
+            item = re.fullmatch(r"\s+-\s+(\S.*?)\s*(#.*)?", ln)
+            if item:
+                out[gid].append(item.group(1).strip("\"'"))
+            elif ln.strip() and not ln.lstrip().startswith("#"):
+                block = False
+    return out
+
+
+def selftest_skip_refusal(main_jobs: dict[str, str | None] | None, records: dict[str, list | None] | None,
+                          head_files: list[str], declared: dict[str, list[str]] | None) -> str | None:
+    """Why a head green on every gate shard red on main still does NOT prove it fixes that shard, or
+    None. run-gates skips a gate's self-test on a pull request unless one of the gate's declared
+    `selftest_inputs` changed (selftest_is_needed), while every push to main runs every self-test. So
+    when main's red is a self-test (`unfalsified` in the shard's --json records), a head whose shard job
+    SKIPPED that self-test is green about it structurally — 2026-11-17: #16599 left
+    `event-contract-code-agreement` unfalsified on main, and the train then served #16627 and #16644 as
+    "fixes" of it, one full CI each, because their shard jobs ran green without the self-test. The head
+    proves the fix only when its own run executed the self-test: it changed a universal input, or one of
+    THAT gate's declared inputs as read from the head's own gates.yaml (`declared`; None = unreadable), or
+    the gate declares none (then run-gates always runs it). A failed job that is no gate shard needs no
+    records. Fails closed: unreadable records or declaration, or a gate the head's gates.yaml does not
+    declare (its self-test cannot have run there), refuse. A content/budget failure is untouched."""
+    failed = sorted(n for n, c in (main_jobs or {}).items() if c is not None and c not in FIX_JOB_OK)
+    slugs = [m.group(1) for n in failed for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m]
+    if not slugs:
+        return None
+    if records is None:
+        return "gate results of main's red run unreadable"
+    if any(f in UNIVERSAL_SELFTEST_INPUTS for f in head_files):
+        return None   # every self-test ran on this head
+    for slug in slugs:
+        recs = records.get(slug)
+        if not isinstance(recs, list):
+            return f"gate results of shard `{slug}` on main unreadable"
+        for r in recs:
+            if not isinstance(r, dict) or "unfalsified" not in (r.get("status"), r.get("failure_kind")):
+                continue
+            gid = str(r.get("id") or "?")
+            if declared is None:
+                return f"self-test of gate `{gid}` failed on main and {GATES_YAML} is unreadable on the head"
+            if gid not in declared:
+                return f"self-test of gate `{gid}` failed on main and the head's {GATES_YAML} does not declare it: it never ran there"
+            inputs = declared[gid]
+            if inputs and not any(f == d or f.startswith(d.rstrip("/") + "/") for f in head_files for d in inputs):
+                return (f"self-test of gate `{gid}` failed on main (unfalsified) and was skipped on the head: "
+                        f"no declared selftest input changed ({', '.join(inputs)})")
+    return None
 
 
 def gate_failures_inconclusive(failed_jobs: list[str], records: dict[str, list | None]) -> tuple[bool, str]:
@@ -2539,6 +2656,38 @@ class GitHub:
             return None
         return data if isinstance(data, list) else None
 
+    def gate_shard_records(self, sha: str, ctx: str, slugs: list[str]) -> dict[str, list | None] | None:
+        """The --json records of gate shards `slugs` from the CURRENT attempt of the workflow run behind
+        check run `ctx` on `sha`: slug -> records (None = that shard's artifact missing or unreadable).
+        None = the run itself is unreadable (no such check run, no run id, no current attempt). Only the
+        named shards' artifacts are downloaded (a few KB each); a rerun keeps attempt-1 artifacts under
+        the same run id, so the artifact name carries the attempt (ci.yml `gate-results-<slug>-a<n>`)."""
+        latest = None
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check.get("name") == ctx and (latest is None or check["id"] > latest["id"]):
+                latest = check
+        if latest is None:
+            return None
+        m = re.search(r"/actions/runs/([0-9]+)/job", latest.get("details_url") or latest.get("html_url") or "")
+        if not m:
+            return None
+        run = int(m.group(1))
+        code, info = api("GET", f"/repos/{self.repo}/actions/runs/{run}")
+        attempt = info.get("run_attempt") if code == 200 and isinstance(info, dict) else None
+        if type(attempt) is not int or attempt < 1:
+            return None
+        arts: dict[str, dict] = {}
+        for a in paginate(f"/repos/{self.repo}/actions/runs/{run}/artifacts", "artifacts"):
+            name = a.get("name") or ""
+            if name.startswith(GATE_ARTIFACT_PREFIX) and not a.get("expired") and (
+                    name not in arts or a["id"] > arts[name]["id"]):
+                arts[name] = a
+        out: dict[str, list | None] = {}
+        for slug in sorted(set(slugs)):
+            a = arts.get(f"{GATE_ARTIFACT_PREFIX}{slug}-a{attempt}")
+            out[slug] = self.artifact_json(a["id"]) if a else None
+        return out
+
     def update_branch(self, n: int, head: str) -> bool:
         """Merge main into the PR branch, pinned to the head the strict lane judged.
 
@@ -3300,7 +3449,8 @@ def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int
 
 
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
-                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT,
+                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
+                stack: bool = SPECULATIVE_STACK_DEFAULT,
                 expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
@@ -3681,8 +3831,13 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         views = strict_batch_views(gh, git, base, strict, fixes, summary)
         if views:
             refs = referenced_scripts(git, base)
+            own_code = train_code_paths(git, base)
+            leaf_modules = shareable_modules(git, base)
             built = build_strict_carrier(git, base, views, strict_cap, lambda f: judge_path(f, refs),
-                                         regen_inventory_fragments(regen_text), derived_output_patterns(regen_text))
+                                         regen_inventory_fragments(regen_text), derived_output_patterns(regen_text),
+                                         judge_cap=judge_cap,
+                                         alone_is=lambda f: f in own_code or config_judge_path(f, refs, leaf_modules),
+                                         member_alone=lambda h, fs: member_test_reaches_out(git, h, fs))
             if built:
                 carrier = publish_strict_carrier(gh, git, base, built[0], built[1], run_id, attempt)
                 if carrier is not None:
@@ -3897,6 +4052,129 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     unreadable age holds (today's behaviour); a carrier past the bound releases the strict lane."""
     age = carrier_age_s(p, now)
     return age is None or age <= CARRIER_PRIORITY_S
+
+
+def selftest_skip_fix_self_test(check) -> None:
+    """A head green on a gate shard whose red on main is a SELF-TEST (unfalsified) is a fix only if its
+    own run executed that self-test (2026-11-17: #16627/#16644 served as fixes of
+    `event-contract-code-agreement`, which their shard jobs never ran). Pure rule first, then the live
+    path (fix_contexts -> fix_evidence) over a stubbed GitHub and git, then the declaration parser and
+    the universal-input mirror against the real runner."""
+    MR = "Validate manifests"
+    main_jobs = {MR: "failure", "gates (data)": "failure"}
+    unf = {"data": [{"id": "g1", "status": "unfalsified", "failure_kind": "unfalsified"}]}
+    content = {"data": [{"id": "g1", "status": "failed", "failure_kind": "content"}]}
+    decl = {"g1": [".github/scripts/check-g1.py", "openbank-x/src/"], "g2": []}
+    for label, records, files, declared, want in [
+        ("unfalsified gate, head changed no declared input -> refused", unf, ["openbank-y/Foo.kt"], decl, "skipped on the head"),
+        ("unfalsified gate, head changed the gate script -> accepted", unf, [".github/scripts/check-g1.py"], decl, None),
+        ("unfalsified gate, head changed a file under a declared dir -> accepted", unf, ["openbank-x/src/a/B.kt"], decl, None),
+        ("unfalsified gate, head changed a universal input -> accepted", unf, [".github/gates/gates.yaml"], decl, None),
+        ("unfalsified gate that declares no inputs (always runs) -> accepted",
+         {"data": [{"id": "g2", "status": "unfalsified", "failure_kind": "unfalsified"}]}, ["openbank-y/Foo.kt"], decl, None),
+        ("content failure on the shard -> unchanged, accepted", content, ["openbank-y/Foo.kt"], decl, None),
+        ("records of main's run unreadable -> refused", None, [".github/scripts/check-g1.py"], decl, "unreadable"),
+        ("the red shard's artifact unreadable -> refused", {"data": None}, ["openbank-y/Foo.kt"], decl, "unreadable"),
+        ("gates.yaml unreadable on the head -> refused", unf, ["openbank-y/Foo.kt"], None, "unreadable on the head"),
+        ("gate not declared on the head -> refused", unf, ["openbank-y/Foo.kt"], {"g2": []}, "never ran there"),
+        ("a prefix that is not a path component is not a match", unf, ["openbank-xy/src/a.kt"], decl, "skipped on the head"),
+    ]:
+        got = selftest_skip_refusal(main_jobs, records, files, declared)
+        check(f"self-test skip: {label}", (got is None) if want is None else (got is not None and want in got), str(got))
+    check("self-test skip: no gate shard failed on main -> nothing read, accepted",
+          selftest_skip_refusal({MR: "failure", "Admin UI": "failure"}, None, [], None) is None)
+    check("self-test skip: an unfalsified record is found by failure_kind as well as status",
+          "skipped on the head" in (selftest_skip_refusal(
+              main_jobs, {"data": [{"id": "g1", "status": "failed", "failure_kind": "unfalsified"}]}, ["x"], decl) or ""))
+
+    # The live path: fix_contexts over a stubbed GitHub and git.
+    main_c, head, mb = "m" * 40, "h" * 40, "b" * 40
+    gates_text = ("gates:\n  - id: g1\n    selftest: |\n      x\n"
+                  "    selftest_inputs:\n      - \".github/scripts/check-g1.py\"\n      - openbank-x/src/\n"
+                  "  - id: g2\n    selftest: |\n      y\n")
+
+    class _R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout = rc, out
+
+    def mk_git(files, gates=gates_text):
+        def git(*a, **_k):
+            if a[0] == "merge-base":
+                return _R(0, mb)
+            if a[0] == "show" and a[1] == f"{head}:{GATES_YAML}":
+                return _R(0 if gates is not None else 128, gates or "")
+            if a[0] == "show":
+                return _R(0, "merge_train:\n  extra_gates:\n")   # rules.yaml: no extra gates
+            if a[0] == "rev-list":
+                return _R(0, main_c + "\n")
+            if a[0] == "diff":
+                return _R(0, "".join(f":100644 100644 a b M\0{f}\0" for f in files))
+            return _R(0, "")
+        return git
+
+    class _Gh:
+        def __init__(self, records):
+            self.records, self.reads = records, 0
+
+        def checks(self, sha):
+            return {MR: "failure"} if sha == main_c else {MR: "success"}
+
+        def ctx_jobs(self, sha, _ctx):
+            return dict(main_jobs) if sha == main_c else {MR: "success", "gates (data)": "success"}
+
+        def extra_checks(self, _sha, _gates):
+            return {}
+
+        def gate_shard_records(self, _sha, _ctx, slugs):
+            self.reads += 1
+            return None if self.records is None else {s: self.records.get(s) for s in slugs}
+
+    def live(records, files, gates=gates_text):
+        gh, cache = _Gh(records), {}
+        got = fix_contexts(gh, mk_git(files, gates), mb, {"number": 7, "head_sha": head}, {MR: main_c}, cache)
+        return got, (cache.get(NOT_FIX_KEY) or {}).get(7, ""), gh, cache
+
+    got, why, gh, cache = live(unf, ["openbank-y/Foo.kt"])
+    check("live: a green head that skipped the red self-test is not a fix, and the reason reaches not_fix",
+          got == [] and "self-test of gate `g1`" in why and "skipped on the head" in why, f"{got} {why}")
+    check("live: the records are read once per main commit and shared by every context",
+          gh.reads == 1 and fix_contexts(gh, mk_git(["openbank-y/Foo.kt"]), mb, {"number": 8, "head_sha": head},
+                                         {MR: main_c, "gates (data)": main_c}, cache) == [] and gh.reads == 1, str(gh.reads))
+    got, why, gh, _c = live(unf, [".github/scripts/check-g1.py"])
+    check("live: a head that changed the gate's declared input (its self-test ran) is the fix", got == [MR], f"{got} {why}")
+    got, why, gh, _c = live(unf, ["openbank-x/src/k/E.kt"])
+    check("live: a block-list declared directory counts", got == [MR], f"{got} {why}")
+    got, why, gh, _c = live(content, ["openbank-y/Foo.kt"])
+    check("live: a content failure on the shard keeps today's behaviour (the fix is accepted)", got == [MR], f"{got} {why}")
+    got, why, gh, _c = live(None, [".github/scripts/check-g1.py"])
+    check("live: an unreadable run fails closed", got == [] and "unreadable" in why, f"{got} {why}")
+    got, why, gh, _c = live(unf, ["openbank-y/Foo.kt"], gates=None)
+    check("live: gates.yaml unreadable on the head fails closed", got == [] and "unreadable on the head" in why, f"{got} {why}")
+
+    class _GhLeaf(_Gh):
+        def ctx_jobs(self, sha, _ctx):
+            return {MR: "failure", "Admin UI": "failure"} if sha == main_c else {MR: "success", "Admin UI": "success"}
+    gh, cache = _GhLeaf(None), {}
+    got = fix_contexts(gh, mk_git(["openbank-y/Foo.kt"]), mb, {"number": 9, "head_sha": head}, {MR: main_c}, cache)
+    check("live: a non-gate job red on main (build, Admin UI) is judged by job evidence alone, no artifact read",
+          got == [MR] and gh.reads == 0, f"{got} reads={gh.reads}")
+
+    parsed = parse_selftest_inputs(gates_text + "  - id: g3\n    selftest_inputs: ['a/b.py', \"c/\"]  # flow\n"
+                                   "  - id: g4\n    selftest_inputs:\n      - d.py   # c\n    run: true\n")
+    check("declaration parser: block list, flow list, quotes, comments, and a gate with none",
+          parsed == {"g1": [".github/scripts/check-g1.py", "openbank-x/src/"], "g2": [], "g3": ["a/b.py", "c/"], "g4": ["d.py"]},
+          str(parsed))
+    real = pathlib.Path(GATES_YAML)
+    if real.is_file():
+        got = parse_selftest_inputs(real.read_text(encoding="utf-8")).get("event-contract-code-agreement")
+        check("declaration parser: the real gates.yaml names the event-contract gate's two scripts",
+              got is not None and ".github/scripts/check-event-contract-code-agreement.py" in got, str(got))
+    runner = pathlib.Path(".github/scripts/run-gates.py")
+    if runner.is_file():
+        m = re.search(r"^UNIVERSAL_SELFTEST_INPUTS = \((.*?)^\)", runner.read_text(encoding="utf-8"), re.S | re.M)
+        theirs = tuple(re.findall(r"\"([^\"]+)\"", re.sub(r"#.*", "", m.group(1)))) if m else None
+        check("universal self-test inputs: the train's mirror equals run-gates.py's tuple",
+              theirs == UNIVERSAL_SELFTEST_INPUTS, f"runner={theirs} train={UNIVERSAL_SELFTEST_INPUTS}")
 
 
 def fix_preempts_strict_self_test(check) -> None:
@@ -4606,6 +4884,39 @@ def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str
     return out
 
 
+def cached_gate_records(gh, sha: str, ctx: str, slugs: list[str], cache: dict | None) -> dict[str, list | None] | None:
+    """gh.gate_shard_records once per tick per (main commit, shard set): the aggregate `Validate manifests` and
+    every red `gates (<slug>)` context name the same run, so they share the read."""
+    key = ("gate_records", sha, tuple(sorted(set(slugs))))
+    if cache is not None and key in cache:
+        return cache[key]
+    out = gh.gate_shard_records(sha, ctx, slugs)
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cache: dict | None) -> str | None:
+    """Why `head` does NOT prove it fixes `ctx`, red on main at `main_commit`, or None when it does:
+    fix_job_evidence (every job red on main ran green on the head), then selftest_skip_refusal (a red
+    gate SELF-TEST on main must have RUN on the head, not been skipped by run-gates' input gating). The
+    second read costs API only when a gate shard failed on main, and is cached per main commit; the
+    head's changed set is the pull request's own side (`base...head`, what run-gates judged) and the
+    declaration is the head's own gates.yaml (what its runner read)."""
+    main_jobs = cached_ctx_jobs(gh, main_commit, ctx, cache)
+    why = fix_job_evidence(main_jobs, cached_ctx_jobs(gh, head, ctx, cache))
+    if why:
+        return why
+    failed = sorted(n for n, c in (main_jobs or {}).items() if c is not None and c not in FIX_JOB_OK)
+    slugs = [m.group(1) for n in failed for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m]
+    if not slugs:
+        return None
+    r = git("show", f"{head}:{GATES_YAML}", check=False)
+    declared = parse_selftest_inputs(r.stdout) if r.returncode == 0 else None
+    return selftest_skip_refusal(main_jobs, cached_gate_records(gh, main_commit, ctx, slugs, cache),
+                                 changed_paths(git, f"{base}...{head}"), declared)
+
+
 def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None,
                  head_checks: dict[str, str | None] | None = None, record: bool = True) -> list[str]:
     """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
@@ -4628,7 +4939,7 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
-        why = fix_job_evidence(cached_ctx_jobs(gh, at_base[0], ctx, cache), cached_ctx_jobs(gh, view["head_sha"], ctx, cache))
+        why = fix_evidence(gh, git, base, ctx, at_base[0], view["head_sha"], cache)
         if why:
             note_not_fix(cache if record else None, view, f"{ctx} {why}")
             continue
@@ -4669,7 +4980,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
         mb = git("merge-base", claim_from, base, check=False).stdout.strip()
         for c in claimed:
             at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
-            why = (fix_job_evidence(cached_ctx_jobs(gh, at_base[0], c, cache), cached_ctx_jobs(gh, head, c, cache))
+            why = (fix_evidence(gh, git, base, c, at_base[0], head, cache)
                    if at_base else "no main verdict at the claim's base")
             if why:
                 note_not_fix(cache, view, f"combined head: {c} {why}")
@@ -4834,8 +5145,147 @@ def needs_regeneration(files: list[str], fragments: list[str], outputs: list[str
     return None
 
 
+def member_paths(git, base: str, head: str) -> set[str] | None:
+    """The disjoint_key of every path a member changes, read from the TREES (merge-base with main..head, no rename
+    detection, so a rename reports both names). None when git cannot say: the member then shares
+    nothing (fail closed)."""
+    mb = git("merge-base", base, head, check=False)
+    if mb.returncode != 0 or not mb.stdout.strip():
+        return None
+    r = git("diff-tree", "-r", "--no-renames", "--name-only", mb.stdout.strip(), head, check=False)
+    if r.returncode != 0:
+        return None
+    return {disjoint_key(ln) for ln in r.stdout.splitlines() if ln}
+
+
+ANALYSIS_MODULE_RE = re.compile(r"libs|detekt|ktlint|lint|rule|governance|auditor|scanner|arch|contract|infra|test")
+_SHAREABLE_MODULES: dict[str, frozenset[str]] = {}
+
+
+def shareable_modules(git, base: str) -> frozenset[str]:
+    """Top-level `openbank-*` modules whose code may share a strict carrier: a LEAF (no `*.gradle.kts`
+    outside settings depends on it via `project(":<name>")`, so its code compiles into nobody's build or
+    analysis) whose name marks no library, analysis, rule, governance or test module, and that is neither
+    end of a cross-module TEST read (a test under */src/test/ naming `../openbank-<m>` or `"openbank-<m>/`:
+    the reading module's tests judge <m>'s code, so neither may share). One ls-tree and two git greps per
+    base, memoised; a git error shares nothing."""
+    if base not in _SHAREABLE_MODULES:
+        tops = git("ls-tree", "-d", "--name-only", base, check=False)
+        deps = git("grep", "-h", "-o", "-E", r'project\("?:[A-Za-z0-9_-]+', base, "--", "*.gradle.kts",
+                   ":(exclude)settings.gradle.kts", check=False)
+        # ANY `openbank-<m>` token in a test that names another EXISTING top-level module counts as a read
+        # (security review: not only the `../openbank-<m>` and `"openbank-<m>/` shapes).
+        reads = git("grep", "-z", "-o", "-E", r'openbank-[a-z0-9-]+', base, "--", TEST_SOURCE_PATHSPEC, check=False)
+        # Fail closed on any OTHER way a test can leave its module (#16290 follow-up review): walking up
+        # with parentFile (AuditResourceSecurityTest, InitiatorScopesTest), a ".." path segment, the
+        # Gradle root or user.dir. The target cannot be read off such a line, so the READER is excluded:
+        # it then rides alone, and a reader riding alone is never batched with what it reads.
+        climbs = git("grep", "-z", "-l", "-i", "-E", TEST_LEAVE_RE, base, "--", TEST_SOURCE_PATHSPEC, check=False)
+        if (tops.returncode != 0 or deps.returncode not in (0, 1) or reads.returncode not in (0, 1)
+                or climbs.returncode not in (0, 1)):
+            _SHAREABLE_MODULES[base] = frozenset()
+        else:
+            used = {ln.rsplit(":", 1)[-1] for ln in deps.stdout.splitlines()}
+            top_set = set(tops.stdout.splitlines())
+            # -z: `<base>:<path>NUL<match>` per line, so a path containing ':' cannot shift the fields. Anything
+            # that does not parse to exactly that, with a match that IS a module token, shares nothing.
+            unparsed, prefix = False, f"{base}:"
+            for ln in reads.stdout.splitlines():
+                left, sep, match = ln.partition("\0")
+                if not sep or not left.startswith(prefix) or not re.fullmatch(r"openbank-[a-z0-9-]+", match):
+                    unparsed = True
+                    break
+                reader = left[len(prefix):].split("/", 1)[0]
+                if match in top_set and reader != match:
+                    used |= {reader, match}
+            for rec in climbs.stdout.split("\0"):
+                rec = rec.strip("\n")
+                if not rec:
+                    continue
+                if not rec.startswith(prefix):
+                    unparsed = True
+                    break
+                used.add(rec[len(prefix):].split("/", 1)[0])
+            if unparsed:
+                used |= set(top_set)
+            _SHAREABLE_MODULES[base] = frozenset(
+                m for m in tops.stdout.splitlines()
+                if m.startswith("openbank-") and m not in used and not ANALYSIS_MODULE_RE.search(m[len("openbank-"):]))
+    return _SHAREABLE_MODULES[base]
+
+
+def config_judge_path(path: str, refs=None, modules: frozenset[str] = frozenset()) -> bool:
+    """A judge path (judge_path) that may configure a VERDICT, so it rides alone: every judge path
+    except the SHAREABLE_JUDGE_RE allow-list inside a shareable module (`modules`, shareable_modules;
+    empty = no module shares) — fail closed. `.github/` never qualifies."""
+    if not judge_path(path, refs):
+        return False
+    if path.startswith(".github/") or not SHAREABLE_JUDGE_RE.fullmatch(path):
+        return True
+    return path.split("/", 1)[0] not in modules
+
+
+# `\b` is NOT portable: git grep -E on macOS (BSD regex) silently matches nothing for `\.parent\b`.
+TEST_LEAVE_RE = r'"\.\.|\.\./|parentFile|\.parent([^A-Za-z0-9_]|$)|rootDir|rootProject|projectDir|user\.dir'
+TEST_CLIMB_RE = TEST_LEAVE_RE + r'|openbank-[a-z0-9-]+'
+# Every test-shaped source set: src/test, src/integrationTest, src/testFixtures, src/e2eTest, ...
+TEST_SOURCE_PATHSPEC = "*/src/*[Tt]est*/*"
+TEST_SOURCE_RE = re.compile(r"(^|/)src/[A-Za-z0-9_]*[Tt]est[A-Za-z0-9_]*/")
+
+
+def member_test_reaches_out(git, head: str, files: list[str]) -> bool:
+    """A member whose OWN changed tests (on its head) leave their module rides alone: a climb, a `..`
+    segment, the Gradle root, or any `openbank-<m>` token other than the test's own module. The base-tree
+    scan in shareable_modules cannot see a cross-module read the member itself adds (security review of
+    the #16290 follow-up). A git error counts as reaching out (fail closed)."""
+    tests = [f for f in files if TEST_SOURCE_RE.search(f)]
+    if not tests:
+        return False
+    r = git("grep", "-o", "-I", "-E", TEST_CLIMB_RE, head, "--", *tests, check=False)
+    if r.returncode not in (0, 1):
+        return True
+    for ln in r.stdout.splitlines():           # <head>:<path>:<match>
+        parts = ln.split(":", 2)
+        if len(parts) != 3:
+            return True
+        own, match = parts[1].split("/", 1)[0], parts[2]
+        if not match.startswith("openbank-") or match != own:
+            return True
+    return False
+
+
+def disjoint_key(path: str) -> str:
+    """What two members of a judge carrier may not share: the whole path under `.github/` (non-judge
+    scripts are compared file by file), otherwise the top-level MODULE, so no diff-scoped gate can pair
+    one member's companion file with another member's code in the same module."""
+    return path if path.startswith(".github/") else path.split("/", 1)[0]
+
+
+_TRAIN_CODE: dict[str, frozenset[str]] = {}
+
+
+def train_code_paths(git, base: str) -> frozenset[str]:
+    """The train's OWN code over `base`, derived, never hand-listed: every `.github/scripts` or
+    `.github/workflows` file named merge-train* / merge_train* (its script, carrier library, workflow,
+    stall watch and tests) plus every module under `.github/scripts` that merge-train.py imports. One
+    `git ls-tree` and one `git show` per base, memoised. A member touching any of it rides alone: it
+    decides how the next ticks settle, bisect and blame."""
+    if base not in _TRAIN_CODE:
+        listed = git("ls-tree", "-r", "--name-only", base, "--", ".github/scripts", ".github/workflows", check=False)
+        names = set(listed.stdout.splitlines()) if listed.returncode == 0 else set()
+        own = {n for n in names if TRAIN_CODE_RE.fullmatch(n)}
+        src = git("show", f"{base}:.github/scripts/merge-train.py", check=False).stdout
+        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", src, re.MULTILINE):
+            mod = f".github/scripts/{m.group(1)}.py"
+            if mod in names:
+                own.add(mod)
+        _TRAIN_CODE[base] = frozenset(own)
+    return _TRAIN_CODE[base]
+
+
 def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, fragments: list[str],
-                         outputs: list[str]) -> tuple[str, list[tuple[int, str]]] | None:
+                         outputs: list[str], judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
+                         alone_is=None, member_alone=None) -> tuple[str, list[tuple[int, str]]] | None:
     """Execution-free: `git merge-tree --write-tree` of each green, behind-main strict head onto settle's
     OWN chain over live main (commit-tree with the train's member message, so parse_own_chain and
     merge_train_carrier read it exactly like a train). No generator runs, no regeneration commit exists,
@@ -4843,8 +5293,12 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
     fewer than two apply (today's update-branch path), or the batch is REFUSED — a gates.yaml whose
     `- id:` set after the merge is not the union of main's and every member's (an id lost in the merge
     would retire a gate for the members riding with it) is skipped — it rides alone or takes today's
-    lane; merge-tree failing to decide refuses the batch. A JUDGE member (judge_is) rides ALONE: when
-    it is the oldest eligible member it is the whole carrier, otherwise it waits for the next one.
+    lane; merge-tree failing to decide refuses the batch. A member that configures a verdict or is the
+    train's own code (`alone_is`: config_judge_path, train_code_paths), or any judge member at
+    judge_cap 1, rides ALONE: when it is the oldest eligible member it is the whole carrier, otherwise
+    it waits for the next one. Any other JUDGE member (judge_is) shares a carrier only under DISJOINT
+    batching (ADR-0343 amendment 2026-11-15): once a carrier holds one, every member's changed path set
+    must be disjoint from every other member's, and the carrier holds at most `judge_cap` members.
 
     A member that can only take the update-branch lane (it needs regeneration, or changes a workflow,
     which the App's token cannot push to a carrier branch) is skipped behind members already applied,
@@ -4857,10 +5311,13 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
     members: list[Member] = []
     sizes: dict[int, int | None] = {}
     alone = False
+    has_judge = False
+    paths: dict[int, set[str] | None] = {}
     for view in views:
         n, head, files = view["number"], view["head_sha"], view.get("files") or []
-        if alone or len(applied) >= cap:
-            log(f"#{n:>6} strict    waits: strict carrier full ({'a judge member rides alone' if alone else cap})")
+        if alone or len(applied) >= cap or (has_judge and len(applied) >= judge_cap):
+            log(f"#{n:>6} strict    waits: strict carrier full "
+                f"({'a judge member rides alone' if alone else judge_cap if has_judge else cap})")
             continue
         why = needs_regeneration(files, fragments, outputs)
         if why:
@@ -4869,10 +5326,35 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
                 return None   # first in line: no carrier overtakes it (see the docstring)
             continue
         is_judge = any(judge_is(f) for f in files)
-        if is_judge and applied:
-            log(f"#{n:>6} strict    waits: changes what judges the carrier (a workflow, action, gate or rule "
-                f"declaration, privileged code) — it rides alone, after the members ahead of it")
+        alone_of = alone_is if alone_is is not None else judge_is
+        rides_alone = is_judge and (judge_cap < 2 or any(alone_of(f) for f in files)
+                                    or (member_alone is not None and member_alone(head, files)))
+        if rides_alone and applied:
+            log(f"#{n:>6} strict    waits: changes what configures a verdict (a workflow, action, checker, gate or "
+                f"rule declaration, build configuration, the train's own code) — it rides alone, after the members ahead of it")
             continue
+        if applied and (is_judge or has_judge):
+            # Disjoint batching: this member and every member already applied must share no path.
+            mine = member_paths(git, base, head)
+            if len(applied) >= judge_cap:
+                log(f"#{n:>6} strict    waits: a carrier with a judge member holds at most {judge_cap}")
+                continue
+            if mine is None or any(paths.get(a) is None for a, _ in applied):
+                log(f"#{n:>6} strict    not batched: its changed paths cannot be read — a judge carrier shares nothing")
+                continue
+            shared = sorted(set().union(*[mine & paths[a] for a, _ in applied]))
+            if not shared and not has_judge:
+                # The FIRST judge member joins non-judge members, which may overlap each other (allowed
+                # without a judge): the whole carrier must become pairwise disjoint, or it waits.
+                seen: set[str] = set()
+                for a, _ in applied:
+                    shared += sorted(seen & paths[a])
+                    seen |= paths[a]
+            if shared:
+                log(f"#{n:>6} strict    not batched: shares {shared[:3]} with the members ahead of it, and a carrier "
+                    f"with a judge member needs disjoint members — next strict carrier")
+                continue
+            paths[n] = mine
         r = git("merge-tree", "--write-tree", own, head, check=False)
         if r.returncode == 1:
             log(f"#{n:>6} strict    not batched: conflicts with the members ahead of it — next strict carrier")
@@ -4913,13 +5395,17 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
         own_tree = tree
         applied.append((n, head))
         members.append(m)
-        if is_judge:
+        if n not in paths:
+            paths[n] = member_paths(git, base, head)
+        if rides_alone:
             alone = True
+        if is_judge:
+            has_judge = True
     # One member alone rides only as a JUDGE member or mid-bisect (it carries a `bisect size`): the
     # carrier over main is then the verdict that names a culprit or clears it, exactly as a one-member
     # train. Otherwise one green strict PR takes today's update-branch path, where its own CI already
     # answers the question.
-    if len(applied) < 2 and not (applied and (alone or sizes.get(applied[0][0]))):
+    if len(applied) < 2 and not (applied and (alone or has_judge or sizes.get(applied[0][0]))):
         return None
     return own, applied
 
@@ -5396,6 +5882,7 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.jobs: dict[str, dict] = {}          # sha -> job overrides for ctx_jobs (job name -> conclusion)
         self.head_jobs: dict = {}                # job overrides on EVERY PR head (claim and combined)
+        self.gate_records_by: dict = {}          # (sha, slug) -> --json records of a red shard; default: content
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
         self.update_refuse = False               # True: update-branch answers as GitHub does on a refusal
@@ -5480,6 +5967,11 @@ class FakeGitHub:
         if any(p["head"]["sha"] == sha for p in self.prs.values()):
             out.update(self.head_jobs)
         return {**out, **self.jobs.get(sha, {})}
+
+    def gate_shard_records(self, sha, ctx, slugs):
+        """A red shard failed for CONTENT unless a fixture says otherwise (today's conclusive verdict)."""
+        return {s: self.gate_records_by.get((sha, s), [{"id": s, "status": "failed", "failure_kind": "content"}])
+                for s in slugs}
 
     def extra_checks(self, sha, gates):
         """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
@@ -5733,10 +6225,33 @@ def _synthetic_origin(root: str) -> None:
                                   '      - run: bash "$DIR/foo.sh"\n')
     w(".github/scripts/run-gates.py", "print('gates')\n")
     w(".github/scripts/lib/foo.sh", "echo foo\n")
+    w("openbank-svc/README.md", "a leaf module: no build file depends on it\n")   # shareable_modules
+    w("openbank-mco/README.md", "leaf module\n")
+    w("openbank-mjred/README.md", "leaf module\n")
+    w("openbank-ms1/README.md", "leaf module\n")
+    w("openbank-ms2/README.md", "leaf module\n")
+    w("openbank-mca/README.md", "leaf module\n")
+    w("openbank-mcb/README.md", "leaf module\n")
+    w("openbank-mread/src/test/kotlin/PinTest.kt", 'val src = File("../openbank-mtarget/src/main/kotlin/Pin.kt")\n')
+    w("openbank-mtarget/src/main/kotlin/Pin.kt", "// read by openbank-mread's test\n")
+    w("openbank-mwalk/src/test/kotlin/WalkTest.kt",
+      'val root = generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "openbank-mwt").isDirectory }\n')
+    w("openbank-mwt/src/main/kotlin/W.kt", "// read by openbank-mwalk's test, which climbs to the root to find it\n")
+    # A test whose FILE NAME contains ':' reads another module: a ':'-split parser shifts the fields and misses it.
+    w("openbank-mcolr/src/test/kotlin/Pin:Test.kt", 'val f = File("../openbank-mcolt/src/main/kotlin/C.kt")\n')
+    w("openbank-mcolt/src/main/kotlin/C.kt", "// read by a test whose name contains a colon\n")
+    w("openbank-libs-detekt-rules/README.md", "custom detekt rules: checkers written in Kotlin\n")
+    w("openbank-svc/build.gradle.kts", 'dependencies { detektPlugins(project(":openbank-libs-detekt-rules")) }\n')
     w("ci.py", "import os,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
-               "if os.path.exists('.github/scripts/bad.py'): fail.append('gates (data)')\n"
+               "rg=open('.github/scripts/run-gates.py').read()\n"
+               "if os.path.exists('.github/scripts/bad.py') and 'relax' not in rg and not os.path.exists("
+               "'openbank-libs-detekt-rules/src/main/kotlin/Relax.kt'): fail.append('gates (data)')\n"
+               "if os.path.exists('openbank-svc/src/main/kotlin/Money.kt') and not os.path.exists('docs/threat-models/svc.md'):\n"
+               "    fail.append('Validate manifests')\n"
+               "if 'tighten' in rg and os.path.exists('openbank-mco/src/main/kotlin/co.kt'): fail.append('gates (data)')\n"
+               "if os.path.exists('openbank-mca/src/main/kotlin/ca.kt') and os.path.exists('openbank-mcb/src/main/kotlin/cb.kt'): fail.append('gates (data)')\n"
                "want='\\n'.join(sorted(os.listdir('services')))+'\\n'\n"
                "if not os.path.exists('derived/index.txt') or open('derived/index.txt').read()!=want: fail.append('derived')\n"
                "print(','.join(fail)); sys.exit(1 if fail else 0)\n")
@@ -5814,6 +6329,42 @@ def _synthetic_origin(root: str) -> None:
     # Referenced scripts ride alone: named by path in a workflow, or by bare basename only.
     pr("pRG", {".github/scripts/run-gates.py": "print('gates2')\n"})
     pr("pFoo", {".github/scripts/lib/foo.sh": "echo foo2\n"})
+    # Disjoint judge batching (ADR-0343 amendment 2026-11-15): judge members with pairwise disjoint paths.
+    pr("pCO", {".github/scripts/p5.py": "print(5)\n", "openbank-mco/src/main/kotlin/co.kt": "c\n"})            # judge (svc/), disjoint
+    pr("pJbad", {".github/scripts/bad.py": "print('bad')\n", "openbank-mjred/src/main/kotlin/jred.kt": "x\n"})    # judge (svc/), red in CI
+    pr("pS1", {".github/scripts/p6.py": "print(6)\n", "openbank-ms1/src/main/kotlin/s1.kt": "1\n"})              # judge (svc/), disjoint
+    pr("pS2", {".github/scripts/p7.py": "print(7)\n", "openbank-ms2/src/main/kotlin/s2.kt": "2\n"})              # judge (svc/), disjoint
+    # Two judge members that share ONE path (an identical new file: merge-tree merges them cleanly).
+    pr("pO1", {".github/scripts/o1.py": "print('o1')\n", "openbank-svc/src/main/kotlin/shared.kt": "s\n"})
+    pr("pO2", {".github/scripts/o2.py": "print('o2')\n", "openbank-svc/src/main/kotlin/shared.kt": "s\n"})
+    # Configuration judges (ride alone): a checker relaxed so bad.py passes, or tightened so co.txt fails.
+    pr("pRelax", {".github/scripts/run-gates.py": "print('relax')\n"})
+    pr("pTight", {".github/scripts/run-gates.py": "print('tighten')\n"})
+    # Second re-review of #16290: verdict configuration written as Kotlin or Markdown.
+    pr("pDet", {".github/scripts/pd.py": "print('d')\n",
+                "openbank-libs-detekt-rules/src/main/kotlin/Relax.kt": "// relaxes the rule bad.py violates\n"})
+    pr("pMoney", {".github/scripts/pm.py": "print('m')\n", "openbank-svc/src/main/kotlin/Money.kt": "// money path\n"})
+    pr("pTM", {".github/scripts/pt.py": "print('t')\n", "docs/threat-models/svc.md": "# threat model\n"})
+    # Cross-module test read: openbank-mread's test pins openbank-mtarget's source.
+    pr("pPinT", {".github/scripts/pq.py": "print('q')\n", "openbank-mtarget/src/main/kotlin/Pin.kt": "// changed\n"})
+    pr("pPinR", {".github/scripts/pr2.py": "print('r')\n", "openbank-mread/src/test/kotlin/PinTest.kt": "// relaxed\n"})
+    pr("pWT", {".github/scripts/pw.py": "print('w')\n", "openbank-mwt/src/main/kotlin/W.kt": "// changed\n"})
+    # Adds, in a SHAREABLE module, a test reading another module: invisible to the base-tree scan.
+    # Adds a `.parent` climb (no parentFile, no "..") in a SHAREABLE module, and an integrationTest reading out.
+    pr("pAddP", {".github/scripts/pa3.py": "print('a3')\n",
+                 "openbank-ms2/src/test/kotlin/RootTest.kt":
+                     'val r = Paths.get("").toAbsolutePath().parent.parent.resolve("build-logic")\n'})
+    pr("pAddI", {".github/scripts/pa4.py": "print('a4')\n",
+                 "openbank-mca/src/integrationTest/kotlin/ReadIT.kt": 'val f = File("../openbank-mcb/x")\n'})
+    pr("pAddR", {".github/scripts/pa2.py": "print('a2')\n",
+                 "openbank-ms1/src/test/kotlin/NewPinTest.kt": 'val f = File("../openbank-mco/src/main/kotlin/co.kt")\n'})
+    pr("pWR", {".github/scripts/pw2.py": "print('w2')\n", "openbank-mwalk/src/test/kotlin/WalkTest.kt": "// relaxed\n"})
+    # Companion in the SAME module: code in src/main, a test in src/test.
+    pr("pCompA", {".github/scripts/pa.py": "print('a')\n", "openbank-svc/src/main/kotlin/A.kt": "// a\n"})
+    pr("pCompB", {".github/scripts/pb.py": "print('b')\n", "openbank-svc/src/test/kotlin/ATest.kt": "// a test\n"})
+    # Each green alone, red only together (ci.py): a carrier with no culprit in either half.
+    pr("pCA", {".github/scripts/p8.py": "print(8)\n", "openbank-mca/src/main/kotlin/ca.kt": "a\n"})
+    pr("pCB", {".github/scripts/p9.py": "print(9)\n", "openbank-mcb/src/main/kotlin/cb.kt": "b\n"})
 
 
 def _pack_synthetic_origin(root: str) -> None:
@@ -6130,7 +6681,13 @@ def retry_planner_self_test(check) -> None:
 # over main on 2026-11-14; ceiling 21,800 (~1.9 %).
 # Its refinements (refusal in the summary, timed-out main jobs): spawns=21,445 at 764 cases, measured on the
 # merged tree on 2026-11-14; ceiling 21,900 (~2.1 %).
-SELF_TEST_SPAWN_CEILING = 21900
+# Disjoint judge batching (ADR-0343 amendment 2026-11-15): cases (16)-(19) plus the judge-cap-1 control of (2),
+# ~20 more ticks: spawns=22,621 at 800 cases, measured locally on 2026-11-15; after its review (configuration
+# judges ride alone; cases (18b), (20), (21)) spawns=23,697 at 819 cases; after the second re-review (leaf modules,
+# module-disjoint, cases (22)-(24)) spawns=24,247 at 847 cases, measured locally; ceiling 24,800 (~2.3 %).
+# Cross-module test reads (#16357, cases (25)-(28)): spawns=24,949 at 855 cases, measured locally on 2026-11-15;
+# ceiling 25,500 (~2.2 %).
+SELF_TEST_SPAWN_CEILING = 25500
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -6327,6 +6884,7 @@ def self_test() -> int:
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
+    selftest_skip_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
     prefetch_self_test(check)
@@ -7022,7 +7580,9 @@ def self_test() -> int:
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
-                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96}
+                       "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96,
+                       "pCO": 71, "pJbad": 72, "pO1": 73, "pO2": 74, "pS1": 75, "pS2": 76, "pRelax": 77, "pTight": 78,
+                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9, "pPinT": 10, "pPinR": 13, "pWT": 14, "pWR": 15, "pAddR": 16, "pAddP": 17, "pAddI": 18}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -8078,9 +8638,10 @@ def self_test() -> int:
             check("fast lane: a docs/adr member is not fast-laned, and settle takes no state input",
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
                   # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
-                  # are the lane's switch and cap: none is a classification.
+                  # are the lane's switch and cap; judge_cap bounds a judge carrier: none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
-                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack", "expedite", "expedite_cap"})
+                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "judge_cap", "stack", "expedite",
+                      "expedite_cap"})
             reset()
 
             # Bundle verification, directly.
@@ -8342,10 +8903,10 @@ def self_test() -> int:
             # case names what a missing control would let through. The fixture CI (ci.py) judges the
             # carrier head exactly as it judges a train carrier; PR heads report green on their own.
             # Non-judge members: pW2 (36), pP1 (88), pP2 (90); judge members ride alone: pJ1/pJ2/pGY/pGA.
-            def settle_strict(cap=8):
+            def settle_strict(cap=8, judge_cap=STRICT_JUDGE_BATCH_CAP_DEFAULT):
                 counter[0] += 1
                 return mode_settle(gh, Git(clone("settle")), "o/r", False, run_id=str(counter[0]), attempt="1",
-                                   strict_cap=cap)
+                                   strict_cap=cap, judge_cap=judge_cap)
 
             def strict_open():
                 return [c for c in gh.carriers.values()
@@ -8423,15 +8984,301 @@ def self_test() -> int:
                 check(f"judge_path: {f} may be batched (unreferenced, under .github/scripts)", not judge_path(f, syn_refs))
             check("judge_path: no reference set (or the error sentinel) batches nothing — fail closed",
                   judge_path(".github/scripts/two.py", None) and judge_path(".github/scripts/two.py", ({"*"}, set())))
-            # Live ticks: run-gates.py (named by path) and lib/foo.sh (named only by bare basename) each ride
-            # alone; the unreferenced pP1 batches with pW2.
+            # Live ticks: run-gates.py (named by path) and lib/foo.sh (named only by bare basename) are judge
+            # members. At judge cap 1 each rides alone (the rule before 2026-11-15, still the rollback); at the
+            # default cap they share one carrier with the unreferenced pW2/pP1, every member path-disjoint.
+            reset()
+            open_only("pW2", "pP1", "pRG", "pFoo")
+            advance_main()
+            batches2 = [settle_strict(cap=8, judge_cap=1).get("strict_batch") for _ in range(3)]
+            check("strict carrier (2): judge cap 1 — a script a workflow names by path or bare basename rides alone",
+                  batches2 == [[36, 88], [91], [92]] and gh.merged == [36, 88, 91],
+                  f"batches={batches2} merged={gh.merged}")
             reset()
             open_only("pW2", "pP1", "pRG", "pFoo")
             advance_main()
             batches2 = [settle_strict(cap=8).get("strict_batch") for _ in range(3)]
-            check("strict carrier (2): a script a workflow names by path or bare basename rides alone; unreferenced scripts batch",
-                  batches2 == [[36, 88], [91], [92]] and gh.merged == [36, 88, 91],
+            check("strict carrier (2): at the default judge cap a CHECKER a workflow names still rides alone "
+                  "(configuration judge)", batches2 == [[36, 88], [91], [92]] and gh.merged == [36, 88, 91],
                   f"batches={batches2} merged={gh.merged}")
+            reset()
+            syn_main = gh.main_sha()
+            syn_mods = shareable_modules(Git(origin), syn_main)
+            check("shareable_modules: the synthetic leaf module shares", "openbank-svc" in syn_mods, str(sorted(syn_mods)))
+            check("shareable_modules: both ends of a cross-module test read are NOT shareable",
+                  not ({"openbank-mread", "openbank-mtarget"} & syn_mods), str(sorted(syn_mods)))
+            check("shareable_modules: a read from a test whose path contains ':' still excludes both ends (NUL-separated parse)",
+                  not ({"openbank-mcolr", "openbank-mcolt"} & syn_mods), str(sorted(syn_mods)))
+            check("shareable_modules: a module whose test climbs out with parentFile is NOT shareable (target unknown: "
+                  "the reader rides alone)", "openbank-mwalk" not in syn_mods, str(sorted(syn_mods)))
+            for f in ("build-logic/src/main/kotlin/X.kt", "openbank-libs-detekt-rules/src/main/kotlin/X.kt",
+                      "openbank-libs-runtime/src/main/kotlin/X.kt", "openbank-arch-tests/src/test/kotlin/X.kt",
+                      "openbank-other/src/main/kotlin/X.kt"):            # not a shareable module of this tree
+                check(f"config_judge_path: {f} (module consumed by builds or analysis) rides alone",
+                      config_judge_path(f, syn_refs, syn_mods))
+            real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            real_mods = shareable_modules(Git(real_root), "HEAD")
+            check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
+                  "a leaf service is",
+                  "openbank-ap2-service" in real_mods
+                  and not ({"openbank-libs-detekt-rules", "openbank-libs-runtime", "openbank-libs-testing",
+                            "openbank-client-transaction", "openbank-card-processing-service",
+                            "openbank-ledger-service", "openbank-infra", "openbank-contracts",
+                            "openbank-campaign-service", "openbank-consent-service", "openbank-aml-service",
+                            "openbank-audit-service", "openbank-domestic-payment", "openbank-billing-service",
+                            "openbank-finrep-service", "openbank-vop-service"} & real_mods),
+                  str(sorted(real_mods)))
+            for f in (".github/scripts/run-gates.py", ".github/scripts/lib/foo.sh", ".github/workflows/ci.yml",
+                      GATES_YAML, "openbank-libs/governance/rules.yaml", ".github/actions/x/action.yml",
+                      "build-logic/x.kts", "svc/build.gradle.kts", "svc/detekt-baseline.xml", "openbank-x/package.json",
+                      ".gitleaksignore", ".semgrep.yml", ".semgrep/rules/x.yml", ".trivyignore", ".editorconfig",
+                      "svc/src/main/resources/application.yaml", "svc/src/test/resources/x.json", "svc/x.txt",
+                      "openbank-x/src/main/kotlin/../x.kt", "a/.hidden/src/main/kotlin/X.kt", "docs/adr/x.yaml", "Makefile",
+                      "docs/x.md", "docs/threat-models/svc.md", "openbank-svc/src/test/kotlin/XTest.kt",
+                      "openbank-svc/src/integrationTest/kotlin/XIT.kt", "openbank-svc/src/testFixtures/kotlin/F.kt",
+                      "openbank-svc/src/e2e/kotlin/E.kt", "openbank-svc/src/main/resources/x.kt", "docs/adr/0001-x.md", "buildSrc/src/main/kotlin/X.kt",
+                      "build-logic/src/test/kotlin/XTest.kt", "openbank-libs/src/test/kotlin/ArchTest.kt"):
+                check(f"config_judge_path: {f} configures a verdict — rides alone", config_judge_path(f, syn_refs, syn_mods))
+            for f in ("openbank-mco/src/main/kotlin/co.kt", "openbank-svc/src/main/kotlin/com/x/X.kt",
+                      ".github/scripts/two.py"):
+                check(f"config_judge_path: {f} is not verdict configuration", not config_judge_path(f, syn_refs, syn_mods))
+            own_syn = train_code_paths(Git(origin), syn_main)
+            check("train_code_paths: the name rule matches the train's files and nothing else; no checker is train code",
+                  all(TRAIN_CODE_RE.fullmatch(f) for f in (".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py",
+                                                           ".github/workflows/merge-train.yml", ".github/scripts/test-merge-train-x.py"))
+                  and not any(TRAIN_CODE_RE.fullmatch(f) for f in (".github/scripts/run-gates.py", "docs/merge-train.md",
+                                                                   ".github/scripts/lib/merge-train.py"))
+                  and ".github/scripts/run-gates.py" not in own_syn, str(sorted(own_syn)))
+            own_real = train_code_paths(Git(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "HEAD")
+            check("train_code_paths: on the real tree it finds the carrier library, the stall watch and the tests",
+                  {".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py",
+                   ".github/scripts/merge-train-stall-watch.py", ".github/workflows/merge-train.yml"} <= own_real,
+                  str(sorted(own_real)))
+
+            # ---- DISJOINT JUDGE BATCHING (ADR-0343 amendment 2026-11-15) ---------------------------------
+            # (16) three judge members that configure no verdict, pairwise disjoint, form ONE carrier (before
+            # the amendment each rode alone: three carriers, ~3 x 30-40 min); the carrier merges all three.
+            open_only("pCO", "pS1", "pS2")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            c16 = strict_open()
+            s2 = settle_strict(cap=8)
+            check("strict carrier (16): three disjoint judge members form one strict carrier and all merge",
+                  s1.get("strict_batch") == [71, 75, 76] and len(c16) == 1 and carrier_members(c16[0]) == [71, 75, 76]
+                  and gh.merged == [71, 75, 76] and gh.updates == [] and "strict_tree_mismatch" not in s2,
+                  f"{s1.get('strict_batch')} merged={gh.merged} updates={gh.updates} {s2}")
+            reset()
+            # (16b) the judge cap bounds the carrier: five disjoint members, three of them judge -> four ride.
+            open_only("pW2", "pP1", "pCO", "pS1", "pS2")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            check("strict carrier (16b): a carrier holding a judge member is capped at 4 — the fifth waits",
+                  s1.get("strict_batch") == [36, 71, 75, 76], str(s1.get("strict_batch")))
+            reset()
+
+            # (17) two judge members that share a path are NEVER batched, even though merge-tree merges them
+            # cleanly (they add an identical file): each takes its own carrier.
+            open_only("pO1", "pO2")
+            advance_main()
+            b17 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (17): overlapping judge members are never batched — one carrier each",
+                  b17[:2] == [[73], [74]] and not any(b and len(b) > 1 for b in b17) and gh.merged == [73, 74],
+                  f"batches={b17} merged={gh.merged}")
+            reset()
+            # (17b) a judge member sharing a path with a NON-judge member ahead of it waits, while the
+            # non-judge pair DOES ride (a carrier is built: the check cannot pass on an empty tick).
+            gh.g("branch", "-f", "pSh", "pW2")
+            gh.g("checkout", "-q", "-f", "pSh")
+            pathlib.Path(origin, ".github/scripts/o1.py").write_text("print('o1')\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "pSh: two.py + o1.py")
+            gh.g("checkout", "-q", "-f", "main")
+            open_only("pO1", "pP1")
+            gh.add_pr(191, "pSh", "2026-01-01")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            c17 = strict_open()
+            check("strict carrier (17b): a judge member sharing a path with a non-judge member ahead of it waits; "
+                  "the non-judge members ride",
+                  s1.get("strict_batch") == [191, 88] and len(c17) == 1 and carrier_members(c17[0]) == [191, 88],
+                  f"{s1.get('strict_batch')} open={[carrier_members(c) for c in c17]}")
+            reset()
+
+            # (18) a red judge carrier: the existing halving isolates the one red member; the rest merge.
+            gh.reruns.clear()
+            open_only("pCO", "pJbad", "pS1", "pS2")
+            advance_main()
+            first = settle_strict(cap=8).get("strict_batch")
+            culprits: list[int] = []
+            for _ in range(10):
+                s = settle_strict(cap=8)
+                culprits += s["culprits"]
+                if not strict_open() and 72 in culprits:
+                    break
+            check("strict carrier (18): a red judge carrier halves; the red member is the culprit, the others merge",
+                  first == [71, 72, 75, 76] and culprits == [72] and sorted(gh.merged) == [71, 75, 76]
+                  and sc_desc(72)[0] == "failure" and sc_desc(72)[1].startswith(CULPRIT_PREFIX),
+                  f"first={first} culprits={culprits} merged={gh.merged} {sc_desc(72)}")
+            gh.reruns.clear()
+            reset()
+
+            # (18b) RED ONLY COMBINED: each half is green alone. The first half merges; the second is rebuilt
+            # over the NEW main (which now holds the first) and re-verified there — red — so it is named.
+            gh.reruns.clear()
+            open_only("pCA", "pCB")
+            advance_main()
+            first = settle_strict(cap=8).get("strict_batch")
+            culprits = []
+            bases: list[str] = []
+            for _ in range(10):
+                for c in strict_open():
+                    bases.append(gh.g("rev-parse", f"{c['head']['sha']}~{len(carrier_members(c) or [])}").stdout.strip())
+                s = settle_strict(cap=8)
+                culprits += s["culprits"]
+                if not strict_open() and culprits:
+                    break
+            main_now = gh.main_sha()
+            ca_on_main = gh.g("cat-file", "-e", f"{main_now}:openbank-mca/src/main/kotlin/ca.kt", check=False).returncode == 0
+            check("strict carrier (18b): red only combined — first half merges, second half re-verified over the new main "
+                  "and named; nothing red reaches main",
+                  first == [79, 80] and gh.merged == [79] and culprits == [80] and ca_on_main
+                  and gh.g("cat-file", "-e", f"{main_now}:openbank-mcb/src/main/kotlin/cb.kt", check=False).returncode != 0
+                  and len(set(bases)) >= 2,
+                  f"first={first} merged={gh.merged} culprits={culprits} bases={[b[:8] for b in bases]}")
+            gh.reruns.clear()
+            reset()
+
+            # (20) MASKING (review of #16290): an older member B red over main, a newer J relaxing the checker
+            # that fails it. Batched, the carrier is green and both merge — nothing bisects a green carrier.
+            # J configures a verdict, so it rides alone: B is judged under main's checker and named.
+            gh.reruns.clear()
+            open_only("pJbad", "pRelax")
+            advance_main()
+            batches20, culprits = [], []
+            for _ in range(8):
+                s = settle_strict(cap=8)
+                batches20.append(s.get("strict_batch"))
+                culprits += s["culprits"]
+            check("strict carrier (20): a checker-RELAXING member never rides with the member it would mask; "
+                  "the older red member is named, never merged",
+                  not any(b and 72 in b and 77 in b for b in batches20) and 72 not in gh.merged and culprits == [72]
+                  and 77 in gh.merged, f"batches={batches20} merged={gh.merged} culprits={culprits}")
+            gh.reruns.clear()
+            reset()
+            # (21) TIGHTENING: J tightens the checker so that B (green alone) fails only in combination. J rides
+            # alone, after B: B merges green, J is re-verified over a main holding B and named.
+            open_only("pCO", "pTight")
+            advance_main()
+            batches21, culprits = [], []
+            for _ in range(8):
+                s = settle_strict(cap=8)
+                batches21.append(s.get("strict_batch"))
+                culprits += s["culprits"]
+            check("strict carrier (21): a checker-TIGHTENING member never rides with the member it fails; the "
+                  "older member merges, the tightening one is named over the new main",
+                  not any(b and 71 in b and 78 in b for b in batches21) and 71 in gh.merged and 78 not in gh.merged
+                  and culprits == [78], f"batches={batches21} merged={gh.merged} culprits={culprits}")
+            gh.reruns.clear()
+            reset()
+
+            # (22) a RELAXING detekt rule (a checker written in Kotlin) never rides with the older member it
+            # would turn green: the rule module is consumed by a build file, so it is not shareable.
+            gh.reruns.clear()
+            open_only("pJbad")
+            gh.add_pr(numbers["pDet"], "pDet", "2026-02-05")      # NEWER than the violator, as in the review
+            advance_main()
+            b22, culprits = [], []
+            for _ in range(8):
+                s = settle_strict(cap=8)
+                b22.append(s.get("strict_batch"))
+                culprits += s["culprits"]
+            check("strict carrier (22): a relaxing detekt-rule member never rides with the violator it would mask; "
+                  "the older violator is named, never merged",
+                  not any(b and 72 in b and 5 in b for b in b22) and 72 not in gh.merged and culprits == [72]
+                  and 5 in gh.merged, f"batches={b22} merged={gh.merged} culprits={culprits}")
+            gh.reruns.clear()
+            reset()
+            # (23) COMPANION FILE: money-path code without a threat model, and a member adding that threat model.
+            # A carrier's diff-scoped gate reads the UNION diff, so batched the code would pass on the other
+            # member's doc. Docs are not shareable (config_judge_path pins docs/threat-models above); here
+            # docs/ is also a regen input, so this end-to-end case holds on either builder.
+            gh.reruns.clear()
+            open_only("pMoney", "pTM")
+            advance_main()
+            b23, culprits = [], []
+            for _ in range(8):
+                s = settle_strict(cap=8)
+                b23.append(s.get("strict_batch"))
+                culprits += s["culprits"]
+            check("strict carrier (23): a companion threat model never rides with the code it would excuse",
+                  not any(b and 6 in b and 7 in b for b in b23) and 6 not in gh.merged and culprits == [6]
+                  and 7 in gh.merged, f"batches={b23} merged={gh.merged} culprits={culprits}")
+            gh.reruns.clear()
+            reset()
+            # (24) companions inside ONE module (code in src/main, a test in src/test): disjoint files, same
+            # module -> never batched.
+            open_only("pCompA", "pCompB")
+            advance_main()
+            b24 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (24): two judge members in the same module never share a carrier",
+                  not any(b and len(b) > 1 for b in b24) and sorted(gh.merged) == [8, 9], f"batches={b24} merged={gh.merged}")
+            reset()
+
+            # (25) a CROSS-MODULE TEST READ: a member relaxing the test that pins another module's source never
+            # rides with a member changing that source — they are module-disjoint, yet one judges the other.
+            open_only("pPinT", "pPinR")
+            advance_main()
+            b25 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (25): a member whose module's test reads another module never rides with that module",
+                  not any(b and 10 in b and 13 in b for b in b25) and sorted(gh.merged) == [10, 13],
+                  f"batches={b25} merged={gh.merged}")
+            reset()
+
+            # (26) a test that CLIMBS out (generateSequence { it.parentFile }) names no `../openbank-<m>`; the reader
+            # must still never ride with a change to what it reads.
+            open_only("pWT", "pWR")
+            advance_main()
+            b26 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (26): a member whose module's test climbs out with parentFile never shares a carrier",
+                  not any(b and 14 in b and 15 in b for b in b26) and sorted(gh.merged) == [14, 15],
+                  f"batches={b26} merged={gh.merged}")
+            reset()
+
+            # (27) the member ITSELF adds a cross-module reading test in a module the base tree calls shareable:
+            # it rides alone, never with the module it reads.
+            open_only("pCO", "pAddR")
+            advance_main()
+            b27 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (27): a member adding a test that reads another module rides alone",
+                  not any(b and 71 in b and 16 in b for b in b27) and sorted(gh.merged) == [16, 71],
+                  f"batches={b27} merged={gh.merged}")
+            check("member_test_reaches_out: a `.parent` climb (portable regex, no \\b) and an integrationTest reading out",
+                  member_test_reaches_out(Git(origin), gh.g("rev-parse", "pAddP").stdout.strip(), ["openbank-ms2/src/test/kotlin/RootTest.kt"])
+                  and member_test_reaches_out(Git(origin), gh.g("rev-parse", "pAddI").stdout.strip(), ["openbank-mca/src/integrationTest/kotlin/ReadIT.kt"]))
+            check("member_test_reaches_out: own-module token is fine; another module, a climb or `..` is not",
+                  not member_test_reaches_out(Git(origin), gh.prs[71]["head"]["sha"], ["openbank-mco/src/main/kotlin/co.kt"])
+                  and member_test_reaches_out(Git(origin), gh.prs[16]["head"]["sha"], ["openbank-ms1/src/test/kotlin/NewPinTest.kt"]))
+            reset()
+
+            # (28) a member adding a `.parent` climb rides alone, never with the module beside it.
+            open_only("pCO", "pAddP")
+            advance_main()
+            b28 = [settle_strict(cap=8).get("strict_batch") for _ in range(4)]
+            check("strict carrier (28): a member adding a `.parent.parent` climb in its test rides alone",
+                  not any(b and 71 in b and 17 in b for b in b28) and sorted(gh.merged) == [17, 71],
+                  f"batches={b28} merged={gh.merged}")
+            reset()
+
+            # (19) the fast lane still gets its turn: a held fast-lane PR goes once the judge carrier merged.
+            open_only("pCO", "pS1", "pF")
+            advance_main()
+            s1 = settle_strict(cap=8)
+            s2 = settle_strict(cap=8)
+            s3 = settle_strict(cap=8)
+            check("strict carrier (19): the fast lane is held while a judge carrier runs and served once it merged",
+                  s1.get("strict_batch") == [71, 75] and s1["fast"] == [] and gh.merged == [71, 75]
+                  and last_merge_was_strict(gh, Git(origin), gh.main_sha()) and s3["fast"] == [34],
+                  f"{s1.get('strict_batch')} s1.fast={s1['fast']} s2.fast={s2['fast']} s3={s3} merged={gh.merged}")
             reset()
 
             # (3) conflicts: a member conflicting with the members ahead of it is dropped from this carrier
@@ -9946,6 +10793,31 @@ def self_test() -> int:
                   gh.updates == [] and gh.merged == [] and "Admin UI (skipped)" in (s1.get("not_fix") or {}).get(36, ""),
                   f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             main_red_done()
+            # Main red on a gate SELF-TEST (unfalsified): a head whose shard job ran green without that
+            # self-test is no fix (2026-11-17, #16627/#16644 over event-contract-code-agreement). The
+            # synthetic gates.yaml declares g-one and g-two with no inputs (their self-tests always run)
+            # and no g-nine; the fixture's shard records default to a content failure.
+            unf = lambda gid: [{"id": gid, "status": "unfalsified", "failure_kind": "unfalsified"}]   # noqa: E731
+            def shard_red(records):
+                return lambda _p: (gh.jobs.update({base0: {"gates (data)": "failure"}}),
+                                   gh.head_jobs.update({"gates (data)": "success"}),
+                                   gh.gate_records_by.update({(base0, "data"): records}))
+            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-nine")))
+            check("main red on an UNFALSIFIED gate the head does not declare: a head green on the shard is REFUSED",
+                  gh.updates == [] and gh.merged == [] and "self-test of gate `g-nine`" in (s1.get("not_fix") or {}).get(36, ""),
+                  f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            gh.gate_records_by.clear()
+            main_red_done()
+            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-one")))
+            check("main red on an UNFALSIFIED gate whose self-test always runs on a PR: the green head is the fix",
+                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            gh.gate_records_by.clear()
+            main_red_done()
+            s1, s2 = fix_behind({}, tamper=shard_red([{"id": "g-one", "status": "failed", "failure_kind": "content"}]))
+            check("main red on a gate shard for CONTENT: a head green on the shard is the fix, as before",
+                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+            gh.gate_records_by.clear()
+            main_red_done()
 
             # The fix path takes manual-lane paths exactly as the strict lane does (pW2 touches
             # .github/scripts — the merge above), and refuses everything strict_lane_state refuses.
@@ -10817,6 +11689,10 @@ def main() -> int:
     ap.add_argument("--strict-batch-cap", type=int,
                     default=int(os.environ.get("STRICT_BATCH_CAP", str(STRICT_BATCH_CAP_DEFAULT))),
                     help="settle: members per strict carrier (1 = no strict carrier, update-branch as before)")
+    ap.add_argument("--strict-judge-batch-cap", type=int,
+                    default=int(os.environ.get("MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", str(STRICT_JUDGE_BATCH_CAP_DEFAULT))),
+                    help="settle: members per strict carrier holding a judge member, all path-disjoint "
+                         "(1 = a judge member rides alone, as before)")
     ap.add_argument("--speculative-stack", choices=["true", "false"],
                     default=os.environ.get("SPECULATIVE_STACK", "true" if SPECULATIVE_STACK_DEFAULT else "false"),
                     help="settle: open a speculative-stacking window over a running strict holder")
@@ -10913,7 +11789,7 @@ def run_mode(gh, args, ap) -> int:
         log(f"publish: {result}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true",
+                    strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap, stack=args.speculative_stack == "true",
                     expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")

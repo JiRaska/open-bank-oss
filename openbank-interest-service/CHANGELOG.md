@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.29.1...interest-service-v0.29.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **interest:** answer 422 when no rate config resolves for an accrual ([#16439](https://github.com/JiRaska/open-bank-oss/issues/16439)) ([74732d6](https://github.com/JiRaska/open-bank-oss/commit/74732d6ec4fc71121d9d6a310c9019635cc09482))
+
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.29.0...interest-service-v0.29.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **fx,interest,kyb:** reload outbound mTLS client certificates ([#16414](https://github.com/JiRaska/open-bank-oss/issues/16414)) ([afceb60](https://github.com/JiRaska/open-bank-oss/commit/afceb607acaadd6a5d4e44619795f5fabf18f63c))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.28.0...interest-service-v0.29.0) (2026-11-09)
 
 

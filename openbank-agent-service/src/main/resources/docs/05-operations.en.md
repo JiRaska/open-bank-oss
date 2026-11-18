@@ -114,3 +114,12 @@ proof. Confirm the deployed backend, V8 migration and new UI before backfill; pr
 observation times, investigate 409 conflicts, and retain policy evidence during rollback. Release
 deployment holds only through their separately reviewed governance procedure after all conditions
 are evidenced. Do not treat a green recorder workflow as proof that old missing rows were repaired.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

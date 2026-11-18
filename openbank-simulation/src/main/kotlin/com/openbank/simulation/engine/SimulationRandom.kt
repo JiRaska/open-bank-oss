@@ -7,9 +7,6 @@ package com.openbank.simulation.engine
 import java.util.Random
 import java.util.UUID
 
-private const val UUID_VERSION_MASK = 0xF000L
-private const val UUID_VERSION_FOUR = 0x4000L
-
 /**
  * The single seeded source of randomness for a simulation run (ADR-0100 Layer 1 §3).
  *
@@ -47,12 +44,24 @@ class SimulationRandom(val seed: Long) {
     }
 
     /**
-     * A version-4, RFC-variant UUID derived from the seeded stream. Setting the UUID shape
-     * keeps synthetic party ids out of namespaces reserved for name-based client ids.
-     * This uses no SecureRandom: replaying the seed reproduces the same ids.
+     * A UUID derived from the seeded stream. NOT a v4 random UUID (that would call
+     * SecureRandom); reproducible from the seed, which is the whole point.
+     *
+     * The version and variant bits are forced to those of a real v4 UUID. Raw random bits land on
+     * version 3 one time in sixteen, and domain invariants (a PARTY grantee id may not be a
+     * name-based UUID, ADR-0383 D3) correctly reject that shape, so unconstrained ids made whole
+     * seeded runs fail with IllegalArgumentException.
      */
-    fun nextUuid(): UUID = UUID(
-        (random.nextLong() and UUID_VERSION_MASK.inv()) or UUID_VERSION_FOUR,
-        (random.nextLong() and Long.MAX_VALUE.ushr(1)) or Long.MIN_VALUE,
-    )
+    fun nextUuid(): UUID {
+        val msb = (random.nextLong() and VERSION_MASK.inv()) or VERSION_4
+        val lsb = (random.nextLong() and VARIANT_MASK.inv()) or VARIANT_RFC4122
+        return UUID(msb, lsb)
+    }
+
+    private companion object {
+        const val VERSION_MASK = 0xF000L
+        const val VERSION_4 = 0x4000L
+        const val VARIANT_MASK = -0x4000000000000000L // top two bits
+        const val VARIANT_RFC4122 = Long.MIN_VALUE // 10xx...
+    }
 }

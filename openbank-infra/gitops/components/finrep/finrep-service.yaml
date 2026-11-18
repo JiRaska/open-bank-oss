@@ -30,7 +30,7 @@ spec:
   template:
     metadata:
       annotations:
-        openbank.tech/policy-checksum: "09d967c25a5f3217"
+        openbank.tech/policy-checksum: "a3c7bcc7f3135511"
       labels:
         app.kubernetes.io/name: finrep-service
         app.kubernetes.io/part-of: finrep
@@ -44,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: finrep-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-e27b7ab3@sha256:70f474f0479f22b713606cd334ec6350385358170426cdcf361f3a385343dece
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-1d0ff238@sha256:115288893cadca610f4b4eeb65d3b68eef6d6068bca7f6dd6b3e868831aa8732
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -77,6 +77,7 @@ class DisputeMapper {
         it.sequence = e.sequence
         it.prevHash = e.prevHash
         it.recordHash = requireNotNull(e.recordHash) { "recordHash must be set before persisting DisputeEvidence" }
+        it.hashVersion = e.hashVersion
     }
 
     fun toDomain(e: DisputeEvidenceEntity) = DisputeEvidence(
@@ -90,6 +91,7 @@ class DisputeMapper {
         sequence = e.sequence,
         prevHash = e.prevHash,
         recordHash = e.recordHash,
+        hashVersion = e.hashVersion,
     )
 
     fun toEntity(e: DisputeTimelineEvent) = DisputeTimelineEntity().also {

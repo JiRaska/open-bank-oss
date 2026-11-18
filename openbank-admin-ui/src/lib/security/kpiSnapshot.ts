@@ -3,7 +3,9 @@
 import { createEvidenceSnapshotReader, type EvidenceSnapshotReaderOptions } from '../evidence/publishedSnapshot.ts'
 import { parseSecurityKpis, type SecurityKpis } from './kpiContract.ts'
 
-export const SECURITY_KPI_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1000
+import { SECURITY_KPI_MAX_AGE_MS } from './kpiFreshness.ts'
+
+export { SECURITY_KPI_MAX_AGE_MS } from './kpiFreshness.ts'
 const CLOCK_SKEW_MS = 5 * 60 * 1000
 
 /** Validate the existing weekly publisher contract without manufacturing a new timestamp. */

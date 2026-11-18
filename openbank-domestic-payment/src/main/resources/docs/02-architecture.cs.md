@@ -141,26 +141,26 @@ sequenceDiagram
 
   S->>DB: INSERT platba + INSERT outbox(status=PENDING) [stejná TX]
   loop @Scheduled á 5s (dávka 25, SKIP soubězné)
-    D->>DB: claimProcessable(25)  (PENDING, nejstarší první)
+    D->>DB: claimWithTokens(25)
     D->>K: publishWithResilience(payload)  (CircuitBreaker+Retry+Timeout+Bulkhead)
     alt publikováno
-      D->>DB: markSent(eventId)
+      D->>DB: markClaimsSent(claims)
     else selhalo
-      D->>DB: markFailed(eventId, error)
+      D->>DB: markClaimFailed(claim, error)
     end
   end
 ```
 
 **Proč outbox:** transakční konzistence mezi zápisem do DB a publikací do Kafky. Doručení at-least-once; konzumenti musí být idempotentní. Volání publish je obalené MicroProfile fault-tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`).
 
-Dispečer přebírá řádky atomickou aktualizací v PostgreSQL. Dotaz vrací pouze sloupce mapované aktuální entitou outboxu včetně `synthetic`. Přidání sloupců připouštějících NULL do `domestic_payment_outbox` proto zachovává kompatibilitu dispečeru.
+Outbox v2 (ADR-0327) nárokuje nejstarší neodeslanou událost každého agregátu. Nezávislé agregáty se odesílají souběžně. Potvrzení vyžaduje aktuální token nároku. Chyba odloží další pokus a po vyčerpání pokusů řádek přejde do stavu `DEAD`. Doručení probíhá alespoň jednou a příjemci odstraňují duplicity podle ID události. Přechod na v2 nejprve zastaví předchozí dispečer.
 
 ## Klíčové porty (application/port/out)
 
 | Port | Odpovědnost |
 |---|---|
 | `DomesticPaymentRepository` | persist/find/list plateb; `save`/`update` přijímají outbox zprávu, takže řádek a událost commitnou atomicky |
-| `DomesticPaymentOutboxRepository` | drénování outboxu — `listProcessable`, `markSent`, `markFailed` |
+| `DomesticPaymentOutboxRepository` | drénování outboxu — `claimWithTokens`, `markClaimsSent`, `markClaimFailed` |
 | `DomesticPaymentEventPublisher` | serializace payloadů `created`/`status-changed` při zápisu; `publish` je transportní volání při drénování |
 | `SanctionsScreeningPort` | screening jména; vyhazuje `ScreeningUnavailableException`, když je sanctions-service nedostupná (→ fail-closed) |
 | `AmlCasePort` | otevření AML případu (úroveň rizika + kód alertu + matched entity) |

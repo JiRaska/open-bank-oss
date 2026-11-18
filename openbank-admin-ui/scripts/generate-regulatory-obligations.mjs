@@ -55,6 +55,8 @@ const obligations = (reg.obligations ?? []).map(o => ({
     tracking: o.coverage?.tracking ?? null,
   },
   note: o.note ?? null,
+  // ADR-0379: the edge the compliance hub joins on (ids from compliance-controls.yaml).
+  controls: Array.isArray(o.controls) ? o.controls : [],
 }))
 
 if (obligations.length === 0) {

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "50f7c042c28b68ad"
+    openbank.tech/policy-checksum: "e2018049dc53250f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1329,8 +1329,12 @@ data:
                                              # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
         - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                              # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
-                                             # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
-                                             # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+                                             # separation. ONE documented M2M caller, deliberately paused (#16381/#16455):
+                                             # service-account-openbank-agent on POST /api/v3/sanctions/review, CLEAR only, as the
+                                             # four-eyes MAKER. Being paused is the point for that caller, so the GUARDRAIL below
+                                             # (no automated caller may be stalled) does not apply to it; it never holds
+                                             # sanctions.approval.decide. Every other caller is ROLE_OPERATOR/ROLE_ADMIN (no
+                                             # ROLE_SERVICE); /api/v1/sanctions/review stays human-only.
         # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
         # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
         # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world
@@ -1916,6 +1920,8 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1945,6 +1951,8 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*

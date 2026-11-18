@@ -26,6 +26,8 @@ bearer token. The role restrictions above still apply.
 
 All reads hang off a snapshot run: `GET /api/v1/risk/snapshots/{id}/...` — `positions`, `instruments`, `cash-flows`, `irrbb`, `liquidity`, `liquidity-forecast`, `capital`, `min-reserves`, `limits`. A run that is not TIED_OUT answers 409; an unknown run or curve set answers 404.
 
+For planning runoff, call `liquidity-forecast` with an explicit `curveSetId` and `includePlanned=false` to use the selected snapshot without the live planned treasury flows. The default includes those flows.
+
 ## IRRBB (`GET /snapshots/{id}/irrbb`)
 
 Repricing gap, ΔEVE under the six BCBS d368 scenarios, ΔNII over 12 months under parallel up/down, the worst case and the assumptions behind them.
@@ -123,3 +125,7 @@ This service's `application.yaml` does not declare the management interface (`qu
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+The Treasury cash-flow consumer preserves distinct accepted schedule and fixing revisions in Risk Engine. Existing latest-state reads keep their current behavior. The archive starts with the state captured at migration time.
+
+Planning input captures bind a tied-out Risk Engine snapshot to a curve set from the same date and provenance and to explicitly selected Treasury cash-flow revisions. A later fixing remains available as a separate revision.
