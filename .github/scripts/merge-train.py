@@ -11124,11 +11124,14 @@ def self_test() -> int:
             gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
             before, _to = reservation_now()
             s1 = settle_now()
-            gh.pending_shas.add(gh.prs[36]["head"]["sha"])
+            # pW2 (#36) and pF (#34) are both fixes of equal, job-level evidence: the OLDER one, pF, is served
+            # first (strongest evidence, then age — fixes_first); it used to be pW2 only because strict-lane
+            # entries preceded promoted candidates in list order.
+            gh.pending_shas.add(gh.prs[34]["head"]["sha"])
             holder, _to = reservation_now()
             s = settle_now()
             check("main red x reservation: the updated fix is the holder while its combined CI runs; the fast lane waits",
-                  before is None and gh.updates == [36] and holder == 36 and gh.merged == [] and s1["fast"] == []
+                  before is None and gh.updates == [34] and holder == 34 and gh.merged == [] and s1["fast"] == []
                   and s["fast"] == [] and s["in_flight"], f"before={before} holder={holder} merged={gh.merged} {s1} {s}")
             gh.pending_shas.clear()
             main_red_done()
