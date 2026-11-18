@@ -1,5 +1,16 @@
 # Branch payment attribution and clearing (ADR-0380 B2)
 
+Branch reversals are durable counterpayments. Original status, the pending reversal and both
+outbox events commit atomically under the original version check. Two racing reversal keys
+cannot refund the same original twice. The reversal swaps the original immutable accounts and
+booking contexts; current Account or Catalogue availability cannot change its route. Both
+one-sided cash flows and same-book/inter-branch transfers use the existing branch recovery sweep
+and idempotent Ledger receipt. A commit-before-dispatch crash needs no further client request.
+`REVERSED` records acceptance of that durable intent; the linked reversal's `COMPLETED` event
+is the settlement evidence. Replaying a reversal key for another branch original is rejected.
+Rollback retains pending reversals, original links, pinned contexts and outbox evidence;
+recovery readers use the existing transaction schema and workflow type.
+
 Transaction reads and pins the immutable source/target Account booking contexts before committing its row and initiated outbox event. Both existing customer legs must have reviewed BRANCH contexts in the same bank; unknown legacy/home attribution and branch FX routes are refused. Every branch leg must also carry an Account-owned denomination equal to the payment currency; a different or absent denomination is refused before the transaction/outbox is written, including incoming credits with no cover hold. Country selection never chooses a GL account.
 
 Branch payments return the persisted PENDING state after asynchronous dispatch to a separate durable Temporal workflow type. A suspend recovery sweep restarts dispatch after a commit-before-start outage using the same workflow id. Posting, hold placement and completion remain retryable across worker outages. A branch reservation has no TTL: it stays covered until the matching booked projection or an explicit release; an uncertain Ledger response must never reopen the funds to spending. The existing stuck-saga control surfaces unresolved operations. Existing regular payment histories and their bounded activity policy remain unchanged.

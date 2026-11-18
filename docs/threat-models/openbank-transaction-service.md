@@ -27,6 +27,15 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 
 ### Outbound reversal evidence for complaint investigations
 
+Branch reversal status, durable counterpayment intent and both lifecycle events commit in one
+database transaction. The original version/status check serialises competing reversal requests;
+a failed insert/event rolls back every effect. Accounts and booking contexts are swapped from
+the original immutable payment, so a current account/market outage cannot reroute a refund.
+Reversal idempotency is bound to the original subject. Existing patient branch recovery and
+bank/digest-bound Ledger receipts cover caller loss before dispatch and lost acknowledgements.
+`REVERSED` is acceptance of the durable intent, not a claim of completed settlement; the linked
+reversal's terminal event proves completion. Original synthetic origin is retained.
+
 `TransactionInitiated` may now include `reversalOf`, copied from the persisted reversal row.
 It is an internal transaction identifier, not a free-text reason or a claim that the reversal
 completed. The existing transactional outbox publishes it on the already protected transaction

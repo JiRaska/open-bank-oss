@@ -99,6 +99,33 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         }.awaitSuspending()
     }
 
+    override suspend fun saveBranchReversal(
+        original: Transaction,
+        reversal: Transaction,
+        originalEvent: OutboxMessage,
+        reversalEvent: OutboxMessage,
+    ): Transaction {
+        require(original.status == TransactionStatus.REVERSED && reversal.status == TransactionStatus.PENDING)
+        require(reversal.type == TransactionType.REVERSAL && reversal.isReversal && reversal.reversalOf == original.id)
+        require(
+            reversal.sourceAccountId == original.targetAccountId &&
+                reversal.targetAccountId == original.sourceAccountId,
+        )
+        require(reversal.sourceBookingContext == original.targetBookingContext)
+        require(reversal.targetBookingContext == original.sourceBookingContext)
+        require(reversal.amount == original.amount && reversal.baseAmount == original.baseAmount)
+        require(reversal.synthetic == original.synthetic)
+        return translatingConflict(original) {
+            Panache.withTransaction {
+                versionMatched(original, TransactionStatus.COMPLETED)
+                    .flatMap { persistAndFlush(reversal.toEntity()) }
+                    .flatMap { outboxRepository.persistMessageUni(originalEvent) }
+                    .flatMap { outboxRepository.persistMessageUni(reversalEvent) }
+                    .replaceWith(reversal)
+            }.awaitSuspending()
+        }
+    }
+
     override suspend fun update(
         transaction: com.openbank.transaction.domain.model.Transaction,
         outboxMessage: OutboxMessage,
@@ -118,57 +145,43 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         )
     }.awaitSuspending()
 
-    // Truly simultaneous writers both pass the version-matched read before either commits; the
-    // loser's flush then fails the @Version check (0 rows). Same conflict, same 409 (#465).
-    private suspend fun translatingConflict(
-        transaction: com.openbank.transaction.domain.model.Transaction,
-        block: suspend () -> com.openbank.transaction.domain.model.Transaction,
-    ): com.openbank.transaction.domain.model.Transaction = try {
-        block()
-    } catch (e: jakarta.persistence.OptimisticLockException) {
-        throw TransactionUpdateConflictException(
-            "Transaction ${transaction.id} was modified concurrently (flush-time version check)",
-            e,
-        )
-    } catch (e: org.hibernate.StaleObjectStateException) {
-        throw TransactionUpdateConflictException(
-            "Transaction ${transaction.id} was modified concurrently (flush-time version check)",
-            e,
-        )
-    }
-
     // Optimistic guard (#465): TransactionEntity.version is a plain column (no @Version), so the
     // old read-copy-write update was pure last-write-wins — two racing reversals both read
     // COMPLETED, both flipped it, and BOTH initiated a reversal credit (double refund). Matching
     // on the version the caller's domain object was read at makes the loser fail with a clean
     // conflict before it can act on the stale state; the version increments here, not in the
     // domain (transitions are status-only copies).
-    private fun versionMatched(transaction: com.openbank.transaction.domain.model.Transaction) =
-        find("id = ?1 and version = ?2", transaction.id, transaction.version).firstResult()
-            .invoke { entity ->
-                if (entity == null) {
-                    throw TransactionUpdateConflictException(
-                        "Transaction ${transaction.id} was modified concurrently " +
-                            "(expected version ${transaction.version})",
-                    )
-                }
-                val stored = entity.toDomain()
-                val sameAccounts = stored.sourceAccountId == transaction.sourceAccountId &&
-                    stored.targetAccountId == transaction.targetAccountId
-                val sameContext = stored.sourceBookingContext == transaction.sourceBookingContext &&
-                    stored.targetBookingContext == transaction.targetBookingContext
-                if (!sameAccounts || !sameContext) {
-                    throw TransactionUpdateConflictException("Transaction booking route cannot be changed")
-                }
-                entity.apply {
-                    status = transaction.status.name
-                    completedAt = transaction.completedAt
-                    failedAt = transaction.failedAt
-                    failureReason = transaction.failureReason
-                    // version is @Version-managed: Hibernate bumps it at flush and guards the
-                    // UPDATE with WHERE version = <read version> — never set it manually.
-                }
+    private fun versionMatched(
+        transaction: Transaction,
+        expectedStatus: TransactionStatus? = null,
+    ): Uni<TransactionEntity?> = find("id = ?1 and version = ?2", transaction.id, transaction.version).firstResult()
+        .invoke { entity ->
+            if (entity == null) {
+                throw TransactionUpdateConflictException(
+                    "Transaction ${transaction.id} was modified concurrently " +
+                        "(expected version ${transaction.version})",
+                )
             }
+            val stored = entity.toDomain()
+            if (expectedStatus != null && stored.status != expectedStatus) {
+                throw TransactionUpdateConflictException("Transaction lifecycle changed before reversal")
+            }
+            val sameAccounts = stored.sourceAccountId == transaction.sourceAccountId &&
+                stored.targetAccountId == transaction.targetAccountId
+            val sameContext = stored.sourceBookingContext == transaction.sourceBookingContext &&
+                stored.targetBookingContext == transaction.targetBookingContext
+            if (!sameAccounts || !sameContext) {
+                throw TransactionUpdateConflictException("Transaction booking route cannot be changed")
+            }
+            entity.apply {
+                status = transaction.status.name
+                completedAt = transaction.completedAt
+                failedAt = transaction.failedAt
+                failureReason = transaction.failureReason
+                // version is @Version-managed: Hibernate bumps it at flush and guards the
+                // UPDATE with WHERE version = <read version> — never set it manually.
+            }
+        }
 
     // Extended search — BIAN aligned
     suspend fun search(query: TransactionSearchQuery): List<com.openbank.transaction.domain.model.Transaction> {
@@ -194,6 +207,25 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
          */
         val NON_TERMINAL_STATUSES = listOf(TransactionStatus.PENDING.name, TransactionStatus.PROCESSING.name)
     }
+}
+
+// Truly simultaneous writers both pass the version-matched read before either commits; the
+// loser's flush then fails the @Version check (0 rows). Same conflict, same 409 (#465).
+private suspend fun translatingConflict(
+    transaction: com.openbank.transaction.domain.model.Transaction,
+    block: suspend () -> com.openbank.transaction.domain.model.Transaction,
+): com.openbank.transaction.domain.model.Transaction = try {
+    block()
+} catch (e: jakarta.persistence.OptimisticLockException) {
+    throw TransactionUpdateConflictException(
+        "Transaction ${transaction.id} was modified concurrently (flush-time version check)",
+        e,
+    )
+} catch (e: org.hibernate.StaleObjectStateException) {
+    throw TransactionUpdateConflictException(
+        "Transaction ${transaction.id} was modified concurrently (flush-time version check)",
+        e,
+    )
 }
 
 private fun snapshotDate(value: Any?): LocalDate = when (value) {

@@ -134,6 +134,46 @@ class BranchPaymentIT {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = ["TRANSFER", "DEBIT", "CREDIT", "SAME_BOOK"])
+    fun `counterpayment restores each original book pocket and clearing leg exactly once`(route: String) {
+        connection().use { db ->
+            val p = Payment()
+            register(db, p)
+            val original = p.payload(targetBook = if (route == "SAME_BOOK") p.sourceBook else p.targetBook)
+                .filterKeys { key ->
+                    when (route) {
+                        "DEBIT" -> key !in setOf("targetAccountId", "targetBookId")
+                        "CREDIT" -> key !in setOf("sourceAccountId", "sourceBookId")
+                        else -> true
+                    }
+                }
+            assertThat(post(original).statusCode).isEqualTo(200)
+            val id = UUID.randomUUID()
+            val reversal = original.filterKeys {
+                it !in
+                    setOf("sourceAccountId", "targetAccountId", "sourceBookId", "targetBookId")
+            }
+                .toMutableMap().apply {
+                    this["transactionId"] = id
+                    this["idempotencyKey"] = "payment:$id"
+                    original["sourceAccountId"]?.let { this["targetAccountId"] = it }
+                    original["targetAccountId"]?.let { this["sourceAccountId"] = it }
+                    original["sourceBookId"]?.let { this["targetBookId"] = it }
+                    original["targetBookId"]?.let { this["sourceBookId"] = it }
+                }
+            val posted = post(reversal)
+            assertThat(posted.statusCode).isEqualTo(200)
+            assertThat(post(reversal).jsonPath().getList<String>("journalIds"))
+                .isEqualTo(posted.jsonPath().getList<String>("journalIds"))
+            assertRestoredPositions(db, p.id, id)
+            val expectedJournals = if (route == "TRANSFER") 4L else 2L
+            assertThat(scalar(db, "SELECT count(*) FROM journal_entries WHERE transaction_id IN ('${p.id}','$id')"))
+                .isEqualTo(expectedJournals)
+            assertThat(snapshot(p, p.date).getBoolean("clearingBalanced")).isTrue()
+        }
+    }
+
     @Test
     fun `failure on second book rolls back both journals and retry posts exactly once`() {
         connection().use { db ->
@@ -392,6 +432,27 @@ class BranchPaymentIT {
             "amount" to amount, "currency" to "EUR", "entryDate" to date.toString(), "valueDate" to date.toString(),
             "createdBy" to UUID.fromString("00000000-0000-0000-0000-000000000001"),
         )
+    }
+}
+
+private fun assertRestoredPositions(db: Connection, original: UUID, reversal: UUID) {
+    db.createStatement().use { statement ->
+        statement.executeQuery(
+            """
+            SELECT e.branch_book_id,l.gl_account_id,l.sub_account_id,
+                sum(CASE WHEN l.side='D' THEN l.amount ELSE -l.amount END)
+            FROM journal_entries e JOIN journal_lines l ON l.journal_id=e.id
+            WHERE e.transaction_id IN ('$original','$reversal')
+            GROUP BY e.branch_book_id,l.gl_account_id,l.sub_account_id
+            """.trimIndent(),
+        ).use { rows ->
+            var count = 0
+            while (rows.next()) {
+                assertThat(rows.getBigDecimal(4)).isEqualByComparingTo("0")
+                count++
+            }
+            assertThat(count).isGreaterThan(0)
+        }
     }
 }
 

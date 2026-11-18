@@ -78,6 +78,9 @@ class TransactionService(
     @Inject
     lateinit var branchDispatch: com.openbank.transaction.application.workflow.BranchPaymentDispatch
 
+    @Inject
+    lateinit var branchReversals: BranchReversalService
+
     /**
      * Public constructor kept stable for the unit tests that construct this class by hand
      * with a mock WorkflowClient (Provider wraps it without changing their call sites).
@@ -314,9 +317,22 @@ class TransactionService(
         val original = transactionRepository.findById(command.originalTransactionId)
         // Idempotency: return the existing reversal in the same origin context.
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) return existing.verifyReplayOrigin(original?.synthetic == true)
+        if (existing != null) {
+            if (listOfNotNull(original?.sourceBookingContext, original?.targetBookingContext).any {
+                    it.mode == "BRANCH"
+                }
+            ) {
+                check(existing.isReversal && existing.reversalOf == original?.id) {
+                    "Idempotency key belongs to a different reversal"
+                }
+            }
+            return existing.verifyReplayOrigin(original?.synthetic == true)
+        }
 
         requireNotNull(original) { "Transaction ${command.originalTransactionId} not found" }
+        if (listOfNotNull(original.sourceBookingContext, original.targetBookingContext).any { it.mode == "BRANCH" }) {
+            return branchReversals.reverse(original, command)
+        }
         check(original.status == TransactionStatus.COMPLETED) {
             "Cannot reverse a ${original.status} transaction"
         }
