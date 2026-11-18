@@ -4294,8 +4294,57 @@ def fast_pass_blocker(git, base: str, view: dict, fragments: list[str], regen_te
             return f"holder touches judge path {f}"
         if any(frag in f for frag in fragments) or f.rsplit("/", 1)[-1] in (regen_text or ""):
             return f"holder touches regen-inventory path {f}"
+    why = fast_pass_named_by(git, base, files)
+    if why:
+        return f"holder path is referenced ({why})"
     if bound and view.get("passed_parent"):
         return "holder head is the re-update after a fast pass (bound: once)"
+    return None
+
+
+FAST_PASS_SCAN = (".github", "build-logic")   # every tree a CI job, gate, checker or build reads its inputs from
+FAST_PASS_GLOB_RE = r"[A-Za-z0-9_./{}-]*[*?][A-Za-z0-9_./*?{}-]*"
+
+
+def fast_pass_tokens(path: str) -> set[str]:
+    """Every form in which a file can be named: full path, the path below .github/scripts/, basename, stem
+    (an import, or a sibling's `$DIR/<name>`), and each directory below .github/scripts/."""
+    rel = path[len(".github/scripts/"):] if path.startswith(".github/scripts/") else path
+    name = path.rsplit("/", 1)[-1]
+    out = {path, rel, name, name.split(".", 1)[0]}
+    out |= {d for d in rel.split("/")[:-1] if d}
+    return {t for t in out if t}
+
+
+def fast_pass_named_by(git, base: str, files: list[str]) -> str | None:
+    """Why some holder file is named ANYWHERE in FAST_PASS_SCAN on `base`, or None (review of #16736).
+    Fail closed by construction: a fixed-string grep for every token form, any extension, in any file other
+    than the holder's own — so a baseline a checker reads, a sourced or called script, an import or a
+    `$DIR/name` call all count, and transitivity needs no closure walk (an unnamed file is reachable from
+    nothing). Glob-shaped tokens in the same trees (`gen-*.py`, `steps/*.sh`, `dir/**`) are expanded with
+    fnmatch. Any git error is a reference."""
+    excl = [f":(exclude){f}" for f in files]
+    toks = sorted({t for f in files for t in fast_pass_tokens(f)})
+    args = ["grep", "-l", "-F", "-I"]
+    for t in toks:
+        args += ["-e", t]
+    r = git(*args, base, "--", *FAST_PASS_SCAN, *excl, check=False)
+    if r.returncode not in (0, 1):
+        return "reference scan failed"
+    if r.stdout.strip():
+        return f"named by {r.stdout.split()[0].split(':', 1)[-1]}"
+    g = git("grep", "-h", "-o", "-I", "-E", FAST_PASS_GLOB_RE, base, "--", *FAST_PASS_SCAN, *excl, check=False)
+    if g.returncode not in (0, 1):
+        return "glob scan failed"
+    for pat in set(g.stdout.split()):
+        pat = pat[2:] if pat.startswith("./") else pat
+        if not pat:
+            continue
+        for f in files:
+            name = f.rsplit("/", 1)[-1]
+            if (fnmatch.fnmatch(f, pat) or fnmatch.fnmatch(f, "*/" + pat) or fnmatch.fnmatch(name, pat)
+                    or fnmatch.fnmatch(name, pat.rsplit("/", 1)[-1]) or fnmatch.fnmatch(f, "*" + pat.rstrip("*") + "*")):
+                return f"{f} matches glob {pat}"
     return None
 
 
@@ -4345,6 +4394,7 @@ def annotate_fast_pass(gh, git, base: str, strict: list, regen_text: str) -> Non
             if git("merge-base", "--is-ancestor", base, view["head_sha"], check=False).returncode != 0:
                 why = fast_pass_equivalent(git, base, view, fragments, regen_text)
                 view["fast_pass_equivalent"] = why is None
+                view["fast_pass_base"] = base
                 if why:
                     log(f"#{view['number']:>6} strict    fast pass does not hold over main {base[:12]}: {why}")
 
@@ -4354,6 +4404,11 @@ def mark_passed_parent(gh, git, view: dict) -> None:
     parents = git("rev-list", "--parents", "-n", "1", view["head_sha"], check=False).stdout.split()
     view["passed_parent"] = (len(parents) == 3 and gh is not None
                              and gh.app_statuses(parents[1]).get(FAST_PASS_CONTEXT, ("", ""))[0] == "success")
+
+
+def fast_pass_base_live(gh, view: dict) -> bool:
+    """A passed holder merges behind main only over the EXACT main its equivalence was proven on (re-read)."""
+    return bool(view.get("fast_pass_equivalent")) and gh.main_sha() == view.get("fast_pass_base")
 
 
 def strict_current(git, base: str, view: dict) -> bool:
@@ -4968,8 +5023,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if not live_source_intent(gh, n, head):
             log(f"#{n:>6} strict    source intent or head changed — next tick")
             continue
-        if view.get("fast_pass_equivalent") and git("merge-base", "--is-ancestor", base, head,
-                                                     check=False).returncode != 0:
+        behind = git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0
+        if behind and not fast_pass_base_live(gh, view):
+            log(f"#{n:>6} strict    fast pass proven over another main than live — recomputed next tick")
+            break
+        if view.get("fast_pass_equivalent") and behind:
             desc = f"strict lane: green head, main {base[:12]} moved only by disjoint fast-lane paths"
             log(f"#{n:>6} strict    green; main moved only by disjoint fast-lane paths since its head: merging")
         elif fix:
@@ -6790,6 +6848,51 @@ def fast_pass_self_test(check) -> None:
               fast_pass_equivalent(git, m3, hv3, frags, "") is not None)
 
 
+def fast_pass_reference_self_test(check) -> None:
+    """Review of #16736: a holder file named ANYWHERE under .github/ or build-logic (a baseline a checker
+    reads, a sourced or called script, a python import, a glob) is no fast pass; and a passed holder merges
+    only over the very main its equivalence was proven on."""
+    with tempfile.TemporaryDirectory() as root:
+        git = Git(root)
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.invalid"); git("config", "user.name", "t")
+        files = {
+            ".github/workflows/ci.yml": "run: python3 .github/scripts/check-purity.py && bash .github/scripts/gate.sh\n"
+                                        "run: python3 .github/scripts/gen-*.py\n",
+            ".github/scripts/check-purity.py": "import metricsrc\nBASE = HERE / 'domain-purity-baseline.txt'\n",
+            ".github/scripts/domain-purity-baseline.txt": "a\n",
+            ".github/scripts/metricsrc.py": "x = 1\n",
+            ".github/scripts/gate.sh": 'bash "$DIR/resolve-selector.sh"\n. "$DIR/pact-modules.sh"\n',
+            ".github/scripts/resolve-selector.sh": "echo\n",
+            ".github/scripts/pact-modules.sh": "echo\n",
+            ".github/scripts/gen-catalog.py": "x\n",
+            ".github/scripts/lonely-tool.py": "x\n",
+        }
+        for path, text in files.items():
+            fp = pathlib.Path(root, path); fp.parent.mkdir(parents=True, exist_ok=True); fp.write_text(text)
+            git("add", path)
+        git("commit", "-q", "-m", "base")
+        base = git("rev-parse", "HEAD").stdout.strip()
+        for f, how in ((".github/scripts/domain-purity-baseline.txt", "a baseline a checker reads"),
+                       (".github/scripts/metricsrc.py", "a python import"),
+                       (".github/scripts/pact-modules.sh", "a sourced shell library"),
+                       (".github/scripts/resolve-selector.sh", "a script another script calls"),
+                       (".github/scripts/gen-catalog.py", "a glob reference (gen-*.py)")):
+            v = {"number": 1, "head_sha": base, "files": [f], "app": {}}
+            check(f"fast pass: {how} is no fast pass", fast_pass_blocker(git, base, v, [], "") is not None,
+                  f"{f} passed")
+        v = {"number": 1, "head_sha": base, "files": [".github/scripts/lonely-tool.py"], "app": {}}
+        check("fast pass: a script nothing names anywhere still passes", fast_pass_blocker(git, base, v, [], "") is None,
+              str(fast_pass_blocker(git, base, v, [], "")))
+    class _G:
+        def __init__(self, sha): self.sha = sha
+        def main_sha(self): return self.sha
+    pv = {"fast_pass_equivalent": True, "fast_pass_base": "a" * 40}
+    live = globals().get("fast_pass_base_live")
+    check("fast pass: merges only over the main the equivalence was proven on",
+          live is not None and live(_G("a" * 40), pv) and not live(_G("b" * 40), pv))
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -6809,6 +6912,7 @@ def self_test() -> int:
     git_memo_self_test(check)
     packed_fixture_self_test(check)
     fast_pass_self_test(check)
+    fast_pass_reference_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
@@ -10400,10 +10504,10 @@ def self_test() -> int:
                 s = settle_now()
                 gh.prs[34]["state"] = "open"                # a fast PR arrives during pW2's reservation
                 s2 = settle_now()
-                # Fast pass (2026-11-18): pW2 changes only an unreferenced .github/scripts file (no judge), so
-                # a disjoint fast PR merges DURING its reservation; a judge holder stays held (fast_pass_self_test).
-                check("fast turn: no fast PR waiting -> no turn; one arriving under a NON-judge reservation passes it",
-                      gh.updates == [36] and s2["in_flight"] and s2["fast"] == [34] and s2.get("fast_pass") == [34],
+                # Fast pass (review of #16736): pW2's script is NAMED in the fixture's gates.yaml, so the
+                # fail-closed reference scan refuses the pass and the fast PR stays held (fast_pass_self_test).
+                check("fast turn: no fast PR waiting -> no turn; one arriving under a running reservation is held",
+                      gh.updates == [36] and s2["in_flight"] and s2["fast"] == [] and not s2.get("fast_pass"),
                       f"{s} {s2} updates={gh.updates}")
                 gh.updates.clear()
                 reset()
