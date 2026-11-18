@@ -49,7 +49,7 @@ class CallerContextResolver @Inject constructor(
      * branch admits it. Absent means no customers tenant is configured.
      */
     @ConfigProperty(name = "mcp.customer.issuer")
-    private val customerIssuer: Optional<String> = Optional.empty(),
+    private val customerIssuer: Optional<String>,
 ) {
 
     /** The validated token, for the customer-channel branch (which reads `iss`, `azp`, `cnf`). */
@@ -186,22 +186,22 @@ class CallerContextResolver @Inject constructor(
         .map { it["sub"].toString() }
         .toList()
 
-    private companion object {
-        const val AGENT_PREFIX = "agent:"
-        const val CLAIM_CONSENT_ID = "consent_id"
-        const val CLAIM_ACT = "act"
-        const val CLAIM_SESSION_ID = "sid"
-        const val CLAIM_AZP = "azp"
-        const val CLAIM_JTI = "jti"
-        const val CLAIM_AUD = "aud"
-        const val CLAIM_REALM_ACCESS = "realm_access"
-        const val CLAIM_PREFERRED_USERNAME = "preferred_username"
-        const val ROLE_PREFIX = "ROLE_"
-
-        /** The audience client an OBO token must target (ADR-0224 D1; realm config from #2762). */
+    companion object {
+        /** The audience client every token on `/mcp` must target (ADR-0224 D1, ADR-0385 D1). */
         const val MCP_AUDIENCE = "openbank-mcp-service"
 
+        private const val AGENT_PREFIX = "agent:"
+        private const val CLAIM_CONSENT_ID = "consent_id"
+        private const val CLAIM_ACT = "act"
+        private const val CLAIM_SESSION_ID = "sid"
+        private const val CLAIM_AZP = "azp"
+        private const val CLAIM_JTI = "jti"
+        private const val CLAIM_AUD = "aud"
+        private const val CLAIM_REALM_ACCESS = "realm_access"
+        private const val CLAIM_PREFERRED_USERNAME = "preferred_username"
+        private const val ROLE_PREFIX = "ROLE_"
+
         /** Delegation beyond this depth is an issuer bug, not a real chain — stop walking. */
-        const val MAX_ACT_DEPTH = 8
+        private const val MAX_ACT_DEPTH = 8
     }
 }

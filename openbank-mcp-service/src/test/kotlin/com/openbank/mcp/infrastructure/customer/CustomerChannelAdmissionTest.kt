@@ -50,7 +50,8 @@ class CustomerChannelAdmissionTest {
         jwt: TestJsonWebToken = token(),
         authorization: String? = "DPoP ${DpopTestProofs.ACCESS_TOKEN}",
         dpop: List<String> = listOf(DpopTestProofs.proof(key)),
-    ) = runBlocking { admission.admit(jwt, authorization, dpop) }
+        throttle: (String) -> String? = { null },
+    ) = runBlocking { admission.admit(jwt, authorization, dpop, throttle) }
 
     private fun refused(outcome: Outcome, status: Int = 401): Outcome.Refused {
         assertThat(outcome).isInstanceOf(Outcome.Refused::class.java)
@@ -161,5 +162,32 @@ class CustomerChannelAdmissionTest {
         assertThat(CustomerChannelAdmission.dpopToken("DPoP ")).isNull()
         assertThat(CustomerChannelAdmission.dpopToken("DPoP a b")).isNull()
         assertThat(CustomerChannelAdmission.dpopToken(null)).isNull()
+    }
+
+    @Test
+    fun `the per-subject-client window runs BEFORE the replay claim, so a throttled proof is not consumed`() {
+        val proof = DpopTestProofs.proof(key)
+        val keys = mutableListOf<String>()
+        val throttled = refused(
+            admit(dpop = listOf(proof), throttle = {
+                keys += it
+                "rate limit exceeded"
+            }),
+            429,
+        )
+        assertThat(throttled.throttled).isTrue()
+        assertThat(keys).containsExactly("customer:c0ffee00-0000-0000-0000-000000000001|mcp-local-test")
+        // Had the limiter run after verify(), this jti would already be claimed and read REPLAYED.
+        assertThat(admit(dpop = listOf(proof))).isInstanceOf(Outcome.Admitted::class.java)
+    }
+
+    @Test
+    fun `a call refused by an earlier gate does not spend the window`() {
+        var spent = 0
+        admit(jwt = token(azp = "mcp-not-declared"), throttle = {
+            spent++
+            null
+        })
+        assertThat(spent).isZero()
     }
 }
