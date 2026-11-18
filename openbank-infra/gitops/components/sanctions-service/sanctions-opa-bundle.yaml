@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "5bff675e9a34f1a9"
+    openbank.tech/policy-checksum: "8b3cbca209684aa1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -853,9 +853,15 @@ data:
     import rego.v1
 
     # Operators and admins may perform ANY sanctions write — the ops/compliance console path
-    # (run a screen, decide a hit, edit a watchlist entry, refresh a feed).
+    # (run a screen, decide a hit, edit a watchlist entry, refresh a feed). STAFF ONLY: a Keycloak
+    # service-account is classified HUMAN, and the docker/CI realms give the shared
+    # service-account-openbank-services ROLE_OPERATOR, so without the machine exclusion any machine
+    # there could act as the four-eyes CHECKER (sanctions.approval.decide) on a sanctions clearance.
+    # No machine write depends on this rule: screens reach sanctions.create via base rest.rego's
+    # m2m-sanctions-screening, and the agent's maker clear has its own named rule below.
     allowed_reasons contains "operator-sanctions-write" if {
     	input.principal.type == "HUMAN"
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "sanctions.")
