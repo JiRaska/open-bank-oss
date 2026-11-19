@@ -3354,7 +3354,7 @@ class CustomerEdgeResource(
     @Path("/mcp-proposals/{id}/approve")
     @Authorize(action = "customer.mcp-proposals.decide")
     @Blocking
-    @Suppress("ReturnCount")
+    @Suppress("ReturnCount", "LongMethod") // one ordered, audited sequence; splitting it hides the order
     fun approveMcpProposal(
         @PathParam("id") id: UUID,
         body: String,
