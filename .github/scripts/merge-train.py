@@ -59,6 +59,7 @@ MODES
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import contextlib
 import datetime
@@ -1032,51 +1033,158 @@ NOT_FIX_HEAD_KEY = ("not_fix_head",)   # cache slot: PR number -> head sha the r
 FIX_CLAIM_CONTEXT = "merge-train/fix-claim"   # App marker: why this head was refused as a main-red fix (publish_fix_claims)
 JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")   # anything under these JUDGES a head: a fix may not edit them
 SCRIPT_DEP_DEPTH = 3   # script_dependencies: how far `import`/`source` chains are followed
+# The `.github/scripts` file list of a COMMIT is immutable, so it may be remembered for the life of the
+# process (one tick in production; many ticks in the self-test, whose spawn budget this protects). Never a
+# verdict, never anything a rerun could change: a listing of what a sha contains.
+_SCRIPTS_TREE_MEMO: dict[str, set[str]] = {}
 
 
-def script_dependencies(git, rev: str, scripts: set[str], cache: dict | None = None) -> set[str]:
-    """Every `.github/scripts/...` file the given scripts import (Python `import x` / `from x import`,
-    resolved under .github/scripts/, dotted to nested) or source (shell `source`/`.` of a `lib/*.sh`
-    or an explicit .github/scripts path), as they exist at `rev` — followed SCRIPT_DEP_DEPTH levels.
-    Derived from the scripts' own text, never hand-listed: the helper libraries a red gate's script
-    relies on judge that gate too (gatelib.py, lib/*.sh), so a fix may not edit them either.
-    Spawn-frugal (the self-test budgets subprocess spawns): existence is one `git ls-tree` per rev, memoised
-    in `cache`, never a `cat-file` per candidate; the derived set is memoised per (rev, scripts)."""
+DYNAMIC_IMPORT_CALLS = ("import_module", "spec_from_file_location", "run_path", "run_module", "__import__")
+SHELL_DYNAMIC_RE = re.compile(r"(?:^|[;&|(\s])(?:source|\.|bash|sh)\s+[\"']?[^\n]*?(?:\$DIR\b|\$HERE\b|\$\{DIR\}|\$\{HERE\}|\$\(\s*dirname\b)", re.M)
+# `__file__`-relative paths the parser CAN follow: the fleet idiom that puts the script's own directory on
+# sys.path (nothing new to resolve: that directory is searched anyway), and a literal joined to the
+# script's directory (a sibling file: code or data, added as a dependency). Any other `__file__` use is
+# dynamic loading the parser cannot follow: UNKNOWN.
+FILE_SYSPATH_RE = re.compile(r"sys\.path\.(?:insert|append)\([^\n]*__file__[^\n]*(?:\.parent|dirname\()[^\n]*\)")
+FILE_SIBLING_RE = re.compile(r"(?:Path\(__file__\)(?:\.resolve\(\))?\.parent|os\.path\.dirname\((?:os\.path\.abspath\()?__file__\)?\))"
+                             r"((?:\s*/\s*\"[^\"\n]+\"|\s*,\s*\"[^\"\n]+\")+)")
+SHELL_SOURCE_RE = re.compile(r"(?:^|[;&|(\s])(?:source|\.|bash|sh)\s+[\"']?((?:\.github/scripts/)?lib/[A-Za-z0-9_.-]+\.sh)", re.M)
+
+
+def script_imports(path: str, text: str) -> set[str] | None:
+    """The .github/scripts candidates one script's text names, or None = UNKNOWN: the script loads code
+    dynamically (importlib.import_module, spec_from_file_location, runpy, __import__, a `__file__`-relative
+    path, or a shell `source`/`.`/`bash` of a `$DIR`/`$HERE`/`$(dirname ...)` path), or cannot be parsed —
+    nothing about its helpers can be derived, so nothing about them may be trusted. Python is parsed with
+    `ast` (every alias of `import a, b`; `from pkg import mod` is both pkg.py and pkg/mod.py; relative
+    imports resolve against the script's directory); shell by regex. Explicit `.github/scripts/...` paths
+    anywhere in the text count for both kinds."""
+    here = path.rsplit("/", 1)[0]
+    cands: set[str] = set(re.findall(r"\.github/scripts/[A-Za-z0-9_./-]+", text))
+    if path.endswith(".py"):
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return None
+        def modpaths(mod: str, rel: int = 0) -> set[str]:
+            roots = [here] if rel else [".github/scripts", ".github/scripts/lib"]
+            stem = mod.replace(".", "/")
+            return {f"{r}/{stem}.py" for r in roots if stem} | {f"{r}/{stem}/__init__.py" for r in roots if stem}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for al in node.names:
+                    cands |= modpaths(al.name)
+            elif isinstance(node, ast.ImportFrom):
+                base_mod = node.module or ""
+                cands |= modpaths(base_mod, node.level) if base_mod else set()
+                for al in node.names:
+                    cands |= modpaths(f"{base_mod}.{al.name}" if base_mod else al.name, node.level)
+            elif isinstance(node, ast.Name) and node.id == "__import__":
+                return None
+            elif isinstance(node, ast.Call):
+                fn = node.func
+                name = fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
+                if name in DYNAMIC_IMPORT_CALLS:
+                    return None
+        followed = len(FILE_SYSPATH_RE.findall(text))
+        for segs in FILE_SIBLING_RE.findall(text):
+            followed += 1
+            cands.add(here + "/" + "/".join(re.findall(r"\"([^\"]+)\"", segs)))
+        if text.count("__file__") > followed:
+            return None   # a `__file__`-relative path in a shape the parser cannot follow
+        return cands
+    if SHELL_DYNAMIC_RE.search(text):
+        return None
+    for m in SHELL_SOURCE_RE.findall(text):
+        cands.add(m if m.startswith(".github/scripts/") else f".github/scripts/{m}")
+        cands.add(f"{here}/{m}")
+    return cands
+
+
+def script_dependencies(git, revs: tuple[str, ...], scripts: set[str], cache: dict | None = None,
+                        changes: list | None = None) -> set[str] | None:
+    """Every `.github/scripts/...` file the given scripts import or source, followed SCRIPT_DEP_DEPTH
+    levels, over the UNION of the trees at `revs` (the trusted base AND the head: a head cannot drop an
+    import to hide a helper edit). None = UNKNOWN, and the caller REFUSES the fix claim: a tree
+    unreadable (`ls-tree` failed), a script that loads code dynamically (script_imports), or candidates
+    still unresolved at the depth cap. Derived from the scripts' own text, never hand-listed: the helper
+    libraries a red gate's script relies on judge that gate too, so a fix may not edit them either.
+    Spawn-frugal (the self-test budgets subprocess spawns): one `ls-tree` for the FIRST rev (the base,
+    memoised per tick across every head) and one `show` per script per rev, memoised; when `changes` —
+    the `changed_entries` of base...head, which the caller already has — is given for a two-rev call,
+    the head's tree is the base tree plus those adds, minus those deletes: no spawn at all for it. No
+    scripts spawn nothing."""
     if not scripts:
-        return set()   # nothing to follow: no spawn at all (the self-test budgets spawns)
-    key = ("script_deps", rev, tuple(sorted(scripts)))
+        return set()
+    key = ("script_deps", tuple(revs), tuple(sorted(scripts)))
     if cache is not None and key in cache:
         return cache[key]
-    tree_key = ("scripts_tree", rev)
-    if cache is not None and tree_key in cache:
-        tree = cache[tree_key]
-    else:
+    trees: dict[str, set[str]] = {}
+    for i, rev in enumerate(revs):
+        tree_key = ("scripts_tree", rev)
+        if cache is not None and tree_key in cache:
+            trees[rev] = cache[tree_key]
+            continue
+        if i == 1 and changes is not None and len(revs) == 2:
+            tree = set(trees[revs[0]])
+            for c in changes:
+                if c.status[:1] in ("D", "R", "C") and c.paths:
+                    tree.discard(c.paths[0])
+                for p in (c.paths[1:] if c.status[:1] in ("R", "C") else c.paths if c.status[:1] == "A" else ()):
+                    if p.startswith(".github/scripts/"):
+                        tree.add(p)
+            trees[rev] = tree
+            if cache is not None:
+                cache[tree_key] = tree
+            continue
+        if rev in _SCRIPTS_TREE_MEMO:
+            trees[rev] = _SCRIPTS_TREE_MEMO[rev]
+            continue
         r = git("ls-tree", "-r", "--name-only", rev, "--", ".github/scripts", check=False)
-        tree = set(r.stdout.split()) if r.returncode == 0 else set()
+        if r.returncode != 0:
+            return None   # the tree cannot be read: nothing derivable, nothing trusted
+        trees[rev] = set(r.stdout.split())
+        if SHA_RE.fullmatch(rev):   # only a real commit sha is immutable; a fixture label or ref name is not
+            _SCRIPTS_TREE_MEMO[rev] = trees[rev]
         if cache is not None:
-            cache[tree_key] = tree
+            cache[tree_key] = trees[rev]
     seen: set[str] = set()
     frontier = set(scripts)
-    for _ in range(SCRIPT_DEP_DEPTH):
-        nxt: set[str] = set()
-        for path in sorted(frontier - seen):
-            seen.add(path)
-            r = git("show", f"{rev}:{path}", check=False)
-            if r.returncode != 0:
-                continue
-            cands: set[str] = set()
-            for a, b in re.findall(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", r.stdout, re.M):
-                mod = (a or b).split(" as ")[0].strip()
-                if mod and not mod.startswith("."):
-                    cands.add(f".github/scripts/{mod.replace('.', '/')}.py")
-                    cands.add(f".github/scripts/{mod.replace('.', '/')}/__init__.py")
-            cands.update(re.findall(r"\.github/scripts/[A-Za-z0-9_./-]+", r.stdout))
-            cands.update(f".github/scripts/lib/{m}" for m in re.findall(r"(?:source|\.)\s+[^\n]*?lib/([A-Za-z0-9_.-]+\.sh)", r.stdout))
-            nxt.update(c for c in cands if c != path and c in tree)
-        frontier = nxt
+    out: set[str] | None = set()
+    for _ in range(SCRIPT_DEP_DEPTH + 1):   # depth+1 passes: the deepest level is resolved, not dropped
         if not frontier:
             break
-    out = seen - set(scripts)
+        nxt: set[str] = set()
+        for path in sorted(frontier):
+            seen.add(path)
+            for rev in revs:
+                if path not in trees[rev]:
+                    continue
+                show_key = ("script_text", rev, path)
+                if cache is not None and show_key in cache:
+                    text = cache[show_key]
+                else:
+                    r = git("show", f"{rev}:{path}", check=False)
+                    text = r.stdout if r.returncode == 0 else None
+                    if cache is not None:
+                        cache[show_key] = text
+                if text is None:
+                    out = None
+                    break
+                cands = script_imports(path, text)
+                if cands is None:
+                    out = None
+                    break
+                nxt.update(c for c in cands if c != path and c not in seen and any(c in trees[v] for v in revs))
+            if out is None:
+                break
+        if out is None:
+            break
+        frontier = nxt
+    if out is not None and frontier:
+        out = None   # unresolved candidates at the depth cap: unknown, never "the ones we happened to see"
+    if out is not None:
+        out = seen - set(scripts)
     if cache is not None:
         cache[key] = out
     return out
@@ -4267,7 +4375,9 @@ def selftest_skip_fix_self_test(check) -> None:
           "skipped on the head" in (selftest_skip_refusal(
               main_jobs, {"data": [{"id": "g1", "status": "failed", "failure_kind": "unfalsified"}]}, ["x"], decl) or ""))
 
-    # The live path: fix_contexts over a stubbed GitHub and git.
+    # The live path: fix_contexts over a stubbed GitHub and git. Fixtures reuse sha-shaped labels with
+    # different stubbed trees, so the process-wide tree memo is cleared before each live block.
+    _SCRIPTS_TREE_MEMO.clear()
     main_c, head, mb = "m" * 40, "h" * 40, "b" * 40
     gates_text = ("gates:\n  - id: g1\n    selftest: |\n      x\n"
                   "    selftest_inputs:\n      - \".github/scripts/check-g1.py\"\n      - openbank-x/src/\n"
@@ -4421,7 +4531,8 @@ def gate_level_fix_self_test(check) -> None:
     check("artifact trust: a red gate ok only in a rogue shard is not verified",
           gate_level_evidence(red, trusted_head_records({"rogue": [{"id": "adr-registry", "status": "ok"}]}, base_jobs, hjobs))[1] == J)
 
-    # Live path (fix_contexts -> fix_evidence) over a stubbed GitHub and git.
+    # Live path (fix_contexts -> fix_evidence) over a stubbed GitHub and git (tree memo cleared: see above).
+    _SCRIPTS_TREE_MEMO.clear()
     A, B, C, D, E, G = "a" * 40, "b" * 39 + "1", "c" * 40, "d" * 40, "e" * 40, "f" * 40
     gates_text = "gates:\n  - id: adr-registry\n    run: python3 .github/scripts/check-adr-registry.py\n"
 
@@ -4514,54 +4625,120 @@ def gate_level_fix_self_test(check) -> None:
     check("LOW-4: a non-gate job red on main is judged by job evidence alone, no artifact read, worded as such",
           got == [MR] and gh.reads == [] and rec(A) == (J, "job-level (no gate red on main)"), f"{got} reads={gh.reads} {rec(A)}")
     # Follow-ups (review LOWs of #16760): derived judge dependencies, non-empty masking, refusal status.
-    tree = {".github/scripts/check-adr-registry.py": "import gatelib\nfrom lib.probe import x\nimport json\n",
-            ".github/scripts/gatelib.py": "import re\n", ".github/scripts/lib/probe.py": "import os\n",
-            ".github/scripts/check-sh.sh": "source \"$DIR/lib/probe.sh\"\nbash .github/scripts/helper.sh\n",
-            ".github/scripts/lib/probe.sh": "", ".github/scripts/helper.sh": ""}
+    base_tree = {".github/scripts/check-adr-registry.py": "import gatelib, helper2\nfrom lib.probe import x\nfrom pkg import mod\nimport json\n",
+                 ".github/scripts/gatelib.py": "import re\nimport pathlib\n_P = pathlib.Path(__file__).resolve().parent / \"patterns.txt\"\n",
+                 ".github/scripts/patterns.txt": "x", ".github/scripts/helper2.py": "import deep1\n", ".github/scripts/deep1.py": "import deep2\n",
+                 ".github/scripts/deep2.py": "import os\n",
+                 ".github/scripts/lib/probe.py": "import os\n", ".github/scripts/pkg/__init__.py": "", ".github/scripts/pkg/mod.py": "",
+                 ".github/scripts/check-sh.sh": "source \"lib/probe.sh\"\nbash .github/scripts/helper.sh\n",
+                 ".github/scripts/lib/probe.sh": "", ".github/scripts/helper.sh": "",
+                 ".github/scripts/run-gates.py": "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))\nimport selftest_input_trace as sit\n",
+                 ".github/scripts/selftest_input_trace.py": "import gatelib\n",
+                 ".github/scripts/dyn.py": "import importlib\nm = importlib.import_module('x')\n",
+                 ".github/scripts/dyn2.py": "import pathlib\np = pathlib.Path(__file__).parent.parent / 'x'\n",
+                 ".github/scripts/dyn.sh": "source \"$DIR/lib/probe.sh\"\n", ".github/scripts/bad.py": "def (:\n"}
+    head_tree = dict(base_tree); head_tree[".github/scripts/check-adr-registry.py"] = "import gatelib\nimport json\n"   # dropped helper2/pkg
+    trees = {"b": base_tree, "h": head_tree}
     def tgit(*a, **_k):
         if a[0] == "show":
-            p = a[1].split(":", 1)[1]
-            return _R(0, tree[p]) if p in tree else _R(128, "")
+            rev, p = a[1].split(":", 1)
+            return _R(0, trees[rev][p]) if p in trees.get(rev, {}) else _R(128, "")
         if a[0] == "ls-tree":
-            return _R(0, "\n".join(sorted(tree)) + "\n")
+            return _R(0, "\n".join(sorted(trees[a[3]])) + "\n") if a[3] in trees else _R(128, "")
         return _R(0, "")
-    deps = script_dependencies(tgit, "h", {".github/scripts/check-adr-registry.py", ".github/scripts/check-sh.sh"})
-    check("judge deps: python imports and shell sources resolve to existing .github/scripts files, stdlib ignored",
-          deps == {".github/scripts/gatelib.py", ".github/scripts/lib/probe.py", ".github/scripts/lib/probe.sh", ".github/scripts/helper.sh"}, str(deps))
-    check("judge deps: an unreadable script yields nothing, and no scripts spawn nothing",
-          script_dependencies(tgit, "h", {".github/scripts/none.py"}) == set()
-          and script_dependencies(lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")), "h", set()) == set())
+    S1 = {".github/scripts/check-adr-registry.py"}
+    deps = script_dependencies(tgit, ("h",), {".github/scripts/check-sh.sh"})
+    check("judge deps: shell sources and explicit paths resolve", deps == {".github/scripts/lib/probe.sh", ".github/scripts/helper.sh"}, str(deps))
+    deps = script_dependencies(tgit, ("b",), S1)
+    check("judge deps: every alias of `import a, b`, `from pkg import mod` as pkg/__init__ + pkg/mod, lib/ root, a 3-level chain to its "
+          "deepest level, and a `__file__`-sibling data file; stdlib ignored",
+          deps == {".github/scripts/gatelib.py", ".github/scripts/patterns.txt", ".github/scripts/helper2.py", ".github/scripts/deep1.py",
+                   ".github/scripts/deep2.py", ".github/scripts/lib/probe.py",
+                   ".github/scripts/pkg/__init__.py", ".github/scripts/pkg/mod.py"}, str(deps))
+    check("judge deps: UNION of base and head — a helper dropped on the head is still derived",
+          script_dependencies(tgit, ("b", "h"), S1) == deps and ".github/scripts/helper2.py" not in (script_dependencies(tgit, ("h",), S1) or set()))
+    trees["b4"] = dict(base_tree); trees["b4"][".github/scripts/deep2.py"] = "import deep3\n"; trees["b4"][".github/scripts/deep3.py"] = "import os\n"
+    check("judge deps: a 4th level beyond the depth cap of 3 -> UNKNOWN (None), never the partial set seen so far",
+          script_dependencies(tgit, ("b4",), S1) is None)
+    for label, script in [("importlib.import_module", "dyn.py"), ("a `__file__` path the parser cannot follow", "dyn2.py"),
+                          ("shell source of a $DIR path", "dyn.sh"), ("unparsable Python", "bad.py")]:
+        check(f"judge deps: {label} -> UNKNOWN", script_dependencies(tgit, ("b",), {f".github/scripts/{script}"}) is None)
+    check("judge deps: the runner's own `sys.path.insert(0, <own dir>)` idiom is followed, its helpers derived",
+          script_dependencies(tgit, ("b",), {".github/scripts/run-gates.py"}) == {".github/scripts/selftest_input_trace.py", ".github/scripts/gatelib.py", ".github/scripts/patterns.txt"})
+    check("judge deps: an unreadable tree (ls-tree failed) -> UNKNOWN", script_dependencies(tgit, ("nope",), S1) is None)
+    check("judge deps: no scripts spawn nothing", script_dependencies(lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")), ("b",), set()) == set())
     spawns, c2 = [], {}
     def cgit(*a, **k):
         spawns.append(a[0]); return tgit(*a, **k)
-    d1 = script_dependencies(cgit, "h", {".github/scripts/check-adr-registry.py"}, c2)
-    d2 = script_dependencies(cgit, "h", {".github/scripts/check-adr-registry.py"}, c2)
-    check("judge deps: spawn-frugal — one ls-tree per rev, no cat-file, and a cached second call spawns nothing",
-          d1 == d2 and spawns.count("ls-tree") == 1 and "cat-file" not in spawns and len(spawns) == 1 + len(d1) + 1, str(spawns))
+    d1 = script_dependencies(cgit, ("b", "h"), S1, c2); n1 = len(spawns); d2 = script_dependencies(cgit, ("b", "h"), S1, c2)
+    check("judge deps: spawn-frugal — one ls-tree per rev, only `show`s otherwise, and a cached second call spawns nothing",
+          d1 == d2 and d1 is not None and spawns.count("ls-tree") == 2 and set(spawns) == {"ls-tree", "show"} and len(spawns) == n1, str(spawns))
+    trees["c" * 40], trees["d" * 40] = base_tree, head_tree
+    _SCRIPTS_TREE_MEMO.pop("c" * 40, None)
+    spawns.clear()
+    script_dependencies(cgit, ("c" * 40, "d" * 40), S1, {}); n_first = spawns.count("ls-tree")
+    spawns.clear()
+    script_dependencies(cgit, ("c" * 40, "d" * 40), S1, {})
+    check("judge deps: a commit sha's tree listing is remembered across ticks (immutable), a label is not",
+          n_first == 2 and spawns.count("ls-tree") == 0 and "b" not in _SCRIPTS_TREE_MEMO, str(spawns))
+    spawns.clear()
+    mod_only = [Change("M", "100644", "100644", [".github/scripts/check-adr-registry.py"])]
+    d3 = script_dependencies(cgit, ("b", "h"), S1, {}, changes=mod_only)
+    check("judge deps: with the head's change set given, the head tree costs NO spawn (base tree + adds - deletes)",
+          d3 == d1 and spawns.count("ls-tree") == 1, str(spawns))
+    added = [Change("A", "000000", "100644", [".github/scripts/newhelper.py"]), Change("D", "100644", "000000", [".github/scripts/helper2.py"])]
+    trees["h2"] = dict(head_tree); trees["h2"][".github/scripts/newhelper.py"] = ""; del trees["h2"][".github/scripts/helper2.py"]
+    trees["h2"][".github/scripts/check-adr-registry.py"] = "import newhelper\n"
+    d4 = script_dependencies(tgit, ("b", "h2"), S1, {}, changes=added)
+    check("judge deps: an added helper on the head is found through the change set, a deleted one still through the base (union)",
+          d4 is not None and ".github/scripts/newhelper.py" in d4 and ".github/scripts/helper2.py" in d4, str(d4))
 
     class _GhDep(_Gh):
         pass
-    files.update({"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml"})
-    heads["g" * 40] = heads["i" * 40] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    live_edits = {"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml",
+                  "2" * 40: ".github/scripts/helper2.py", "3" * 40: ".github/scripts/pkg/mod.py",
+                  "4" * 40: ".github/scripts/selftest_input_trace.py", "5" * 40: ".github/gates/selftest-undeclared-inputs.baseline",
+                  "6" * 40: ".github/scripts/patterns.txt", "7" * 40: "docs/adr/0009-q.md"}
+    files.update(live_edits)
+    for h_ in live_edits:
+        heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
     gates_dep = "gates:\n  - id: adr-registry\n    run: python3 .github/scripts/check-adr-registry.py\n"
+    live_trees = {mb: base_tree}
+    for h_ in live_edits:
+        live_trees[h_] = head_tree   # every head dropped helper2 and pkg from the gate script
     def dgit(*a, **_k):
         if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
             return _R(0, gates_dep)
-        if a[0] == "show" and a[1].split(":", 1)[1] in tree:
-            return _R(0, tree[a[1].split(":", 1)[1]])
+        if a[0] == "show":
+            rev, p = a[1].split(":", 1)
+            if p in live_trees.get(rev, {}):
+                return _R(0, live_trees[rev][p])
         if a[0] == "ls-tree":
-            return _R(0, "\n".join(sorted(tree)) + "\n")
+            return _R(0, "\n".join(sorted(live_trees[a[3]])) + "\n") if a[3] in live_trees else _R(128, "")
         return git(*a, **_k)
+    _SCRIPTS_TREE_MEMO.clear()   # the dependency fixture has its own trees for these labels
     gh, cache = _GhDep(heads), {}
-    got_g = fix_contexts(gh, dgit, mb, {"number": 7, "head_sha": "g" * 40}, {MR: main_c}, cache)
-    got_i = fix_contexts(gh, dgit, mb, {"number": 8, "head_sha": "i" * 40}, {MR: main_c}, cache)
+    got = {h_: fix_contexts(gh, dgit, mb, {"number": i + 20, "head_sha": h_}, {MR: main_c}, cache) for i, h_ in enumerate(live_edits)}
     nf = cache.get(NOT_FIX_KEY, {})
-    check("judge deps (live): a head editing gatelib.py, imported by the red gate's script, is refused as a fix",
-          got_g == [] and "changes the judge (.github/scripts/gatelib.py)" in nf.get(7, ""), f"{got_g} {nf.get(7)}")
-    check("judge (live): a head editing .github/actions/** is refused as a fix",
-          got_i == [] and "changes the judge (.github/actions/" in nf.get(8, ""), f"{got_i} {nf.get(8)}")
+    def refused(h_, frag):
+        i = list(live_edits).index(h_) + 20
+        return got[h_] == [] and "changes the judge" in nf.get(i, "") and frag in nf.get(i, "")
+    check("judge deps (live): a head editing gatelib.py, imported by the red gate's script, is refused", refused("g" * 40, "gatelib.py"), str(nf))
+    check("judge (live): a head editing .github/actions/** is refused", refused("i" * 40, ".github/actions/"), str(nf))
+    check("judge deps (live): `import gatelib, helper2` — a head editing the SECOND alias is refused", refused("2" * 40, "helper2.py"), str(nf))
+    check("judge deps (live): `from pkg import mod` — a head editing pkg/mod.py is refused", refused("3" * 40, "pkg/mod.py"), str(nf))
+    check("runner (live): a head editing selftest_input_trace.py (the runner's helper) is refused", refused("4" * 40, "selftest_input_trace.py"), str(nf))
+    check("runner (live): a head editing the undeclared-inputs baseline (the runner's data) is refused", refused("5" * 40, "baseline"), str(nf))
+    check("judge deps (live): a `__file__`-sibling data file of a helper (patterns.txt) is refused", refused("6" * 40, "patterns.txt"), str(nf))
+    check("judge deps (live): UNION — every head dropped helper2 from the gate script, yet the base still names it (see helper2 above); "
+          "an unrelated edit is still a fix", got["7" * 40] == [MR], f"{got['7' * 40]} {nf}")
+    live_trees["8" * 40] = dict(head_tree); live_trees["8" * 40][".github/scripts/check-adr-registry.py"] = base_tree[".github/scripts/dyn.py"]
+    files["8" * 40] = "docs/adr/0010-r.md"; heads["8" * 40] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    got8 = fix_contexts(gh, dgit, mb, {"number": 30, "head_sha": "8" * 40}, {MR: main_c}, cache)
+    check("judge deps (live): a gate script that loads code dynamically on the head -> the fix claim is refused as underivable",
+          got8 == [] and "cannot be derived" in cache.get(NOT_FIX_KEY, {}).get(30, ""), f"{got8} {cache.get(NOT_FIX_KEY, {}).get(30)}")
     check("refusal visibility: note_not_fix records the head the refusal is about",
-          cache.get(NOT_FIX_HEAD_KEY, {}).get(7) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
+          cache.get(NOT_FIX_HEAD_KEY, {}).get(20) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
 
     class _GhMask:
         def __init__(self, jobs):
@@ -5340,6 +5517,32 @@ def cached_gate_records(gh, sha: str, ctx: str, slugs: list[str], cache: dict | 
     return out
 
 
+def cached_text(git, rev: str, path: str, cache: dict | None) -> str | None:
+    """`git show rev:path` once per tick (None = absent): fix_contexts runs two or three times per head and
+    tick (promotion, then strict_fixes in the reservation and in the strict lane), and each run read the
+    head's gates.yaml again — one spawn each, identical inputs."""
+    key = ("text", rev, path)
+    if cache is not None and key in cache:
+        return cache[key]
+    r = git("show", f"{rev}:{path}", check=False)
+    out = r.stdout if r.returncode == 0 else None
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def cached_changes(git, base: str, head: str, cache: dict | None) -> list:
+    """changed_entries(base...head) once per tick per head: every context of a claim and the dependency walk
+    read the same change set (one `git diff` spawn, not one per context)."""
+    key = ("changes", base, head)
+    if cache is not None and key in cache:
+        return cache[key]
+    out = changed_entries(git, f"{base}...{head}")
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
 def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cache: dict | None) -> str | None:
     """Why `head` does NOT prove it fixes `ctx`, red on main at `main_commit`, or None when it does:
     fix_job_evidence (every job red on main ran green on the head), then selftest_skip_refusal (a red
@@ -5358,10 +5561,10 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
         if cache is not None:
             cache[(FIX_STRENGTH_KEY, head, ctx)] = (FIX_JOB_LEVEL, "job-level (no gate red on main)")
         return None
-    r = git("show", f"{head}:{GATES_YAML}", check=False)
-    gates_text = r.stdout if r.returncode == 0 else None
+    gates_text = cached_text(git, head, GATES_YAML, cache)
     declared = parse_selftest_inputs(gates_text) if gates_text is not None else None
-    head_files = changed_paths(git, f"{base}...{head}")
+    changes = cached_changes(git, base, head, cache)
+    head_files = list(dict.fromkeys(p for c in changes for p in c.paths))
     main_records = cached_gate_records(gh, main_commit, ctx, slugs, cache)
     why = selftest_skip_refusal(main_jobs, main_records, head_files, declared)
     if why:
@@ -5376,7 +5579,13 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
                for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
     scripts = parse_gate_scripts(gates_text) if gates_text is not None else {}
     own = {s for gid in red_ids for s in scripts.get(gid, ())}
-    judge = {GATES_YAML, ".github/scripts/run-gates.py"} | own | script_dependencies(git, head, own, cache)
+    # The RUNNER judges every gate: walk its helpers too, and count its data inputs (the universal
+    # self-test inputs: gates.yaml, the tracer, gatelib, the undeclared-inputs baseline) as the judge.
+    deps = script_dependencies(git, (base, head), own | {".github/scripts/run-gates.py"}, cache, changes=changes)
+    if deps is None:
+        return (f"the judge of the red gate(s) cannot be derived (dynamic loading, an unreadable tree or helpers "
+                f"beyond {SCRIPT_DEP_DEPTH} levels in {', '.join(sorted(own))}): its own green cannot verify a fix")
+    judge = set(UNIVERSAL_SELFTEST_INPUTS) | {".github/scripts/run-gates.py"} | own | deps
     touched = sorted(f for f in head_files if f in judge or f.startswith(JUDGE_PREFIXES))
     if touched:
         return f"the head changes the judge ({touched[0]}): its own green cannot verify a fix"
@@ -5402,7 +5611,12 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
     if not mb:
         return []
     out = []
-    extra = train_extra_gates(git, base) or {}
+    if cache is not None and ("extra_gates", base) in cache:
+        extra = cache[("extra_gates", base)]
+    else:
+        extra = train_extra_gates(git, base) or {}   # one rules.yaml read per tick, not one per claim
+        if cache is not None:
+            cache[("extra_gates", base)] = extra
     for ctx in sorted(main_red):
         if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
             continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
