@@ -144,7 +144,11 @@ class CustomerPaymentProposerTest {
                 CustomerPaymentProposer.idempotencyKey(key, null, "req-00000001"),
                 CustomerPaymentProposer.idempotencyKey(key.copy(clientId = "other"), "sid-1", "req-00000001"),
                 CustomerPaymentProposer.idempotencyKey(key.copy(partyId = UUID.randomUUID()), "sid-1", "req-00000001"),
-                CustomerPaymentProposer.idempotencyKey(key.copy(keyThumbprint = "x".repeat(43)), "sid-1", "req-00000001"),
+                CustomerPaymentProposer.idempotencyKey(
+                    key.copy(keyThumbprint = "x".repeat(43)),
+                    "sid-1",
+                    "req-00000001",
+                ),
             ),
         ).hasSize(6).doesNotContain(k)
     }
@@ -178,7 +182,13 @@ class CustomerPaymentProposerTest {
     @Test
     fun `the result is the id, PENDING and a bank-rendered summary - no model text`() {
         every { store.create(any(), any()) } returns receipt(summary = "Proposed to <script>")
-        val body = (proposer.propose(CustomerPaymentProposer.parse(args()), key, null) as CustomerPaymentProposer.Result.Proposed).body
+        val body = (
+            proposer.propose(
+                CustomerPaymentProposer.parse(args()),
+                key,
+                null,
+            ) as CustomerPaymentProposer.Result.Proposed
+            ).body
         assertThat(body.path("proposalId").asText()).isEqualTo(PROPOSAL)
         assertThat(body.path("status").asText()).isEqualTo("PENDING")
         assertThat(body.path("summary").asText()).contains("Nothing has been paid").doesNotContain("<script>")
@@ -198,11 +208,17 @@ class CustomerPaymentProposerTest {
     fun `store refusals map to fixed safe messages`() {
         fun refusal(status: Int, code: String?): CustomerPaymentProposer.Result.Refused {
             every { store.create(any(), any()) } throws ProposalStoreRefusal(status, code)
-            return proposer.propose(CustomerPaymentProposer.parse(args()), key, null) as CustomerPaymentProposer.Result.Refused
+            return proposer.propose(
+                CustomerPaymentProposer.parse(args()),
+                key,
+                null,
+            ) as CustomerPaymentProposer.Result.Refused
         }
         assertThat(refusal(429, "PROPOSAL_LIMIT_REACHED").message).isEqualTo(CustomerPaymentProposer.LIMIT_REACHED)
         assertThat(refusal(409, "IDEMPOTENCY_KEY_REUSED").message).isEqualTo(CustomerPaymentProposer.REQUEST_ID_REUSED)
-        assertThat(refusal(409, "IDEMPOTENCY_REQUEST_IN_PROGRESS").message).isEqualTo(CustomerPaymentProposer.IN_PROGRESS)
+        assertThat(
+            refusal(409, "IDEMPOTENCY_REQUEST_IN_PROGRESS").message,
+        ).isEqualTo(CustomerPaymentProposer.IN_PROGRESS)
         assertThat(refusal(400, null).message).isEqualTo(CustomerPaymentProposer.INVALID_INSTRUCTION)
         // Expired / revoked / suspended grant: the store finds none. Drop the cached grant.
         val forbidden = refusal(403, "PROPOSAL_NOT_PERMITTED")
@@ -214,7 +230,11 @@ class CustomerPaymentProposerTest {
     @Test
     fun `a transport failure is unavailable, not success`() {
         every { store.create(any(), any()) } throws IllegalStateException("connection reset")
-        val out = proposer.propose(CustomerPaymentProposer.parse(args()), key, null) as CustomerPaymentProposer.Result.Refused
+        val out = proposer.propose(
+            CustomerPaymentProposer.parse(args()),
+            key,
+            null,
+        ) as CustomerPaymentProposer.Result.Refused
         assertThat(out.unavailable).isTrue()
         assertThat(out.message).isNull()
         verify(exactly = 1) { store.create(any(), any()) }

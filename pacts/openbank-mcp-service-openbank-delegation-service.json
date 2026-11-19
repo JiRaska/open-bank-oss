@@ -73,6 +73,98 @@
       }
     },
     {
+      "description": "POST create a PENDING payment proposal under an active propose grant",
+      "providerStates": [
+        {
+          "name": "an active MCP_CLIENT propose grant exists for the pact party, client, key and account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": "125.50",
+          "creditorIban": "CZ6508000000192000145399",
+          "creditorName": "Pact Creditor",
+          "currency": "CZK",
+          "debtorAccountId": "d3d3d3d3-0000-4000-8000-000000000003",
+          "keyThumbprint": "0000000000000000000000000000000000000000000",
+          "mcpClientId": "mcp-local-reference",
+          "operationType": "DOMESTIC_PAYMENT",
+          "partyId": "d3d3d3d3-0000-4000-8000-000000000001",
+          "reference": "Pact reference"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "337dd454eee507a9b04a5212eac7cf0814dcccdb4fbacd2964120a3447b7f62b"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9a-f]{64}$"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/payment-proposals"
+      },
+      "response": {
+        "body": {
+          "deduplicated": false,
+          "expiresAt": "2000-01-31T14:00:00.000+01:00",
+          "proposalId": "d3d3d3d3-0000-4000-8000-000000000004",
+          "status": "PENDING",
+          "summary": "Proposed 125.50 CZK"
+        },
+        "generators": {
+          "body": {
+            "$.expiresAt": {
+              "format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+              "type": "DateTime"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "format": "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+                  "match": "timestamp"
+                }
+              ]
+            },
+            "$.proposalId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.summary": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
       "description": "POST resolve with no active MCP_CLIENT grant for the triple",
       "providerStates": [
         {
@@ -101,6 +193,50 @@
           "Content-Type": "application/json"
         },
         "status": 200
+      }
+    },
+    {
+      "description": "POST create a payment proposal with no active propose grant",
+      "providerStates": [
+        {
+          "name": "no MCP_CLIENT propose grant exists for the pact party, client, key and account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": "125.50",
+          "creditorIban": "CZ6508000000192000145399",
+          "creditorName": "Pact Creditor",
+          "currency": "CZK",
+          "debtorAccountId": "d3d3d3d3-0000-4000-8000-000000000003",
+          "keyThumbprint": "0000000000000000000000000000000000000000000",
+          "mcpClientId": "mcp-local-reference",
+          "operationType": "DOMESTIC_PAYMENT",
+          "partyId": "d3d3d3d3-0000-4000-8000-000000000001",
+          "reference": "Pact reference"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "337dd454eee507a9b04a5212eac7cf0814dcccdb4fbacd2964120a3447b7f62b"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9a-f]{64}$"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/payment-proposals"
+      },
+      "response": {
+        "status": 403
       }
     }
   ],

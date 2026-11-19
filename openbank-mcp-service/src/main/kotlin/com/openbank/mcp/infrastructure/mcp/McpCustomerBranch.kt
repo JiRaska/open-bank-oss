@@ -231,7 +231,16 @@ internal class McpCustomerBranch(
         is CustomerReadTools.Outcome.Refused -> {
             if (result.invalidateGrant) grantCache.invalidate(key)
             val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
-            audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability, startedAt = startedAt)
+            audit(
+                ctx.agentId,
+                tool,
+                params,
+                result.reason,
+                ctx.actChain,
+                decision,
+                result.capability,
+                startedAt = startedAt,
+            )
             toolError(id, result.message ?: if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
         }
         is CustomerReadTools.Outcome.DownstreamRejected -> {

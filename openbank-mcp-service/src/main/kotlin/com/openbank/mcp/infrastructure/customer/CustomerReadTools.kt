@@ -180,7 +180,11 @@ class CustomerReadTools @Inject constructor(
             ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
         policy(spec, caller, grant.capabilities)?.let { return it }
         return when (val result = proposer.propose(instruction, key, caller.sessionId)) {
-            is CustomerPaymentProposer.Result.Proposed -> Outcome.Allowed(render(result.body), capability, grant.grantId)
+            is CustomerPaymentProposer.Result.Proposed -> Outcome.Allowed(
+                render(result.body),
+                capability,
+                grant.grantId,
+            )
             is CustomerPaymentProposer.Result.Refused -> Outcome.Refused(
                 result.reason,
                 capability,

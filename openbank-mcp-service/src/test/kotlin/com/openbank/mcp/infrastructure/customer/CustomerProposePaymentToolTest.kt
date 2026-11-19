@@ -62,8 +62,11 @@ class CustomerProposePaymentToolTest {
         ),
     )
 
-    private fun call(grants: List<CustomerGrant>, arguments: JsonNode = args(), who: CustomerReadTools.Caller = caller) =
-        tools.call(CustomerReadTools.PROPOSE_PAYMENT, arguments, who, grants)
+    private fun call(
+        grants: List<CustomerGrant>,
+        arguments: JsonNode = args(),
+        who: CustomerReadTools.Caller = caller,
+    ) = tools.call(CustomerReadTools.PROPOSE_PAYMENT, arguments, who, grants)
 
     private fun pending() = McpProposalReceipt(UUID.randomUUID(), "PENDING", false, "2026-11-20T10:00:00Z", "s")
 
