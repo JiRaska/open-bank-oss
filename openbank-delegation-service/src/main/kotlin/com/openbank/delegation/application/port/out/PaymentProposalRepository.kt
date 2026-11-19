@@ -5,7 +5,6 @@
 package com.openbank.delegation.application.port.out
 
 import com.openbank.delegation.domain.model.PaymentProposal
-import com.openbank.delegation.domain.model.PaymentProposalPayload
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -49,5 +48,11 @@ interface PaymentProposalRepository {
 }
 
 /** A deduplication probe shared by the repository and its tests. */
-fun List<PaymentProposal>.openDuplicateOf(payload: PaymentProposalPayload, now: OffsetDateTime): PaymentProposal? =
-    firstOrNull { it.isOpen(now) && it.payload.sameInstructionAs(payload) }
+/** Scoped to the same client and grant: another client's identical proposal is its own record. */
+fun List<PaymentProposal>.openDuplicateOf(candidate: PaymentProposal, now: OffsetDateTime): PaymentProposal? =
+    firstOrNull {
+        it.isOpen(now) &&
+            it.mcpClientId == candidate.mcpClientId &&
+            it.grantId == candidate.grantId &&
+            it.payload.sameInstructionAs(candidate.payload)
+    }

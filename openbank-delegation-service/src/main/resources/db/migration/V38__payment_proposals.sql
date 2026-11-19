@@ -3,8 +3,11 @@
 -- payment is initiated by the customer's own session through the ordinary payment path. Nothing in
 -- this table moves money.
 --
--- V38 (not V35): open PRs already claim V35-V37 in this module; Flyway accepts the gap and the
--- number cannot collide on merge.
+-- V38: main ends at V34 and open PRs claim V34-V37 in this module (checked 2026-11-19 across
+-- every open PR touching db/migration), so 38 is the next version above every claim. Once this is
+-- applied, a migration numbered below 38 that lands later is NOT applied (Flyway runs in order and
+-- refuses an unapplied lower version on boot), so any PR still holding V35-V37 must renumber above
+-- the highest version on main when it merges.
 --
 -- Rollback: a new forward migration `DROP TABLE delegation_payment_proposals;` together with
 -- `DROP FUNCTION delegation_payment_proposal_guard(), delegation_payment_proposal_no_delete();`, after confirming no APPROVED rows exist
@@ -89,3 +92,8 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_payment_proposal_no_delete
     BEFORE DELETE ON delegation_payment_proposals
     FOR EACH ROW EXECUTE FUNCTION delegation_payment_proposal_no_delete();
+
+-- TRUNCATE bypasses row triggers, so it needs its own statement-level guard.
+CREATE TRIGGER trg_payment_proposal_no_truncate
+    BEFORE TRUNCATE ON delegation_payment_proposals
+    FOR EACH STATEMENT EXECUTE FUNCTION delegation_payment_proposal_no_delete();

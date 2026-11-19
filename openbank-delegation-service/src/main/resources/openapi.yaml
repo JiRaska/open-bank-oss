@@ -135,7 +135,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ProposalDecisionRequest' }
+            schema: { $ref: '#/components/schemas/ProposalApproveRequest' }
       responses:
         '200':
           description: Approved
@@ -1329,6 +1329,12 @@ components:
       properties:
         partyId: { type: string, format: uuid }
         payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    ProposalApproveRequest:
+      type: object
+      required: [partyId, payloadSha256]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$', description: 'Must equal the stored hash the device signed' }
     ProposalExecutionRequest:
       type: object
       required: [partyId, payloadSha256]

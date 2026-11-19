@@ -115,7 +115,12 @@ class PaymentProposalTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["Pay\u202Eeman", "Elek\u200Btrarna", "Name\u2028Other", "Name\u2029x", "a\uFEFFb"])
+    @ValueSource(
+        strings = [
+            "Pay\u202Eeman", "Elek\u200Btrarna", "Name\u2028Other", "Name\u2029x", "a\uFEFFb",
+            "lone\uD800surrogate", "private\uE000use", "unassigned\u0378x",
+        ],
+    )
     fun `Unicode format, bidi and separator characters in a payee name are refused`(name: String) {
         assertThatThrownBy {
             vectorPayload().copy(creditorName = name)
@@ -140,9 +145,11 @@ class PaymentProposalTest {
     }
 
     @Test
-    fun `dedupe compares payee amount currency and debtor, not the free text`() {
-        assertThat(vectorPayload().sameInstructionAs(vectorPayload(amount = "1250.5", reference = "other"))).isTrue()
+    fun `dedupe requires every instruction field to match, amount numerically`() {
+        assertThat(vectorPayload().sameInstructionAs(vectorPayload(amount = "1250.5"))).isTrue()
         assertThat(vectorPayload().sameInstructionAs(vectorPayload(amount = "1250.51"))).isFalse()
+        assertThat(vectorPayload().sameInstructionAs(vectorPayload(reference = "other"))).isFalse()
+        assertThat(vectorPayload().sameInstructionAs(vectorPayload().copy(creditorName = "Someone Else"))).isFalse()
     }
 
     private fun proposal() = PaymentProposal(

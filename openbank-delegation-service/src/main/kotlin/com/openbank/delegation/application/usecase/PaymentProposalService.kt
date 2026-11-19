@@ -17,6 +17,7 @@ import com.openbank.delegation.domain.model.PaymentProposalLimitException
 import com.openbank.delegation.domain.model.PaymentProposalNotFoundException
 import com.openbank.delegation.domain.model.PaymentProposalNotPermittedException
 import com.openbank.delegation.domain.model.PaymentProposalPayload
+import com.openbank.delegation.domain.model.PaymentProposalStateException
 import com.openbank.delegation.domain.model.PaymentProposalStatus
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
@@ -29,9 +30,13 @@ import java.util.UUID
 
 data class CreatePaymentProposalCommand(
     val partyId: UUID,
-    /** The connected client's `azp`, from the verified customer token — never from the model. */
+    /**
+     * The connected client's `azp`, as mcp-service read it from the customer token IT verified.
+     * TRUSTED here, not re-verified: mcp-service calls with its own service-account token and
+     * passes this in the body (threat model, "Spoofing a grant"). Never from the model.
+     */
     val mcpClientId: String,
-    /** The DPoP key thumbprint (`cnf.jkt`) of that token. */
+    /** The DPoP key thumbprint (`cnf.jkt`) of that token; trusted from mcp-service likewise. */
     val keyThumbprint: String,
     val payload: PaymentProposalPayload,
 )
@@ -133,7 +138,13 @@ class PaymentProposalService(
         val current = get(id, partyId)
         val now = OffsetDateTime.now(clock)
         // APPROVED-but-unexecuted is the retry of a payment that failed after approval: no write.
-        if (current.status == PaymentProposalStatus.APPROVED) return current.confirmRetry(payloadSha256, now)
+        if (current.status == PaymentProposalStatus.APPROVED) {
+            // A retry is only as alive as the grant: a revoked or suspended grant ends it.
+            if (grants.findById(current.grantId)?.isActiveOn(now) != true) {
+                throw PaymentProposalStateException("proposal $id can no longer be retried: its grant is not active")
+            }
+            return current.confirmRetry(payloadSha256, now)
+        }
         return mutate(id) { it.approve(payloadSha256, now) }
     }
 
@@ -159,9 +170,12 @@ class PaymentProposalService(
         proposals.transition(id, transition) ?: throw PaymentProposalNotFoundException()
 
     /**
-     * ADR-0383 D3/D6: the grant is FOUND, never named. The triple comes from the verified customer
-     * token mcp-service presented, so a client cannot borrow another client's grant, another key's
-     * grant, or another party's grant by supplying an id.
+     * ADR-0383 D3/D6: the grant is FOUND, never named — no grant id is accepted from anyone. The
+     * triple (party, azp, cnf.jkt) is supplied by mcp-service, which read it from the customer
+     * token it verified; this service TRUSTS mcp-service for it and does not re-verify it (it sees
+     * only mcp-service's own service-account token). A compromised mcp-service could therefore
+     * name any party that holds an active MCP_CLIENT grant — and still only create a proposal that
+     * party must approve with SCA. Binding create to the exchanged customer token is a follow-up.
      */
     private suspend fun proposeGrantFor(command: CreatePaymentProposalCommand, now: OffsetDateTime): DelegationGrant =
         grants.findByGrantorId(command.partyId).firstOrNull { grant ->

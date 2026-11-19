@@ -60,7 +60,7 @@ class PaymentProposalRepositoryImpl(
         limits: ProposalLimits,
         now: OffsetDateTime,
     ): Uni<ProposalCreateOutcome> {
-        current.openDuplicateOf(candidate.payload, now)?.let {
+        current.openDuplicateOf(candidate, now)?.let {
             return Uni.createFrom().item(ProposalCreateOutcome.Deduplicated(it))
         }
         val open = current.count { it.isOpen(now) }

@@ -245,17 +245,26 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
     compromised mcp-service could propose under any party that holds such a grant; a proposal still
     needs that customer's SCA in the app. Binding the create to the exchanged customer token is a
     follow-up.
+  - **Trust in mcp-service and the edge (stated, not verified).** The store does not re-verify
+    the `mcpClientId`/`keyThumbprint` mcp-service passes (it sees only mcp-service's service-account
+    token), nor the `paymentId` the edge records on execution (it sees only the edge's token; the
+    edge takes it from the payment service's create response). Both callers are pinned by verified
+    client identity and OPA; a lie from either can at worst attach a proposal to the wrong grant of
+    a party that holds one, or mislabel which payment executed it — never move money, which still
+    needs the customer's SCA at the edge and the payment service's own checks.
   - **Tampering / TOCTOU.** The instruction columns and hash are immutable (entity
     `updatable = false` plus the V38 trigger), the state graph is one-way at the database, DELETE
-    raises. The SHA-256 covers proposal id, party and every instruction field; approval and
+    raises, TRUNCATE raises (statement trigger). The SHA-256 covers proposal id, party and every instruction field; approval and
     execution both re-compare it, and a row whose hash does not describe its columns fails to load.
   - **Stale authority.** A proposal is only as alive as its grant: reading or approving one whose
     grant is no longer ACTIVE persists REJECTED first, and a grant write that leaves ACTIVE rejects
     its PENDING proposals in the same transaction.
   - **Display spoofing (D7).** Payee name and reference refuse Unicode Cc/Cf/Zl/Zp (bidi
-    overrides, zero-width, line separators), `<>[]` backtick and `://`, and must be NFC.
+    overrides, zero-width, line separators), Cs (unpaired surrogates), Co and Cn, `<>[]` backtick
+    and `://`, and must be NFC (refused, never re-encoded).
   - **Denial of service.** ≤10 open and ≤20 created per party per 24 h, decided under a per-party
-    advisory transaction lock; identical open proposals are deduplicated; TTL 24 h (capped).
+    advisory transaction lock; an open proposal identical in every instruction field from the same client and grant is
+    deduplicated; TTL 24 h (capped).
   - **Repudiation.** Every transition writes an outbox event in the same transaction (data-
     minimised: no IBAN/name/reference).
   - Not in this slice: the push coalescing and VoP display of D6 (app/edge), an expiry sweep

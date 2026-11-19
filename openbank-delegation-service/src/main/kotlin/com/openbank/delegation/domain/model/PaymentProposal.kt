@@ -83,12 +83,18 @@ data class PaymentProposalPayload(
     /** Two decimals, no exponent: the form both the hash and the SCA dynamic linking use. */
     val canonicalAmount: String get() = amount.setScale(2, RoundingMode.UNNECESSARY).toPlainString()
 
-    /** The same payment, for ADR-0383 D6 deduplication (same payee, amount and currency). */
+    /**
+     * ADR-0383 D6 deduplication: the SAME instruction in every field (rail, debtor, payee, name,
+     * amount, currency, reference). A proposal that differs only in its reference or payee name is
+     * a different instruction and is never folded into one the customer may already have reviewed.
+     */
     fun sameInstructionAs(other: PaymentProposalPayload): Boolean = operationType == other.operationType &&
         debtorAccountId == other.debtorAccountId &&
         creditorIban == other.creditorIban &&
+        creditorName == other.creditorName &&
         amount.compareTo(other.amount) == 0 &&
-        currency == other.currency
+        currency == other.currency &&
+        reference == other.reference
 
     companion object {
         const val MAX_NAME = 70
@@ -105,7 +111,9 @@ data class PaymentProposalPayload(
         // Unicode categories, not ASCII \p{Cntrl}: Cc (controls), Cf (format: bidi overrides such as
         // U+202E, zero-width U+200B/U+200D, U+FEFF) and Zl/Zp (U+2028/U+2029) can make a payee name
         // render as a different one on the approval screen.
-        private val UNSAFE = Regex("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}<>\\[\\]`]|://")
+        // Also Cs (an unpaired surrogate - refused, never silently re-encoded as '?'), Co (private
+        // use) and Cn (unassigned): none renders as what the customer is meant to read.
+        private val UNSAFE = Regex("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}\\p{Co}\\p{Cn}<>\\[\\]`]|://")
 
         /** NFC so visually identical names compare and hash identically; callers normalise first. */
         fun normalize(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFC)
