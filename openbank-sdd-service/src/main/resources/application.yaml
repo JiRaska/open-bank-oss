@@ -161,7 +161,7 @@ openbank:
   sdd:
     expiry-cron: "0 15 3 * * ?"
     expiry:
-      enabled: true
+      enabled: false
   outbox:
     dispatch-enabled: true
     poll-interval: 5s

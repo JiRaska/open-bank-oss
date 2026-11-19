@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * Regression coverage in the family of #2148 / #2187 (`LedgerSchedulerVertxContextIT`,
@@ -35,12 +36,13 @@ import java.util.UUID
  * every two seconds against a real Postgres, flips `openbank.sdd.expiry.enabled` on, and waits for
  * a genuinely scheduler-dispatched sweep to expire an idle mandate.
  *
- * The sweep being enabled is what the production rollout of `openbank.sdd.expiry.enabled: true`
+ * The sweep being enabled is what the per-environment rollout of `OPENBANK_SDD_EXPIRY_ENABLED`
  * relies on; without this test a scheduler that silently never ran (no Vert.x context, a swallowed
  * throw before the per-item try/catch) would be indistinguishable from "no mandates were idle".
  *
- * The outbox dispatcher is switched off here so a dispatched event cannot race the assertions; the
- * expiry sweep itself only transitions `sdd_mandate` rows.
+ * The outbox dispatcher is switched off here so a dispatched event cannot race the assertions. The
+ * sweep must also write exactly one `sdd.mandate.expired.v1` outbox row per expired mandate, in the
+ * SAME transaction as the status change (equal `xmin`), and none for the live mandate.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -63,6 +65,29 @@ class MandateExpirySchedulerVertxContextIT {
 
     @Inject
     lateinit var mandates: SddMandateRepository
+
+    @Inject
+    lateinit var dataSource: DataSource
+
+    /** (mandate xmin, outbox xmin, event_type) for every outbox row of [mandateId]. */
+    private fun outboxWritersOf(mandateId: UUID): List<Triple<String, String, String>> =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                SELECT m.xmin::text, o.xmin::text, o.event_type
+                FROM sdd_mandate m
+                JOIN sdd_outbox o ON o.aggregate_id = m.id
+                WHERE m.id = ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, mandateId)
+                statement.executeQuery().use { rows ->
+                    generateSequence { if (rows.next()) rows else null }
+                        .map { Triple(it.getString(1), it.getString(2), it.getString(3)) }
+                        .toList()
+                }
+            }
+        }
 
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -96,6 +121,17 @@ class MandateExpirySchedulerVertxContextIT {
         assertThat(onEventLoop { mandates.findById(live.id).awaitSuspending() }?.status)
             .describedAs("a mandate with a recent collection is not idle and stays ACTIVE")
             .isEqualTo(MandateStatus.ACTIVE)
+
+        val writers = outboxWritersOf(idle.id)
+        assertThat(writers.map { it.third })
+            .describedAs("the sweep emits exactly one expired event for the idle mandate")
+            .containsExactly("sdd.mandate.expired.v1")
+        assertThat(writers.single().second)
+            .describedAs("the EXPIRED row and its outbox row commit in one transaction")
+            .isEqualTo(writers.single().first)
+        assertThat(outboxWritersOf(live.id))
+            .describedAs("a live mandate gets no expired event")
+            .isEmpty()
     }
 
     private fun mandate(signatureDate: LocalDate, lastCollection: LocalDate?) = SddMandate(
