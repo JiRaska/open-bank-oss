@@ -109,7 +109,7 @@ class McpCustomerChannelOffIT {
         recorder.clear()
         repeat(10) {
             given().contentType(ContentType.JSON).header("Authorization", "DPoP not-a-token")
-                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""")
+                .body(LIST_ACCOUNTS_CALL)
                 .post("/mcp").then().statusCode(401)
         }
         val rows = recorder.events.size
@@ -129,5 +129,10 @@ class McpCustomerChannelOffIT {
     fun `protected-resource metadata is 404 while the channel is off`() {
         given().get("/.well-known/oauth-protected-resource/mcp").then().statusCode(404)
         given().get("/.well-known/oauth-protected-resource").then().statusCode(404)
+    }
+
+    private companion object {
+        const val LIST_ACCOUNTS_CALL =
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}"""
     }
 }
