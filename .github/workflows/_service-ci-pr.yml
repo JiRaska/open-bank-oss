@@ -49,7 +49,16 @@ jobs:
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service)
       && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-      && inputs.ref == '' && 'openbank-mini' || 'ubuntu-latest') }}
+      && inputs.ref == '' && 'openbank-mini' || (github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository && vars.PR_RUNNER_POOL)
+      || 'ubuntu-latest') }}
+    # PR_RUNNER_POOL (trial 2026-11-19, issue #16006): when set to a self-hosted label (e.g.
+    # `openbank-pr`), PR builds from branches of THIS repo build on that pool instead of the
+    # hosted runners, whose 20-job concurrency cap is what PR CI queues on (measured 2026-11-19:
+    # hosted p50 queue 42 min, saturated at 20-25 jobs). Fork PRs never route there. The pool
+    # holds no GitHub credential (single-use JIT runners, one sysbox container per job) and is
+    # separate from `openbank-mini`, which carries the train App keys. Unset = kill switch:
+    # every build is hosted again.
     timeout-minutes: 45
     environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'gradle-cache-writer' || '' }}
