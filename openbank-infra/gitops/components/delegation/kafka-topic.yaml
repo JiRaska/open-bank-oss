@@ -73,9 +73,10 @@ spec:
     retention.ms: -1
 ---
 # ADR-0383 D6 — customer MCP payment-proposal lifecycle (PaymentProposalCreated / Approved /
-# Rejected / Expired / Executed / ExecutionFailed), published by delegation-service through its
-# transactional outbox, keyed by proposal id. A dedicated topic so the existing delegation
-# projections never see an event type they do not know. Data-minimised (no payee IBAN/name).
+# Rejected / Expired / Executed / ExecutionFailed), produced by delegation-service through its
+# transactional outbox, keyed by proposal id. Declared by the consumer's PR (audit-service) so the
+# subscription never names a topic that does not exist (#2598); the producer's PR owns the
+# KafkaUser Write grant and the event contract. Data-minimised (no payee IBAN/name/reference).
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
