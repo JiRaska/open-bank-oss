@@ -4943,6 +4943,16 @@ def urgent_strict_self_test(check) -> None:
                    {16835})
     check("urgent: a pre-empted head whose CI stalls while it waits is not timed out (not blamed)",
           h == 16835 and t == [], f"holder={h} timed_out={t}")
+    # Re-review of #16856: the URGENT head's own CI stalls and the stall rule releases it. Nobody holds main
+    # then, so the head that yielded to it must hold again instead of "waiting" on every tick forever.
+    h, t = reserve([("pending", view(16760, "cur-holder", marked=True)),
+                    ("pending", view(16835, "cur-urgent-stalled", urgent=True))], {16835})
+    check("urgent: an urgent head released by the stall rule does not keep the pre-empted head waiting",
+          h == 16760 and t == [16835], f"holder={h} timed_out={t}")
+    released = view(16835, "cur-urgent", urgent=True, app={RELEASED_CONTEXT: ("success", "released")})
+    h, t = reserve([("pending", view(16760, "cur-holder", marked=True)), ("pending", released)], {16835})
+    check("urgent: an urgent head released earlier (RELEASED marker) does not keep the pre-empted head waiting",
+          h == 16760 and t == [16835], f"holder={h} timed_out={t}")
     red = {"Validate manifests": "failure"}
     h, _t = reserve([("pending", view(15991, "cur-fix", fix=True)), ("green", view(16835, "old-urgent", urgent=True))],
                     {16835}, red=red)
@@ -5692,8 +5702,13 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
                      else 2 if sv[1]["number"] in urgent else 3)
     # An urgent PR whose up-to-date head is in CI holds main; a head that yielded to an urgent PR then waits
     # without holding and is never timed out for it (never blamed).
+    # Only an urgent head that can actually HOLD main counts: up to date, in CI, not released earlier
+    # (RELEASED_CONTEXT) and not released now (reservation_expired). Otherwise a stalled urgent PR would
+    # keep the head that yielded to it waiting on every tick while nobody holds main (re-review of #16856).
     urgent_running = any(st == "pending" and v["number"] in urgent
+                         and RELEASED_CONTEXT not in (v.get("app") or {})
                          and git("merge-base", "--is-ancestor", base, v["head_sha"], check=False).returncode == 0
+                         and reservation_expired(git, v["head_sha"], now, activity) is None
                          for st, v in strict)
     for state, view in ordered:
         n, head = view["number"], view["head_sha"]

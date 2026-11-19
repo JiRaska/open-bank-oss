@@ -99,6 +99,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # merge-train.py of #16856 (urgent strict path, ADR-0343 amendment 2026-11-19) after merging main at
     # 35b69fe982 (#16760), reviewed with that PR.
     '16a1391170f232a21f6e84c875cae5ad04316d0b',
+    # merge-train.py of #16856 after the re-review (a released urgent head holds no one back), reviewed with that PR.
+    '287818084655bc5e34d0a700430e354b1ffb4c97',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
