@@ -110,4 +110,25 @@ class AccountNumberReissueServiceTest {
         assertThat(report.skipped).isEqualTo(1)
         assertThat(report.reissued).isEqualTo(0)
     }
+
+    @Test
+    fun `a generated number already held by another account is never used`(): Unit = runBlocking {
+        val holder = UUID.fromString("00000000-0000-0000-0000-000000000001")
+        val victim = UUID.fromString("00000000-0000-0000-0000-000000000002")
+        val store = FakeStore(mapOf(holder to goodNumber, victim to bad1))
+        val spare = generator.generate(CurrencyCode.of("CZK"))
+        val gen = io.mockk.mockk<IbanGenerator>()
+        // First candidate collides with the holder's number; the second is free.
+        io.mockk.every { gen.generate(any()) } returnsMany listOf(
+            com.openbank.libs.domain.account.Iban.of(goodNumber),
+            spare,
+        )
+
+        val report = AccountNumberReissueService(store, gen, clock).reissueInvalid()
+
+        assertThat(report.reissued).isEqualTo(1)
+        assertThat(store.numbers[victim]).isEqualTo(spare.value)
+        assertThat(store.numbers[holder]).isEqualTo(goodNumber)
+        assertThat(store.numbers.values).doesNotHaveDuplicates()
+    }
 }

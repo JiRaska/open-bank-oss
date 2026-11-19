@@ -5,6 +5,8 @@
 package com.openbank.account.integration
 
 import com.openbank.account.domain.model.CzechIbanValidity
+import com.openbank.libs.domain.account.CzechAccountNumber
+import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -16,6 +18,7 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigInteger
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -87,6 +90,45 @@ class AccountNumberReissueIT {
             .describedAs("account row and outbox row must be written by one transaction")
             .isEqualTo(xmins[0])
         assertThat(scalar("SELECT count(*) FROM account_number_reissue WHERE account_id = ?", accountId)).isEqualTo(1L)
+    }
+
+    /**
+     * Same job, independent oracle: validity here is [CzechAccountNumber] applied to the stored prefix and
+     * base, not the service's own [CzechIbanValidity], so a wrong weight in the service cannot grade itself.
+     * Covers a bad PREFIX over a good base (the shape the old generator never produced but a hand-keyed row
+     * can), and proves a valid number is left exactly as it was.
+     */
+    @Test
+    fun `an invalid prefix is re-issued by the real job and a valid number is left alone`() {
+        val validBase = CzechAccountNumber.generateBase()
+        val valid = iban("0000", "000000", validBase)
+        val prefixOnly = iban("0000", "000001", CzechAccountNumber.generateBase()) // prefix weight 1 -> sum 1
+        val validId = UUID.randomUUID()
+        val prefixId = UUID.randomUUID()
+        insertAccount(validId, valid)
+        insertAccount(prefixId, prefixOnly)
+        assertThat(CzechAccountNumber.isValid("000001", prefixOnly.substring(14))).isFalse()
+
+        val deadline = System.currentTimeMillis() + 30_000
+        var current = prefixOnly
+        while (current == prefixOnly && System.currentTimeMillis() < deadline) {
+            Thread.sleep(500)
+            current = scalar("SELECT account_number FROM accounts WHERE id = ?", prefixId) as String
+        }
+
+        assertThat(current).isNotEqualTo(prefixOnly)
+        assertThat(CzechAccountNumber.isValid(current.substring(8, 14).trimStart('0'), current.substring(14, 24)))
+            .describedAs("independent oracle on the re-issued number %s", current).isTrue()
+        assertThat(Iban.of(current).value).isEqualTo(current)
+        assertThat(scalar("SELECT account_number FROM accounts WHERE id = ?", validId)).isEqualTo(valid)
+        assertThat(scalar("SELECT version FROM accounts WHERE id = ?", validId)).isEqualTo(0L)
+        assertThat(scalar("SELECT count(*) FROM account_number_reissue WHERE account_id = ?", validId)).isEqualTo(0L)
+    }
+
+    private fun iban(bank: String, prefix: String, base: String): String {
+        val bban = bank + prefix + base
+        val check = 98 - BigInteger(bban + "123500").mod(BigInteger.valueOf(97)).toInt()
+        return "CZ" + check.toString().padStart(2, '0') + bban
     }
 
     private fun insertAccount(id: UUID, number: String) {
