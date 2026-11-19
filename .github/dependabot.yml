@@ -15,6 +15,12 @@ updates:
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    ignore:
+      # webauthn4j 0.31+ pulls the Jackson 3 `tools.jackson` artifacts, which clash with the
+      # Jackson 2 line Quarkus ships; the version catalog already pins 0.28.x for this reason.
+      # Lift this once the fleet moves to Jackson 3 (#16448 reverted the 0.32 bump).
+      - dependency-name: "com.webauthn4j:*"
+        versions: [">= 0.31.0"]
     groups:
       quarkus:
         patterns:
@@ -37,6 +43,25 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Customer MCP channel E2E harness + attack suite (issue #16617)
+  - package-ecosystem: "npm"
+    directory: "/e2e/mcp-harness"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Prague"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "javascript"
+    commit-message:
+      prefix: "chore(deps-mcp-harness)"
+    groups:
+      mcp-harness:
+        patterns:
+          - "*"
 
   # Admin UI
   - package-ecosystem: "npm"

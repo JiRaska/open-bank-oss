@@ -1,0 +1,21 @@
+{
+  "name": "openbank-mcp-harness",
+  "private": true,
+  "version": "0.0.0",
+  "description": "ADR-0383/0385 customer MCP channel: E2E client harness and authorization attack suite (issue #16617 layers 2 and 3).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "list": "node src/cli.ts --list",
+    "attacks": "node src/cli.ts --run",
+    "journey": "node src/cli.ts --journey"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "playwright-core": "1.65.1"
+  }
+}

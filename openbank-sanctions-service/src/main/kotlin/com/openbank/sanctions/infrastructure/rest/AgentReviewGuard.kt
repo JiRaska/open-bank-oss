@@ -38,9 +38,13 @@ class AgentReviewGuard : ReaderInterceptor {
     override fun aroundReadFrom(context: ReaderInterceptorContext): Any? {
         val value = context.proceed()
         val request = value as? ReviewRequest ?: return value
-        val method = runCatching { resourceInfo.resourceMethod }.getOrNull() ?: return value
+        // Fail CLOSED: a review body whose target method or caller cannot be established is
+        // refused, never waved through to @Authorize (where it would mint a pending approval).
+        val method = runCatching { resourceInfo.resourceMethod }.getOrNull()
+            ?: throw ForbiddenException(UNRESOLVED)
         if (method.declaringClass != SanctionsResourceV3::class.java) return value
         val principal = runCatching { securityContext.userPrincipal }.getOrNull()
+            ?: throw ForbiddenException(UNRESOLVED)
         if (ServiceAccountIdentity.verifiedClientId(principal) != AGENT_CLIENT_ID) return value
         refusal(request.newStatus.name, fourEyesEnforced())?.let { throw ForbiddenException(it) }
         return value
@@ -49,6 +53,7 @@ class AgentReviewGuard : ReaderInterceptor {
     companion object {
         const val AGENT_CLIENT_ID = "openbank-agent"
         val AGENT_REVIEW_TARGETS = setOf("CLEAR")
+        private const val UNRESOLVED = "a sanctions review whose target or caller cannot be established is refused"
         private const val FOUR_EYES_KEY = "authz.four-eyes.enforce"
 
         /** Why an agent review is refused, or `null` when it may proceed to the four-eyes gate. */
