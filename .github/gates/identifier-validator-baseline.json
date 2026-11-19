@@ -63,9 +63,6 @@
     "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/reference/ReferencePayloads.kt": 1
   },
   "mod97": {
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/application/usecase/PaymentConfirmationMapper.kt": 2,
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/client/SchemeGatewayAdapter.kt": 1,
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/client/SettlementAdapter.kt": 2,
     "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 7
   }
 }
