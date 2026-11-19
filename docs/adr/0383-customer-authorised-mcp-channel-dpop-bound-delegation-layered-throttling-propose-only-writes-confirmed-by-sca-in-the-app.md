@@ -260,13 +260,17 @@ D4 said the exchanged token "never leaves MCP". That is false. mcp-service sends
 `Authorization: Bearer` to exactly one downstream service over in-cluster HTTP. It stays in the
 cluster and is never returned to the MCP client, but it does cross a process and network boundary.
 
-The decision not to sender-constrain it stands. It now rests on these controls, each enforced at
-exchange time, where a token failing any check is refused:
+The decision not to sender-constrain it stands. It now rests on two groups of controls.
+
+Enforced by mcp-service at exchange time, where a token failing any check is refused:
 - lifetime `expires_in` at most 60 s;
 - a single audience: the one service the token is sent to;
 - a single read scope, with no other scope accepted;
-- `azp` equal to mcp-service's exchange client;
-- the downstream PDP's read-only rule for the MCP actor.
+- `azp` equal to mcp-service's exchange client.
+
+Enforced downstream, by the receiving service:
+- its PDP's read-only rule for the MCP actor (D4 item 2);
+- its own party-ownership check.
 
 **Residual:** the in-cluster hop is plaintext HTTP unless the target namespace's mesh or mTLS
 encrypts it. A capture from pod memory, from the receiving service or from that hop yields at most

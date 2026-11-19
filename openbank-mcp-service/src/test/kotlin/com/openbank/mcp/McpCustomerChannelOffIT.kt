@@ -102,6 +102,24 @@ class McpCustomerChannelOffIT {
     }
 
     @Test
+    fun `a tokenless DPoP flood is windowed by client address and every suppression is counted`() {
+        // No claims at all: the subject is absent, so the window key is the client-address hash.
+        CustomerTokenSource.claims = emptyMap()
+        val before = meters.find("openbank.mcp.audit_suppressed").counter()?.count() ?: 0.0
+        recorder.clear()
+        repeat(10) {
+            given().contentType(ContentType.JSON).header("Authorization", "DPoP not-a-token")
+                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""")
+                .post("/mcp").then().statusCode(401)
+        }
+        val rows = recorder.events.size
+        assertThat(rows).isBetween(0, 2)
+        val suppressed = (meters.find("openbank.mcp.audit_suppressed").counter()?.count() ?: 0.0) - before
+        // Every refused call is either one audit row or one counted suppression.
+        assertThat(suppressed + rows).isEqualTo(10.0)
+    }
+
+    @Test
     fun `control - with no token the anonymous path still answers 200`() {
         given().contentType(ContentType.JSON).body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
             .post("/mcp").then().statusCode(200)

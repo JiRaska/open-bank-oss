@@ -58,10 +58,10 @@ internal class McpThrottleSupport(
         return limit.reason
     }
 
-    /** The audit row for an unauthenticated call that was within the anonymous budget. */
     /** At most one audit row per [key] per minute window (the throttled-refusal window). */
     fun shouldAuditRefusal(key: String): Boolean = limiter.shouldAuditThrottle(key)
 
+    /** The audit row for an unauthenticated call that was within the anonymous budget. */
     fun auditAnonymousCall(toolName: String, argumentKeys: List<String>, reason: String) = runBlocking {
         auditor.toolCallCompleted(
             McpCallAuditor.ToolCall(
