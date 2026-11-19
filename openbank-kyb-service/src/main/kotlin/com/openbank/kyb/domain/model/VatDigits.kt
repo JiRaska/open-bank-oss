@@ -4,8 +4,10 @@
 
 package com.openbank.kyb.domain.model
 
+import java.time.Clock
 import java.time.DateTimeException
 import java.time.LocalDate
+import java.time.ZoneId
 
 // Small pure helpers shared by the EU VAT national rules (EuVatNationalRules.kt).
 
@@ -43,3 +45,19 @@ internal fun vatDate(year: Int, month: Int, day: Int): LocalDate? = try {
 }
 
 internal fun vatValidDate(year: Int, month: Int, day: Int) = vatDate(year, month, day) != null
+
+/**
+ * Business zone of each state that encodes a birth date in an identifier. "Today" for the future-date
+ * bound is the civil date in the ISSUING state's zone, never the caller's: a person born on the local
+ * date today is valid in the first hours after local midnight although the UTC date is still
+ * yesterday. A modelling choice of this module, not a statute.
+ */
+private val BIRTH_DATE_ZONES: Map<String, ZoneId> = mapOf(
+    "RO" to ZoneId.of("Europe/Bucharest"),
+    "LV" to ZoneId.of("Europe/Riga"),
+    "BG" to ZoneId.of("Europe/Sofia"),
+)
+
+/** A real calendar date not after today in [state]'s zone on [clock]: the one upper-bound rule for every encoded birth date. */
+internal fun vatBornNotAfterToday(date: LocalDate?, clock: Clock, state: String): Boolean =
+    date != null && !date.isAfter(LocalDate.now(clock.withZone(BIRTH_DATE_ZONES.getValue(state))))

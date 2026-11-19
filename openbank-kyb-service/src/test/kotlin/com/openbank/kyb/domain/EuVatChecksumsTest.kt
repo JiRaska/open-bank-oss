@@ -6,12 +6,15 @@ package com.openbank.kyb.domain
 
 import com.openbank.kyb.domain.model.EuVatChecksums
 import com.openbank.kyb.domain.model.IdentifierChecksums
+import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
@@ -74,6 +77,7 @@ class EuVatChecksumsTest {
         "SK2626504705", // SK third=2
         "SK6533591163", // SK third=3
         "SK1443424697", // SK third=4
+        "SK7155014548", // SK third=5
         "SK6475152585", // SK third=7
         "SK5387192580", // SK third=8
         "SK5298597546", // SK third=9
@@ -131,6 +135,14 @@ class EuVatChecksumsTest {
         "FR33957629694", // FR numeric key
         "RO5050615020364", // RO CNP born 2005
         "RO2980801068381", // RO CNP
+        "LV04038518592", // LV born 1985
+        "BG8503042764", // BG EGN born 1985
+        "SK8403129163", // SK RC man 1984
+        "SK9155203453", // SK RC woman 1991
+        "SK0506152581", // SK RC 2005
+        "RO7960716023701", // RO CNP foreign 7
+        "RO8300922120790", // RO CNP foreign 8
+        "RO9781024010947", // RO CNP foreign 9
     )
 
     private val invalid = listOf(
@@ -219,15 +231,24 @@ class EuVatChecksumsTest {
         "FR1Q947575421", // FR alpha key
         "FR46614966529", // FR numeric key
         "RO5356838703649", // RO CNP
+        "SK8405121613", // SK RC shape, bad check
+        "RO7900230123604", // RO CNP foreign 7, 30 February
+        "NL625287773B687", // NL 3-digit suffix
     )
 
     private val policyInvalid = listOf(
-        "SK7155014548", // SK third=5
         "IE3A73216MB", // IE old+9th
         "BE0379580400", // BE remainder 0 / last=00
         "XIGD000", // XI GD000
         "FR12000000000", // FR Monaco zero SIREN
         "RO6670615017673", // RO CNP born 2067
+        "LV15066725058", // LV born 2067
+        "BG6746157292", // BG EGN born 2067
+        "SK0506166860", // SK RC 2005 remainder 10
+        "XI000000000123", // XI zero base 12 digits
+        "XI000000000999", // XI zero base 12 digits
+        "XI000000000", // XI zero base 9 digits
+        "LV15066733867", // LV 7th digit 3
     )
 
     private val prefixes = "AT BE BG CY CZ DE DK EE EL ES FI FR HR HU IE IT LT LU LV MT NL PL PT RO SE SI SK XI".split(
@@ -333,6 +354,68 @@ class EuVatChecksumsTest {
         assertThat(EuVatChecksums.valid("CZ" + arabic("25596641"))).describedAs("CZ").isFalse()
     }
 
+    /**
+     * Every identifier that encodes a birth date rejects a date after today, with the date read from
+     * the injected clock: RO CNP, LV personal code (stdnum/lv/pvn.py `get_birth_date`: century digit
+     * 0/1/2 = 1800/1900/2000) and BG EGN (stdnum/bg/egn.py `get_birth_date`: month +20 = 1800s,
+     * +40 = 2000s). Today and the far past are accepted, tomorrow and the far future are not.
+     */
+    @Test
+    fun `a birth date after today is rejected in LV, BG and RO, today and the far past are accepted`() {
+        val clock = Clock.fixed(Instant.parse("2026-11-19T12:00:00Z"), ZoneOffset.UTC)
+        val farFuture = Clock.fixed(Instant.parse("2070-01-01T00:00:00Z"), ZoneOffset.UTC)
+        val cases = listOf(
+            Born("LV", "LV04038518592", "LV19112621582", "LV20112625928", "LV15066725058"),
+            Born("BG", "BG8503042764", "BG2651195110", "BG2651209764", "BG6746157292"),
+        )
+        cases.forEach { c ->
+            assertThat(EuVatChecksums.valid(c.past, clock)).describedAs("${c.state} far past").isTrue()
+            assertThat(EuVatChecksums.valid(c.today, clock)).describedAs("${c.state} born today").isTrue()
+            assertThat(EuVatChecksums.valid(c.tomorrow, clock)).describedAs("${c.state} born tomorrow").isFalse()
+            assertThat(EuVatChecksums.valid(c.future, clock)).describedAs("${c.state} born 2067").isFalse()
+            assertThat(
+                EuVatChecksums.valid(c.tomorrow, Clock.fixed(Instant.parse("2026-11-20T00:00:00Z"), ZoneOffset.UTC)),
+            )
+                .describedAs("${c.state}: the day after, the same number is fine").isTrue()
+            assertThat(
+                EuVatChecksums.valid(c.future, farFuture),
+            ).describedAs("${c.state}: 2067 is past by 2070").isTrue()
+        }
+    }
+
+    @Test
+    fun `parse threads the clock down to the rule that decodes the date`() {
+        val clock = Clock.fixed(Instant.parse("2026-11-19T12:00:00Z"), ZoneOffset.UTC)
+        val tomorrow = "LV20112625928"
+        val raw = LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, tomorrow, clock)
+        assertThat(raw.isFailure).isTrue()
+        val later = Clock.fixed(Instant.parse("2026-11-21T12:00:00Z"), ZoneOffset.UTC)
+        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, tomorrow, later).isSuccess).isTrue()
+        assertThat(LegalEntityIdentifier.of(IdentifierScheme.EU_VAT, tomorrow, later).value).isEqualTo(tomorrow)
+        assertThat(IdentifierChecksums.valid(IdentifierScheme.EU_VAT, tomorrow, clock)).isFalse()
+    }
+
+    @Test
+    fun `a prefix outside VIES gets its own reason, not a checksum message`() {
+        fun reason(raw: String) =
+            LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw).exceptionOrNull()?.message.orEmpty()
+        assertThat(reason("GB123456789")).contains("not in VIES").contains("XI").doesNotContain("checksum")
+        assertThat(reason("GR123456783")).contains("not in VIES").contains("EL").doesNotContain("checksum")
+        assertThat(reason("ZZ12345678")).contains("not in VIES").doesNotContain("checksum")
+        assertThat(reason("SK1983589521")).describedAs("a real wrong digit").contains("checksum")
+    }
+
+    @Test
+    fun `SK accepts a valid birth number or the official rule, and nothing else`() {
+        // third digit 0, 5: valid only through the RC branch (stdnum/sk/dph.py validate: rc.is_valid first)
+        assertThat(EuVatChecksums.valid("SK8403129163")).isTrue()
+        assertThat(EuVatChecksums.valid("SK9155203453")).isTrue()
+        // the same shape with a wrong check digit is neither an RC nor divisible by 11
+        assertThat(EuVatChecksums.valid("SK8405121613")).isFalse()
+        // third digit 2 and divisible by 11: valid through the official rule alone
+        assertThat(EuVatChecksums.valid("SK2626504705")).isTrue()
+    }
+
     @Test
     fun `a RO CNP is rejected for a birth date after today and accepted for today, with an injected clock`() {
         val noon = Instant.parse("2026-11-19T12:00:00Z")
@@ -343,4 +426,69 @@ class EuVatChecksumsTest {
         val later = Clock.fixed(noon.plusSeconds(86_400L), ZoneOffset.UTC)
         assertThat(EuVatChecksums.valid("RO5261120121411", later)).describedAs("tomorrow's child, a day later").isTrue()
     }
+
+    /**
+     * `today` is the civil date in the ISSUING state's zone (RO Europe/Bucharest, LV Europe/Riga, BG
+     * Europe/Sofia), never the caller's zone: a person born on the local date today is valid in the
+     * first hours after local midnight although the UTC date is still yesterday. Summer (UTC+3) and
+     * winter (UTC+2) boundaries; the clock's own zone must not matter, so Kiritimati (UTC+14) too.
+     */
+    @Test
+    fun `today is the civil date of the issuing state, in summer and in winter time`() {
+        val states = listOf("RO CNP", "LV", "BG EGN")
+        fun vector(state: String, date: String) = V.getValue("$state born $date")
+        fun at(instant: String, zone: ZoneId = ZoneOffset.UTC) = Clock.fixed(Instant.parse(instant), zone)
+        val kiritimati = ZoneId.of("Pacific/Kiritimati")
+        for (state in states) {
+            // summer: 22:30Z on 14 July is 01:30 on 15 July in Bucharest, Riga and Sofia
+            for (zone in listOf(ZoneOffset.UTC, kiritimati)) {
+                val late = at("2026-07-14T22:30:00Z", zone)
+                assertThat(
+                    EuVatChecksums.valid(vector(state, "2026-07-15"), late),
+                ).describedAs("$state summer, born the local day").isTrue()
+                assertThat(
+                    EuVatChecksums.valid(vector(state, "2026-07-16"), late),
+                ).describedAs("$state summer, the day after").isFalse()
+            }
+            // 20:59Z is 23:59 on 14 July locally: the 15th is still tomorrow
+            assertThat(
+                EuVatChecksums.valid(vector(state, "2026-07-15"), at("2026-07-14T20:59:00Z")),
+            ).describedAs("$state summer before local midnight").isFalse()
+            // winter: 22:30Z on 14 January is 00:30 on 15 January (UTC+2)
+            assertThat(
+                EuVatChecksums.valid(vector(state, "2026-01-15"), at("2026-01-14T22:30:00Z")),
+            ).describedAs("$state winter, born the local day").isTrue()
+            assertThat(
+                EuVatChecksums.valid(vector(state, "2026-01-16"), at("2026-01-14T22:30:00Z")),
+            ).describedAs("$state winter, the day after").isFalse()
+            assertThat(
+                EuVatChecksums.valid(vector(state, "2026-01-15"), at("2026-01-14T21:59:00Z")),
+            ).describedAs("$state winter before local midnight").isFalse()
+        }
+    }
+
+    private companion object {
+        val V = mapOf(
+            "RO CNP born 2026-07-15" to "RO5260715127286",
+            "LV born 2026-07-15" to "LV15072621749",
+            "BG EGN born 2026-07-15" to "BG2647151718",
+            "RO CNP born 2026-07-16" to "RO5260716403328",
+            "LV born 2026-07-16" to "LV16072624960",
+            "BG EGN born 2026-07-16" to "BG2647167545",
+            "RO CNP born 2026-01-15" to "RO5260115025518",
+            "LV born 2026-01-15" to "LV15012629802",
+            "BG EGN born 2026-01-15" to "BG2641152390",
+            "RO CNP born 2026-01-16" to "RO5260116406380",
+            "LV born 2026-01-16" to "LV16012625030",
+            "BG EGN born 2026-01-16" to "BG2641160646",
+        )
+    }
 }
+
+private data class Born(
+    val state: String,
+    val past: String,
+    val today: String,
+    val tomorrow: String,
+    val future: String,
+)

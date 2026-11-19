@@ -5,7 +5,6 @@
 package com.openbank.kyb.domain.model
 
 import java.time.Clock
-import java.time.LocalDate
 
 /**
  * The national part of a VAT number (the text after the two-letter prefix) checked against each
@@ -73,12 +72,15 @@ internal object EuVatNationalRules {
     // ---- NL -------------------------------------------------------------------------------
 
     /**
-     * NL btw-id (stdnum/nl/btw.py `validate`, stdnum/nl/bsn.py `checksum`): 9 digits, `B`, a 2-digit
-     * non-zero suffix. Valid when the 9 digits are a BSN (elfproef: sum of (9-i)·digit over the first
+     * NL btw-id: `NL` + 9 digits + `B` + 2 digits, the shape the Belastingdienst publishes for every btw-id
+     * (https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/gebruik-vanaf-1-januari-2020-uw-nieuwe-btw-identificatienummer),
+     * with a non-zero suffix (stdnum/nl/btw.py `validate`, stdnum/nl/bsn.py `checksum`). Valid when the 9 digits are a BSN (elfproef: sum of (9-i)·digit over the first
      * eight minus the ninth, mod 11) OR `NL`+number is ISO 7064 MOD 97-10 valid. stdnum's doctest
      * comment dates that second form "valid since 2020-01-01" (numbers for sole proprietors) but
-     * its `validate` applies it to every number, with no scoping to a sole-proprietor shape, and so
-     * does this rule: nothing narrower than that is published in the sources used here. Positive.
+     * its `validate` applies it to every number of that shape. The only published scope of the 2020
+     * form is that shape (a sole proprietor's number no longer embeds the BSN); the Belastingdienst
+     * page names no checksum and no narrower shape, so none is invented. A string that satisfies
+     * MOD 97-10 but is not that shape (3-digit suffix, another letter than `B`) is rejected. Positive.
      */
     fun nl(n: String): Boolean {
         if (n.length != 12 || n[9] != 'B') return false
@@ -179,6 +181,7 @@ internal object EuVatNordicBaltic {
     // ---- LV -------------------------------------------------------------------------------
 
     private val LV_LEGAL_WEIGHTS = intArrayOf(9, 1, 4, 8, 3, 10, 2, 5, 7, 6, 1)
+    private const val LV_MAX_CENTURY_DIGIT = 2
     private val LV_PERSON_WEIGHTS = intArrayOf(10, 5, 8, 4, 2, 1, 6, 3, 7, 9)
 
     /**
@@ -187,12 +190,18 @@ internal object EuVatNordicBaltic {
      * starts `32`) with check = (1 + Σwᵢdᵢ) mod 11 mod 10; stdnum notes that personal-code
      * algorithm "has not been confirmed by an independent source".
      */
-    fun lv(n: String): Boolean {
+    fun lv(n: String, clock: Clock = Clock.systemUTC()): Boolean {
         if (n.length != 11 || !vatDigits(n)) return false
         if (n[0] > '3') return vatWeighted(n, LV_LEGAL_WEIGHTS) % 11 == 3
         if (!n.startsWith("32")) {
             val year = 1800 + vatDigit(n, 6) * 100 + n.substring(4, 6).toInt()
-            if (!vatValidDate(year, n.substring(2, 4).toInt(), n.substring(0, 2).toInt())) return false
+            // Birth date after today cannot exist; century digit 0/1/2 = 1800/1900/2000 (stdnum/lv/pvn.py
+            // `get_birth_date`). Same rule as RO and BG.
+            // The century digit is defined as 0, 1, 2 (1800s, 1900s, 2000s); stdnum/lv/pvn.py
+            // `get_birth_date` would decode 3..9 as 2100..2700, which is never a birth year.
+            if (vatDigit(n, 6) > LV_MAX_CENTURY_DIGIT) return false
+            val born = vatDate(year, n.substring(2, 4).toInt(), n.substring(0, 2).toInt())
+            if (!vatBornNotAfterToday(born, clock, "LV")) return false
         }
         return (1 + vatWeighted(n, LV_PERSON_WEIGHTS)) % 11 % 10 == vatDigit(n, 10)
     }
@@ -273,15 +282,17 @@ internal object EuVatCentralSouthEast {
 
     private fun roCnp(n: String, clock: Clock): Boolean {
         if (n[0] == '0') return false
+        // First digit 7, 8, 9 (foreign residents) carries no century. stdnum/ro/cnp.py `get_birth_date`
+        // assumes 1900 for them "in order to try to construct a date"; so does this rule, which also
+        // means their decoded date can never lie in the future, and a 2000s birth cannot be told apart.
         val century = when (n[0]) {
             '3', '4' -> 1800
             '5', '6' -> 2000
             else -> 1900
         }
         val born = vatDate(century + n.substring(1, 3).toInt(), n.substring(3, 5).toInt(), n.substring(5, 7).toInt())
-            ?: return false
         // A birth date after today cannot exist (stdnum/ro/cnp.py has a TODO for exactly this check).
-        if (born.isAfter(LocalDate.now(clock))) return false
+        if (!vatBornNotAfterToday(born, clock, "RO")) return false
         if (n.substring(7, 9).toInt() !in RO_COUNTIES) return false
         val sum = vatWeighted(n, RO_CNP_WEIGHTS) % 11
         return (if (sum == 10) 1 else sum) == vatDigit(n, 12)
@@ -299,7 +310,7 @@ internal object EuVatCentralSouthEast {
      * foreigner or other: a valid EGN (birth date + mod 11 check), a valid PNF (mod 10 check), or
      * the "other" rule check = (11 − Σwᵢdᵢ) mod 11 with weights 4,3,2,7,6,5,4,3,2 (10 is invalid).
      */
-    fun bg(n: String): Boolean {
+    fun bg(n: String, clock: Clock = Clock.systemUTC()): Boolean {
         if (!vatDigits(n)) return false
         return when (n.length) {
             9 -> {
@@ -307,14 +318,14 @@ internal object EuVatCentralSouthEast {
                 if (check == 10) check = (0 until 8).sumOf { (it + 3) * vatDigit(n, it) } % 11
                 check % 10 == vatDigit(n, 8)
             }
-            10 -> bgEgn(n) ||
+            10 -> bgEgn(n, clock) ||
                 vatWeighted(n, BG_PNF_WEIGHTS) % 10 == vatDigit(n, 9) ||
                 Math.floorMod(11 - vatWeighted(n, BG_OTHER_WEIGHTS), 11) == vatDigit(n, 9)
             else -> false
         }
     }
 
-    private fun bgEgn(n: String): Boolean {
+    private fun bgEgn(n: String, clock: Clock): Boolean {
         var year = 1900 + n.substring(0, 2).toInt()
         var month = n.substring(2, 4).toInt()
         if (month > 40) {
@@ -324,7 +335,8 @@ internal object EuVatCentralSouthEast {
             year -= 100
             month -= 20
         }
-        return vatValidDate(year, month, n.substring(4, 6).toInt()) &&
+        // month +20 = 1800s, +40 = 2000s (stdnum/bg/egn.py `get_birth_date`); a date after today is no EGN
+        return vatBornNotAfterToday(vatDate(year, month, n.substring(4, 6).toInt()), clock, "BG") &&
             vatWeighted(n, BG_EGN_WEIGHTS) % 11 % 10 == vatDigit(n, 9)
     }
 }

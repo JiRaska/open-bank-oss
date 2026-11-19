@@ -93,13 +93,19 @@ data class LegalEntityIdentifier private constructor(val scheme: IdentifierSchem
                     InvalidIdentifierException(scheme, "does not match the ${scheme.displayName} format"),
                 )
             }
+            if (scheme == IdentifierScheme.EU_VAT) {
+                EuVatChecksums.unknownPrefixReason(value)?.let {
+                    return Result.failure(InvalidIdentifierException(scheme, it))
+                }
+            }
             if (scheme.checksum && !IdentifierChecksums.valid(scheme, value, clock)) {
                 return Result.failure(InvalidIdentifierException(scheme, "checksum failed — a digit is wrong"))
             }
             return Result.success(LegalEntityIdentifier(scheme, value))
         }
 
-        fun of(scheme: IdentifierScheme, raw: String): LegalEntityIdentifier = parse(scheme, raw).getOrThrow()
+        fun of(scheme: IdentifierScheme, raw: String, clock: Clock = Clock.systemUTC()): LegalEntityIdentifier =
+            parse(scheme, raw, clock).getOrThrow()
 
         /**
          * Rebuilds an identifier that was validated when it was STORED. Reads must not re-run the
@@ -245,7 +251,7 @@ object EuVatChecksums {
     val SHAPE_ONLY_STATES: Map<String, String> = emptyMap()
 
     private val RULES: Map<String, (String, Clock) -> Boolean> = mapOf(
-        "AT" to plain(this::at), "BE" to plain(EuVatNationalRules::be), "BG" to plain(EuVatCentralSouthEast::bg),
+        "AT" to plain(this::at), "BE" to plain(EuVatNationalRules::be), "BG" to EuVatCentralSouthEast::bg,
         "CY" to plain(EuVatMediterranean::cy), "CZ" to plain(this::czDic), "DE" to plain(this::de),
         "DK" to plain(EuVatNordicBaltic::dk),
         "EE" to plain(EuVatNordicBaltic::ee), "EL" to plain(EuVatMediterranean::el),
@@ -254,12 +260,24 @@ object EuVatChecksums {
         "HU" to plain(EuVatCentralSouthEast::hu), "IE" to plain(EuVatNationalRules::ie),
         "IT" to plain(EuVatNationalRules::it),
         "LT" to plain(EuVatNordicBaltic::lt), "LU" to plain(EuVatNationalRules::lu),
-        "LV" to plain(EuVatNordicBaltic::lv),
+        "LV" to EuVatNordicBaltic::lv,
         "MT" to plain(EuVatMediterranean::mt), "NL" to plain(EuVatNationalRules::nl),
         "PL" to plain(IdentifierChecksums::nip),
         "PT" to plain(EuVatNationalRules::pt), "RO" to EuVatCentralSouthEast::ro, "SE" to plain(EuVatNordicBaltic::se),
         "SI" to plain(EuVatCentralSouthEast::si), "SK" to plain(this::sk), "XI" to plain(EuVatMediterranean::xi),
     )
+
+    /** Why [vat] cannot be checked at all, or null when its prefix is a VIES prefix this object knows. */
+    fun unknownPrefixReason(vat: String): String? {
+        val cc = vat.take(2)
+        if (cc in RULES || cc in SHAPE_ONLY_STATES) return null
+        val hint = when (cc) {
+            "GB" -> " (the UK left VIES in 2021; use XI for Northern Ireland)"
+            "GR" -> " (VIES uses EL for Greece)"
+            else -> ""
+        }
+        return "country prefix $cc is not in VIES$hint"
+    }
 
     private fun plain(rule: (String) -> Boolean): (String, Clock) -> Boolean = { n, _ -> rule(n) }
 
@@ -270,6 +288,7 @@ object EuVatChecksums {
         country == "NL" -> n.take(NL_PAYLOAD)
         country == "SE" -> n.take(SE_PAYLOAD)
         country == "FR" -> n.drop(FR_KEY_LENGTH)
+        country == "XI" && n.length == XI_LONG_LENGTH -> n.take(XI_LONG_PAYLOAD) // the check reads the first 9 digits
         country == "XI" && n.length == XI_GOVERNMENT_LENGTH -> n // GD001..GD499 / HA500..HA999: every digit identifies
         else -> n.dropLast(1)
     }
@@ -285,19 +304,23 @@ object EuVatChecksums {
     }
 
     /**
-     * SK IČ DPH: 10 digits, first digit not 0, third digit one of 2, 3, 4, 7, 8, 9, number divisible
-     * by 11. The Slovak tax authority's published material gives the 10-digit shape only
-     * (https://www.financnasprava.sk/_img/pfsedit/Dokumenty_PFS/Infoservis/Aktualne_informacie/dph/2016/2016.03.21_IC_DPH_EU.pdf);
-     * the third-digit and mod 11 arithmetic is per python-stdnum (stdnum/sk/dph.py `validate`, `checksum`)
-     * (https://arthurdejong.org/python-stdnum/doc/2.2/stdnum.sk.dph.html). stdnum additionally lets
-     * a Slovak rodné číslo through before applying the rule and its own source calls that unclear;
-     * this validator applies the rule to every number, which is the stricter reading.
+     * SK IČ DPH: 10 ASCII digits that are EITHER a valid Slovak rodné číslo (a natural person's IČ DPH
+     * can be her RČ) OR satisfy the official rule: first digit not 0, third digit one of 2, 3, 4, 7, 8,
+     * 9, number divisible by 11. Both branches are python-stdnum's (stdnum/sk/dph.py `validate`: it
+     * returns when `rc.is_valid(number)`, then applies the digit rule and `checksum`, `int(number) % 11`),
+     * whose comment says it is unclear whether an RČ may be a VAT number; this accepts it, as the
+     * previous rule did. The Slovak tax authority's own list gives the 10-digit shape only
+     * (https://www.financnasprava.sk/_img/pfsedit/Dokumenty_PFS/Infoservis/Aktualne_informacie/dph/2016/2016.03.21_IC_DPH_EU.pdf).
+     * The RČ branch uses the libs [RodneCislo] structure and checksum WITHOUT an upper bound on the
+     * birth date; the bound (today in Europe/Bratislava) comes with the Clock-taking overload of the
+     * libs RČ parser. TODO(#16897): switch to it, keeping one future-date rule for every encoded birth date.
      */
-    fun sk(n: String): Boolean = n.length == SK_LENGTH &&
-        n.all(Char::isAsciiDigit) &&
-        n[0] != '0' &&
-        n[2] in SK_THIRD_DIGITS &&
-        n.toLong() % MOD_11 == 0L
+    fun sk(n: String): Boolean {
+        if (n.length != SK_LENGTH || !n.all(Char::isAsciiDigit)) return false
+        if (IdentifierChecksums.allZeroPayload(n.dropLast(1))) return false
+        return RodneCislo.isValid(n) ||
+            (n[0] != '0' && n[2] in SK_THIRD_DIGITS && n.toLong() % MOD_11 == 0L)
+    }
 
     /**
      * Czech DIČ (zákon 280/2009 Sb. § 130): a legal entity uses its IČO (8 digits, never starting
@@ -389,6 +412,8 @@ object EuVatChecksums {
     private const val NL_PAYLOAD = 8
     private const val SE_PAYLOAD = 9
     private const val XI_GOVERNMENT_LENGTH = 5
+    private const val XI_LONG_LENGTH = 12
+    private const val XI_LONG_PAYLOAD = 8
 
     // 0-9 and A-Z without I and O (stdnum/fr/tva.py `_alphabet`), built rather than spelled out
     private val FR_KEY_ALPHABET: String = ('0'..'9').plus('A'..'Z').filter { it != 'I' && it != 'O' }.joinToString("")

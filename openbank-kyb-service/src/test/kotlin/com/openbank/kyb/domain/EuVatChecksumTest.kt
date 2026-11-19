@@ -27,6 +27,7 @@ class EuVatChecksumTest {
             "CZ000101001", // natural person: CZ + 9-digit pre-1954 rodné číslo
             "CZ699127220", // "special" 9-digit DIČ (6xxxxxxxx) with its own check digit
             "SK1983589520", // SK: 10 digits, first not 0, third in 2,3,4,7,8,9, divisible by 11
+            "SK9309064974", // SK: third digit 0, but a valid birth number (RC branch of stdnum sk/dph)
             "PL1234561001", // PL: NIP
             "DE123456788", // DE: ISO 7064 MOD 11,10
             "FR11123456782", // FR: numeric key = (12 + 3 * (SIREN mod 97)) mod 97
@@ -49,7 +50,6 @@ class EuVatChecksumTest {
             "CZ91234565", // 8-digit DIČ never starts with 9 (IČO checksum itself holds)
             "CZ699127221", // special DIČ check digit wrong (month 91: not a rodné číslo either)
             "SK1983589521", // SK: not divisible by 11
-            "SK9309064974", // SK: divisible by 11 but third digit is 0
             "SK0895446915", // SK: divisible by 11, third digit ok, first digit 0
             "SK2000000002", // SK: divisible by 11, third digit 0 (accepted before #16774)
             "PL1234561002",
