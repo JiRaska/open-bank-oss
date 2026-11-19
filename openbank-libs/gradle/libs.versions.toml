@@ -1,6 +1,6 @@
 [versions]
 kotlin = "2.4.21"
-quarkus = "3.40.1.1"
+quarkus = "3.40.1.2"
 quarkus-plugin = "3.40.1.1"
 # Transaction pilot only; other workers retain 1.25.1 until their versioned rollout.
 temporal = "1.40.0"
