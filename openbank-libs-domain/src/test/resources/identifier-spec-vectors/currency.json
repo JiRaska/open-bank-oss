@@ -57,6 +57,28 @@
       "stdnum": true
     },
     {
+      "value": "CUC",
+      "valid": false,
+      "rule": "withdrawn 2021 (Cuban convertible peso)",
+      "known_defect": {
+        "issue": "#16821",
+        "current": true,
+        "why": "not in CurrencyCode.WITHDRAWN"
+      },
+      "stdnum": false
+    },
+    {
+      "value": "BGN",
+      "valid": false,
+      "rule": "withdrawn from ISO 4217 after the euro changeover on 2026-01-01",
+      "known_defect": {
+        "issue": "#16821",
+        "current": true,
+        "why": "not in CurrencyCode.WITHDRAWN"
+      },
+      "stdnum": false
+    },
+    {
       "value": "DEM",
       "valid": false,
       "rule": "withdrawn 2002 (Deutsche Mark), still known to java.util.Currency",

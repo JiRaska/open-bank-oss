@@ -157,6 +157,7 @@ ORACLES = {
 # the marker must go). A known defect can neither be forgotten nor silently fixed.
 _ISO3166 = frozenset(c.alpha_2 for c in pycountry.countries) | {"XS", "EU", "XA", "XB", "XC", "XD", "XF", "QS", "QT"}
 KNOWN_DEFECTS = {
+    "currency": ("#16821", lambda v: v in {"BGN", "CUC"}),
     "isin": ("#16773", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
 
