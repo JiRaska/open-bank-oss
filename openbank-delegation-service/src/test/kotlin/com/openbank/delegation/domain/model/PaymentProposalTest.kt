@@ -89,6 +89,19 @@ class PaymentProposalTest {
     }
 
     @Test
+    fun `a retry of an approved, unexecuted proposal changes nothing and is refused once executed`() {
+        val approved = proposal().approve(VECTOR_SHA256, now)
+        assertThat(approved.confirmRetry(VECTOR_SHA256, now)).isEqualTo(approved)
+        assertThatThrownBy { approved.confirmRetry("f".repeat(64), now) }
+            .isInstanceOf(PaymentProposalHashMismatchException::class.java)
+        assertThatThrownBy { approved.confirmRetry(VECTOR_SHA256, approved.expiresAt) }
+            .isInstanceOf(PaymentProposalStateException::class.java)
+        val executed = approved.recordExecuted(VECTOR_SHA256, UUID.randomUUID(), now)
+        assertThatThrownBy { executed.confirmRetry(VECTOR_SHA256, now) }
+            .isInstanceOf(PaymentProposalStateException::class.java)
+    }
+
+    @Test
     fun `a rejected proposal can never be approved`() {
         val rejected = proposal().reject(now)
         assertThatThrownBy { rejected.approve(VECTOR_SHA256, now) }

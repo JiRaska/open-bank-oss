@@ -162,6 +162,21 @@ data class PaymentProposal(
         return transition(PaymentProposalStatus.APPROVED, now)
     }
 
+    /**
+     * A retry of the edge's approval after the payment failed downstream: still APPROVED with no
+     * executed payment, same hash, unexpired. Returns this unchanged (no new state), so the edge may
+     * spend a FRESH SCA challenge and retry the payment under the proposal-id idempotency key —
+     * which can never pay twice. After EXECUTED it is refused like any other second approval.
+     */
+    fun confirmRetry(suppliedSha256: String, now: OffsetDateTime): PaymentProposal {
+        requireHash(suppliedSha256)
+        requireStatus(PaymentProposalStatus.APPROVED)
+        if (executedPaymentId != null || !now.isBefore(expiresAt)) {
+            throw PaymentProposalStateException("proposal $id can no longer be retried")
+        }
+        return this
+    }
+
     fun reject(now: OffsetDateTime): PaymentProposal {
         requireOpen(now)
         return transition(PaymentProposalStatus.REJECTED, now)

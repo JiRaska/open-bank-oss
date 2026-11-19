@@ -149,16 +149,18 @@ class PaymentProposalApiIT {
             ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
         ],
     )
-    fun `approve once with the exact hash, replay refused, execution recorded against the same hash`() {
+    fun `approve once with the exact hash, retry idempotent, approval after execution refused`() {
         val id = seedProposal()
         val hash = hashOf(id)
         given().header(HDR, party).get("/api/v1/payment-proposals?partyId=$party").then().statusCode(200)
             .body("[0].payloadSha256", equalTo(hash))
             .body("[0].approvalRequestId", equalTo("mcp-proposal:$id"))
         decide(id, "approve", hash, party).statusCode(200).body("status", equalTo("APPROVED"))
-        decide(id, "approve", hash, party).statusCode(409)
+        // A retry before execution is idempotent: no new state and no second Approved event.
+        decide(id, "approve", hash, party).statusCode(200).body("status", equalTo("APPROVED"))
         decide(id, "execution", "0".repeat(64), party, UUID.randomUUID()).statusCode(409)
         decide(id, "execution", hash, party, UUID.randomUUID()).statusCode(200).body("status", equalTo("EXECUTED"))
+        decide(id, "approve", hash, party).statusCode(409) // a second approval after success is refused
         assertThat(outboxCount(id, "PaymentProposalApproved")).isEqualTo(1)
         assertThat(outboxCount(id, "PaymentProposalExecuted")).isEqualTo(1)
     }

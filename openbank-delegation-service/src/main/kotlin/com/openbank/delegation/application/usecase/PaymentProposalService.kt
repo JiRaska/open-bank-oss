@@ -130,8 +130,10 @@ class PaymentProposalService(
     }
 
     suspend fun approve(id: UUID, partyId: UUID, payloadSha256: String): PaymentProposal {
-        get(id, partyId)
+        val current = get(id, partyId)
         val now = OffsetDateTime.now(clock)
+        // APPROVED-but-unexecuted is the retry of a payment that failed after approval: no write.
+        if (current.status == PaymentProposalStatus.APPROVED) return current.confirmRetry(payloadSha256, now)
         return mutate(id) { it.approve(payloadSha256, now) }
     }
 

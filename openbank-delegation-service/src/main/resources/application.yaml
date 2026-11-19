@@ -219,7 +219,6 @@ mp:
       # keyed by proposal id. Its own topic, so no existing delegation consumer sees these types.
       payment-proposal-events-out:
         connector: smallrye-kafka
-        client.id: delegation-service-payment-proposals-${quarkus.uuid}
         topic: openbank.delegation.payment-proposal-events
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
