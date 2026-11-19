@@ -82,3 +82,17 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: mcp-service
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 9121
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 9121

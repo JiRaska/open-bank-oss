@@ -474,8 +474,17 @@ a stub (T-T2/T-D2).
     replayed once more, and every D5.3 budget restarts from zero. `noeviction` and the maxmemory
     margin make OOM unlikely but not impossible. Prod needs an operator-managed HA store with
     persistence; until then this is accepted for the sandbox and called out in 05-operations.
-  - **Residual:** the requirepass value is visible in the Valkey process arguments inside its own pod
-    (kubelet `$(VAR)` expansion); anyone who can exec into that pod can already read its memory.
+  - *Password handling (#16791 re-review).* The requirepass value never reaches argv: a POSIX-sh
+    wrapper writes it into a memory-medium emptyDir config file, unsets the variable and `exec`s
+    `valkey-server` on the file. Measured on `valkey/valkey:9.1.3-alpine`: `/proc/1/cmdline` reads
+    `valkey-server *:6379`, the variable is absent from `/proc/1/environ`, an unauthenticated `PING`
+    answers `NOAUTH`, and an empty password refuses to start (exit 1).
+  - **Residual:** the value is still in the Kubernetes Secret and in the tmpfs file inside the pod;
+    anyone who can read that Secret or exec into the pod can read it (and could read process
+    memory anyway).
+  - *Detection.* `MCPValkeyMemoryNearMax` / `MCPValkeyMemoryFull` (redis_exporter sidecar,
+    promtool-tested including the cold value) warn before `noeviction` turns a full store into a
+    channel-wide 503.
   - **Residual:** the channel cannot be enabled in a cluster until `mcp-service/customer-store` is
     written to KV (password + HMAC secret) — the boot gate makes that a refusal rather than a
     silent per-pod or unauthenticated store. Replication is asynchronous: if the primary

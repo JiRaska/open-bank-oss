@@ -99,10 +99,19 @@ ephemeral, so:
 - **Full store:** `--maxmemory 128mb` with `noeviction` makes writes fail rather than evict; the channel
   then answers 503 `replay_store_unavailable`. Never change the policy to an evicting one — eviction
   silently reopens replay.
-- **Provisioning:** write `valkey_password` and `key_hmac_secret` (each >= 32 random bytes) to KV
-  `mcp-service/customer-store`; the `mcp-customer-store` ExternalSecret syncs them. Until then the
-  Valkey pod does not start and mcp-service runs with the customer channel off. Enabling the channel
-  without them refuses to boot.
+- **Provisioning:** write `valkey_password` and `key_hmac_secret` to KV `mcp-service/customer-store`,
+  each a random hex string of at least 32 bytes (`openssl rand -hex 32`; the password goes into a
+  quoted config line, so no `"` or newline). The `mcp-customer-store` ExternalSecret syncs every 5
+  minutes; to sync at once run
+  `kubectl -n platform annotate externalsecret mcp-customer-store force-sync=$(date +%s) --overwrite`.
+  Until it syncs the Valkey pod sits in `CreateContainerConfigError` (by design: it never starts
+  unauthenticated) and mcp-service runs with the customer channel off. Enabling the channel without
+  them refuses to boot. **Provision before the GitOps change that creates `mcp-valkey` is merged.**
+- **Auth:** the password is rendered by a shell wrapper into a tmpfs config file (`/conf`, memory
+  medium) and removed from the environment before `exec valkey-server`, so it is in neither the
+  process arguments (`/proc/1/cmdline`, `crictl inspect`) nor the node's disk.
+- **Alerts:** `MCPValkeyMemoryNearMax` (> 80% of maxmemory for 5m, warning) and
+  `MCPValkeyMemoryFull` (> 95% for 2m, critical) from the redis_exporter sidecar.
 - **Rotation:** rotate both with the channel drained; a new HMAC secret orphans live entries for one
   proof window.
 

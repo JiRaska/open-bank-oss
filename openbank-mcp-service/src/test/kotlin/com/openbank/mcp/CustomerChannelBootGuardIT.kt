@@ -33,7 +33,7 @@ class CustomerChannelBootGuardIT {
         .withDatabaseName("openbank_mcp")
         .withUsername("openbank")
         .withPassword("boot-guard-test-only")
-    private val valkey: GenericContainer<*> = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine"))
+    private val valkey: GenericContainer<*> = GenericContainer(DockerImageName.parse("valkey/valkey:9.1.3-alpine"))
         .withExposedPorts(6379)
         .withCommand("valkey-server", "--requirepass", VALKEY_PASSWORD)
     private val runner: String = System.getProperty("openbank.test.mcp.runner")

@@ -14,7 +14,7 @@
 # into 503 (fail closed).
 #
 # Auth: requirepass from the mcp-customer-store Secret (ExternalSecret beside this file, KV
-# mcp-service/customer-store). The Secret ref is REQUIRED here, so without the provisioned value this
+# mcp-service/customer-store), rendered into a tmpfs config file, never argv. The Secret ref is REQUIRED here, so without the provisioned value this
 # pod does not start — it never runs unauthenticated. Named mcp-valkey (not the bare per-ns `redis`)
 # because `platform` is a shared namespace; ingress admits only mcp-service pods
 # (open-bank.tech/same-namespace-ingress-from, read by gen-network-policies.py).
@@ -59,18 +59,29 @@ spec:
       containers:
         - name: redis
           image: docker.io/valkey/valkey:9.1.3-alpine
-          # $(VALKEY_PASSWORD) is expanded by the kubelet from the env below; no shell, no value in git.
+          # The password must never reach argv: kubelet-expanded `$(VAR)` args land in
+          # /proc/1/cmdline and `crictl inspect`. So a POSIX-sh wrapper writes every setting,
+          # requirepass included, into a memory-medium emptyDir (/conf, never on disk), drops the
+          # variable from its environment and execs valkey-server on the file. `$VALKEY_PASSWORD`
+          # below is shell syntax, NOT kubelet `$(...)` syntax, so argv carries only this script.
+          # An empty password refuses to start rather than run unauthenticated. The KV value must
+          # be a hex/alphanumeric string (no `"` or newline), as 05-operations says.
+          command: ["sh", "-c"]
           args:
-            - "--save"
-            - ""
-            - "--appendonly"
-            - "no"
-            - "--maxmemory"
-            - "128mb"
-            - "--maxmemory-policy"
-            - "noeviction"
-            - "--requirepass"
-            - "$(VALKEY_PASSWORD)"
+            - |
+              set -eu
+              [ -n "${VALKEY_PASSWORD:-}" ] || { echo "VALKEY_PASSWORD empty: refusing to start unauthenticated" >&2; exit 1; }
+              umask 077
+              {
+                echo 'save ""'
+                echo 'appendonly no'
+                echo 'dir /data'
+                echo 'maxmemory 128mb'
+                echo 'maxmemory-policy noeviction'
+                printf 'requirepass "%s"\n' "$VALKEY_PASSWORD"
+              } > /conf/valkey.conf
+              unset VALKEY_PASSWORD
+              exec valkey-server /conf/valkey.conf
           env:
             - name: VALKEY_PASSWORD
               valueFrom:
@@ -89,6 +100,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: conf
+              mountPath: /conf
           readinessProbe:
             tcpSocket:
               port: redis
@@ -106,9 +119,43 @@ spec:
             limits:
               cpu: 500m
               memory: 192Mi
+        # Memory ratio for MCPValkeyMemoryNearMax (prometheus-rules-mcp-valkey.yaml): the fleet's
+        # redis_exporter sidecar (copilot-redis pattern). Non-alpine tag: multi-arch. The password
+        # comes from env (REDIS_PASSWORD), never argv.
+        - name: exporter
+          image: docker.io/oliver006/redis_exporter:v1.92.1
+          args: ["--redis.addr=redis://localhost:6379"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-customer-store
+                  key: VALKEY_PASSWORD
+          ports:
+            - name: redis-metrics
+              containerPort: 9121
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: data
           emptyDir: {}
+        # The rendered config holds requirepass: tmpfs, so it never touches the node's disk.
+        - name: conf
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
 ---
 apiVersion: v1
 kind: Service
@@ -124,3 +171,25 @@ spec:
     - name: redis
       port: 6379
       targetPort: redis
+---
+# Scrapes the redis_exporter sidecar for MCPValkeyMemoryNearMax. The fleet PodMonitor only scrapes
+# Quarkus `management` ports, so the store needs its own (copilot-redis pattern).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: mcp-valkey-metrics
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-valkey
+  namespaceSelector:
+    matchNames:
+      - platform
+  podMetricsEndpoints:
+    - port: redis-metrics
+      path: /metrics
+      interval: 30s
+

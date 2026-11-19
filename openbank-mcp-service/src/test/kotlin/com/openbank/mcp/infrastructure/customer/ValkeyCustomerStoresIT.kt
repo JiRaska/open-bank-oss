@@ -49,7 +49,7 @@ import java.util.concurrent.TimeUnit
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ValkeyCustomerStoresIT {
 
-    private val valkey: GenericContainer<*> = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine"))
+    private val valkey: GenericContainer<*> = GenericContainer(DockerImageName.parse("valkey/valkey:9.1.3-alpine"))
         .withExposedPorts(6379)
     private val vertx = Vertx.vertx()
     private val clients = mutableListOf<Redis>()
@@ -206,7 +206,7 @@ class ValkeyCustomerStoresIT {
     @Test
     @Timeout(value = 60, unit = TimeUnit.SECONDS) // an unbounded wait must fail the test, not hang the build
     fun `a hung Valkey (container paused) answers 503 within the timeout, never admits`(): Unit = runBlocking {
-        val hung = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(6379)
+        val hung = GenericContainer(DockerImageName.parse("valkey/valkey:9.1.3-alpine")).withExposedPorts(6379)
         hung.start()
         try {
             val ds = pod("redis://${hung.host}:${hung.firstMappedPort}")
