@@ -100,6 +100,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '25f1786d171b1ab122685d39314fd850fc019b85',
     # merge-train.py of the #16843/#16874 follow-up stacked on #16832 (c5e853c27d), reviewed with that PR.
     '82746dd0548f1f2e352fefbe97cb2aa9a801df5b',
+    # merge-train.py of #16885 after its review fix (judge directories code runs from, opaque-shell fallback).
+    '15c3e1510c102bdd91e8006e1a04207b1abb83ef',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

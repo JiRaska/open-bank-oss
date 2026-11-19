@@ -1007,9 +1007,19 @@ EXEC_SCRIPT_EXT_RE = re.compile(r"\.(py|sh|bash|js|mjs|cjs|ts|pl|rb)$")
 # Code ROOTS handed to an interpreter: each `:`-element of these assignments, and the `-s` start
 # directory of `python3 -m unittest discover`. Code under them runs, so the directory is judge.
 CODE_ROOT_ENV_RE = re.compile(r"(?:^|[\s;&|(])(?:PYTHONPATH|NODE_PATH|PERL5LIB|RUBYLIB)=([^\s\"';|&)]+)")
+# A directory argument after one of these runs code FROM that directory (`cd dir && ./x`, `make -C dir`,
+# `./gradlew -p build-logic test`, `npm --prefix dir`, `--project-dir dir`): judge, a bare single segment
+# included (review of #16885).
+DIR_EXEC_FLAGS = frozenset({"cd", "-C", "-p", "--prefix", "--project-dir"})
+# A token after one of these is the program that runs; without an extension (`bash tools/gate/run`) it is
+# still an executed FILE, never a directory.
+EXEC_PROGRAMS = frozenset({"bash", "sh", "zsh", "python", "python3", "node", "exec", "source", ".", "perl", "ruby"})
+# `bash -c`, `sh -c` or `eval` in a gate builds its command from a string this tokeniser cannot read:
+# every directory that gate names is then judge (fail closed, review of #16885).
+OPAQUE_SHELL_RE = re.compile(r"(?:^|[\s;&|(`])(?:(?:ba|z)?sh\s+-c|eval)(?=[\s\"'])")
 
 
-def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]:
+def gate_named_paths(text: str, gate_ids: set[str], is_dir=None) -> tuple[set[str], set[str]]:
     """(files, directories) the repo paths the gates.yaml entries of `gate_ids` name in `run` and
     `selftest` that are the code that JUDGES, by simple tokenisation of those strings (security review of
     #16832: gates run scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py,
@@ -1026,13 +1036,21 @@ def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]
     on whitespace, shell punctuation AND `:` (PYTHONPATH-style lists), normalised with posixpath.normpath
     (`./x`, `a/./b`); `..`-relative and absolute tokens, globs, `$VAR`s, flags and URLs are dropped —
     never a blanket refusal for an odd slash token: over-refusal is what bit before. No import parsing,
-    no spawn. `.github/` prefixes and FIX_JUDGE_FILES stay refused by fix_evidence regardless."""
+    no spawn. `.github/` prefixes and FIX_JUDGE_FILES stay refused by fix_evidence regardless.
+    Also judge (review of #16885, which found the subject rule fail-open): a directory after `cd`, `-C`,
+    `-p`, `--prefix` or `--project-dir` (a bare single segment too: `./gradlew -p build-logic`), the
+    directory `node dir/` runs, the root a `find dir ... -exec` walks, a directory on an `xargs` line, and
+    each package prefix of `-m a.b.c` that `is_dir` (default os.path.isdir, the checkout) says exists. A
+    program token without an extension (`bash tools/gate/run`, a line's first word) is an executed file.
+    A gate whose run/selftest contains `bash -c`, `sh -c` or `eval` makes every directory it names judge."""
+    is_dir = is_dir or os.path.isdir
     files: set[str] = set()
     dirs: set[str] = set()
     # Per GATE: a directory one gate scans is not made judge by a script another red gate executes under it.
     named_dirs: dict[str, set[str]] = {}
     exec_files: dict[str, set[str]] = {}
     roots: dict[str, set[str]] = {}
+    opaque: set[str] = set()
     gid, key = None, None
 
     def path_token(tok: str) -> tuple[str, bool] | None:
@@ -1067,23 +1085,48 @@ def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]
                 pt = path_token(entry)
                 if pt and pt[1]:
                     roots.setdefault(gid, set()).add(pt[0] + "/")
+        if OPAQUE_SHELL_RE.search(rest):
+            opaque.add(gid)
         toks = re.split(r"[\s\"'|;&()<>=,:\[\]`]+", rest)
         discover = "discover" in toks
+        find_exec = "find" in toks and ("-exec" in toks or "-execdir" in toks)
+        xargs = "xargs" in toks
+        first = next((j for j, t in enumerate(toks) if t), None)
         for i, tok in enumerate(toks):
+            prev = toks[i - 1] if i > 0 else ""
+            if prev == "-m" and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", tok):
+                parts = tok.split(".")
+                for k in range(1, len(parts) + 1):
+                    d = "/".join(parts[:k]) + "/"
+                    if is_dir(d):
+                        roots.setdefault(gid, set()).add(d)
+                continue
+            if (prev in DIR_EXEC_FLAGS and "/" not in tok and DIR_SEGMENT_RE.match(tok)
+                    and not re.search(r"\.[A-Za-z0-9]+$", tok)):
+                named_dirs.setdefault(gid, set()).add(tok + "/")
+                roots.setdefault(gid, set()).add(tok + "/")
+                continue
             pt = path_token(tok)
             if pt is None:
                 continue
-            p, is_dir = pt
-            if is_dir:
+            p, is_d = pt
+            if is_d and not tok.endswith("/") and (prev in EXEC_PROGRAMS or i == first):
+                is_d = False                       # an extensionless program: `bash tools/gate/run`
+                exec_files.setdefault(gid, set()).add(p)
+            if is_d:
                 named_dirs.setdefault(gid, set()).add(p + "/")
-                if discover and i > 0 and toks[i - 1] == "-s":
+                if ((discover and prev == "-s") or prev in DIR_EXEC_FLAGS or (prev == "node" and tok.endswith("/"))
+                        or (find_exec and prev == "find") or xargs):
                     roots.setdefault(gid, set()).add(p + "/")
             else:
                 files.add(p)
                 if EXEC_SCRIPT_EXT_RE.search(p):
                     exec_files.setdefault(gid, set()).add(p)
     for g, named in named_dirs.items():
-        dirs |= {d for d in named if d in roots.get(g, ()) or any(f.startswith(d) for f in exec_files.get(g, ()))}
+        dirs |= {d for d in named if g in opaque or d in roots.get(g, ())
+                 or any(f.startswith(d) for f in exec_files.get(g, ()))}
+    for g, rs in roots.items():   # `-m a.b.c` package roots are named only through the dotted path
+        dirs |= rs
     return files, dirs
 
 
@@ -4672,6 +4715,36 @@ def gate_level_fix_self_test(check) -> None:
     fs, ds = gate_named_paths(gates_pair, {"s", "g"})
     check("named paths (per gate): a directory one red gate scans is not judge because ANOTHER red gate executes a script under it",
           "openbank-infra/scripts/" not in ds and fs == {"openbank-infra/scripts/x.py"}, f"{fs} {ds}")
+    # Review of #16885: the subject rule was fail-open for directories code runs FROM. Each shape below is a
+    # judge directory; each is must-FAIL against the rule that only knew named scripts and code roots.
+    real_dirs = {"tools/", "tools/lint/", "pkg/", "pkg/sub/"}
+    shapes = [
+        ("cd", "cd openbank-infra/tooling && ./run-all", {"openbank-infra/tooling/"}),
+        ("make -C", "make -C openbank-infra/make check", {"openbank-infra/make/"}),
+        ("-C", "git -C openbank-x/sub status", {"openbank-x/sub/"}),
+        ("-p bare segment (gates.yaml selftest shape)", "./gradlew -p build-logic test --build-cache", {"build-logic/"}),
+        ("--prefix", "npm --prefix openbank-admin-ui run lint-gate", {"openbank-admin-ui/"}),
+        ("--project-dir", "tool --project-dir=perf/proj verify", {"perf/proj/"}),
+        ("node dir/", "node openbank-x/gate/ --check", {"openbank-x/gate/"}),
+        ("find -exec", "find openbank-x/checks -name '*.t' -exec {} +", {"openbank-x/checks/"}),
+        ("xargs", "ls openbank-x/bin | xargs -n1 sh", {"openbank-x/bin/"}),
+        ("-m a.b.c", "python3 -m pkg.sub.mod --strict", {"pkg/", "pkg/sub/"}),
+        ("bash -c fallback", "bash -c \"$CMD\" openbank-x/opaque/", {"openbank-x/opaque/"}),
+        ("eval fallback", "eval \"$X\"; ls openbank-x/also/", {"openbank-x/also/"}),
+    ]
+    for name, cmd, want in shapes:
+        _fs, ds = gate_named_paths(f"gates:\n  - id: q\n    run: {cmd}\n", {"q"}, is_dir=lambda d: d in real_dirs)
+        check(f"named paths (#16885 review): `{name}` makes its directory judge", want <= ds, f"{cmd!r}: {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: q\n    run: bash tools/gate/run --all\n", {"q"}, is_dir=lambda d: False)
+    check("named paths (#16885 review): an extensionless program `bash tools/gate/run` is an executed FILE, never a (subject) directory",
+          fs == {"tools/gate/run"} and ds == set(), f"{fs} {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: q\n    run: ls tools/gate/; bash tools/gate/run\n", {"q"}, is_dir=lambda d: False)
+    check("named paths (#16885 review): a named directory holding an extensionless executed program is judge",
+          fs == {"tools/gate/run"} and ds == {"tools/gate/"}, f"{fs} {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: q\n    run: python3 -m nopkg.mod; git diff --exit-code docs/runbooks/\n", {"q"},
+                              is_dir=lambda d: False)
+    check("named paths (#16885 review): `-m` prefixes that are not directories, and a diffed directory, are still not judge",
+          ds == set(), f"{fs} {ds}")
     # REAL text: this checkout's own gates.yaml (synthetic fixtures once hid 355/355 UNKNOWN, #16832). The
     # subject directories of the review finding must not be judge; the code roots and named scripts must be.
     real_gates = pathlib.Path(GATES_YAML)
@@ -4693,6 +4766,9 @@ def gate_level_fix_self_test(check) -> None:
               rds_sh == set(), f"{rfs_sh} {rds_sh}")
         check("real gates.yaml: service-runbook-drift names its generator, NOT docs/runbooks/",
               "openbank-infra/scripts/generate-service-runbooks.py" in rfs_rb and "docs/runbooks/" not in rds_rb, f"{rfs_rb} {rds_rb}")
+        _f, rds_tp = gate_named_paths(rtext, {"test-provenance-cache"})
+        check("real gates.yaml: test-provenance-cache's `./gradlew -p build-logic` selftest makes build-logic/ judge (#16885 review)",
+              "test-provenance-cache" in rids and "build-logic/" in rds_tp, f"{rds_tp}")
         check("real gates.yaml: governance-script-unit-tests' `unittest discover -s` roots are judge directories",
               {"openbank-infra/scripts/", "perf/tests/"} <= rds_gu, f"{rfs_gu} {rds_gu}")
         all_fs, all_ds = gate_named_paths(rtext, rids)
