@@ -59,7 +59,6 @@ MODES
 from __future__ import annotations
 
 import argparse
-import ast
 import base64
 import contextlib
 import datetime
@@ -1031,163 +1030,13 @@ FIX_GATE_VERIFIED = 2    # ...and every gate red on main is `ok` in the head's o
 FIX_STRENGTH_KEY = "fix_strength"   # cache slot: (FIX_STRENGTH_KEY, head sha, context) -> level
 NOT_FIX_HEAD_KEY = ("not_fix_head",)   # cache slot: PR number -> head sha the refusal in NOT_FIX_KEY is about
 FIX_CLAIM_CONTEXT = "merge-train/fix-claim"   # App marker: why this head was refused as a main-red fix (publish_fix_claims)
-JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")   # anything under these JUDGES a head: a fix may not edit them
-SCRIPT_DEP_DEPTH = 3   # script_dependencies: how far `import`/`source` chains are followed
-# The `.github/scripts` file list of a COMMIT is immutable, so it may be remembered for the life of the
-# process (one tick in production; many ticks in the self-test, whose spawn budget this protects). Never a
-# verdict, never anything a rerun could change: a listing of what a sha contains.
-_SCRIPTS_TREE_MEMO: dict[str, set[str]] = {}
-
-
-DYNAMIC_IMPORT_CALLS = ("import_module", "spec_from_file_location", "run_path", "run_module", "__import__")
-SHELL_DYNAMIC_RE = re.compile(r"(?:^|[;&|(\s])(?:source|\.|bash|sh)\s+[\"']?[^\n]*?(?:\$DIR\b|\$HERE\b|\$\{DIR\}|\$\{HERE\}|\$\(\s*dirname\b)", re.M)
-# `__file__`-relative paths the parser CAN follow: the fleet idiom that puts the script's own directory on
-# sys.path (nothing new to resolve: that directory is searched anyway), and a literal joined to the
-# script's directory (a sibling file: code or data, added as a dependency). Any other `__file__` use is
-# dynamic loading the parser cannot follow: UNKNOWN.
-FILE_SYSPATH_RE = re.compile(r"sys\.path\.(?:insert|append)\([^\n]*__file__[^\n]*(?:\.parent|dirname\()[^\n]*\)")
-FILE_SIBLING_RE = re.compile(r"(?:Path\(__file__\)(?:\.resolve\(\))?\.parent|os\.path\.dirname\((?:os\.path\.abspath\()?__file__\)?\))"
-                             r"((?:\s*/\s*\"[^\"\n]+\"|\s*,\s*\"[^\"\n]+\")+)")
-SHELL_SOURCE_RE = re.compile(r"(?:^|[;&|(\s])(?:source|\.|bash|sh)\s+[\"']?((?:\.github/scripts/)?lib/[A-Za-z0-9_.-]+\.sh)", re.M)
-
-
-def script_imports(path: str, text: str) -> set[str] | None:
-    """The .github/scripts candidates one script's text names, or None = UNKNOWN: the script loads code
-    dynamically (importlib.import_module, spec_from_file_location, runpy, __import__, a `__file__`-relative
-    path, or a shell `source`/`.`/`bash` of a `$DIR`/`$HERE`/`$(dirname ...)` path), or cannot be parsed —
-    nothing about its helpers can be derived, so nothing about them may be trusted. Python is parsed with
-    `ast` (every alias of `import a, b`; `from pkg import mod` is both pkg.py and pkg/mod.py; relative
-    imports resolve against the script's directory); shell by regex. Explicit `.github/scripts/...` paths
-    anywhere in the text count for both kinds."""
-    here = path.rsplit("/", 1)[0]
-    cands: set[str] = set(re.findall(r"\.github/scripts/[A-Za-z0-9_./-]+", text))
-    if path.endswith(".py"):
-        try:
-            tree = ast.parse(text)
-        except (SyntaxError, ValueError):
-            return None
-        def modpaths(mod: str, rel: int = 0) -> set[str]:
-            roots = [here] if rel else [".github/scripts", ".github/scripts/lib"]
-            stem = mod.replace(".", "/")
-            return {f"{r}/{stem}.py" for r in roots if stem} | {f"{r}/{stem}/__init__.py" for r in roots if stem}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for al in node.names:
-                    cands |= modpaths(al.name)
-            elif isinstance(node, ast.ImportFrom):
-                base_mod = node.module or ""
-                cands |= modpaths(base_mod, node.level) if base_mod else set()
-                for al in node.names:
-                    cands |= modpaths(f"{base_mod}.{al.name}" if base_mod else al.name, node.level)
-            elif isinstance(node, ast.Name) and node.id == "__import__":
-                return None
-            elif isinstance(node, ast.Call):
-                fn = node.func
-                name = fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
-                if name in DYNAMIC_IMPORT_CALLS:
-                    return None
-        followed = len(FILE_SYSPATH_RE.findall(text))
-        for segs in FILE_SIBLING_RE.findall(text):
-            followed += 1
-            cands.add(here + "/" + "/".join(re.findall(r"\"([^\"]+)\"", segs)))
-        if text.count("__file__") > followed:
-            return None   # a `__file__`-relative path in a shape the parser cannot follow
-        return cands
-    if SHELL_DYNAMIC_RE.search(text):
-        return None
-    for m in SHELL_SOURCE_RE.findall(text):
-        cands.add(m if m.startswith(".github/scripts/") else f".github/scripts/{m}")
-        cands.add(f"{here}/{m}")
-    return cands
-
-
-def script_dependencies(git, revs: tuple[str, ...], scripts: set[str], cache: dict | None = None,
-                        changes: list | None = None) -> set[str] | None:
-    """Every `.github/scripts/...` file the given scripts import or source, followed SCRIPT_DEP_DEPTH
-    levels, over the UNION of the trees at `revs` (the trusted base AND the head: a head cannot drop an
-    import to hide a helper edit). None = UNKNOWN, and the caller REFUSES the fix claim: a tree
-    unreadable (`ls-tree` failed), a script that loads code dynamically (script_imports), or candidates
-    still unresolved at the depth cap. Derived from the scripts' own text, never hand-listed: the helper
-    libraries a red gate's script relies on judge that gate too, so a fix may not edit them either.
-    Spawn-frugal (the self-test budgets subprocess spawns): one `ls-tree` for the FIRST rev (the base,
-    memoised per tick across every head) and one `show` per script per rev, memoised; when `changes` —
-    the `changed_entries` of base...head, which the caller already has — is given for a two-rev call,
-    the head's tree is the base tree plus those adds, minus those deletes: no spawn at all for it. No
-    scripts spawn nothing."""
-    if not scripts:
-        return set()
-    key = ("script_deps", tuple(revs), tuple(sorted(scripts)))
-    if cache is not None and key in cache:
-        return cache[key]
-    trees: dict[str, set[str]] = {}
-    for i, rev in enumerate(revs):
-        tree_key = ("scripts_tree", rev)
-        if cache is not None and tree_key in cache:
-            trees[rev] = cache[tree_key]
-            continue
-        if i == 1 and changes is not None and len(revs) == 2:
-            tree = set(trees[revs[0]])
-            for c in changes:
-                if c.status[:1] in ("D", "R", "C") and c.paths:
-                    tree.discard(c.paths[0])
-                for p in (c.paths[1:] if c.status[:1] in ("R", "C") else c.paths if c.status[:1] == "A" else ()):
-                    if p.startswith(".github/scripts/"):
-                        tree.add(p)
-            trees[rev] = tree
-            if cache is not None:
-                cache[tree_key] = tree
-            continue
-        if rev in _SCRIPTS_TREE_MEMO:
-            trees[rev] = _SCRIPTS_TREE_MEMO[rev]
-            continue
-        r = git("ls-tree", "-r", "--name-only", rev, "--", ".github/scripts", check=False)
-        if r.returncode != 0:
-            return None   # the tree cannot be read: nothing derivable, nothing trusted
-        trees[rev] = set(r.stdout.split())
-        if SHA_RE.fullmatch(rev):   # only a real commit sha is immutable; a fixture label or ref name is not
-            _SCRIPTS_TREE_MEMO[rev] = trees[rev]
-        if cache is not None:
-            cache[tree_key] = trees[rev]
-    seen: set[str] = set()
-    frontier = set(scripts)
-    out: set[str] | None = set()
-    for _ in range(SCRIPT_DEP_DEPTH + 1):   # depth+1 passes: the deepest level is resolved, not dropped
-        if not frontier:
-            break
-        nxt: set[str] = set()
-        for path in sorted(frontier):
-            seen.add(path)
-            for rev in revs:
-                if path not in trees[rev]:
-                    continue
-                show_key = ("script_text", rev, path)
-                if cache is not None and show_key in cache:
-                    text = cache[show_key]
-                else:
-                    r = git("show", f"{rev}:{path}", check=False)
-                    text = r.stdout if r.returncode == 0 else None
-                    if cache is not None:
-                        cache[show_key] = text
-                if text is None:
-                    out = None
-                    break
-                cands = script_imports(path, text)
-                if cands is None:
-                    out = None
-                    break
-                nxt.update(c for c in cands if c != path and c not in seen and any(c in trees[v] for v in revs))
-            if out is None:
-                break
-        if out is None:
-            break
-        frontier = nxt
-    if out is not None and frontier:
-        out = None   # unresolved candidates at the depth cap: unknown, never "the ones we happened to see"
-    if out is not None:
-        out = seen - set(scripts)
-    if cache is not None:
-        cache[key] = out
-    return out
+# The JUDGE (security review of 75ca372b, HIGH): a fix claim may not edit anything that judges it. A
+# dependency parser was tried first and could not be made to follow the fleet's own `__file__` idioms —
+# run-gates.py itself read as UNKNOWN, every gate shard's fix claim was refused, and main-red recovery
+# was defeated. So no parsing: a fail-closed PREFIX rule over the trees that hold gate scripts and their
+# helpers, the workflows, the actions, and the gate manifest, baselines and measurements.
+FIX_JUDGE_PREFIXES = (".github/scripts/", ".github/workflows/", ".github/actions/", ".github/gates/")
+FIX_JUDGE_FILES = (".github/scripts/run-gates.py",)   # covered by the prefixes; named so the rule reads whole
 
 
 RED_GATE_STATES = ("failed", "unfalsified")
@@ -1252,22 +1101,6 @@ def trusted_head_records(head_records: dict[str, list | None] | None, main_jobs:
     base = {m.group(1) for n in (main_jobs or {}) for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m}
     return {slug: recs for slug, recs in head_records.items()
             if slug in base and (head_jobs or {}).get(f"gates ({slug})") in OK_STATES}
-
-
-def parse_gate_scripts(text: str) -> dict[str, set[str]]:
-    """gate id -> every `.github/scripts/...` path its gates.yaml entry names (run, selftest, inputs),
-    by line scan: the scripts that JUDGE that gate."""
-    out: dict[str, set[str]] = {}
-    gid = None
-    for ln in text.splitlines():
-        m = GATE_ID_RE.match(ln)
-        if m:
-            gid = m.group(1)
-            out.setdefault(gid, set())
-            continue
-        if gid is not None:
-            out[gid].update(re.findall(r"\.github/scripts/[A-Za-z0-9_./-]+", ln))
-    return out
 
 
 def fix_strength(cache: dict | None, view: dict, ctxs: list[str]) -> int:
@@ -4375,9 +4208,7 @@ def selftest_skip_fix_self_test(check) -> None:
           "skipped on the head" in (selftest_skip_refusal(
               main_jobs, {"data": [{"id": "g1", "status": "failed", "failure_kind": "unfalsified"}]}, ["x"], decl) or ""))
 
-    # The live path: fix_contexts over a stubbed GitHub and git. Fixtures reuse sha-shaped labels with
-    # different stubbed trees, so the process-wide tree memo is cleared before each live block.
-    _SCRIPTS_TREE_MEMO.clear()
+    # The live path: fix_contexts over a stubbed GitHub and git.
     main_c, head, mb = "m" * 40, "h" * 40, "b" * 40
     gates_text = ("gates:\n  - id: g1\n    selftest: |\n      x\n"
                   "    selftest_inputs:\n      - \".github/scripts/check-g1.py\"\n      - openbank-x/src/\n"
@@ -4531,8 +4362,7 @@ def gate_level_fix_self_test(check) -> None:
     check("artifact trust: a red gate ok only in a rogue shard is not verified",
           gate_level_evidence(red, trusted_head_records({"rogue": [{"id": "adr-registry", "status": "ok"}]}, base_jobs, hjobs))[1] == J)
 
-    # Live path (fix_contexts -> fix_evidence) over a stubbed GitHub and git (tree memo cleared: see above).
-    _SCRIPTS_TREE_MEMO.clear()
+    # Live path (fix_contexts -> fix_evidence) over a stubbed GitHub and git.
     A, B, C, D, E, G = "a" * 40, "b" * 39 + "1", "c" * 40, "d" * 40, "e" * 40, "f" * 40
     gates_text = "gates:\n  - id: adr-registry\n    run: python3 .github/scripts/check-adr-registry.py\n"
 
@@ -4624,121 +4454,37 @@ def gate_level_fix_self_test(check) -> None:
     got = fix_contexts(gh, git, mb, {"number": 9, "head_sha": A}, {MR: main_c}, cache)
     check("LOW-4: a non-gate job red on main is judged by job evidence alone, no artifact read, worded as such",
           got == [MR] and gh.reads == [] and rec(A) == (J, "job-level (no gate red on main)"), f"{got} reads={gh.reads} {rec(A)}")
-    # Follow-ups (review LOWs of #16760): derived judge dependencies, non-empty masking, refusal status.
-    base_tree = {".github/scripts/check-adr-registry.py": "import gatelib, helper2\nfrom lib.probe import x\nfrom pkg import mod\nimport json\n",
-                 ".github/scripts/gatelib.py": "import re\nimport pathlib\n_P = pathlib.Path(__file__).resolve().parent / \"patterns.txt\"\n",
-                 ".github/scripts/patterns.txt": "x", ".github/scripts/helper2.py": "import deep1\n", ".github/scripts/deep1.py": "import deep2\n",
-                 ".github/scripts/deep2.py": "import os\n",
-                 ".github/scripts/lib/probe.py": "import os\n", ".github/scripts/pkg/__init__.py": "", ".github/scripts/pkg/mod.py": "",
-                 ".github/scripts/check-sh.sh": "source \"lib/probe.sh\"\nbash .github/scripts/helper.sh\n",
-                 ".github/scripts/lib/probe.sh": "", ".github/scripts/helper.sh": "",
-                 ".github/scripts/run-gates.py": "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))\nimport selftest_input_trace as sit\n",
-                 ".github/scripts/selftest_input_trace.py": "import gatelib\n",
-                 ".github/scripts/dyn.py": "import importlib\nm = importlib.import_module('x')\n",
-                 ".github/scripts/dyn2.py": "import pathlib\np = pathlib.Path(__file__).parent.parent / 'x'\n",
-                 ".github/scripts/dyn.sh": "source \"$DIR/lib/probe.sh\"\n", ".github/scripts/bad.py": "def (:\n"}
-    head_tree = dict(base_tree); head_tree[".github/scripts/check-adr-registry.py"] = "import gatelib\nimport json\n"   # dropped helper2/pkg
-    trees = {"b": base_tree, "h": head_tree}
-    def tgit(*a, **_k):
-        if a[0] == "show":
-            rev, p = a[1].split(":", 1)
-            return _R(0, trees[rev][p]) if p in trees.get(rev, {}) else _R(128, "")
-        if a[0] == "ls-tree":
-            return _R(0, "\n".join(sorted(trees[a[3]])) + "\n") if a[3] in trees else _R(128, "")
-        return _R(0, "")
-    S1 = {".github/scripts/check-adr-registry.py"}
-    deps = script_dependencies(tgit, ("h",), {".github/scripts/check-sh.sh"})
-    check("judge deps: shell sources and explicit paths resolve", deps == {".github/scripts/lib/probe.sh", ".github/scripts/helper.sh"}, str(deps))
-    deps = script_dependencies(tgit, ("b",), S1)
-    check("judge deps: every alias of `import a, b`, `from pkg import mod` as pkg/__init__ + pkg/mod, lib/ root, a 3-level chain to its "
-          "deepest level, and a `__file__`-sibling data file; stdlib ignored",
-          deps == {".github/scripts/gatelib.py", ".github/scripts/patterns.txt", ".github/scripts/helper2.py", ".github/scripts/deep1.py",
-                   ".github/scripts/deep2.py", ".github/scripts/lib/probe.py",
-                   ".github/scripts/pkg/__init__.py", ".github/scripts/pkg/mod.py"}, str(deps))
-    check("judge deps: UNION of base and head — a helper dropped on the head is still derived",
-          script_dependencies(tgit, ("b", "h"), S1) == deps and ".github/scripts/helper2.py" not in (script_dependencies(tgit, ("h",), S1) or set()))
-    trees["b4"] = dict(base_tree); trees["b4"][".github/scripts/deep2.py"] = "import deep3\n"; trees["b4"][".github/scripts/deep3.py"] = "import os\n"
-    check("judge deps: a 4th level beyond the depth cap of 3 -> UNKNOWN (None), never the partial set seen so far",
-          script_dependencies(tgit, ("b4",), S1) is None)
-    for label, script in [("importlib.import_module", "dyn.py"), ("a `__file__` path the parser cannot follow", "dyn2.py"),
-                          ("shell source of a $DIR path", "dyn.sh"), ("unparsable Python", "bad.py")]:
-        check(f"judge deps: {label} -> UNKNOWN", script_dependencies(tgit, ("b",), {f".github/scripts/{script}"}) is None)
-    check("judge deps: the runner's own `sys.path.insert(0, <own dir>)` idiom is followed, its helpers derived",
-          script_dependencies(tgit, ("b",), {".github/scripts/run-gates.py"}) == {".github/scripts/selftest_input_trace.py", ".github/scripts/gatelib.py", ".github/scripts/patterns.txt"})
-    check("judge deps: an unreadable tree (ls-tree failed) -> UNKNOWN", script_dependencies(tgit, ("nope",), S1) is None)
-    check("judge deps: no scripts spawn nothing", script_dependencies(lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")), ("b",), set()) == set())
-    spawns, c2 = [], {}
-    def cgit(*a, **k):
-        spawns.append(a[0]); return tgit(*a, **k)
-    d1 = script_dependencies(cgit, ("b", "h"), S1, c2); n1 = len(spawns); d2 = script_dependencies(cgit, ("b", "h"), S1, c2)
-    check("judge deps: spawn-frugal — one ls-tree per rev, only `show`s otherwise, and a cached second call spawns nothing",
-          d1 == d2 and d1 is not None and spawns.count("ls-tree") == 2 and set(spawns) == {"ls-tree", "show"} and len(spawns) == n1, str(spawns))
-    trees["c" * 40], trees["d" * 40] = base_tree, head_tree
-    _SCRIPTS_TREE_MEMO.pop("c" * 40, None)
-    spawns.clear()
-    script_dependencies(cgit, ("c" * 40, "d" * 40), S1, {}); n_first = spawns.count("ls-tree")
-    spawns.clear()
-    script_dependencies(cgit, ("c" * 40, "d" * 40), S1, {})
-    check("judge deps: a commit sha's tree listing is remembered across ticks (immutable), a label is not",
-          n_first == 2 and spawns.count("ls-tree") == 0 and "b" not in _SCRIPTS_TREE_MEMO, str(spawns))
-    spawns.clear()
-    mod_only = [Change("M", "100644", "100644", [".github/scripts/check-adr-registry.py"])]
-    d3 = script_dependencies(cgit, ("b", "h"), S1, {}, changes=mod_only)
-    check("judge deps: with the head's change set given, the head tree costs NO spawn (base tree + adds - deletes)",
-          d3 == d1 and spawns.count("ls-tree") == 1, str(spawns))
-    added = [Change("A", "000000", "100644", [".github/scripts/newhelper.py"]), Change("D", "100644", "000000", [".github/scripts/helper2.py"])]
-    trees["h2"] = dict(head_tree); trees["h2"][".github/scripts/newhelper.py"] = ""; del trees["h2"][".github/scripts/helper2.py"]
-    trees["h2"][".github/scripts/check-adr-registry.py"] = "import newhelper\n"
-    d4 = script_dependencies(tgit, ("b", "h2"), S1, {}, changes=added)
-    check("judge deps: an added helper on the head is found through the change set, a deleted one still through the base (union)",
-          d4 is not None and ".github/scripts/newhelper.py" in d4 and ".github/scripts/helper2.py" in d4, str(d4))
-
-    class _GhDep(_Gh):
-        pass
-    live_edits = {"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml",
-                  "2" * 40: ".github/scripts/helper2.py", "3" * 40: ".github/scripts/pkg/mod.py",
-                  "4" * 40: ".github/scripts/selftest_input_trace.py", "5" * 40: ".github/gates/selftest-undeclared-inputs.baseline",
-                  "6" * 40: ".github/scripts/patterns.txt", "7" * 40: "docs/adr/0009-q.md"}
-    files.update(live_edits)
-    for h_ in live_edits:
+    # Follow-ups (review LOWs of #16760) and the HIGH of 75ca372b: the judge is a PREFIX rule, not a parser.
+    judge_edits = {"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml",
+                   "2" * 40: ".github/scripts/lib/probe.sh", "4" * 40: ".github/scripts/selftest_input_trace.py",
+                   "5" * 40: ".github/gates/selftest-undeclared-inputs.baseline", "6" * 40: ".github/gates/gates.yaml",
+                   "7" * 40: ".github/scripts/run-gates.py", "8" * 40: ".github/gates/gate-runtime-measurements.json"}
+    service_edits = {"9" * 40: "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/Foo.kt", "1" * 40: "docs/adr/0009-q.md"}
+    files.update(judge_edits); files.update(service_edits)
+    for h_ in list(judge_edits) + list(service_edits):
         heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
-    gates_dep = "gates:\n  - id: adr-registry\n    run: python3 .github/scripts/check-adr-registry.py\n"
-    live_trees = {mb: base_tree}
-    for h_ in live_edits:
-        live_trees[h_] = head_tree   # every head dropped helper2 and pkg from the gate script
-    def dgit(*a, **_k):
-        if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
-            return _R(0, gates_dep)
-        if a[0] == "show":
-            rev, p = a[1].split(":", 1)
-            if p in live_trees.get(rev, {}):
-                return _R(0, live_trees[rev][p])
-        if a[0] == "ls-tree":
-            return _R(0, "\n".join(sorted(live_trees[a[3]])) + "\n") if a[3] in live_trees else _R(128, "")
-        return git(*a, **_k)
-    _SCRIPTS_TREE_MEMO.clear()   # the dependency fixture has its own trees for these labels
-    gh, cache = _GhDep(heads), {}
-    got = {h_: fix_contexts(gh, dgit, mb, {"number": i + 20, "head_sha": h_}, {MR: main_c}, cache) for i, h_ in enumerate(live_edits)}
+    gh, cache = _Gh(heads), {}
+    got = {h_: fix_contexts(gh, git, mb, {"number": i + 20, "head_sha": h_}, {MR: main_c}, cache)
+           for i, h_ in enumerate(list(judge_edits) + list(service_edits))}
     nf = cache.get(NOT_FIX_KEY, {})
-    def refused(h_, frag):
-        i = list(live_edits).index(h_) + 20
-        return got[h_] == [] and "changes the judge" in nf.get(i, "") and frag in nf.get(i, "")
-    check("judge deps (live): a head editing gatelib.py, imported by the red gate's script, is refused", refused("g" * 40, "gatelib.py"), str(nf))
-    check("judge (live): a head editing .github/actions/** is refused", refused("i" * 40, ".github/actions/"), str(nf))
-    check("judge deps (live): `import gatelib, helper2` — a head editing the SECOND alias is refused", refused("2" * 40, "helper2.py"), str(nf))
-    check("judge deps (live): `from pkg import mod` — a head editing pkg/mod.py is refused", refused("3" * 40, "pkg/mod.py"), str(nf))
-    check("runner (live): a head editing selftest_input_trace.py (the runner's helper) is refused", refused("4" * 40, "selftest_input_trace.py"), str(nf))
-    check("runner (live): a head editing the undeclared-inputs baseline (the runner's data) is refused", refused("5" * 40, "baseline"), str(nf))
-    check("judge deps (live): a `__file__`-sibling data file of a helper (patterns.txt) is refused", refused("6" * 40, "patterns.txt"), str(nf))
-    check("judge deps (live): UNION — every head dropped helper2 from the gate script, yet the base still names it (see helper2 above); "
-          "an unrelated edit is still a fix", got["7" * 40] == [MR], f"{got['7' * 40]} {nf}")
-    live_trees["8" * 40] = dict(head_tree); live_trees["8" * 40][".github/scripts/check-adr-registry.py"] = base_tree[".github/scripts/dyn.py"]
-    files["8" * 40] = "docs/adr/0010-r.md"; heads["8" * 40] = {"data": [{"id": "adr-registry", "status": "ok"}]}
-    got8 = fix_contexts(gh, dgit, mb, {"number": 30, "head_sha": "8" * 40}, {MR: main_c}, cache)
-    check("judge deps (live): a gate script that loads code dynamically on the head -> the fix claim is refused as underivable",
-          got8 == [] and "cannot be derived" in cache.get(NOT_FIX_KEY, {}).get(30, ""), f"{got8} {cache.get(NOT_FIX_KEY, {}).get(30)}")
+    for i, (h_, path) in enumerate(judge_edits.items()):
+        check(f"judge prefix: a head editing {path} is refused as a fix, naming the path",
+              got[h_] == [] and "changes the judge" in nf.get(i + 20, "") and path in nf.get(i + 20, ""), f"{got[h_]} {nf.get(i + 20)}")
+    for h_ in service_edits:
+        check(f"judge prefix: a head editing only {service_edits[h_].split('/')[0]} with the red gate ok is the fix, gate-verified",
+              got[h_] == [MR] and rec(h_)[0] == V, f"{got[h_]} {rec(h_)}")
+    check("judge prefix: every universal self-test input (the runner's data) lies under the judge prefixes",
+          all(p.startswith(FIX_JUDGE_PREFIXES) for p in UNIVERSAL_SELFTEST_INPUTS), str(UNIVERSAL_SELFTEST_INPUTS))
     check("refusal visibility: note_not_fix records the head the refusal is about",
           cache.get(NOT_FIX_HEAD_KEY, {}).get(20) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
+    # REAL text, not a synthetic fixture (the HIGH of 75ca372b was invisible to every fixture): the runner on
+    # this checkout uses `__file__` in shapes a parser did not follow; the prefix rule needs none of that.
+    runner = pathlib.Path(".github/scripts/run-gates.py")
+    if runner.is_file():
+        text = runner.read_text(encoding="utf-8")
+        check("real run-gates.py: it uses `__file__` (the shapes that defeated the parser) and a head editing it is refused by the prefix rule alone",
+              text.count("__file__") >= 1 and ".github/scripts/run-gates.py".startswith(FIX_JUDGE_PREFIXES)
+              and got["7" * 40] == [] and "run-gates.py" in nf.get(26, ""), f"__file__ x{text.count('__file__')} {nf.get(26)}")
 
     class _GhMask:
         def __init__(self, jobs):
@@ -4768,9 +4514,7 @@ def gate_level_fix_self_test(check) -> None:
           publish_fix_claims(g, "m" * 40, {5: "the head changes the judge (x)"}, {5: "1" * 40}, False) == [] and g.posted == [])
     check("refusal visibility: shadow posts nothing; a refusal with no recorded head posts nothing",
           publish_fix_claims(_GhPost(), "m" * 40, {5: "x"}, {5: "1" * 40}, True) == [] and publish_fix_claims(_GhPost(), "m" * 40, {5: "x"}, {}, False) == [])
-    check("gate scripts: the gates.yaml entry's scripts are found per id",
-          parse_gate_scripts(gates_text + "  - id: g2\n    selftest: |\n      python3 .github/scripts/t.py --self-test\n    run: true\n")
-          == {"adr-registry": {".github/scripts/check-adr-registry.py"}, "g2": {".github/scripts/t.py"}})
+
 
 def fix_preempts_strict_self_test(check) -> None:
     """ADR-0343 amendment 2026-11-14: on a red main a fix pre-empts a strict reservation whose CI is still
@@ -5572,23 +5316,14 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
     # Gate-level evidence: the gate red on main should be `ok` somewhere in the head's own gate results
     # (all shards: a gate may move), not skipped inside a green shard job — a full-fleet CI run of an
     # unrelated PR passes the job rule for every job. Skipped/absent caps the strength; red refuses.
-    # A head that changes the judge — gates.yaml, the runner, any workflow, or a red gate's own scripts —
-    # cannot be verified BY that judge: its green may be the edit talking. Refused outright (security
-    # review of 7ca5c4a1), not capped: such a fix is merged by a human, never by its own verdict.
-    red_ids = {str(r.get("id")) for recs in (main_records or {}).values() if isinstance(recs, list)
-               for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
-    scripts = parse_gate_scripts(gates_text) if gates_text is not None else {}
-    own = {s for gid in red_ids for s in scripts.get(gid, ())}
-    # The RUNNER judges every gate: walk its helpers too, and count its data inputs (the universal
-    # self-test inputs: gates.yaml, the tracer, gatelib, the undeclared-inputs baseline) as the judge.
-    deps = script_dependencies(git, (base, head), own | {".github/scripts/run-gates.py"}, cache, changes=changes)
-    if deps is None:
-        return (f"the judge of the red gate(s) cannot be derived (dynamic loading, an unreadable tree or helpers "
-                f"beyond {SCRIPT_DEP_DEPTH} levels in {', '.join(sorted(own))}): its own green cannot verify a fix")
-    judge = set(UNIVERSAL_SELFTEST_INPUTS) | {".github/scripts/run-gates.py"} | own | deps
-    touched = sorted(f for f in head_files if f in judge or f.startswith(JUDGE_PREFIXES))
+    # A head that changes the JUDGE — any gate script or helper, workflow, action, or the gate manifest,
+    # baselines and measurements — cannot be verified BY that judge: its green may be the edit talking.
+    # Refused outright, never capped: such a fix is merged by a human. A prefix rule, deliberately: a
+    # dependency parser read run-gates.py itself as unknown and refused every gate-shard fix claim.
+    touched = sorted(f for f in head_files if f.startswith(FIX_JUDGE_PREFIXES) or f in FIX_JUDGE_FILES)
     if touched:
-        return f"the head changes the judge ({touched[0]}): its own green cannot verify a fix"
+        return (f"the head changes the judge ({touched[0]}): a fix claim may not edit CI gates, scripts, workflows "
+                "or actions — its own green cannot verify a fix; it is merged by a human")
     # Head artifacts count only for the BASE shard set with a green `gates (<slug>)` job behind each.
     head_records = trusted_head_records(cached_gate_records(gh, head, ctx, None, cache), main_jobs,
                                         cached_ctx_jobs(gh, head, ctx, cache))
@@ -11513,33 +11248,37 @@ def self_test() -> int:
                 return lambda _p: (gh.jobs.update({base0: {"gates (data)": "failure"}}),
                                    gh.head_jobs.update({"gates (data)": "success"}),
                                    gh.gate_records_by.update({(base0, "data"): records}))
-            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-nine")))
-            check("main red on an UNFALSIFIED gate the head does not declare: a head green on the shard is REFUSED",
-                  gh.updates == [] and gh.merged == [] and "self-test of gate `g-nine`" in (s1.get("not_fix") or {}).get(36, ""),
+            # Fix PRs here edit docs (pX #33), not .github/scripts/: a fix claim may not edit the judge (prefix rule).
+            s1, s2 = fix_behind({}, fix="pX", tamper=shard_red(unf("g-nine")))
+            # pX is a promoted train candidate: promote_fixes judges it with record=False (a candidate that is not
+            # a fix just stays a candidate), so the refusal shows as "not served", never as a not_fix reason.
+            check("main red on an UNFALSIFIED gate the head does not declare: a head green on the shard is REFUSED (not served)",
+                  gh.updates == [] and gh.merged == [] and 33 not in (s1.get("not_fix") or {}),
                   f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             gh.gate_records_by.clear()
             main_red_done()
-            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-one")))
+            s1, s2 = fix_behind({}, fix="pX", tamper=shard_red(unf("g-one")))
             check("main red on an UNFALSIFIED gate whose self-test always runs on a PR: the green head is the fix",
-                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+                  gh.updates == [33] and gh.merged == [33], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             gh.gate_records_by.clear()
             main_red_done()
-            s1, s2 = fix_behind({}, tamper=shard_red([{"id": "g-one", "status": "failed", "failure_kind": "content"}]))
+            s1, s2 = fix_behind({}, fix="pX", tamper=shard_red([{"id": "g-one", "status": "failed", "failure_kind": "content"}]))
             check("main red on a gate shard for CONTENT: a head green on the shard is the fix, as before",
-                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+                  gh.updates == [33] and gh.merged == [33], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             gh.gate_records_by.clear()
             main_red_done()
             # Gate-level evidence and evidence-first ordering (2026-11-18): two green strict-lane fixes
-            # behind a main red on the content of gate g-one in shard `data`: pW2 (#36, older) and pP1
-            # (#88, newer). Each case names what the HEAD's gate results say about g-one.
-            def two_fixes(rec36, rec88, slug36="data"):
-                open_only("pW", "pW2", "pP1")
+            # behind a main red on the content of gate g-one in shard `data`: pX (#33, docs, older) and pF
+            # (#34, svc, newer) — both outside the judge trees, so the prefix rule lets them claim. Each case
+            # names what the HEAD's gate results say about g-one.
+            def two_fixes(rec33, rec34, slug33="data"):
+                open_only("pW", "pX", "pF")
                 main_breaks(base_red=True)
                 gh.jobs[base0] = {"gates (data)": "failure", "gates (kotlin)": "success"}   # both shards exist on the base run
                 gh.head_jobs.update({"gates (data)": "success", "gates (kotlin)": "success"})
                 gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
                 gh.gate_records_by[(base0, "data")] = [{"id": "g-one", "status": "failed", "failure_kind": "content"}]
-                for n, rec, slug in ((36, rec36, slug36), (88, rec88, "data")):
+                for n, rec, slug in ((33, rec33, slug33), (34, rec34, "data")):
                     if rec is not None:
                         gh.gate_records_by[(gh.prs[n]["head"]["sha"], slug)] = rec
                 s = settle_now()
@@ -11552,20 +11291,32 @@ def self_test() -> int:
             g_red = [{"id": "g-one", "status": "failed", "failure_kind": "content"}]
             updates, not_fix = two_fixes(g_skipped, g_ok)
             check("#16690 shape: the older full-fleet head that SKIPPED the red gate is only job-level; the head that passed it is served first",
-                  updates == [88] and 36 not in not_fix, f"updates={updates} not_fix={not_fix}")
+                  updates == [34] and 33 not in not_fix, f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(None, g_ok)
             check("evidence first: a newer gate-verified fix is update-branched before an older job-level one (artifacts unreadable)",
-                  updates == [88] and 36 not in not_fix, f"updates={updates} not_fix={not_fix}")
-            updates, not_fix = two_fixes(g_ok, None, slug36="kotlin")
+                  updates == [34] and 33 not in not_fix, f"updates={updates} not_fix={not_fix}")
+            updates, not_fix = two_fixes(g_ok, None, slug33="kotlin")
             check("moved shard: the red gate ok in ANOTHER shard of the older head verifies it, and it is served first",
-                  updates == [36], f"updates={updates} not_fix={not_fix}")
+                  updates == [33], f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(g_red, g_ok)
-            check("a head on which the red gate is still red is not a fix", updates == [88] and "red on the head too" in not_fix.get(36, ""),
-                  f"updates={updates} not_fix={not_fix}")
+            check("a head on which the red gate is still red is not a fix: the other head is served, this one never (promoted "
+                  "candidates are refused silently, record=False)", updates == [34] and 33 not in updates, f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(g_ok, g_ok)
-            check("equal evidence: the older fix is served first", updates == [36], f"updates={updates} not_fix={not_fix}")
+            check("equal evidence: the older fix is served first", updates == [33], f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(None, None)
-            check("both heads unreadable: the job rule stands and age decides, as before", updates == [36], f"updates={updates}")
+            check("both heads unreadable: the job rule stands and age decides, as before", updates == [33], f"updates={updates}")
+            # And the fixture's own strict-lane "fix" PRs, which edit .github/scripts/, are now refused by the prefix rule.
+            open_only("pW", "pW2")
+            main_breaks(base_red=True)
+            gh.jobs[base0] = {"gates (data)": "failure"}
+            gh.head_jobs["gates (data)"] = "success"
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            s = settle_now()
+            check("judge prefix (e2e): a green PR editing .github/scripts/ is refused as a fix on a red gate shard, not update-branched",
+                  gh.updates == [] and "changes the judge (.github/scripts/two.py)" in (s.get("not_fix") or {}).get(36, ""),
+                  f"updates={gh.updates} not_fix={s.get('not_fix')}")
+            gh.gate_records_by.clear()
+            main_red_done()
             # Judge change: a fix candidate that edits a workflow is refused outright (security review).
             open_only("pW", "pJ2")
             main_breaks(base_red=True)
