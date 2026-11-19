@@ -23,8 +23,10 @@ NegativeAuth verification class (refusal state).
 ## Running
 
 ```bash
-./gradlew :openbank-analytics-sink:test --tests '*AccountRegistryPactConsumerTest'
+./gradlew :openbank-analytics-sink:consumerPactTest
 ```
+
+(or `:openbank-analytics-sink:test --tests '*AccountRegistryPactConsumerTest'` inside the full suite).
 
 The generated pact lands in the repo-root `pacts/` directory
 (`pact.rootDir`, git-pact convention) and is committed; the
