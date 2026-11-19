@@ -5,7 +5,7 @@
 import org.apache.maven.model.building.DefaultModelBuilderFactory
 import org.apache.maven.model.building.DefaultModelBuildingRequest
 import org.apache.maven.model.building.ModelBuildingRequest
-import org.cyclonedx.gradle.CycloneDxTask
+import org.cyclonedx.gradle.CyclonedxDirectTask
 import org.cyclonedx.gradle.GradleAssistedMavenModelResolverImpl
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.result.ComponentArtifactsResult
@@ -22,7 +22,8 @@ plugins {
 
 val bomProject = project
 
-tasks.withType<CycloneDxTask>().configureEach {
+// 3.x: the direct task is the one that resolves this project's configurations.
+tasks.withType<CyclonedxDirectTask>().configureEach {
     doFirst {
         val runtime = bomProject.configurations.findByName("runtimeClasspath")
         if (runtime == null || !runtime.isCanBeResolved) {
