@@ -63,8 +63,9 @@ class PaymentProposalApiIT {
     )
     fun `create requires an Idempotency-Key and replays the first answer for it`() {
         seedGrant()
-        given().contentType(ContentType.JSON).body(mapOf("partyId" to party.toString()))
-            .post("/api/v1/payment-proposals").then().statusCode(400)
+        // A complete, valid request with NO key: only the key requirement can refuse it.
+        create(key = "").statusCode(400)
+        assertThat(proposalCount()).isZero()
         val key = UUID.randomUUID().toString()
         val first = create(key = key).statusCode(201).extract().path<String>("proposalId")
         create(key = key).statusCode(201).header("X-Idempotency-Replayed", equalTo("true"))
@@ -403,6 +404,14 @@ class PaymentProposalApiIT {
             }
         }
         return id
+    }
+
+    private fun proposalCount(): Int = jdbc().use { c ->
+        c.createStatement().executeQuery("select count(*) from delegation_payment_proposals where party_id = '$party'")
+            .use {
+                it.next()
+                it.getInt(1)
+            }
     }
 
     private fun rowStatus(id: UUID): String = jdbc().use { c ->
