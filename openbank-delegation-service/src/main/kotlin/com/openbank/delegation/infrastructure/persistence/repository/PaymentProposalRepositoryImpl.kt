@@ -30,6 +30,7 @@ import java.util.UUID
  * of one proposal yield exactly one APPROVED and one refusal.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one aggregate adapter keeps every proposal write and its outbox row together
 class PaymentProposalRepositoryImpl(
     private val outboxRepository: DelegationOutboxRepository,
     private val objectMapper: ObjectMapper,
@@ -151,17 +152,17 @@ class PaymentProposalRepositoryImpl(
 
     private fun rejectedOutbox(row: Array<Any?>, now: OffsetDateTime): OutboxMessage {
         val event = PaymentProposalLifecycleEvent(
-            aggregateId = row[0] as UUID,
-            partyId = row[1] as UUID,
-            grantId = row[2] as UUID,
-            mcpClientId = row[3] as String,
+            aggregateId = row[COL_ID] as UUID,
+            partyId = row[COL_PARTY] as UUID,
+            grantId = row[COL_GRANT] as UUID,
+            mcpClientId = row[COL_CLIENT] as String,
             status = PaymentProposalStatus.REJECTED,
-            revision = (row[4] as Number).toLong(),
-            operationType = PaymentProposalOperationType.valueOf(row[5] as String),
-            amount = (row[6] as java.math.BigDecimal).toPlainString(),
-            currency = row[7].toString(),
-            payloadSha256 = row[8].toString(),
-            expiresAt = toOffset(row[9]),
+            revision = (row[COL_REVISION] as Number).toLong(),
+            operationType = PaymentProposalOperationType.valueOf(row[COL_OPERATION] as String),
+            amount = (row[COL_AMOUNT] as java.math.BigDecimal).toPlainString(),
+            currency = row[COL_CURRENCY].toString(),
+            payloadSha256 = row[COL_HASH].toString(),
+            expiresAt = toOffset(row[COL_EXPIRES]),
             occurredAt = now.toInstant(),
         )
         return OutboxMessage(
@@ -227,6 +228,18 @@ class PaymentProposalRepositoryImpl(
     }
 
     private companion object {
+        // Column positions of REJECT_BY_GRANT_SQL's RETURNING list.
+        const val COL_ID = 0
+        const val COL_PARTY = 1
+        const val COL_GRANT = 2
+        const val COL_CLIENT = 3
+        const val COL_REVISION = 4
+        const val COL_OPERATION = 5
+        const val COL_AMOUNT = 6
+        const val COL_CURRENCY = 7
+        const val COL_HASH = 8
+        const val COL_EXPIRES = 9
+
         /** Enough to cover the daily limit and every open proposal; a party can never exceed it. */
         const val PARTY_SCAN_LIMIT = 200
         const val PARTY_LOCK_SQL =

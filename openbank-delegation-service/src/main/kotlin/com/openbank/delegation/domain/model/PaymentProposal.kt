@@ -117,6 +117,7 @@ data class PaymentProposalPayload(
     }
 }
 
+@Suppress("TooManyFunctions") // the lifecycle transitions are the aggregate's whole API
 data class PaymentProposal(
     val id: UUID,
     val partyId: UUID,

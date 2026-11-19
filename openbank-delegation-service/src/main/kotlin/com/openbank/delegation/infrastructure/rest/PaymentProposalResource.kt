@@ -230,7 +230,9 @@ data class McpProposalReceipt(
                 "in the bank app with strong customer authentication before it expires.",
         )
 
-        private fun maskIban(iban: String): String = iban.take(4) + "…" + iban.takeLast(4)
+        private const val IBAN_VISIBLE = 4
+
+        private fun maskIban(iban: String): String = iban.take(IBAN_VISIBLE) + "…" + iban.takeLast(IBAN_VISIBLE)
     }
 }
 
