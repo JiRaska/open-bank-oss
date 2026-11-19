@@ -512,9 +512,9 @@ class DealRepositoryImpl(
         return q.singleResult.map { BigDecimal(it.toString()) }
     }
 
-    override suspend fun pendingOutflows(currency: String, day: LocalDate, excludeDealId: UUID?): BigDecimal =
+    override suspend fun pendingOutflows(currency: String, excludeDealId: UUID?): BigDecimal =
         Panache.withSession {
-            Panache.getSession().flatMap { pendingOutflows(it, currency, day, excludeDealId) }
+            Panache.getSession().flatMap { pendingOutflows(it, currency, excludeDealId) }
         }.awaitSuspending()
 
     /**
@@ -530,7 +530,7 @@ class DealRepositoryImpl(
         g: com.openbank.treasury.application.port.out.FundingGuard,
     ): Uni<Void> = session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
         .setParameter("line", "treasury-funding:${g.currency}").singleResult
-        .flatMap { pendingOutflows(session, g.currency, g.day, dealId) }
+        .flatMap { pendingOutflows(session, g.currency, dealId) }
         .map { pending ->
             if (!g.fits(pending)) {
                 throw com.openbank.treasury.application.port.out.FundingExceededException(g.describe(pending))
@@ -539,7 +539,9 @@ class DealRepositoryImpl(
 
     /**
      * #12115: Σ principal of the OTHER ACTUAL deals whose cash is contracted to leave the [currency]
-     * contra account on or before [day] but has not moved — a [com.openbank.treasury.domain.model.Funding.PENDING_STATES]
+     * contra account but has not moved, WHATEVER their value date — the balance is today's and no
+     * inflow is projected, so a later-valued outflow consumes the same cash (a value-date cut-off let
+     * a nearer-dated booking ignore a farther-dated one and both settle into an overdraft) — a [com.openbank.treasury.domain.model.Funding.PENDING_STATES]
      * state and a funding-consuming product ([com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS],
      * derived from the domain, never a second literal list). A SETTLED deal moved already (the
      * balance carries it); a DRAFT or PENDING_APPROVAL one is not concluded.
@@ -547,17 +549,15 @@ class DealRepositoryImpl(
     private fun pendingOutflows(
         session: org.hibernate.reactive.mutiny.Mutiny.Session,
         currency: String,
-        day: LocalDate,
         excludeDealId: UUID?,
     ): Uni<BigDecimal> {
         val q = session.createNativeQuery<Any>(
             "select coalesce(sum(principal), 0) from deals " +
                 "where kind = 'ACTUAL' and currency = :ccy and deal_id <> :d " +
-                "and product in (:products) and state in (:states) and value_date <= :day",
+                "and product in (:products) and state in (:states)",
         ).setParameter("ccy", currency).setParameter("d", excludeDealId ?: NO_DEAL)
             .setParameter("products", FUNDING_CONSUMING_PRODUCT_NAMES)
             .setParameter("states", FUNDING_PENDING_STATE_NAMES)
-            .setParameter("day", day)
         return q.singleResult.map { BigDecimal(it.toString()) }
     }
 

@@ -172,14 +172,16 @@ class TreasuryDealFundingTest {
         }
 
     @Test
-    fun `only outflows valued on or before the deal's own value date count against it`(): Unit = runBlocking {
-        // Committed 700k valued next week; this 400k placement settles today, before it.
-        book(placement("700000.00", value = monday.plusDays(7)))
-        assertThat(book(placement("400000.00")).state).isEqualTo(DealState.BOOKED)
-        // A deal valued AFTER the 700k counts it (and today's 400k): 1M - 700k - 400k < 0.
-        val d = service.draft(placement("400000.00", value = monday.plusDays(8)), DealFixtures.dealer)
-        service.submit(d.id, DealFixtures.dealer)
-        assertThatThrownBy { runBlocking { service.approve(d.id, DealFixtures.approver) } }
-            .isInstanceOf(FundingExceededException::class.java)
-    }
+    fun `a nearer-dated booking counts a farther-dated committed outflow - A 800k at D+5 then B 800k at D+1 is refused`(): Unit =
+        runBlocking {
+            // A books 800k valued D+5; B (800k, valued D+1, BEFORE A) must still see A: both would
+            // settle from the same 1M, leaving the contra account 600k short.
+            assertThat(book(placement("800000.00", value = monday.plusDays(5))).state).isEqualTo(DealState.BOOKED)
+            val b = service.draft(placement("800000.00", value = monday.plusDays(1)), DealFixtures.dealer)
+            service.submit(b.id, DealFixtures.dealer)
+            assertThatThrownBy { runBlocking { service.approve(b.id, DealFixtures.approver) } }
+                .isInstanceOf(FundingExceededException::class.java)
+            assertThat(service.get(b.id).deal.state).isEqualTo(DealState.PENDING_APPROVAL)
+            assertThat(metered).containsExactly("CZK")
+        }
 }

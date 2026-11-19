@@ -31,20 +31,21 @@ fun interface FundingMeter {
 
 /**
  * The funding headroom a booking was vetted against: the contra account's [balance] as measured
- * before the write, the [required] principal of the deal being booked, and [day] — the latest value
- * date up to which OTHER committed outflows count against it (this deal's own value date, never
- * before today). Inside the booking's transaction the (currency) funding line is locked and the
+ * before the write and the [required] principal of the deal being booked. EVERY other committed,
+ * not-yet-settled outflow counts against it, whatever its value date: the balance is today's and no
+ * future inflow is projected, so an outflow valued later than this deal still needs the same cash
+ * (otherwise A for 800 at D+5 then B for 800 at D+1 against 1000 both pass and both settle). Inside the booking's transaction the (currency) funding line is locked and the
  * committed outflows re-measured, so two bookings on one line serialise and cannot jointly overdraw
  * (mirrors [ExposureGuard] for the counterparty line). A shortfall refuses the booking
  * ([FundingExceededException], 422) instead of committing an overdrawn nostro.
  */
-data class FundingGuard(val currency: String, val balance: BigDecimal, val required: BigDecimal, val day: LocalDate) {
+data class FundingGuard(val currency: String, val balance: BigDecimal, val required: BigDecimal) {
     /** True when the balance covers the already-committed [pendingOutflows] plus this deal. */
     fun fits(pendingOutflows: BigDecimal): Boolean = balance.subtract(pendingOutflows).subtract(required).signum() >= 0
 
     fun describe(pendingOutflows: BigDecimal): String =
         "booking needs $required $currency on the contra account; balance $balance, " +
-            "already committed $pendingOutflows on or before $day"
+            "already committed (unsettled, any value date) $pendingOutflows"
 }
 
 /** The contra account would go negative: the booking is refused, nothing is written (422 FUNDING_EXCEEDED). */

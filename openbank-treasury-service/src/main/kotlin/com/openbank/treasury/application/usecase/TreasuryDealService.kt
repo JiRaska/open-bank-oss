@@ -349,7 +349,7 @@ class TreasuryDealService(
 
     /**
      * #12115: a placement is booked only against money the contra (nostro) account verifiably holds:
-     * the ledger's balance net of every other committed outflow up to the deal's own value date.
+     * the ledger's balance net of every other committed, unsettled outflow, whatever its value date.
      * Checked here (fail fast, 422 FUNDING_EXCEEDED) and re-measured under the funding line lock in
      * the save's transaction, so two concurrent bookings cannot jointly overdraw. The check is a
      * gate at BOOKING: settlement moves what booking already funded, and the TreasuryFundingExceeded
@@ -360,8 +360,8 @@ class TreasuryDealService(
         val port = funding ?: return null
         if (!Funding.consumes(deal)) return null
         val balance = port.balance(deal.currency, bankToday())
-        val guard = FundingGuard(deal.currency, balance, deal.principal, maxOf(deal.valueDate, bankToday()))
-        val pending = deals.pendingOutflows(guard.currency, guard.day, deal.id)
+        val guard = FundingGuard(deal.currency, balance, deal.principal)
+        val pending = deals.pendingOutflows(guard.currency, deal.id)
         if (!guard.fits(pending)) {
             fundingMeter.exceeded(deal.currency)
             throw FundingExceededException(guard.describe(pending))

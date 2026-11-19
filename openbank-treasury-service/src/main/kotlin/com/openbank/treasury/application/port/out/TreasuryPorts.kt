@@ -122,12 +122,13 @@ interface DealRepository {
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
 
     /**
-     * #12115: cash committed to leave the [currency] contra account on or before [day]: Σ principal
+     * #12115: cash committed to leave the [currency] contra account and not yet moved, whatever its
+     * value date (a later-valued outflow needs the same cash — no inflow is projected): Σ principal
      * of ACTUAL deals in a [com.openbank.treasury.domain.model.Funding.PENDING_STATES] state whose
      * product consumes funding ([com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS]),
      * excluding [excludeDealId].
      */
-    suspend fun pendingOutflows(currency: String, day: LocalDate, excludeDealId: UUID?): BigDecimal
+    suspend fun pendingOutflows(currency: String, excludeDealId: UUID?): BigDecimal
 
     /**
      * Every PENDING_APPROVAL deal carrying a senior limit override, across all counterparties and

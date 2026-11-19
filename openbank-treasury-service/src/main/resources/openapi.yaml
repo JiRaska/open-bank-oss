@@ -96,7 +96,7 @@ info:
 
     **Funding** (#12115): a placement (an interbank one or the ČNB deposit facility) books only
     against money the contra (nostro) account verifiably holds — the ledger's own balance, net of
-    every other booked-but-unsettled outflow up to the deal's value date, re-measured under the
+    every other booked-but-unsettled outflow whatever its value date, re-measured under the
     funding line lock so concurrent bookings cannot jointly overdraw. A shortfall blocks booking
     (422 `FUNDING_EXCEEDED`). Settlement moves what booking funded; a contra account driven negative
     by a flow bypassing the check raises `TreasuryFundingExceeded`.

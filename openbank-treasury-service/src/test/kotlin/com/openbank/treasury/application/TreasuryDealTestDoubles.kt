@@ -324,7 +324,7 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         fundingGuard: com.openbank.treasury.application.port.out.FundingGuard?,
     ) {
         fundingGuard?.let { g ->
-            val pending = pendingOutflows(g.currency, g.day, deal.id)
+            val pending = pendingOutflows(g.currency, deal.id)
             if (!g.fits(pending)) {
                 throw com.openbank.treasury.application.port.out.FundingExceededException(g.describe(pending))
             }
@@ -357,13 +357,12 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
     }.sumOf { it.limitAmount }
     override suspend fun pendingLimitOverrides() =
         rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
-    override suspend fun pendingOutflows(currency: String, day: LocalDate, excludeDealId: UUID?) = rows.values.filter {
+    override suspend fun pendingOutflows(currency: String, excludeDealId: UUID?) = rows.values.filter {
         it.kind == com.openbank.treasury.domain.model.DealKind.ACTUAL &&
             it.currency == currency &&
             it.id != excludeDealId &&
             it.product in com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS &&
-            it.state in com.openbank.treasury.domain.model.Funding.PENDING_STATES &&
-            !it.valueDate.isAfter(day)
+            it.state in com.openbank.treasury.domain.model.Funding.PENDING_STATES
     }.sumOf { it.principal }
     override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
     override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
