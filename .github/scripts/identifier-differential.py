@@ -41,6 +41,8 @@ from stdnum import lei as std_lei
 from stdnum import luhn as std_luhn
 from stdnum.at import businessid as std_at_fn
 from stdnum.bg import egn as std_bg_egn
+from stdnum.bg import pnf as std_bg_pnf
+from stdnum.bg import vat as std_bg_vat
 from stdnum.cz import bankaccount as std_bank
 from stdnum.cz import dic as std_dic
 from stdnum.cz import rc as std_rc
@@ -217,7 +219,12 @@ def _vat_birthdate(v: str):
         if cc == "SK" and len(n) == 10 and not _sk_official(n):
             return _rc_birthdate(n)           # the RČ branch of stdnum.sk.dph
         if cc == "BG" and len(n) == 10:
-            return std_bg_egn.get_birth_date(n)
+            # a 10-digit BG VAT number is an EGN, a foreigner's PNF or an "other" number (stdnum bg.vat): only a number
+            # valid SOLELY as an EGN encodes a birthdate that can be in the future
+            if std_bg_egn.is_valid(n) and not std_bg_pnf.is_valid(n) \
+                    and n[-1] != std_bg_vat.calc_check_digit_other(n[:-1]):
+                return std_bg_egn.get_birth_date(n)
+            return None
         if cc == "LV" and len(n) == 11 and n[0] in "0123":
             return std_lv_pvn.get_birth_date(n)
         if cc == "RO" and len(n) == 13:
