@@ -2,6 +2,13 @@
 
 Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over products (accounts, savings goals, cards) and single objects (payment, statement, document).
 
+## KYB authority client
+
+The statutory representation read contract uses the named Delegation workload and the private
+KYB listener over mTLS in deployed profiles. The client declares 2-second connect and read limits.
+Pact replays current, stale, and unauthorized revisions against KYB. The JOINT signing flow consumes
+this contract once its source and transport prerequisites are deployed.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
@@ -102,3 +109,25 @@ that is actually enforced.
 the refusal must stay, the sealed path's row lock must stay, every file referencing grant exposure
 must be classified in `rules.yaml: delegation_exposure_delivery.referenced_in`, and `role:
 enforcement` is refused outright.
+
+### Joint statutory representation
+
+The statutory issue and acceptance routes collect separate device-backed signatures under an
+exact Party rule and KYB attestation. An operation fixes its grant terms, target revision, company,
+representatives, office slots, quorum, and expiry. Every receipt binds one human and the frozen
+operation. The last qualifying signature, the OFFERED or ACTIVE transition, its provenance, and the
+existing lifecycle outbox event commit in one database transaction.
+
+`openbank.delegation.statutory-collection-enabled` defaults to false. Ordinary individual and
+verified sole-signature flows use their existing routes. New joint issues use the existing SOLO
+usage policy. The statutory quorum governs creating or accepting a grant, while any existing
+approval-group policy governs later use of that grant.
+
+Delegation verifies the current KYB attestation over private-CA mTLS with its existing client
+certificate and the named `openbank-delegation` bearer. The KYB provider route and policy
+from #15662 must be present in the verified image before configuring the 8443 listener.
+The sandbox collection switch stays off during this rollout.
+
+The V37 migration adds operations, receipts, and grant provenance. Rollback disables collection and
+retains these rows for audit. Deploy the sole issuer provenance guard and the named Party, KYB, and
+SCA contracts before enabling collection in a test environment.

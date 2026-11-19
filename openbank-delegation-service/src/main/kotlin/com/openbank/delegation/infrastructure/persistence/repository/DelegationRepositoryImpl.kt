@@ -31,6 +31,10 @@ class DelegationRepositoryImpl(
     PanacheRepository<DelegationGrantEntity> {
 
     override suspend fun save(grant: DelegationGrant, event: DomainEvent): DelegationGrant = Panache.withTransaction {
+        saveInTransaction(grant, event)
+    }.awaitSuspending()
+
+    internal fun saveInTransaction(grant: DelegationGrant, event: DomainEvent): Uni<DelegationGrant> {
         val write = if (
             grant.status == DelegationStatus.OFFERED && grant.lifecycleRevision == INITIAL_LIFECYCLE_REVISION
         ) {
@@ -38,10 +42,10 @@ class DelegationRepositoryImpl(
         } else {
             updateLifecycle(grant).replaceWith(grant)
         }
-        write.flatMap { saved ->
+        return write.flatMap { saved ->
             outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(saved)
         }
-    }.awaitSuspending()
+    }
 
     private fun persistNew(grant: DelegationGrant): Uni<DelegationGrant> = Panache.getSession().flatMap { session ->
         session.persist(DelegationGrantEntity.fromDomain(grant)).replaceWith(grant)
@@ -62,8 +66,8 @@ class DelegationRepositoryImpl(
         }
         return update(
             "status = ?1, lifecycleRevision = ?2, acceptScaSessionId = ?3, updatedAt = ?4, " +
-                "closedAt = ?5, closedBy = ?6, closedReason = ?7 " +
-                "where id = ?8 and lifecycleRevision = ?9",
+                "closedAt = ?5, closedBy = ?6, closedReason = ?7, " +
+                "granteeStatutoryOperationId = ?8 where id = ?9 and lifecycleRevision = ?10",
             grant.status,
             grant.lifecycleRevision,
             grant.acceptScaSessionId,
@@ -71,6 +75,7 @@ class DelegationRepositoryImpl(
             grant.closedAt,
             grant.closedBy,
             grant.closedReason,
+            grant.granteeStatutoryOperationId,
             grant.id,
             expectedRevision,
         ).flatMap { count ->

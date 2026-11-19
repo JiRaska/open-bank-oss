@@ -165,3 +165,22 @@ prohibited if {
 	startswith(input.action, "delegation.signing.")
 	not machine_named("service-account-openbank-edge")
 }
+
+# Statutory signing carries two separately authenticated identities from customer-edge.
+allowed_reasons contains "edge-service-statutory-delegation" if {
+    input.principal.type == "HUMAN"
+    machine_named("service-account-openbank-edge")
+    "ROLE_API" in input.principal.roles
+    input.action in {
+        "delegation.statutory.issue",
+        "delegation.statutory.accept",
+        "delegation.statutory.read",
+        "delegation.statutory.sign",
+        "delegation.statutory.close",
+    }
+}
+
+prohibited if {
+    startswith(input.action, "delegation.statutory.")
+    not machine_named("service-account-openbank-edge")
+}

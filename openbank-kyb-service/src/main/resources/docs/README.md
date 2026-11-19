@@ -2,6 +2,11 @@
 
 Legal-entity verification and business onboarding (ADR-0284).
 
+## Statutory representation contract verification
+
+The Delegation consumer contract checks current and stale revisions and refusal of the shared
+workload identity. The KYB provider replays those interactions against its HTTP resource in CI.
+
 ## Interface
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
@@ -41,6 +46,18 @@ When `openbank.kyb.monitoring.enabled` is true, the service registers the entity
 ## Build-time wiring
 
 - **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.
+
+## Private application listener
+
+The KYB image fixes client certificate authentication at build time. The sandbox listener on
+8443 verifies the private CA and still requires an OIDC bearer for API calls. Its ingress admits
+only the Delegation workload. Port 8157 continues serving the existing callers.
+
+The mounted certificate is supplied through KYB-specific environment variables. Earlier images
+ignore these variables and continue serving 8157 during the rollout. After the certificate is ready,
+verify the new image's two-listener posture. Deploy the statutory authority route from #15662 and
+verify its policy admits the named Delegation workload before deploying the collection consumer.
+The sandbox collection flag stays off while those checks run.
 
 ## Shared build dependencies
 

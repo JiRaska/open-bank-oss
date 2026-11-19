@@ -395,3 +395,10 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+### Statutory delegation receipts
+
+The reserved statutory namespace requires the named Delegation caller and a completed device
+decision. The receipt binds the human, the company and the frozen operation identifier and hash.
+The same scoped request can recover its persisted receipt after an interrupted response. The
+generic SCA inbox excludes these challenges because the statutory screen supplies the terms.

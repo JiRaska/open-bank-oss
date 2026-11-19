@@ -173,6 +173,9 @@ class ScaPactFolderProviderVerificationTest {
         if (context != null && context.interaction.providerStates.any { it.name == PENSION_OPERATION_STATE }) {
             testIdentityAssociation.setTestIdentity(PENSION_IDENTITY)
         }
+        if (context?.interaction?.providerStates?.any { it.name == StatutoryApprovalPactFixture.STATE } == true) {
+            testIdentityAssociation.setTestIdentity(StatutoryApprovalPactFixture.identity)
+        }
         context?.verifyInteraction()
     }
 
@@ -206,6 +209,7 @@ class ScaPactFolderProviderVerificationTest {
      * `ScaService.consume` authorises an unlinked challenge exactly when the consume states none —
      * which is why the consumer's request body carries only `partyId`.
      */
+
     /**
      * State for account-service's `SavingsWithdrawScaPactConsumerTest` (#8345): the owner-approval
      * leg of a savings withdrawal proposal reads the challenge, checks its purpose and party, and
@@ -248,6 +252,12 @@ class ScaPactFolderProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    @State(StatutoryApprovalPactFixture.STATE)
+    fun stateDeviceApprovedStatutoryOperation() = runOnVertxContext {
+        val existing = challengeRepo.findById(StatutoryApprovalPactFixture.challengeId)
+        challengeRepo.save(StatutoryApprovalPactFixture.challenge(existing?.version ?: 0))
     }
 
     /**

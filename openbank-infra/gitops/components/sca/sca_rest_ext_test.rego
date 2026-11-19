@@ -43,6 +43,20 @@ edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN",
 
 services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
+delegation := {"service_account": true, "client_id": "openbank-delegation", "type": "HUMAN", "id": "service-account-openbank-delegation", "roles": ["ROLE_API"]}
+
+test_only_named_delegation_consumes_statutory_approval if {
+	decision := rest.allow with input as {"principal": delegation, "action": "scaChallenge.consume.statutory"}
+		with data.rules as rules_mock
+	decision.allow == true
+	not rest.allow.allow with input as {"principal": services_m2m, "action": "scaChallenge.consume.statutory"}
+		with data.rules as rules_mock
+	not rest.allow.allow with input as {"principal": operator, "action": "scaChallenge.consume.statutory"}
+		with data.rules as rules_mock
+	not rest.allow.allow with input as {"principal": delegation, "action": "scaChallenge.consume"}
+		with data.rules as rules_mock
+}
+
 # --- the regressions this file exists to prevent ---
 
 test_shared_m2m_may_consume_via_identity_rule if {

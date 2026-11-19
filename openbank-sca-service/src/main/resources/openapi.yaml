@@ -377,7 +377,8 @@ paths:
             (ADR-0335 D1): an APPROVAL challenge whose device-signed approvalRequestId begins
             `pension-` is spendable only by pension-service, which may spend nothing else; an
             MCP_CLIENT_CONNECT challenge only by the authorization server's scoped consumer
-            (ADR-0385 D3). A refusal never burns the challenge.
+            (ADR-0385 D3). Statutory delegation approvals use the dedicated consume route.
+            A refusal never burns the challenge.
         '404':
           description: Challenge not found
         '409':
@@ -386,6 +387,47 @@ paths:
           description: >-
             Challenge expired, or concurrently modified by another lifecycle write; re-read the
             challenge before retrying.
+
+  /api/v1/sca/challenges/{id}/consume-statutory-approval:
+    post:
+      tags: [SCA]
+      operationId: consumeStatutoryApproval
+      summary: Consume or recover the exact device-signed statutory delegation approval
+      description: >-
+        Only delegation-service may call this operation. The approved device, actor, company
+        and signed request and digest must match. Repeating an exact already-consumed binding
+        returns the recorded receipt for reconciliation of the same operation.
+      parameters:
+        - $ref: '#/components/parameters/challengeId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must be the challenge UUID from the path in canonical UUID form.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partyId, companyPartyId, approvalRequestId, payloadSha256]
+              properties:
+                partyId: {type: string, format: uuid}
+                companyPartyId: {type: string, format: uuid}
+                approvalRequestId: {type: string}
+                payloadSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: Exact approved challenge and its consumption time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaChallengeResponse'
+        '400': {description: The statutory binding is invalid or the challenge is not approved}
+        '403': {description: The caller, actor or challenge namespace does not match}
+        '404': {description: Challenge not found}
+        '409': {description: The signed binding differs from the submitted statutory operation}
+        '422': {description: The unused challenge expired}
 
   /api/v1/sca/challenges/{id}/decision:
     post:

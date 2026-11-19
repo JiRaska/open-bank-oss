@@ -12,6 +12,7 @@ import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
+import com.openbank.delegation.domain.model.GrantorSigningEvidence
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.money.RoundingPolicy
@@ -140,6 +141,18 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "grant_sca_session_id")
     var grantScaSessionId: UUID? = null
 
+    @Column(name = "grantor_signing_actor_id", updatable = false)
+    var grantorSigningActorId: UUID? = null
+
+    @Column(name = "grantor_sole_mandate_id", updatable = false)
+    var grantorSoleMandateId: UUID? = null
+
+    @Column(name = "grantor_statutory_operation_id", updatable = false)
+    var grantorStatutoryOperationId: UUID? = null
+
+    @Column(name = "grantee_statutory_operation_id")
+    var granteeStatutoryOperationId: UUID? = null
+
     @Column(name = "accept_sca_session_id")
     var acceptScaSessionId: UUID? = null
 
@@ -187,6 +200,9 @@ class DelegationGrantEntity : PanacheEntityBase() {
         status = status,
         lifecycleRevision = lifecycleRevision,
         grantScaSessionId = grantScaSessionId,
+        grantorSigningEvidence = grantorSigningActorId?.let { GrantorSigningEvidence(it, grantorSoleMandateId) },
+        grantorStatutoryOperationId = grantorStatutoryOperationId,
+        granteeStatutoryOperationId = granteeStatutoryOperationId,
         acceptScaSessionId = acceptScaSessionId,
         note = note,
         createdAt = createdAt,
@@ -266,6 +282,10 @@ class DelegationGrantEntity : PanacheEntityBase() {
             status = g.status
             lifecycleRevision = g.lifecycleRevision
             grantScaSessionId = g.grantScaSessionId
+            grantorSigningActorId = g.grantorSigningEvidence?.actorPartyId
+            grantorSoleMandateId = g.grantorSigningEvidence?.soleMandateId
+            grantorStatutoryOperationId = g.grantorStatutoryOperationId
+            granteeStatutoryOperationId = g.granteeStatutoryOperationId
             acceptScaSessionId = g.acceptScaSessionId
             note = g.note
             createdAt = g.createdAt

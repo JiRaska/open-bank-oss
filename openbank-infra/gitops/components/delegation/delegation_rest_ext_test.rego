@@ -277,3 +277,19 @@ test_operator_gets_no_write_reason_for_signing if {
 test_operator_is_prohibited_from_business_signing if {
 	prohibited with input as {"principal": operator, "action": "delegation.signing.approval.sign"}
 }
+
+test_statutory_delegation_admits_the_named_edge_for_each_action if {
+    every action in ["issue", "accept", "read", "sign", "close"] {
+        allow with input as {"principal": edge, "action": concat("", ["delegation.statutory.", action])}
+    }
+}
+
+test_statutory_delegation_denies_human_operator_and_shared_machine if {
+    every caller in [
+        {"type": "HUMAN", "id": "synthetic-staff", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+        {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"], "service_account": true},
+    ] {
+        not allow with input as {"principal": caller, "action": "delegation.statutory.read"}
+        not allow with input as {"principal": caller, "action": "delegation.statutory.sign"}
+    }
+}

@@ -944,6 +944,62 @@ class ScaServiceTest {
     }
 
     @Test
+    fun `statutory challenges stay in their full terms ceremony outside the generic inbox`(): Unit = runBlocking {
+        val statutory = statutoryApproval()
+        val other = challenge(partyId = statutory.partyId)
+        coEvery { repository.findPendingByParty(statutory.partyId) } returns listOf(statutory, other)
+
+        assertThat(service.listPendingByParty(statutory.partyId)).containsExactly(other)
+    }
+
+    @Test
+    fun `statutory receipts recover only the same device signed company operation`(): Unit = runBlocking {
+        val challenge = statutoryApproval()
+        val consumed = challenge.copy(consumedAt = now)
+        val command = statutoryConsume(challenge)
+        coEvery { repository.findById(challenge.id) } returnsMany listOf(challenge, consumed, consumed)
+        coEvery { repository.markConsumed(challenge.id) } returns true
+
+        assertThat(service.consume(command).consumedAt).isEqualTo(now)
+        assertThat(service.consume(command)).isEqualTo(consumed)
+        assertThatThrownBy {
+            runBlocking { service.consume(command.copy(payloadSha256 = "a".repeat(64))) }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        coVerify(exactly = 1) { repository.markConsumed(challenge.id) }
+    }
+
+    @Test
+    fun `statutory approval checks the human device and company before spending`(): Unit = runBlocking {
+        val challenge = statutoryApproval()
+        val command = statutoryConsume(challenge)
+        coEvery { repository.findById(challenge.id) } returnsMany listOf(
+            challenge,
+            challenge.copy(method = ScaMethod.TOTP),
+            challenge.copy(decidedByPartyId = UUID.randomUUID()),
+        )
+        assertThatThrownBy {
+            runBlocking { service.consume(command.copy(statutoryPrincipalPartyId = UUID.randomUUID())) }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        repeat(2) {
+            assertThatThrownBy {
+                runBlocking { service.consume(command) }
+            }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        }
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+    }
+
+    @Test
+    fun `the statutory consumer can reconcile the receipt after losing the spend race`(): Unit = runBlocking {
+        val challenge = statutoryApproval()
+        val receipt = challenge.copy(consumedAt = now)
+        coEvery { repository.findById(challenge.id) } returnsMany listOf(challenge, receipt)
+        coEvery { repository.markConsumed(challenge.id) } returns false
+
+        assertThat(service.consume(statutoryConsume(challenge))).isEqualTo(receipt)
+        coVerify(exactly = 1) { repository.markConsumed(challenge.id) }
+    }
+
+    @Test
     fun `consume throws ScaChallengeNotFoundException for unknown id`(): Unit = runBlocking {
         coEvery { repository.findById(any()) } returns null
         assertThatThrownBy {
@@ -1325,6 +1381,23 @@ class ScaServiceTest {
         payloadSha256 = ch.dynamicLinkingData?.payloadSha256,
         scope = scope,
     )
+
+    private fun statutoryApproval(): ScaChallenge {
+        val challenge = pensionApproval()
+        return challenge.copy(
+            method = ScaMethod.PUSH_NOTIFICATION,
+            onBehalfOfPartyId = UUID.randomUUID(),
+            decidedByPartyId = challenge.partyId,
+            dynamicLinkingData = requireNotNull(challenge.dynamicLinkingData).copy(
+                approvalRequestId = "delegation-statutory-accept:${UUID.randomUUID()}",
+            ),
+        )
+    }
+
+    private fun statutoryConsume(challenge: ScaChallenge) = pensionConsume(
+        challenge,
+        ConsumerScope.Reserved(ReservedNamespace.DELEGATION_STATUTORY),
+    ).copy(statutoryPrincipalPartyId = challenge.onBehalfOfPartyId)
 
     private fun challenge(
         id: UUID = UUID.randomUUID(),

@@ -63,15 +63,16 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     override suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority = try {
         val principal = client.getParty(principalPartyId)
-        val verdict = when {
-            principal.id != principalPartyId || principal.status != "ACTIVE" -> GrantorAuthorityVerdict.DENIED
+        val authority = when {
+            principal.id != principalPartyId || principal.status != "ACTIVE" ->
+                GrantorAuthority(GrantorAuthorityVerdict.DENIED)
             principal.partyType == "INDIVIDUAL" && actorPartyId == principalPartyId ->
-                GrantorAuthorityVerdict.AUTHORIZED
-            principal.partyType in ORGANIZATION_TYPES -> organizationAuthority(principalPartyId, actorPartyId)
-            else -> GrantorAuthorityVerdict.DENIED
+                GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
+            principal.partyType in ORGANIZATION_TYPES && actorPartyId != principalPartyId ->
+                organizationAuthority(principalPartyId, actorPartyId)
+            else -> GrantorAuthority(GrantorAuthorityVerdict.DENIED)
         }
-        GrantorAuthority(
-            verdict = verdict,
+        authority.copy(
             displayName = principal.legalName?.trim()?.takeIf { it.isNotEmpty() },
             partyType = principal.partyType,
         )
@@ -82,13 +83,14 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE)
     }
 
-    private suspend fun organizationAuthority(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthorityVerdict {
+    private suspend fun organizationAuthority(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority {
         val rows = client.actingFor(actorPartyId).filter { it.partyId == principalPartyId }
-        return when {
-            rows.isEmpty() -> GrantorAuthorityVerdict.DENIED
-            rows.all { it.mandate?.isSoleFor(actorPartyId) == true } -> GrantorAuthorityVerdict.AUTHORIZED
-            else -> GrantorAuthorityVerdict.MANDATE_ONLY
+        if (rows.isEmpty()) return GrantorAuthority(GrantorAuthorityVerdict.DENIED)
+        val soleIds = rows.mapNotNull { row ->
+            row.mandate?.takeIf { it.isSoleFor(actorPartyId) }?.id
         }
+        if (soleIds.size != rows.size) return GrantorAuthority(GrantorAuthorityVerdict.MANDATE_ONLY)
+        return GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, soleMandateId = soleIds.minOrNull())
     }
 
     private companion object {

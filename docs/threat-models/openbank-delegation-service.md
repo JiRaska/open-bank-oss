@@ -69,6 +69,10 @@ and require a human operator plus OPA; client applications do not receive a bank
    its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
    `delegation.disclosure.release` for that identity, never the shared backend client. Every
    unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
+10. delegation-service → private KYB authority listener (#10247). KYB requires a trusted client
+    certificate and an OIDC bearer on 8443. The generated policy admits only the Delegation
+    workload on that port and preserves existing KYB HTTP peers on 8157. Statutory collection
+    remains disabled until the deployed KYB authority route and named bearer policy are verified.
 
 ## Threats and mitigations
 
@@ -178,6 +182,15 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   its rail. Neither has an owner to ask, so both remain refused at the writer until those pairs
   leave `CAPABILITY_MATRIX`.
 
+### Statutory KYB authority client
+
+The statutory KYB client sends its named Delegation workload token over the private mTLS listener.
+The TLS client verifies the server hostname against the configured private CA and presents the
+existing Delegation certificate. Connection and read each have a two-second timeout. The
+consumer and provider replay expect 204 only for the current revision, 404 for a stale revision,
+and 403 for the shared workload on the same resource. The JOINT signing flow requires successful
+authority evidence before proceeding.
+
 ## Out of scope (tracked as follow-ups)
 
 - D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
@@ -227,6 +240,11 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   revoked mandate, an inactive principal, malformed evidence or unavailable evidence refuses preview
   and offer before SCA is spent. A verified retail principal signs directly. Approval-group
   management applies its own current-mandate checks.
+- **Company offer acceptance retains issuer evidence** (#10247). An offer stores the issuing
+  human and their exact mandate ID. Acceptance revalidates that mandate with Party before spending
+  the grantee's SCA. A company grantee must also present the customer-edge-authenticated human
+  with a current sole mandate. For an older offer without recorded issuer evidence, only a verified
+  individual grantor can be established. The new nullable columns retain historical records.
 
 ## Change log
 
@@ -472,3 +490,12 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## Statutory co-signatures (#10247)
+
+Customer-edge supplies separately authenticated company and human identities. Delegation
+corroborates the exact Party rule, active mandates and KYB attestation, then records a bounded
+operation with frozen terms and, for acceptance, the offered grant revision. Different verified
+humans must fill the current quorum and office slots. Each receipt can commit only its company,
+actor, challenge and payload. PostgreSQL locks the operation and grant, and writes signatures,
+provenance and the lifecycle event in one transaction. Collection defaults to disabled.

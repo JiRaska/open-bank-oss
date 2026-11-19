@@ -22,6 +22,11 @@ enum class ReservedNamespace(
 ) {
     /** pension-service operations: `pension-onboarding:…`, `pension-transfer-out:…`, `pension-exit:…`. */
     PENSION("pension-", setOf(ScaPurpose.APPROVAL), Regex("^pension-[a-z]+(-[a-z]+)*:\\S+$")),
+    DELEGATION_STATUTORY(
+        "delegation-statutory-",
+        setOf(ScaPurpose.APPROVAL),
+        Regex("^delegation-statutory-(issue|accept):[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"),
+    ),
 
     /**
      * ADR-0385 D3 — connecting a customer MCP client: `mcp-connect:<PAR request id>`. Only the
