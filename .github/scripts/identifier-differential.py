@@ -42,6 +42,7 @@ from stdnum.at import businessid as std_at_fn
 from stdnum.cz import bankaccount as std_bank
 from stdnum.cz import dic as std_dic
 from stdnum.cz import rc as std_rc
+from stdnum.eu import vat as std_vat
 from stdnum.fr import siren as std_siren
 from stdnum.pl import nip as std_nip
 
@@ -143,6 +144,7 @@ ORACLES = {
     "sk-ico": (_ico, _none),
     "pl-nip": (std_nip.is_valid, _none),
     "fr-siren": (std_siren.is_valid, _none),
+    "eu-vat": (std_vat.is_valid, _none),
     "lei": (std_lei.is_valid, _none),
     "isin": (std_isin.is_valid, _none),
     "pan-luhn": (std_luhn.is_valid, _none),
@@ -156,7 +158,11 @@ ORACLES = {
 # disagreement only on such rows AND fails once none of them disagrees (the defect is fixed, so
 # the marker must go). A known defect can neither be forgotten nor silently fixed.
 _ISO3166 = frozenset(c.alpha_2 for c in pycountry.countries) | {"XS", "EU", "XA", "XB", "XC", "XD", "XF", "QS", "QT"}
+# kyb EuVatChecksums verifies CZ, SK, PL, DE, FR and AT; every other member state is accepted on
+# shape alone (`else -> true`), which the reference rejects when the check digit is wrong.
+_EU_VAT_CHECKED = frozenset({"CZ", "SK", "PL", "DE", "FR", "AT"})
 KNOWN_DEFECTS = {
+    "eu-vat": ("#16774", lambda v: v[:2] not in _EU_VAT_CHECKED),
     "currency": ("#16821", lambda v: v in {"BGN", "CUC"}),
     "isin": ("#16773", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
@@ -283,7 +289,22 @@ def _gen_currency(r: random.Random) -> str:
     return "".join(r.choice(string.ascii_uppercase) for _ in range(3))
 
 
+def _gen_eu_vat(r: random.Random) -> str:
+    cc = r.choice(["CZ", "CZ", "SK", "PL", "DE", "FR", "AT", "IT", "ES", "NL", "BE", "SE", "DK", "PT"])
+    lengths = {"CZ": (8, 9, 10), "SK": (10,), "PL": (10,), "DE": (9,), "FR": (11,), "AT": (9,), "IT": (11,),
+               "ES": (9,), "NL": (12,), "BE": (10,), "SE": (12,), "DK": (8,), "PT": (9,)}
+    n = r.choice(lengths[cc])
+    body = _digits(r, n - 1)
+    if cc == "AT":
+        body = "U" + _digits(r, n - 2)
+    for d in string.digits:
+        if r.random() < 0.6 and std_vat.is_valid(cc + body + d):
+            return cc + body + d
+    return cc + body + r.choice(string.digits)
+
+
 GENERATORS = {
+    "eu-vat": _gen_eu_vat,
     "cz-rc": _gen_rc,
     "iban": _gen_iban,
     "cz-account": _gen_account,

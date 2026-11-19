@@ -21,10 +21,16 @@
       "value": "CZ25596642",
       "valid": false,
       "rule": "CZ VAT with wrong IČO check digit",
+      "stdnum": false
+    },
+    {
+      "value": "IT010000000",
+      "valid": false,
+      "rule": "IT VAT with a wrong check digit: member states outside CZ/SK/PL/DE/FR/AT are shape-checked only",
       "known_defect": {
         "issue": "#16774",
         "current": true,
-        "why": "EU_VAT is format-only (checksum=false); no per-member-state check is implemented"
+        "why": "EuVatChecksums.valid returns true for every other prefix"
       },
       "stdnum": false
     },
@@ -48,5 +54,5 @@
       "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
     }
   ],
-  "differential": false
+  "differential": true
 }
