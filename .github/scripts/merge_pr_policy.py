@@ -83,8 +83,13 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'd6740b723531449f329c61dd26120e8840e3652d',
     # merge-train.py of the #16290 follow-up (cross-module test reads are not shareable).
     'bc0c3a48a9c1508194982f8538e3efd1ba2b94f9',
+    # merge-train.py of #16700 (a train fix pre-empts strict carriers), reviewed with that PR.
+    '964c354b0c4d18cce3ac9f8ff61b4b6e014304d0',
     # merge-train.py of #16675 (unfalsified gates cannot back a fix claim), reviewed with that PR.
     '67d8f953ed7ccf43ad395711306b457f95388de1',
+    # merge-train.py of #16700 after merging main at 321e26ad7f (re-derived declaration budget,
+    # #16785), reviewed with that PR.
+    '7887f1058488cea4f26939b5ab39e7d9d909e538',
     # merge-train.py of #16760 (fix evidence judged per gate, strongest evidence served first).
     'e8976bdaa91f35f698ceb44a956b03998f1486a1',
     # merge-train.py of #16760 after merging main at 76402bc5d1, reviewed with that PR.
