@@ -2095,6 +2095,7 @@ dependencies:
         - openbank-mcp-service/
         - openbank-communication-service/
         - openbank-fetch-broker/
+        - openbank-regulatory-obligations-watcher/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:
@@ -2124,7 +2125,8 @@ dependencies:
                                              # itself, but the ADR's own binding decision places it
                                              # "under ADR-0197 like the rest of that plane"
         - openbank-fetch-broker             # ADR-0387 D9 -- agent-plane public-web fetch broker
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service'|':openbank-fetch-broker') as a dependency"
+        - openbank-regulatory-obligations-watcher  # ADR-0367 D6 / ADR-0387 S4 -- register-source watcher agent
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service'|':openbank-fetch-broker'|':openbank-regulatory-obligations-watcher') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]

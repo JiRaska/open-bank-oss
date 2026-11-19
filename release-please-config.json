@@ -493,6 +493,12 @@
       "exclude-paths": [
         "openbank-products/src/test"
       ]
+    },
+    "openbank-regulatory-obligations-watcher": {
+      "component": "regulatory-obligations-watcher",
+      "exclude-paths": [
+        "openbank-regulatory-obligations-watcher/src/test"
+      ]
     }
   }
 }

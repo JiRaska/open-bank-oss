@@ -65,4 +65,37 @@ class HostAllowlistTest {
         assertThat(AgentsYamlCharterHosts(null).grantsFor("web-reader")).isEmpty()
         assertThat(AgentsYamlCharterHosts(": : not yaml [").grantsFor("web-reader")).isEmpty()
     }
+
+    @Test
+    fun `an object-shaped tier grant counts, and a read grant of another resource does not`() {
+        val yaml = """
+            agents:
+              - id: object-reader
+                enabled: true
+                tools:
+                  allow:
+                    - {tier: read, resources: [read.governance]}
+                    - {tier: read, resources: [read.public_web]}
+                data_scope: {public_web: {hosts: [www.cnb.cz]}}
+              - id: other-reader
+                enabled: true
+                tools:
+                  allow:
+                    - {tier: read, resources: [read.governance]}
+                    - {tier: write_proposal, resources: [read.public_web]}
+                data_scope: {public_web: {hosts: [www.cnb.cz]}}
+        """.trimIndent()
+        val hosts = AgentsYamlCharterHosts(yaml)
+        assertThat(hosts.grantsFor("agent:object-reader").keys).containsExactly("www.cnb.cz")
+        assertThat(hosts.grantsFor("agent:other-reader")).isEmpty()
+    }
+
+    @Test
+    fun `the real agents yaml grants the regulatory watcher exactly its register hosts`() {
+        val yaml = java.io.File("../openbank-libs/governance/agents.yaml").readText()
+        assertThat(AgentsYamlCharterHosts(yaml).grantsFor("agent:regulatory-obligations-watcher").keys).containsExactlyInAnyOrder(
+            "eur-lex.europa.eu", "uoou.gov.cz", "www.cnb.cz", "www.eba.europa.eu", "www.fau.gov.cz",
+            "www.financnisprava.gov.cz", "www.gsft.cz", "www.zakonyprolidi.cz",
+        )
+    }
 }

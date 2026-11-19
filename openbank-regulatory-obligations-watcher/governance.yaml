@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: PostgreSQL
+databaseName: openbank_regwatcher
+dataLineageRole: internal
+dataClassification: public
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: openbank-fetch-broker
+      relationType: api
+      description: web.fetch (MCP, ADR-0387) of every source URL the regulatory obligations
+        register cites; the only way this agent reads the public web
+    - serviceName: litellm
+      relationType: api
+      description: compares a changed source text with the register rows (charter model, registered prompt)
+  downstream:
+    - serviceName: github
+      relationType: api
+      description: files governance issues (draft.ticket) citing obligation id, source URL, quote
+        and content sha256; never a PR, never a write to the register
+databaseLineage:
+  ownedDatabases: [openbank_regwatcher]
+  dependentDatabases: []

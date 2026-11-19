@@ -1,0 +1,96 @@
+quarkus:
+  application:
+    name: regulatory-obligations-watcher
+  http:
+    port: 8173
+  oidc:
+    # Inbound: the operator trigger (POST /api/v1/regulatory-watcher/run) is a bearer-token call.
+    auth-server-url: http://localhost:8080/realms/openbank
+    application-type: service
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    # Reactive client for the app; JDBC URL is for Flyway migrations only.
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_regwatcher}
+      max-size: 5
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_regwatcher}
+  hibernate-orm:
+    # Flyway owns the schema; Hibernate never generates it.
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    management:
+      enabled: false
+    http:
+      test-port: 0
+  openbank:
+    regulatory-watcher:
+      # A cron that never fires (31 February), NOT quarkus.scheduler.enabled=false: the scheduler
+      # wiring is still built and validated at boot (#2148, #2187).
+      check-cron: "0 0 5 31 2 ?"
+      # Tests drive several runs in one day; production keeps the charter's runs_per_day: 1.
+      runs-per-day: 1000
+      register:
+        resource: test-register/regulatory-obligations.yaml
+      # broker.mcp-url / identity.token-url come from the StubBroker test resource.
+      identity:
+        client-secret: test-only-not-a-secret
+      github:
+        token: test-only-not-a-secret
+
+openbank:
+  regulatory-watcher:
+    agent-id: regulatory-obligations-watcher
+    # Kill switch (charter limits.kill_switch): set OPENBANK_REGULATORY_WATCHER_ENABLED=false.
+    enabled: ${OPENBANK_REGULATORY_WATCHER_ENABLED:true}
+    # Charter: weekly Monday 06:30 UTC. Quarkus cron is SIX fields (sec min hour dom month dow).
+    check-cron: ${REGULATORY_WATCHER_CHECK_CRON:0 30 6 ? * MON}
+    # Charter limits (agents.yaml: regulatory-obligations-watcher.limits).
+    tokens-per-run: 60000
+    runs-per-day: 1
+    max-issues-per-run: 5
+    broker:
+      mcp-url: ${FETCH_BROKER_MCP_URL:http://localhost:8172/mcp}
+    identity:
+      token-url: ${KEYCLOAK_TOKEN_URL:http://localhost:8080/realms/openbank/protocol/openid-connect/token}
+      client-id: openbank-regulatory-obligations-watcher
+      # client-secret: env OPENBANK_REGULATORY_WATCHER_IDENTITY_CLIENT_SECRET (Optional — absent = reads nothing)
+    # model.api-key / github.token likewise come only from the environment (both Optional).
+    model:
+      # Must equal agents.yaml model for this charter (check-agent-model-parity).
+      id: deepseek-ai/DeepSeek-V3.2
+      gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
+    github:
+      api-url: ${GITHUB_API_URL:https://api.github.com}
+      repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
+    policy:
+      opa-url: ${OPA_URL:http://localhost:8181}

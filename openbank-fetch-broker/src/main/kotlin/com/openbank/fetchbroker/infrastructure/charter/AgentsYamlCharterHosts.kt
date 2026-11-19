@@ -36,7 +36,7 @@ class AgentsYamlCharterHosts(yaml: String?) : CharterHostsPort {
         return try {
             ObjectMapper(YAMLFactory()).readTree(yaml).path("agents")
                 .filter { it.path("enabled").asBoolean(false) }
-                .filter { a -> a.path("tools").path("allow").any { it.asText() == RESOURCE } }
+                .filter { a -> a.path("tools").path("allow").any(::grantsPublicWeb) }
                 .associate { a ->
                     a.path("id").asText() to grants(a.path("data_scope").path("public_web").path("hosts"))
                 }
@@ -46,6 +46,20 @@ class AgentsYamlCharterHosts(yaml: String?) : CharterHostsPort {
             emptyMap()
         }
     }
+
+    /**
+     * A charter grants the resource either as a flat string entry (`allow: [read.public_web]`) or,
+     * the shape every control-plane charter in agents.yaml uses, as an object
+     * `{tier: read, resources: [read.public_web]}`. Reading only the string form made every real
+     * charter grant nothing here (ADR-0387 S4, regulatory-obligations-watcher). Exact names only:
+     * the policy, not this re-check, interprets globs.
+     */
+    private fun grantsPublicWeb(entry: JsonNode): Boolean =
+        if (entry.isTextual) {
+            entry.asText() == RESOURCE
+        } else {
+            entry.path("tier").asText() == TIER_READ && entry.path("resources").any { it.asText() == RESOURCE }
+        }
 
     private fun grants(hosts: JsonNode): Map<String, HostGrant> = hosts.mapNotNull { entry ->
         val host = HostAllowlist.normalise(if (entry.isTextual) entry.asText() else entry.path("host").asText(""))
@@ -64,6 +78,7 @@ class AgentsYamlCharterHosts(yaml: String?) : CharterHostsPort {
 
     companion object {
         const val RESOURCE = "read.public_web"
+        private const val TIER_READ = "read"
         private const val AGENT_PREFIX = "agent:"
         private const val MAX_LOGGED = 120
 
