@@ -40,12 +40,15 @@ from stdnum import isin as std_isin
 from stdnum import lei as std_lei
 from stdnum import luhn as std_luhn
 from stdnum.at import businessid as std_at_fn
+from stdnum.bg import egn as std_bg_egn
 from stdnum.cz import bankaccount as std_bank
 from stdnum.cz import dic as std_dic
 from stdnum.cz import rc as std_rc
 from stdnum.eu import vat as std_vat
+from stdnum.lv import pvn as std_lv_pvn
 from stdnum.fr import siren as std_siren
 from stdnum.pl import nip as std_nip
+from stdnum.ro import cnp as std_ro_cnp
 
 
 # The caller-supplied "today" for the birth-number future rule. RodneCislo.parse(raw, today) is clock-free, so the
@@ -182,6 +185,46 @@ def _sk_official(n: str) -> bool:
     return n[0] != "0" and n[2] in "234789" and int(n) % 11 == 0
 
 
+# ONE policy per identifier for dates: an identifier whose spec EMBEDS a date (a birth number, a personal code) must
+# reject a date after the caller-supplied today; every other identifier states why it has none. The inventory
+# gate requires an entry for every identifier the oracle judges, like ZERO_POLICY.
+#   identifier -> ("future-reject", what encodes the date) | ("no-date", reason)
+DATE_POLICY = {
+    "cz-rc": ("future-reject", "the birth number itself (RodneCislo.parse(raw, today))"),
+    "eu-vat": ("future-reject", "CZ DIČ of a natural person (RČ), BG EGN, LV personal code, RO CNP"),
+    "cz-account": ("no-date", "an account number encodes no date"),
+    "cz-ico": ("no-date", "an IČO encodes no date"),
+    "sk-ico": ("no-date", "an IČO encodes no date"),
+    "pl-nip": ("no-date", "a NIP encodes no date"),
+    "fr-siren": ("no-date", "a SIREN encodes no date"),
+    "at-fn": ("no-date", "a Firmenbuchnummer encodes no date"),
+    "lei": ("no-date", "an LEI encodes no date"),
+    "isin": ("no-date", "an ISIN encodes no date"),
+    "iban": ("no-date", "an IBAN encodes no date"),
+    "pan-luhn": ("no-date", "the checksum primitive ignores the expiry date, which is not part of the PAN"),
+    "currency": ("no-date", "a currency code encodes no date"),
+}
+
+
+def _vat_birthdate(v: str):
+    """The birthdate a natural-person VAT number encodes (CZ RČ, BG EGN, LV personal code, RO CNP), or None."""
+    cc, n = v[:2], v[2:]
+    if not n.isdigit() or not n.isascii():
+        return None
+    try:
+        if cc == "CZ" and len(n) in (9, 10):
+            return _rc_birthdate(n)
+        if cc == "BG" and len(n) == 10:
+            return std_bg_egn.get_birth_date(n)
+        if cc == "LV" and len(n) == 11 and n[0] in "0123":
+            return std_lv_pvn.get_birth_date(n)
+        if cc == "RO" and len(n) == 13:
+            return std_ro_cnp.get_birth_date(n)
+    except Exception:  # noqa: BLE001 - an undecodable date is just not a birth date
+        return None
+    return None
+
+
 def _be_official(n: str) -> bool:
     """Belgian VAT: first digit 0 or 1, check digits = 97 - (first eight digits mod 97)."""
     return n[0] in "01" and int(n[8:]) == 97 - int(n[:8]) % 97
@@ -190,6 +233,9 @@ def _be_official(n: str) -> bool:
 def _eu_vat_divergence(v: str):
     """Where kyb's EuVatChecksums is deliberately stricter than stdnum.eu.vat."""
     cc, national = v[:2], v[2:]
+    born = _vat_birthdate(v)
+    if born is not None and born > AS_OF:
+        return "birthdate is in the future relative to the caller-supplied today (as_of)"
     if cc == "CZ" and national.isdigit() and len(national) in (9, 10) and not (len(national) == 9 and national[0] == "6"):
         return _rc_divergence(national)          # a CZ DIČ of a natural person is a birth number
     if cc == "BE" and national.isdigit() and len(national) == 10 and not _be_official(national):
@@ -245,12 +291,13 @@ _EU_VAT_SHAPE_ONLY = ("ES", "IT", "NL", "BE", "PT", "IE", "DK", "FI", "SE", "LU"
 KNOWN_DEFECTS = {
     "eu-vat-sk-third-digit": ("#16774", "eu-vat", lambda v: v[:2] == "SK" and (v[2] == "0" or v[4] not in "234789")),
     "fr-siren-all-zero": ("#16880", "fr-siren", lambda v: v == "000000000"),
-    "eu-vat-cz-future-birthdate": ("#16896", "eu-vat", lambda v: v[:2] == "CZ" and v[2:].isdigit() and len(v) in (11, 12)
-                                    and (_rc_birthdate(v[2:]) or AS_OF) > AS_OF),
     "currency-cuc": ("#16821", "currency", lambda v: v == "CUC"),
     "currency-bgn": ("#16821", "currency", lambda v: v == "BGN"),
     "isin-prefix-not-iso3166": ("#16773", "isin", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
+for _cc, _issue in (("CZ", "#16896"), ("BG", "#16897"), ("LV", "#16897"), ("RO", "#16897")):
+    KNOWN_DEFECTS[f"eu-vat-future-birthdate-{_cc}"] = (
+        _issue, "eu-vat", (lambda cc: lambda v: v[:2] == cc and (_vat_birthdate(v) or AS_OF) > AS_OF)(_cc))
 for _cc in _EU_VAT_SHAPE_ONLY:
     KNOWN_DEFECTS[f"eu-vat-shape-only-{_cc}"] = ("#16774", "eu-vat", (lambda cc: lambda v: v[:2] == cc)(_cc))
 
@@ -379,7 +426,35 @@ def _gen_currency(r: random.Random) -> str:
     return "".join(r.choice(string.ascii_uppercase) for _ in range(3))
 
 
+def _gen_person_vat(r: random.Random) -> str:
+    """A natural-person VAT number whose date straddles AS_OF (past, today, future), check digit by search."""
+    cc = r.choice(["BG", "LV", "RO", "CZ"])
+    day = AS_OF + datetime.timedelta(days=r.choice([-20000, -400, -1, 0, 1, 3, 400, 9000]))
+    if cc == "BG":
+        body = f"{day.year % 100:02d}{day.month + (40 if day.year >= 2000 else 0):02d}{day.day:02d}" + _digits(r, 3)
+        for d in string.digits:
+            if std_bg_egn.is_valid(body + d):
+                return cc + body + d
+    if cc == "LV":
+        body = f"{day.day:02d}{day.month:02d}{day.year % 100:02d}{(day.year - 1800) // 100}" + _digits(r, 3)
+        for d in string.digits:
+            if std_vat.is_valid(cc + body + d):
+                return cc + body + d
+    if cc == "RO":
+        s = "5" if day.year >= 2000 else "1"
+        body = s + f"{day.year % 100:02d}{day.month:02d}{day.day:02d}" + f"{r.randrange(1, 47):02d}" + _digits(r, 3)
+        for d in string.digits:
+            if std_ro_cnp.is_valid(body + d):
+                return cc + body + d
+    if cc == "CZ":
+        v = _gen_rc(r)
+        return "CZ" + v
+    return _gen_eu_vat(r)
+
+
 def _gen_eu_vat(r: random.Random) -> str:
+    if r.random() < 0.2:
+        return _gen_person_vat(r)
     cc = r.choice(["CZ", "CZ", "SK", "PL", "DE", "FR", "AT", "IT", "ES", "NL", "BE", "SE", "DK", "PT"])
     lengths = {"CZ": (8, 9, 10), "SK": (10,), "PL": (10,), "DE": (9,), "FR": (11,), "AT": (9,), "IT": (11,),
                "ES": (9,), "NL": (12,), "BE": (10,), "SE": (12,), "DK": (8,), "PT": (9,)}
@@ -508,7 +583,8 @@ def vectors(directory: pathlib.Path) -> int:
     for f in sorted(directory.glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
         ref = refs.get(d["identifier"])
-        if d["identifier"] == "cz-rc" and d.get("as_of") != AS_OF.isoformat():
+        if (d["identifier"] == "cz-rc" or any("[as_of]" in c["rule"] for c in d["cases"])) \
+                and d.get("as_of") != AS_OF.isoformat():
             print(f"::error::{f.name}: as_of {d.get('as_of')!r} must equal the oracle's AS_OF {AS_OF.isoformat()}")
             bad += 1
         if bool(d.get("differential")) != (ref is not None):
@@ -570,6 +646,16 @@ def self_test() -> int:
     ok &= expected("eu-vat", valid_it) == (True, "stdnum")
     invalid_it = next(v for v in (_gen_eu_vat(r) for _ in range(5000)) if v[:2] == "IT" and not std_vat.is_valid(v))
     ok &= expected("eu-vat", invalid_it)[1].startswith("known-defect eu-vat-shape-only-IT")
+    # the future-date property is not vacuous: each natural-person form yields rows the reference ACCEPTS (so the
+    # expectation really narrows it) and rows after as_of
+    r = random.Random(4)
+    seen = {}
+    for _ in range(8000):
+        v = _gen_person_vat(r)
+        d = _vat_birthdate(v)
+        if d is not None and std_vat.is_valid(v):
+            seen.setdefault(v[:2], set()).add(d > AS_OF)
+    ok &= all(seen.get(cc) == {True, False} for cc in ("BG", "LV", "RO", "CZ"))
     # the all-zero property is not vacuous: every reject-policy identifier yields rows, and where the reference
     # has a check, at least one row the reference ACCEPTS (a correct-looking check), so rejecting it is real work
     for identifier, (kind, how) in ZERO_POLICY.items():

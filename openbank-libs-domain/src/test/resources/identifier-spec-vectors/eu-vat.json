@@ -1,6 +1,7 @@
 {
   "identifier": "eu-vat",
   "reference": "stdnum.eu.vat",
+  "as_of": "2026-06-15",
   "sources": [
     "https://ec.europa.eu/taxation_customs/vies/",
     "https://www.zakonyprolidi.cz/cs/2004-235"
@@ -56,6 +57,96 @@
       "valid": false,
       "rule": "CZ DIČ built on a never-issued birth number (+20 month in 2003)",
       "stdnum_divergence": "stdnum accepts the +20 month before 2004; see #16748",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "BG2646151230",
+      "valid": true,
+      "rule": "BG natural-person VAT: birthdate equals as_of (today) [as_of]",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "BG2646161239",
+      "valid": false,
+      "rule": "BG natural-person VAT: birthdate the day after as_of (tomorrow) [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "known_defect": {
+        "issue": "#16897",
+        "current": true,
+        "why": "kyb's check has no upper bound on the encoded birthdate"
+      },
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "BG8503093210",
+      "valid": true,
+      "rule": "BG natural-person VAT: birthdate far in the past",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "LV15062621235",
+      "valid": true,
+      "rule": "LV natural-person VAT: birthdate equals as_of (today) [as_of]",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "LV16062621230",
+      "valid": false,
+      "rule": "LV natural-person VAT: birthdate the day after as_of (tomorrow) [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "known_defect": {
+        "issue": "#16897",
+        "current": true,
+        "why": "kyb's check has no upper bound on the encoded birthdate"
+      },
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "LV09038513217",
+      "valid": true,
+      "rule": "LV natural-person VAT: birthdate far in the past",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "RO5260615321231",
+      "valid": true,
+      "rule": "RO natural-person VAT: birthdate equals as_of (today) [as_of]",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "RO5260616321232",
+      "valid": false,
+      "rule": "RO natural-person VAT: birthdate the day after as_of (tomorrow) [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "known_defect": {
+        "issue": "#16897",
+        "current": true,
+        "why": "kyb's check has no upper bound on the encoded birthdate"
+      },
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "RO1850309463218",
+      "valid": true,
+      "rule": "RO natural-person VAT: birthdate far in the past",
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"
