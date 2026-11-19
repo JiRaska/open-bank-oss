@@ -8,6 +8,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.text.Normalizer
 import java.time.OffsetDateTime
 import java.util.Locale
 import java.util.UUID
@@ -83,12 +84,11 @@ data class PaymentProposalPayload(
     val canonicalAmount: String get() = amount.setScale(2, RoundingMode.UNNECESSARY).toPlainString()
 
     /** The same payment, for ADR-0383 D6 deduplication (same payee, amount and currency). */
-    fun sameInstructionAs(other: PaymentProposalPayload): Boolean =
-        operationType == other.operationType &&
-            debtorAccountId == other.debtorAccountId &&
-            creditorIban == other.creditorIban &&
-            amount.compareTo(other.amount) == 0 &&
-            currency == other.currency
+    fun sameInstructionAs(other: PaymentProposalPayload): Boolean = operationType == other.operationType &&
+        debtorAccountId == other.debtorAccountId &&
+        creditorIban == other.creditorIban &&
+        amount.compareTo(other.amount) == 0 &&
+        currency == other.currency
 
     companion object {
         const val MAX_NAME = 70
@@ -102,10 +102,17 @@ data class PaymentProposalPayload(
          * customer is about to sign. Refused, not stripped: a silently rewritten reference is a
          * different payment from the one the model described.
          */
-        private val UNSAFE = Regex("[\\p{Cntrl}<>\\[\\]`]|://")
+        // Unicode categories, not ASCII \p{Cntrl}: Cc (controls), Cf (format: bidi overrides such as
+        // U+202E, zero-width U+200B/U+200D, U+FEFF) and Zl/Zp (U+2028/U+2029) can make a payee name
+        // render as a different one on the approval screen.
+        private val UNSAFE = Regex("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}<>\\[\\]`]|://")
+
+        /** NFC so visually identical names compare and hash identically; callers normalise first. */
+        fun normalize(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFC)
 
         private fun requireSafeText(value: String, field: String) {
-            require(!UNSAFE.containsMatchIn(value)) { "$field contains control characters or markup" }
+            require(Normalizer.isNormalized(value, Normalizer.Form.NFC)) { "$field must be NFC-normalised" }
+            require(!UNSAFE.containsMatchIn(value)) { "$field contains control, format or markup characters" }
         }
     }
 }
@@ -132,8 +139,13 @@ data class PaymentProposal(
     }
 
     /** The status a reader must see: a PENDING proposal past its expiry is EXPIRED, persisted or not. */
-    fun effectiveStatus(now: OffsetDateTime): PaymentProposalStatus =
-        if (status == PaymentProposalStatus.PENDING && !now.isBefore(expiresAt)) PaymentProposalStatus.EXPIRED else status
+    fun effectiveStatus(now: OffsetDateTime): PaymentProposalStatus = if (status == PaymentProposalStatus.PENDING &&
+        !now.isBefore(expiresAt)
+    ) {
+        PaymentProposalStatus.EXPIRED
+    } else {
+        status
+    }
 
     fun isOpen(now: OffsetDateTime): Boolean = effectiveStatus(now) == PaymentProposalStatus.PENDING
 
@@ -236,8 +248,7 @@ data class PaymentProposal(
 
 class PaymentProposalStateException(message: String) : RuntimeException(message)
 
-class PaymentProposalHashMismatchException(id: UUID) :
-    RuntimeException("payloadSha256 does not match proposal $id")
+class PaymentProposalHashMismatchException(id: UUID) : RuntimeException("payloadSha256 does not match proposal $id")
 
 class PaymentProposalNotFoundException : RuntimeException("payment proposal not found")
 

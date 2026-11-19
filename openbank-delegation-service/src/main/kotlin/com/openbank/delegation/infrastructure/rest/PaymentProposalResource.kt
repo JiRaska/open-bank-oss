@@ -73,10 +73,12 @@ class PaymentProposalResource(private val proposals: PaymentProposalService) {
                     debtorAccountId = requireNotNull(body.debtorAccountId) { "debtorAccountId is required" },
                     creditorIban = requireText(body.creditorIban, "creditorIban", IBAN_MAX)
                         .replace(" ", "").uppercase(),
-                    creditorName = requireText(body.creditorName, "creditorName", PaymentProposalPayload.MAX_NAME),
+                    creditorName = PaymentProposalPayload.normalize(
+                        requireText(body.creditorName, "creditorName", PaymentProposalPayload.MAX_NAME),
+                    ),
                     amount = requireNotNull(body.amount) { "amount is required" },
                     currency = requireText(body.currency, "currency", CURRENCY_LEN).uppercase(),
-                    reference = body.reference?.takeIf { it.isNotBlank() },
+                    reference = body.reference?.takeIf { it.isNotBlank() }?.let(PaymentProposalPayload::normalize),
                 ),
             ),
         )
@@ -273,11 +275,10 @@ data class PaymentProposalView(
     }
 }
 
-private fun proposalError(status: Response.Status, code: String, message: String?): Response =
-    Response.status(status)
-        .type(MediaType.APPLICATION_JSON)
-        .entity(mapOf("status" to status.statusCode, "code" to code, "error" to message))
-        .build()
+private fun proposalError(status: Response.Status, code: String, message: String?): Response = Response.status(status)
+    .type(MediaType.APPLICATION_JSON)
+    .entity(mapOf("status" to status.statusCode, "code" to code, "error" to message))
+    .build()
 
 @Provider
 class PaymentProposalNotFoundMapper : ExceptionMapper<PaymentProposalNotFoundException> {

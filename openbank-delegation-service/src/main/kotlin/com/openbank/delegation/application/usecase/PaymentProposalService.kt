@@ -66,7 +66,10 @@ class PaymentProposalService(
         @ConfigProperty(name = "openbank.delegation.payment-proposals.ttl", defaultValue = "PT24H") ttl: Duration,
         @ConfigProperty(name = "openbank.delegation.payment-proposals.max-open-per-party", defaultValue = "10")
         maxOpen: Int,
-        @ConfigProperty(name = "openbank.delegation.payment-proposals.max-created-per-party-per-day", defaultValue = "20")
+        @ConfigProperty(
+            name = "openbank.delegation.payment-proposals.max-created-per-party-per-day",
+            defaultValue = "20",
+        )
         maxPerDay: Int,
     ) : this(proposals, grants, Clock.systemUTC(), ttl, ProposalLimits(maxOpen, maxPerDay))
 
@@ -99,11 +102,31 @@ class PaymentProposalService(
     /** A party sees only its own proposals; another party's id is indistinguishable from none. */
     suspend fun get(id: UUID, partyId: UUID): PaymentProposal = proposals.findById(id)
         ?.takeIf { it.partyId == partyId }
+        ?.let { reconcileGrant(it, OffsetDateTime.now(clock)) }
         ?: throw PaymentProposalNotFoundException()
 
     suspend fun listPending(partyId: UUID): List<PaymentProposal> {
         val now = OffsetDateTime.now(clock)
-        return proposals.findByParty(partyId, LIST_LIMIT).filter { it.isOpen(now) }
+        return proposals.findByParty(partyId, LIST_LIMIT)
+            .filter { it.isOpen(now) }
+            .map { reconcileGrant(it, now) }
+            .filter { it.isOpen(now) }
+    }
+
+    /**
+     * A proposal is only as alive as the grant it was made under. If that grant is no longer
+     * ACTIVE (revoked, suspended, expired, renounced) a PENDING proposal is REJECTED — persisted,
+     * with its event — before anyone can read it as approvable. The revoke/suspend path also
+     * rejects pending proposals in its own transaction ([PaymentProposalRepository.rejectPendingForGrant]);
+     * this is the read-side half for grants that lapsed without a write (validTo passing).
+     */
+    private suspend fun reconcileGrant(proposal: PaymentProposal, now: OffsetDateTime): PaymentProposal {
+        if (proposal.effectiveStatus(now) != PaymentProposalStatus.PENDING) return proposal
+        val live = grants.findById(proposal.grantId)?.isActiveOn(now) == true
+        if (live) return proposal
+        return proposals.transition(proposal.id) { current ->
+            if (current.effectiveStatus(now) == PaymentProposalStatus.PENDING) current.reject(now) else current
+        } ?: proposal
     }
 
     suspend fun approve(id: UUID, partyId: UUID, payloadSha256: String): PaymentProposal {
@@ -118,12 +141,7 @@ class PaymentProposalService(
         return mutate(id) { it.reject(now) }
     }
 
-    suspend fun recordExecution(
-        id: UUID,
-        partyId: UUID,
-        payloadSha256: String,
-        paymentId: UUID?,
-    ): PaymentProposal {
+    suspend fun recordExecution(id: UUID, partyId: UUID, payloadSha256: String, paymentId: UUID?): PaymentProposal {
         get(id, partyId)
         val now = OffsetDateTime.now(clock)
         return mutate(id) {

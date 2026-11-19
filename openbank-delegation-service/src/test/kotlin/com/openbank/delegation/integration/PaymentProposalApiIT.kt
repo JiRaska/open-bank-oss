@@ -1,0 +1,351 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+package com.openbank.delegation.integration
+
+import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.PaymentProposal
+import com.openbank.delegation.domain.model.PaymentProposalOperationType
+import com.openbank.delegation.domain.model.PaymentProposalPayload
+import com.openbank.delegation.it.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured.given
+import io.restassured.http.ContentType
+import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.equalTo
+import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.sql.Connection
+import java.sql.DriverManager
+import java.sql.Timestamp
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+import java.util.UUID
+
+/**
+ * ADR-0383 D6 over real HTTP + PostgreSQL: who may create, who may decide, and that an approval
+ * releases only the exact instruction, once, while the proposal is live and its grant ACTIVE.
+ */
+@QuarkusTest
+@QuarkusTestResource(PaymentProposalApiIT.InMemoryKafka::class)
+@QuarkusTestResource(PostgresTestResource::class)
+class PaymentProposalApiIT {
+
+    class InMemoryKafka : io.quarkus.test.common.QuarkusTestResourceLifecycleManager {
+        override fun start(): Map<String, String> =
+            io.smallrye.reactive.messaging.memory.InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "delegation-events-out",
+                "payment-proposal-events-out",
+            ) + mapOf("openbank.outbox.dispatch-enabled" to "false")
+
+        override fun stop() = io.smallrye.reactive.messaging.memory.InMemoryConnector.clear()
+    }
+
+    private val party = UUID.randomUUID()
+    private val account = UUID.randomUUID()
+
+    // ---- mcp-service: create only ----
+
+    @Test
+    @TestSecurity(user = MCP, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
+    fun `mcp creates a PENDING proposal under an active grant, deduplicates, and records an event`() {
+        seedGrant()
+        val first = create().statusCode(201).body("status", equalTo("PENDING")).extract().path<String>("proposalId")
+        create().statusCode(200).body("deduplicated", equalTo(true)).body("proposalId", equalTo(first))
+        assertThat(rowStatus(UUID.fromString(first))).isEqualTo("PENDING")
+        assertThat(outboxCount(UUID.fromString(first), "PaymentProposalCreated")).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = MCP, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
+    fun `mcp cannot create without a grant for that client, key and account`() {
+        seedGrant()
+        create(client = "another-client").statusCode(403)
+        create(jkt = "x".repeat(43)).statusCode(403)
+        create(debtor = UUID.randomUUID()).statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = MCP, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
+    fun `mcp cannot read, approve, reject or record execution`() {
+        val id = seedProposal()
+        val hash = hashOf(id)
+        given().get("/api/v1/payment-proposals/$id?partyId=$party").then().statusCode(403)
+        decide(id, "approve", hash, party).statusCode(403)
+        decide(id, "reject", hash, party).statusCode(403)
+        decide(id, "execution", hash, party).statusCode(403)
+        assertThat(rowStatus(id)).isEqualTo("PENDING")
+    }
+
+    @Test
+    @TestSecurity(user = MCP, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-mcp"), Claim(key = "preferred_username", value = MCP),
+        ],
+    )
+    fun `the free text cannot carry a bidi override`() {
+        seedGrant()
+        create(name = "Pay‮eman").statusCode(400)
+    }
+
+    // ---- customer-edge: read + decide only ----
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `edge cannot create a proposal`() {
+        seedGrant()
+        create().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `approve once with the exact hash, replay refused, execution recorded against the same hash`() {
+        val id = seedProposal()
+        val hash = hashOf(id)
+        given().header(HDR, party).get("/api/v1/payment-proposals?partyId=$party").then().statusCode(200)
+            .body("[0].payloadSha256", equalTo(hash))
+            .body("[0].approvalRequestId", equalTo("mcp-proposal:$id"))
+        decide(id, "approve", hash, party).statusCode(200).body("status", equalTo("APPROVED"))
+        decide(id, "approve", hash, party).statusCode(409)
+        decide(id, "execution", "0".repeat(64), party, UUID.randomUUID()).statusCode(409)
+        decide(id, "execution", hash, party, UUID.randomUUID()).statusCode(200).body("status", equalTo("EXECUTED"))
+        assertThat(outboxCount(id, "PaymentProposalApproved")).isEqualTo(1)
+        assertThat(outboxCount(id, "PaymentProposalExecuted")).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `approval with a mismatched hash is refused and leaves the proposal PENDING`() {
+        val id = seedProposal()
+        decide(id, "approve", "a".repeat(64), party).statusCode(409).body("code", equalTo("PROPOSAL_HASH_MISMATCH"))
+        assertThat(rowStatus(id)).isEqualTo("PENDING")
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `an expired proposal is refused`() {
+        val id = seedProposal(createdAt = Instant.now().minus(25, ChronoUnit.HOURS))
+        decide(id, "approve", hashOf(id), party).statusCode(409)
+        assertThat(rowStatus(id)).isEqualTo("PENDING") // reads as EXPIRED; nothing was approved
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `another party's proposal is invisible and cannot be decided`() {
+        val id = seedProposal()
+        val other = UUID.randomUUID()
+        given().header(HDR, other).get("/api/v1/payment-proposals/$id?partyId=$other").then().statusCode(404)
+        decide(id, "approve", hashOf(id), other).statusCode(404)
+        // and the party header must match the claimed party
+        given().header(HDR, other).get("/api/v1/payment-proposals/$id?partyId=$party").then().statusCode(403)
+        assertThat(rowStatus(id)).isEqualTo("PENDING")
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(
+                key = "sub",
+                value = SUB,
+            ), Claim(key = "azp", value = "openbank-edge"), Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `a proposal whose grant was revoked is rejected, not approvable`() {
+        val id = seedProposal()
+        jdbc().use {
+            it.createStatement().executeUpdate(
+                "update delegation_grants set status = 'REVOKED' where grantor_party_id = '$party'",
+            )
+        }
+        decide(id, "approve", hashOf(id), party).statusCode(409)
+        assertThat(rowStatus(id)).isEqualTo("REJECTED")
+        assertThat(outboxCount(id, "PaymentProposalRejected")).isEqualTo(1)
+    }
+
+    // ---- helpers ----
+
+    private fun create(
+        client: String = CLIENT,
+        jkt: String = JKT,
+        debtor: UUID = account,
+        name: String = "Elektrárna Praha a.s.",
+    ) = given().contentType(ContentType.JSON).body(
+        mapOf(
+            "partyId" to party.toString(), "mcpClientId" to client, "keyThumbprint" to jkt,
+            "operationType" to "DOMESTIC_PAYMENT", "debtorAccountId" to debtor.toString(),
+            "creditorIban" to IBAN, "creditorName" to name, "amount" to "1250.50", "currency" to "CZK",
+        ),
+    ).post("/api/v1/payment-proposals").then()
+
+    private fun decide(id: UUID, verb: String, hash: String, asParty: UUID, paymentId: UUID? = null) =
+        given().contentType(ContentType.JSON).header(HDR, asParty)
+            .body(
+                mapOf("partyId" to asParty.toString(), "payloadSha256" to hash) +
+                    (paymentId?.let { mapOf("paymentId" to it.toString()) } ?: emptyMap()),
+            )
+            .post("/api/v1/payment-proposals/$id/$verb").then()
+
+    private fun payload() = PaymentProposalPayload(
+        PaymentProposalOperationType.DOMESTIC_PAYMENT,
+        account,
+        IBAN,
+        "Elektrárna Praha a.s.",
+        BigDecimal("1250.50"),
+        "CZK",
+    )
+
+    private fun hashOf(id: UUID) = PaymentProposal.canonicalSha256(id, party, payload())
+
+    private fun jdbc(): Connection = DriverManager.getConnection(
+        ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java),
+        "openbank",
+        "openbank_secret",
+    )
+
+    private fun seedGrant(): UUID {
+        val id = UUID.randomUUID()
+        jdbc().use { c ->
+            c.createStatement().executeUpdate(
+                """
+                insert into delegation_grants
+                    (id, grantor_party_id, grantee_party_id, resource_type, resource_id, valid_from, status,
+                     grantee_type, grantee_client_id, grantee_key_thumbprint)
+                values ('$id', '$party', '${DelegationGrant.mcpClientGranteeId(CLIENT)}', 'ACCOUNT', '$account', now() - interval '1 day', 'ACTIVE',
+                        'MCP_CLIENT', '$CLIENT', '$JKT')
+                """.trimIndent(),
+            )
+            c.createStatement().executeUpdate(
+                "insert into delegation_capabilities (grant_id, capability) values ('$id', 'ACCOUNT_PROPOSE_PAYMENT')",
+            )
+        }
+        return id
+    }
+
+    private fun seedProposal(createdAt: Instant = Instant.now()): UUID {
+        val grant = seedGrant()
+        val id = UUID.randomUUID()
+        jdbc().use { c ->
+            c.prepareStatement(
+                """
+                insert into delegation_payment_proposals
+                    (id, party_id, grant_id, mcp_client_id, operation_type, debtor_account_id, creditor_iban,
+                     creditor_name, amount, currency, payload_sha256, status, created_at, expires_at)
+                values (?, ?, ?, ?, 'DOMESTIC_PAYMENT', ?, ?, ?, 1250.50, 'CZK', ?, 'PENDING', ?, ?)
+                """.trimIndent(),
+            ).use { s ->
+                s.setObject(1, id)
+                s.setObject(2, party)
+                s.setObject(3, grant)
+                s.setString(4, CLIENT)
+                s.setObject(5, account)
+                s.setString(6, IBAN)
+                s.setString(7, "Elektrárna Praha a.s.")
+                s.setString(8, hashOf(id))
+                s.setTimestamp(9, Timestamp.from(createdAt))
+                s.setTimestamp(10, Timestamp.from(createdAt.plus(24, ChronoUnit.HOURS)))
+                s.executeUpdate()
+            }
+        }
+        return id
+    }
+
+    private fun rowStatus(id: UUID): String = jdbc().use { c ->
+        c.createStatement().executeQuery("select status from delegation_payment_proposals where id = '$id'").use {
+            it.next()
+            it.getString(1)
+        }
+    }
+
+    private fun outboxCount(id: UUID, type: String): Int = jdbc().use { c ->
+        c.createStatement().executeQuery(
+            "select count(*) from delegation_outbox where aggregate_id = '$id' and event_type = '$type'",
+        ).use {
+            it.next()
+            it.getInt(1)
+        }
+    }
+
+    private companion object {
+        const val MCP = "service-account-openbank-mcp"
+        const val EDGE = "service-account-openbank-edge"
+        const val SUB = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"
+        const val HDR = "X-Customer-Party-Id"
+        const val CLIENT = "mcp-hosted-reference"
+        const val JKT = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        const val IBAN = "CZ6508000000192000145399"
+    }
+}

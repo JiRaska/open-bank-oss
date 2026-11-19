@@ -112,22 +112,35 @@ class PaymentProposalRepositoryImpl(
         Panache.getSession().flatMap { session -> loadParty(session, partyId, limit) }
     }.awaitSuspending()
 
-    override suspend fun transition(
-        id: UUID,
-        transition: (PaymentProposal) -> PaymentProposal,
-    ): PaymentProposal? = Panache.withTransaction {
+    override suspend fun transition(id: UUID, transition: (PaymentProposal) -> PaymentProposal): PaymentProposal? =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery(LOCK_BY_ID_SQL, PaymentProposalEntity::class.java)
+                    .setParameter("id", id)
+                    .resultList
+                    .flatMap { rows ->
+                        val current = rows.firstOrNull()?.toDomain() ?: return@flatMap Uni.createFrom().nullItem()
+                        val now = OffsetDateTime.now()
+                        val next = transition(current)
+                        write(session, current, next, now).replaceWith(next)
+                    }
+            }
+        }.awaitSuspending()
+
+    override fun rejectPendingForGrant(grantId: UUID, now: OffsetDateTime): Uni<Void> =
         Panache.getSession().flatMap { session ->
-            session.createNativeQuery(LOCK_BY_ID_SQL, PaymentProposalEntity::class.java)
-                .setParameter("id", id)
+            session.createNativeQuery(LOCK_PENDING_BY_GRANT_SQL, PaymentProposalEntity::class.java)
+                .setParameter("grant", grantId)
                 .resultList
                 .flatMap { rows ->
-                    val current = rows.firstOrNull()?.toDomain() ?: return@flatMap Uni.createFrom().nullItem()
-                    val now = OffsetDateTime.now()
-                    val next = transition(current)
-                    write(session, current, next, now).replaceWith(next)
+                    var chain: Uni<Void> = Uni.createFrom().voidItem()
+                    rows.map { it.toDomain() }.forEach { p ->
+                        val next = if (p.isOpen(now)) p.reject(now) else p.expire(now)
+                        chain = chain.flatMap { write(session, p, next, now) }
+                    }
+                    chain
                 }
         }
-    }.awaitSuspending()
 
     private fun write(
         session: Mutiny.Session,
@@ -182,6 +195,9 @@ class PaymentProposalRepositoryImpl(
             "select 1 from (select pg_advisory_xact_lock(hashtextextended('payment-proposal:' || :party, 0))) l"
         const val FIND_BY_ID_SQL = "select * from delegation_payment_proposals where id = :id"
         const val LOCK_BY_ID_SQL = "$FIND_BY_ID_SQL for update"
+        const val LOCK_PENDING_BY_GRANT_SQL =
+            "select * from delegation_payment_proposals where grant_id = :grant and status = 'PENDING' " +
+                "order by id for update"
         const val FIND_BY_PARTY_SQL =
             "select * from delegation_payment_proposals where party_id = :party order by created_at desc, id"
         const val UPDATE_SQL = """

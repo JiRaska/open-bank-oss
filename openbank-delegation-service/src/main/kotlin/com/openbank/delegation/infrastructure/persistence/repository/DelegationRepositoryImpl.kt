@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.PaymentProposalRepository
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationGrantEntity
@@ -19,6 +21,7 @@ import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -40,8 +43,22 @@ class DelegationRepositoryImpl(
         }
         write.flatMap { saved ->
             outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(saved)
-        }
+        }.flatMap { saved -> closeProposalsIfInactive(saved).replaceWith(saved) }
     }.awaitSuspending()
+
+    /**
+     * ADR-0383 D6: a grant that leaves ACTIVE takes its PENDING payment proposals with it, in the
+     * SAME transaction, so a revoked or suspended MCP_CLIENT grant leaves nothing approvable.
+     */
+    @Inject
+    lateinit var paymentProposals: PaymentProposalRepository
+
+    private fun closeProposalsIfInactive(grant: DelegationGrant): Uni<Void> =
+        if (grant.granteeType == DelegationGranteeType.MCP_CLIENT && grant.status != DelegationStatus.ACTIVE) {
+            paymentProposals.rejectPendingForGrant(grant.id, OffsetDateTime.now())
+        } else {
+            Uni.createFrom().voidItem()
+        }
 
     private fun persistNew(grant: DelegationGrant): Uni<DelegationGrant> = Panache.getSession().flatMap { session ->
         session.persist(DelegationGrantEntity.fromDomain(grant)).replaceWith(grant)
@@ -144,7 +161,9 @@ class DelegationRepositoryImpl(
             expectedLifecycleRevision,
         ).flatMap { count ->
             if (count > 0) {
-                outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(true)
+                outboxRepository.persistInTransaction(outboxMessage(event))
+                    .flatMap { paymentProposals.rejectPendingForGrant(id, expiredAt) }
+                    .replaceWith(true)
             } else {
                 Uni.createFrom().item(false)
             }

@@ -31,11 +31,7 @@ interface PaymentProposalRepository {
      * identical open proposal if one exists, enforce [limits], otherwise insert [candidate].
      * [candidate] is built by the caller so the id is inside its payload hash before the row exists.
      */
-    suspend fun create(
-        candidate: PaymentProposal,
-        limits: ProposalLimits,
-        now: OffsetDateTime,
-    ): ProposalCreateOutcome
+    suspend fun create(candidate: PaymentProposal, limits: ProposalLimits, now: OffsetDateTime): ProposalCreateOutcome
 
     suspend fun findById(id: UUID): PaymentProposal?
 
@@ -43,6 +39,13 @@ interface PaymentProposalRepository {
 
     /** Lock the row, apply [transition], persist + outbox. Null when the row does not exist. */
     suspend fun transition(id: UUID, transition: (PaymentProposal) -> PaymentProposal): PaymentProposal?
+
+    /**
+     * REJECT every PENDING proposal made under [grantId], with events, inside the CALLER's open
+     * transaction (the grant's revoke/suspend write), so a grant can never leave ACTIVE while a
+     * proposal made under it stays approvable.
+     */
+    fun rejectPendingForGrant(grantId: UUID, now: OffsetDateTime): io.smallrye.mutiny.Uni<Void>
 }
 
 /** A deduplication probe shared by the repository and its tests. */
