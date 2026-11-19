@@ -1949,6 +1949,20 @@ def self_test():
                 bad.append("a self-test was not traced on a push event (main hides drift)")
             else:
                 os.unlink(pushed)
+        finally:
+            sit.strace_usable = saved_usable
+            if saved_mode is None:
+                os.environ.pop(sit.TRACE_ENV, None)
+            else:
+                os.environ[sit.TRACE_ENV] = saved_mode
+
+        # #16895, kept OUTSIDE the block above so it runs whatever that block found: an
+        # undeclared self-test read must FAIL the gate on a push to main as on a pull request.
+        saved_mode = os.environ.get(sit.TRACE_ENV)
+        saved_usable = sit.strace_usable
+        try:
+            os.environ[sit.TRACE_ENV] = "require"
+            sit.strace_usable = lambda: (True, "")
             saved_argv, saved_analyse = sit.strace_argv, sit.analyse
             try:
                 sit.strace_argv = lambda _f: []

@@ -630,7 +630,7 @@ jobs:
     # independent governance checks still run. Admission refusal still blocks all.
     if: always() && needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       # Never fail-fast: one red shard must not hide the state of the other seven, or a PR
       # gets a one-gate-at-a-time debugging loop instead of the whole picture in one run.
