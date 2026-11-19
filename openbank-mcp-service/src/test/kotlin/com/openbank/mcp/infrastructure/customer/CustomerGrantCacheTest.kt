@@ -106,29 +106,43 @@ class CustomerGrantCacheTest {
     }
 
     @Test
-    fun `at the cap it evicts expired entries first, then only the oldest, never everything`() {
+    fun `at the cap it evicts only the oldest entry, never everything`() {
         val small = CustomerGrantCache(source, Duration.ofSeconds(15), clock, maxEntries = 3)
         source.answer = { listOf(grant()) }
-        val expiring = key.copy(partyId = UUID.randomUUID())
-        source.answer = { listOf(grant(validTo = clock.now.plusSeconds(1))) }
-        small.grants(expiring)
+        val keys = (1..4).map { key.copy(partyId = UUID.randomUUID()) }
+        keys.take(3).forEach { small.grants(it) }
+        small.grants(keys[3])
+        assertThat(small.isCached(keys[0])).isFalse()
+        assertThat(keys.drop(1).map { small.isCached(it) }).containsOnly(true)
+    }
+
+    @Test
+    fun `refreshing a key already held at the cap evicts nothing`() {
+        val small = CustomerGrantCache(source, Duration.ofSeconds(15), clock, maxEntries = 2)
         source.answer = { listOf(grant()) }
         val k1 = key.copy(partyId = UUID.randomUUID())
         val k2 = key.copy(partyId = UUID.randomUUID())
-        clock.now = clock.now.plusSeconds(1)
         small.grants(k1)
-        clock.now = clock.now.plusMillis(1)
         small.grants(k2)
-        // Full (3) — the expired entry goes first; k1 and k2 survive.
-        val k3 = key.copy(partyId = UUID.randomUUID())
-        small.grants(k3)
-        assertThat(small.isCached(expiring)).isFalse()
-        assertThat(listOf(k1, k2, k3).map { small.isCached(it) }).containsOnly(true)
-        // Full again with nothing expired — only the oldest (k1) is dropped.
-        clock.now = clock.now.plusMillis(1)
-        val k4 = key.copy(partyId = UUID.randomUUID())
-        small.grants(k4)
-        assertThat(small.isCached(k1)).isFalse()
-        assertThat(listOf(k2, k3, k4).map { small.isCached(it) }).containsOnly(true)
+        clock.now = clock.now.plusSeconds(15)
+        small.grants(k2)
+        assertThat(small.isCached(k1)).isTrue()
+        assertThat(small.isCached(k2)).isTrue()
+    }
+
+    @Test
+    fun `an invalidation during an in-flight lookup is not undone by that lookup's answer`() {
+        val revoked = grant()
+        lateinit var target: CustomerGrantCache
+        source.answer = {
+            // The revocation lands while this lookup is still in flight with the old answer.
+            target.invalidate(key)
+            listOf(revoked)
+        }
+        target = CustomerGrantCache(source, Duration.ofSeconds(15), clock)
+        assertThat(target.grants(key)).containsExactly(revoked)
+        assertThat(target.isCached(key)).isFalse()
+        source.answer = { emptyList() }
+        assertThat(target.grants(key)).isEmpty()
     }
 }

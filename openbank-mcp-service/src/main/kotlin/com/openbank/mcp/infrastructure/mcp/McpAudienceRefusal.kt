@@ -22,7 +22,10 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
         log.warnf("rejected %s: %s", McpInputBounds.logSafe(method), reason.description)
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
         // Bounded like every other audit write (#16628); a NUL-carrying request is not audited at all.
-        if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
+        // The channel-off refusal answers tokens nobody here can attribute to a subject, so its audit
+        // rows share ONE per-minute window: a flood of them cannot become an audit-write amplifier.
+        val auditable = reason != Reason.CUSTOMER_CHANNEL_OFF || throttle.shouldAuditRefusal(CHANNEL_OFF_AUDIT_KEY)
+        if (auditable && method == "tools/call" && !McpInputBounds.containsNul(params)) {
             throttle.auditAnonymousCall(
                 McpInputBounds.echo(params.path("name").asText("")),
                 McpInputBounds.auditKeys(params.path("arguments")),
@@ -32,6 +35,10 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
         return Response.status(Response.Status.UNAUTHORIZED)
             .header("WWW-Authenticate", "Bearer error=\"invalid_token\", error_description=\"${reason.description}\"")
             .build()
+    }
+
+    private companion object {
+        const val CHANNEL_OFF_AUDIT_KEY = "customer-channel-off"
     }
 
     /** Why a presented token is refused before any method runs. Descriptions are constants, never input. */

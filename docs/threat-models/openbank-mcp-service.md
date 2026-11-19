@@ -468,11 +468,15 @@ a stub (T-T2/T-D2).
     regenerated `mcp-opa-bundle` (must-ALLOW balance read; must-DENY scope escalation,
     propose_payment, operator on the channel; control operator read off-channel ALLOW).
   - *Unbound exchanged token (accepted, ADR-0383 D4).* The downstream token is a plain bearer, not
-    DPoP-bound. D4 accepts this explicitly: it is in-cluster only and never leaves mcp-service, so its
-    protection is the lifetime (`expires_in` <= 60 s, refused otherwise), the single audience, the
-    single read scope, `azp` = the exchange client (each verified on the answer, a token failing any
-    is refused), and the downstream PDP's read-only rule. A pod-memory or in-cluster network capture
-    therefore yields at most 60 s of reads of one service for one customer.
+    DPoP-bound, and it DOES leave mcp-service: it is sent as `Authorization: Bearer` to exactly one
+    downstream service over in-cluster HTTP. It never leaves the cluster and is never returned to the
+    MCP client. D4 accepts the missing sender binding on that basis ("in-cluster only ... does not
+    need to be sender-constrained"). The protections are: lifetime `expires_in` <= 60 s (refused
+    otherwise); a single audience, the one service it is sent to; a single read scope; `azp` = the
+    exchange client (each verified on the answer, any failure refuses); and the downstream PDP's
+    read-only rule. A capture from pod memory, from the receiving service, or from in-cluster traffic
+    therefore yields at most 60 s of reads of that one service for one customer. Residual: the
+    in-cluster hop is plain HTTP unless the mesh/mTLS posture of the target namespace encrypts it.
   - *Fail-closed.* Lookup error, empty grant set, exchange failure (including an unconfigured
     exchange secret), a downstream 401/403 and a downstream 5xx/timeout are all refusals, audited `DENIED`
     (`UNAVAILABLE` for lookup/exchange outages). Only positive lookups are cached, at most

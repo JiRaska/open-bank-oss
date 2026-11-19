@@ -11,6 +11,8 @@ import io.quarkus.test.junit.TestProfile
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.hamcrest.Matchers.containsString
+import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
@@ -46,6 +48,26 @@ class McpCustomerChannelOffIT {
                 .statusCode(401)
                 .header("WWW-Authenticate", containsString("customer channel is not enabled"))
         }
+    }
+
+    @Inject
+    lateinit var recorder: RecordingAuditEventPublisher
+
+    @Test
+    fun `a flood of channel-off tools calls writes at most one audit row per minute window`() {
+        CustomerTokenSource.claims = mapOf(
+            "iss" to "https://kc.open-bank.tech/realms/openbank-customers",
+            "sub" to "c0ffee00-0000-0000-0000-0000000000f2",
+            "aud" to "openbank-mcp-service",
+        )
+        recorder.clear()
+        repeat(10) {
+            given().contentType(ContentType.JSON).header("Authorization", "DPoP t")
+                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""")
+                .post("/mcp").then().statusCode(401)
+        }
+        // One per minute window; two only if the run straddles a boundary.
+        assertThat(recorder.events.size).isBetween(1, 2)
     }
 
     @Test

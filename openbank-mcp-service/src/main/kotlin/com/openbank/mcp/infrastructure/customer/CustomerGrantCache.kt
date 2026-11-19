@@ -19,7 +19,9 @@ import java.util.concurrent.ConcurrentHashMap
  * created grant is visible at once and an outage cannot be remembered as either answer. A positive
  * entry lives at most [ttl] (bounded to [MAX_TTL] at construction) and never past the earliest
  * `validTo` of the grants it holds; [invalidate] drops it the moment a downstream service refuses
- * the customer's exchanged token. A revocation therefore takes effect within [ttl] at the latest.
+ * the customer's exchanged token, and a lookup already in flight when that happens does not re-cache
+ * its (possibly pre-revocation) answer. A revocation therefore takes effect within [ttl] at the latest.
+ * At the cap the oldest entry is evicted (insertion order, O(1)); a refresh never evicts.
  */
 @ApplicationScoped
 class CustomerGrantCache(
@@ -40,14 +42,28 @@ class CustomerGrantCache(
         }
     }
 
-    private class Entry(val grants: List<CustomerGrant>, val expiresAt: Instant, val storedAt: Instant)
+    private class Entry(val grants: List<CustomerGrant>, val expiresAt: Instant, val seq: Long)
 
     private val entries = ConcurrentHashMap<GrantKey, Entry>()
+
+    /** Insertion order, for O(1) oldest-first eviction. Stale pairs (re-inserted keys) are skipped. */
+    private val order = ArrayDeque<Pair<GrantKey, Long>>()
+    private val lock = Any()
+    private var nextSeq = 0L
+
+    /**
+     * Bumped by every [invalidate]. A lookup that started before an invalidation must not cache its
+     * answer: it may be the pre-revocation grant set. One counter for all keys is conservative (an
+     * unrelated invalidation skips caching one concurrent answer) and needs no per-key state to bound.
+     */
+    @Volatile
+    private var generation = 0L
 
     /** The active grants for [key]; throws [GrantLookupUnavailable] when the answer is unknown. */
     fun grants(key: GrantKey): List<CustomerGrant> {
         val now = clock.instant()
         entries[key]?.let { if (now.isBefore(it.expiresAt)) return it.grants else entries.remove(key, it) }
+        val startedAt = generation
         val fresh = source.resolve(key)
         if (fresh.isEmpty() || ttl.isZero) {
             entries.remove(key)
@@ -55,21 +71,34 @@ class CustomerGrantCache(
         }
         val bound = fresh.mapNotNull { it.validTo }.minOrNull()
         val expiresAt = now.plus(ttl).let { if (bound != null && bound.isBefore(it)) bound else it }
-        if (entries.size >= maxEntries) evict(now)
-        entries[key] = Entry(fresh, expiresAt, now)
+        synchronized(lock) {
+            if (generation != startedAt) return fresh
+            // A refresh of a key already held replaces it in place: it never evicts anything.
+            if (!entries.containsKey(key)) {
+                while (entries.size >= maxEntries && evictOldest()) Unit
+            }
+            val seq = nextSeq++
+            entries[key] = Entry(fresh, expiresAt, seq)
+            order.addLast(key to seq)
+        }
         return fresh
     }
 
     fun invalidate(key: GrantKey) {
-        entries.remove(key)
+        synchronized(lock) {
+            generation++
+            entries.remove(key)
+        }
     }
 
-    /** At the cap: drop expired entries first, then the oldest single entries — never the whole cache. */
-    private fun evict(now: Instant) {
-        entries.entries.removeIf { !now.isBefore(it.value.expiresAt) }
-        while (entries.size >= maxEntries) {
-            val oldest = entries.entries.minByOrNull { it.value.storedAt } ?: return
-            entries.remove(oldest.key, oldest.value)
+    /** Drops the oldest live entry; false when none is left. O(1) amortised: each queued pair is popped once. Caller holds [lock]. */
+    private fun evictOldest(): Boolean {
+        while (true) {
+            val (key, seq) = order.removeFirstOrNull() ?: return false
+            if (entries[key]?.seq == seq) {
+                entries.remove(key)
+                return true
+            }
         }
     }
 
