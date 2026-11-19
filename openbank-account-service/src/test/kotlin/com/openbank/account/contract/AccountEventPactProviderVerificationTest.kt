@@ -105,6 +105,11 @@ class AccountEventPactProviderVerificationTest {
     companion object {
         // Must match DelegationAccountOwnershipPactConsumerTest's ACCOUNT_ID / OWNER_PARTY_ID.
         private val ACCOUNT_ID = UUID.fromString("11111111-2222-4333-8444-555555555555")
+
+        // Its own party, never OWNER_PARTY_ID: states share one database, and a second account on
+        // that party would break party-service's single-row per-party pact.
+        private val SECOND_ACTIVE_ACCOUNT_ID = UUID.fromString("70000000-0000-0000-0000-000000000070")
+        private val SECOND_ACTIVE_PARTY_ID = UUID.fromString("71000000-0000-0000-0000-000000000071")
         private val OWNER_PARTY_ID = UUID.fromString("66666666-7777-4888-8999-aaaaaaaaaaaa")
 
         // Must match CustomerEdgeDelegatedPaymentPactConsumerTest's fixed UUIDs.
@@ -263,6 +268,34 @@ class AccountEventPactProviderVerificationTest {
     }
 
     /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */
+    /**
+     * analytics-sink's initial-load page (#16825) asks `GET /accounts/active?limit=1` and pins the
+     * `nextCursor` its page loop follows. The provider omits `nextCursor` on the last page, so the
+     * state must guarantee a second ACTIVE account: with only one, the first page IS the last page
+     * and the cursor the consumer exists to pin can never appear.
+     */
+    @State("at least two ACTIVE accounts exist")
+    fun atLeastTwoActiveAccounts() {
+        accountOwnedByKnownParty()
+        runOnVertxContext {
+            if (accountRepository.findById(SECOND_ACTIVE_ACCOUNT_ID) != null) return@runOnVertxContext
+            accountRepository.save(
+                Account(
+                    id = SECOND_ACTIVE_ACCOUNT_ID,
+                    accountNumber = Iban("CZ8108000000192000145402"),
+                    accountType = AccountType.CURRENT,
+                    partyId = SECOND_ACTIVE_PARTY_ID,
+                    productId = UUID.fromString("99999999-8888-4777-8666-555555555555"),
+                    currency = CurrencyCode("CZK"),
+                    status = AccountStatus.ACTIVE,
+                    openedAt = Instant.parse("2026-01-02T00:00:00Z"),
+                    closedAt = null,
+                    version = 0,
+                ),
+            )
+        }
+    }
+
     @State("an account owned by a known party exists")
     fun accountOwnedByKnownParty() = runOnVertxContext {
         if (accountRepository.findById(ACCOUNT_ID) != null) return@runOnVertxContext

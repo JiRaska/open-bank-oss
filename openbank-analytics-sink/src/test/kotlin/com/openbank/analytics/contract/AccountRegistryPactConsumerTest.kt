@@ -37,8 +37,8 @@ import org.junit.jupiter.api.extension.ExtendWith
  * here: the row binds `id`, `accountNumber`, `accountType`, `partyId`, `productId`,
  * `currencyCode` and `openedAt`, and the pagination object carries a followable cursor.
  *
- * Reuses account-service's existing provider state ("an account owned by a known party exists")
- * so AccountPactFolderProviderVerificationTest serves the 200 leg without provider-side changes;
+ * The 200 leg uses the provider state "at least two ACTIVE accounts exist" at `limit=1`, so the
+ * page is not the last and carries a cursor (served by both account-service provider twins);
  * the refusal leg reuses the fleet NEGATIVE_AUTH_STATE served by
  * AccountNegativeAuthProviderVerificationTest (ADR-0279 #3).
  *
@@ -53,11 +53,11 @@ class AccountRegistryPactConsumerTest {
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun activeRegistryPagePact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("an account owned by a known party exists")
+        .given("at least two ACTIVE accounts exist")
         .uponReceiving("GET the first page of ACTIVE accounts for the analytics initial load")
         .path(EXPECTED_ACTIVE_PATH)
         .method("GET")
-        .query("limit=$PAGE_LIMIT")
+        .query("limit=$FIRST_PAGE_LIMIT")
         .willRespondWith()
         .status(200)
         .headers(mapOf("Content-Type" to "application/json"))
@@ -73,7 +73,7 @@ class AccountRegistryPactConsumerTest {
                     a.stringType("openedAt", "2026-01-15T00:00:00Z")
                 }
                 o.`object`("pagination") { p ->
-                    p.booleanType("hasNextPage", false)
+                    p.booleanType("hasNextPage", true)
                     p.stringType("nextCursor", "AAAAAAAAAAAAAAAAAAAAAQ")
                 }
             }.build(),
@@ -120,7 +120,7 @@ class AccountRegistryPactConsumerTest {
 
         val raw = given()
             .baseUri(mockServer.getUrl())
-            .queryParam("limit", PAGE_LIMIT)
+            .queryParam("limit", FIRST_PAGE_LIMIT)
             .get(clientDerivedActivePath())
             .then()
             .statusCode(200)
@@ -147,6 +147,14 @@ class AccountRegistryPactConsumerTest {
 
         /** What the initial load asks for when it passes no limit (the client's default). */
         const val PAGE_LIMIT = 100
+
+        /**
+         * One row per page, against a provider state holding two ACTIVE accounts: the provider
+         * omits `nextCursor` on the last page, so only a page that is NOT the last carries the
+         * cursor this contract pins (#16825 recorded one at limit=100 over a single account,
+         * which the provider can never answer).
+         */
+        const val FIRST_PAGE_LIMIT = 1
 
         /** LITERAL, retyped from account-service's `AccountResource` — never derived from the client. */
         const val EXPECTED_ACTIVE_PATH = "/api/v1/accounts/active"

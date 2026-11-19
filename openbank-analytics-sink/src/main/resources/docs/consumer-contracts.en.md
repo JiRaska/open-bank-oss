@@ -14,6 +14,8 @@ initial-load page of `GET /api/v1/accounts/active`:
   `accountType`, `partyId`, `productId`, `currencyCode`, `openedAt`),
 - the `pagination.nextCursor` the page loop follows — a renamed cursor would
   silently truncate the fleet snapshot after the first page,
+  pinned at `limit=1` against the provider state "at least two ACTIVE accounts
+  exist", because account-service omits `nextCursor` on the last page,
 - the unauthenticated refusal (401, ADR-0279 #3).
 
 The provider replays the contract in account-service's

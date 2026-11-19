@@ -7,7 +7,7 @@
       "description": "GET the first page of ACTIVE accounts for the analytics initial load",
       "providerStates": [
         {
-          "name": "an account owned by a known party exists"
+          "name": "at least two ACTIVE accounts exist"
         }
       ],
       "request": {
@@ -15,7 +15,7 @@
         "path": "/api/v1/accounts/active",
         "query": {
           "limit": [
-            "100"
+            "1"
           ]
         }
       },
@@ -33,7 +33,7 @@
             }
           ],
           "pagination": {
-            "hasNextPage": false,
+            "hasNextPage": true,
             "nextCursor": "AAAAAAAAAAAAAAAAAAAAAQ"
           }
         },
