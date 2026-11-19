@@ -90,8 +90,12 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # merge-train.py of #16700 after merging main at 321e26ad7f (re-derived declaration budget,
     # #16785), reviewed with that PR.
     '7887f1058488cea4f26939b5ab39e7d9d909e538',
-    # merge-train.py of the urgent strict path (ADR-0343 amendment 2026-11-19), reviewed with that PR.
-    '9c725c3d151a2c3e56b6a728b9449e1314b24256',
+    # merge-train.py of #16760 (fix evidence judged per gate, strongest evidence served first).
+    'e8976bdaa91f35f698ceb44a956b03998f1486a1',
+    # merge-train.py of #16760 after merging main at 76402bc5d1, reviewed with that PR.
+    'd4c5ccdabee1e86687f096075120deb0b6df17a3',
+    # merge-train.py of #16760 after merging main at 0118e99327 (#16700: relevance ranking of main-red fixes), reviewed with that PR.
+    '67641bd6ce24a54b632c50d16d229ce1bd579843',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
