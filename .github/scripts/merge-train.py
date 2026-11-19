@@ -1028,6 +1028,58 @@ def selftest_skip_refusal(main_jobs: dict[str, str | None] | None, records: dict
 FIX_JOB_LEVEL = 1        # every job red on main ran green on the head (gate results unreadable on the head)
 FIX_GATE_VERIFIED = 2    # ...and every gate red on main is `ok` in the head's own gate-results artifact
 FIX_STRENGTH_KEY = "fix_strength"   # cache slot: (FIX_STRENGTH_KEY, head sha, context) -> level
+NOT_FIX_HEAD_KEY = ("not_fix_head",)   # cache slot: PR number -> head sha the refusal in NOT_FIX_KEY is about
+FIX_CLAIM_CONTEXT = "merge-train/fix-claim"   # App marker: why this head was refused as a main-red fix (publish_fix_claims)
+JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")   # anything under these JUDGES a head: a fix may not edit them
+SCRIPT_DEP_DEPTH = 3   # script_dependencies: how far `import`/`source` chains are followed
+
+
+def script_dependencies(git, rev: str, scripts: set[str], cache: dict | None = None) -> set[str]:
+    """Every `.github/scripts/...` file the given scripts import (Python `import x` / `from x import`,
+    resolved under .github/scripts/, dotted to nested) or source (shell `source`/`.` of a `lib/*.sh`
+    or an explicit .github/scripts path), as they exist at `rev` — followed SCRIPT_DEP_DEPTH levels.
+    Derived from the scripts' own text, never hand-listed: the helper libraries a red gate's script
+    relies on judge that gate too (gatelib.py, lib/*.sh), so a fix may not edit them either.
+    Spawn-frugal (the self-test budgets subprocess spawns): existence is one `git ls-tree` per rev, memoised
+    in `cache`, never a `cat-file` per candidate; the derived set is memoised per (rev, scripts)."""
+    if not scripts:
+        return set()   # nothing to follow: no spawn at all (the self-test budgets spawns)
+    key = ("script_deps", rev, tuple(sorted(scripts)))
+    if cache is not None and key in cache:
+        return cache[key]
+    tree_key = ("scripts_tree", rev)
+    if cache is not None and tree_key in cache:
+        tree = cache[tree_key]
+    else:
+        r = git("ls-tree", "-r", "--name-only", rev, "--", ".github/scripts", check=False)
+        tree = set(r.stdout.split()) if r.returncode == 0 else set()
+        if cache is not None:
+            cache[tree_key] = tree
+    seen: set[str] = set()
+    frontier = set(scripts)
+    for _ in range(SCRIPT_DEP_DEPTH):
+        nxt: set[str] = set()
+        for path in sorted(frontier - seen):
+            seen.add(path)
+            r = git("show", f"{rev}:{path}", check=False)
+            if r.returncode != 0:
+                continue
+            cands: set[str] = set()
+            for a, b in re.findall(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", r.stdout, re.M):
+                mod = (a or b).split(" as ")[0].strip()
+                if mod and not mod.startswith("."):
+                    cands.add(f".github/scripts/{mod.replace('.', '/')}.py")
+                    cands.add(f".github/scripts/{mod.replace('.', '/')}/__init__.py")
+            cands.update(re.findall(r"\.github/scripts/[A-Za-z0-9_./-]+", r.stdout))
+            cands.update(f".github/scripts/lib/{m}" for m in re.findall(r"(?:source|\.)\s+[^\n]*?lib/([A-Za-z0-9_.-]+\.sh)", r.stdout))
+            nxt.update(c for c in cands if c != path and c in tree)
+        frontier = nxt
+        if not frontier:
+            break
+    out = seen - set(scripts)
+    if cache is not None:
+        cache[key] = out
+    return out
 
 
 RED_GATE_STATES = ("failed", "unfalsified")
@@ -3592,6 +3644,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     stuck: list = []
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
     not_fix: dict[int, str] = {}   # summary["not_fix"]: refusals from EVERY settle view this tick, not just the last
+    not_fix_heads: dict[int, str] = {}   # PR number -> the head the refusal was about (publish_fix_claims)
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
@@ -3907,6 +3960,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             Pusher(git, branch, gh.remote).delete()
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
         not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
+        not_fix_heads.update(main_cache.get(NOT_FIX_HEAD_KEY, {}))
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
@@ -3972,8 +4026,12 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
     not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
+    not_fix_heads.update(main_cache.get(NOT_FIX_HEAD_KEY, {}))
     if not_fix:
         summary["not_fix"] = dict(sorted(not_fix.items()))
+        posted = publish_fix_claims(gh, base, not_fix, not_fix_heads, shadow)
+        if posted:
+            summary["fix_claim_posted"] = posted
     if summary.get("main_health_deferred"):
         return summary
     stack_head = next((v["head_sha"] for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -4455,6 +4513,84 @@ def gate_level_fix_self_test(check) -> None:
     got = fix_contexts(gh, git, mb, {"number": 9, "head_sha": A}, {MR: main_c}, cache)
     check("LOW-4: a non-gate job red on main is judged by job evidence alone, no artifact read, worded as such",
           got == [MR] and gh.reads == [] and rec(A) == (J, "job-level (no gate red on main)"), f"{got} reads={gh.reads} {rec(A)}")
+    # Follow-ups (review LOWs of #16760): derived judge dependencies, non-empty masking, refusal status.
+    tree = {".github/scripts/check-adr-registry.py": "import gatelib\nfrom lib.probe import x\nimport json\n",
+            ".github/scripts/gatelib.py": "import re\n", ".github/scripts/lib/probe.py": "import os\n",
+            ".github/scripts/check-sh.sh": "source \"$DIR/lib/probe.sh\"\nbash .github/scripts/helper.sh\n",
+            ".github/scripts/lib/probe.sh": "", ".github/scripts/helper.sh": ""}
+    def tgit(*a, **_k):
+        if a[0] == "show":
+            p = a[1].split(":", 1)[1]
+            return _R(0, tree[p]) if p in tree else _R(128, "")
+        if a[0] == "ls-tree":
+            return _R(0, "\n".join(sorted(tree)) + "\n")
+        return _R(0, "")
+    deps = script_dependencies(tgit, "h", {".github/scripts/check-adr-registry.py", ".github/scripts/check-sh.sh"})
+    check("judge deps: python imports and shell sources resolve to existing .github/scripts files, stdlib ignored",
+          deps == {".github/scripts/gatelib.py", ".github/scripts/lib/probe.py", ".github/scripts/lib/probe.sh", ".github/scripts/helper.sh"}, str(deps))
+    check("judge deps: an unreadable script yields nothing, and no scripts spawn nothing",
+          script_dependencies(tgit, "h", {".github/scripts/none.py"}) == set()
+          and script_dependencies(lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")), "h", set()) == set())
+    spawns, c2 = [], {}
+    def cgit(*a, **k):
+        spawns.append(a[0]); return tgit(*a, **k)
+    d1 = script_dependencies(cgit, "h", {".github/scripts/check-adr-registry.py"}, c2)
+    d2 = script_dependencies(cgit, "h", {".github/scripts/check-adr-registry.py"}, c2)
+    check("judge deps: spawn-frugal — one ls-tree per rev, no cat-file, and a cached second call spawns nothing",
+          d1 == d2 and spawns.count("ls-tree") == 1 and "cat-file" not in spawns and len(spawns) == 1 + len(d1) + 1, str(spawns))
+
+    class _GhDep(_Gh):
+        pass
+    files.update({"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml"})
+    heads["g" * 40] = heads["i" * 40] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    gates_dep = "gates:\n  - id: adr-registry\n    run: python3 .github/scripts/check-adr-registry.py\n"
+    def dgit(*a, **_k):
+        if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
+            return _R(0, gates_dep)
+        if a[0] == "show" and a[1].split(":", 1)[1] in tree:
+            return _R(0, tree[a[1].split(":", 1)[1]])
+        if a[0] == "ls-tree":
+            return _R(0, "\n".join(sorted(tree)) + "\n")
+        return git(*a, **_k)
+    gh, cache = _GhDep(heads), {}
+    got_g = fix_contexts(gh, dgit, mb, {"number": 7, "head_sha": "g" * 40}, {MR: main_c}, cache)
+    got_i = fix_contexts(gh, dgit, mb, {"number": 8, "head_sha": "i" * 40}, {MR: main_c}, cache)
+    nf = cache.get(NOT_FIX_KEY, {})
+    check("judge deps (live): a head editing gatelib.py, imported by the red gate's script, is refused as a fix",
+          got_g == [] and "changes the judge (.github/scripts/gatelib.py)" in nf.get(7, ""), f"{got_g} {nf.get(7)}")
+    check("judge (live): a head editing .github/actions/** is refused as a fix",
+          got_i == [] and "changes the judge (.github/actions/" in nf.get(8, ""), f"{got_i} {nf.get(8)}")
+    check("refusal visibility: note_not_fix records the head the refusal is about",
+          cache.get(NOT_FIX_HEAD_KEY, {}).get(7) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
+
+    class _GhMask:
+        def __init__(self, jobs):
+            self.jobs = jobs
+        def ctx_jobs(self, sha, _ctx):
+            return self.jobs[sha]
+    check("masking: a head with the same failing job as main may be masked",
+          masked_no_worse(_GhMask({"m": {MR: "failure", "A": "failure"}, "h": {MR: "failure", "A": "failure"}}), MR, "h", "m", {}))
+    check("masking: a head red on the context with NO failing job (inconsistent) never masks",
+          not masked_no_worse(_GhMask({"m": {MR: "failure"}, "h": {MR: "success"}}), MR, "h", "m", {}))
+    check("masking: a head failing an extra job never masks",
+          not masked_no_worse(_GhMask({"m": {MR: "failure"}, "h": {MR: "failure", "B": "failure"}}), MR, "h", "m", {}))
+
+    class _GhPost:
+        def __init__(self, existing=None):
+            self.existing, self.posted = existing or {}, []
+        def app_statuses(self, sha):
+            return self.existing.get(sha, {})
+        def post_status(self, sha, state, desc, context=STATUS_CONTEXT, **_kw):
+            self.posted.append((sha, state, desc, context))
+    g = _GhPost()
+    p = publish_fix_claims(g, "m" * 40, {5: "the head changes the judge (x)"}, {5: "1" * 40}, shadow=False)
+    check("refusal visibility: the reason is posted as the App's merge-train/fix-claim status on the refused head",
+          p == [5] and g.posted == [("1" * 40, "failure", "not a fix over main mmmmmmmmmmmm: the head changes the judge (x)", FIX_CLAIM_CONTEXT)], str(g.posted))
+    g = _GhPost({"1" * 40: {FIX_CLAIM_CONTEXT: ("failure", "not a fix over main mmmmmmmmmmmm: the head changes the judge (x)")}})
+    check("refusal visibility: idempotent — the same reason over the same main posts nothing",
+          publish_fix_claims(g, "m" * 40, {5: "the head changes the judge (x)"}, {5: "1" * 40}, False) == [] and g.posted == [])
+    check("refusal visibility: shadow posts nothing; a refusal with no recorded head posts nothing",
+          publish_fix_claims(_GhPost(), "m" * 40, {5: "x"}, {5: "1" * 40}, True) == [] and publish_fix_claims(_GhPost(), "m" * 40, {5: "x"}, {}, False) == [])
     check("gate scripts: the gates.yaml entry's scripts are found per id",
           parse_gate_scripts(gates_text + "  - id: g2\n    selftest: |\n      python3 .github/scripts/t.py --self-test\n    run: true\n")
           == {"adr-registry": {".github/scripts/check-adr-registry.py"}, "g2": {".github/scripts/t.py"}})
@@ -5154,6 +5290,32 @@ def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
     log(f"#{view.get('number', 0):>6} not a fix: {why}")
     if cache is not None and view.get("number") is not None:
         cache.setdefault(NOT_FIX_KEY, {})[view["number"]] = why
+        if view.get("head_sha"):
+            cache.setdefault(NOT_FIX_HEAD_KEY, {})[view["number"]] = view["head_sha"]
+
+
+def publish_fix_claims(gh, base: str, not_fix: dict[int, str], heads: dict[int, str], shadow: bool) -> list[int]:
+    """Refusal visibility (review LOW of #16760): the reason a fix claim was refused reaches the PR as the
+    App's `merge-train/fix-claim` status on the refused head — until now it lived only in the settle log
+    and summary["not_fix"]. A status, not a comment: one GET (the App's own statuses on the head) and a
+    POST only when the description changed, against a comment's list + create/update, and no thread
+    noise. State `failure` like `merge-train/notice`: never required, so it blocks nothing. The
+    description names the main it was judged against, so a stale one reads as stale. NEVER read back
+    for any decision: fix evidence is re-derived every tick. Shadow posts nothing."""
+    posted: list[int] = []
+    for n, why in sorted(not_fix.items()):
+        head = heads.get(n)
+        if not head or not SHA_RE.fullmatch(head):
+            continue
+        desc = f"not a fix over main {base[:12]}: {why}"[:140]
+        if gh.app_statuses(head).get(FIX_CLAIM_CONTEXT) == ("failure", desc):
+            continue   # already says exactly this: idempotent
+        if shadow:
+            log(f"#{n:>6} fix-claim status (shadow, not posted): {desc}")
+            continue
+        gh.post_status(head, "failure", desc, context=FIX_CLAIM_CONTEXT)
+        posted.append(n)
+    return posted
 
 
 def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str | None] | None:
@@ -5213,8 +5375,9 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
     red_ids = {str(r.get("id")) for recs in (main_records or {}).values() if isinstance(recs, list)
                for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
     scripts = parse_gate_scripts(gates_text) if gates_text is not None else {}
-    judge = {GATES_YAML, ".github/scripts/run-gates.py"} | {s for gid in red_ids for s in scripts.get(gid, ())}
-    touched = sorted(f for f in head_files if f in judge or f.startswith(".github/workflows/"))
+    own = {s for gid in red_ids for s in scripts.get(gid, ())}
+    judge = {GATES_YAML, ".github/scripts/run-gates.py"} | own | script_dependencies(git, head, own, cache)
+    touched = sorted(f for f in head_files if f in judge or f.startswith(JUDGE_PREFIXES))
     if touched:
         return f"the head changes the judge ({touched[0]}): its own green cannot verify a fix"
     # Head artifacts count only for the BASE shard set with a green `gates (<slug>)` job behind each.
@@ -5265,7 +5428,10 @@ def masked_no_worse(gh, ctx: str, head: str, main_commit: str, cache: dict | Non
         return False
     def failing(jobs):
         return {n for n, v in jobs.items() if v is not None and v not in FIX_JOB_OK}
-    return failing(hj) <= failing(mj)
+    fh = failing(hj)
+    # A head red on the context with NO failing job is inconsistent evidence (an empty set is a subset
+    # of anything): it never masks the context as success.
+    return bool(fh) and fh <= failing(mj)
 
 
 def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: dict[str, str | None],
@@ -11195,6 +11361,17 @@ def self_test() -> int:
             s = settle_now()
             check("judge change: a green PR editing .github/workflows/ is refused as a fix, not update-branched",
                   gh.updates == [] and "changes the judge" in (s.get("not_fix") or {}).get(82, ""), f"updates={gh.updates} not_fix={s.get('not_fix')}")
+            h82 = gh.prs[82]["head"]["sha"]
+            claims = [st for st in gh.statuses.get(h82, []) if st[0] == FIX_CLAIM_CONTEXT]
+            check("refusal visibility (e2e): the refused head carries ONE merge-train/fix-claim status naming the reason and main",
+                  len(claims) == 1 and claims[0][1] == "failure" and "changes the judge" in claims[0][2] and "over main" in claims[0][2]
+                  and s.get("fix_claim_posted") == [82], f"{claims} {s.get('fix_claim_posted')}")
+            # The same refusal again (what the next tick would publish, without spending a whole fixture tick
+            # on it: the self-test budgets subprocess spawns): nothing more is posted.
+            again = publish_fix_claims(gh, gh.main_sha(), dict(s.get("not_fix") or {}), {82: h82}, shadow=False)
+            claims = [st for st in gh.statuses.get(h82, []) if st[0] == FIX_CLAIM_CONTEXT]
+            check("refusal visibility (e2e): publishing the same refusal again over the same main posts nothing more",
+                  len(claims) == 1 and again == [], f"{claims} {again}")
             gh.gate_records_by.clear()
             main_red_done()
             # Independent masking: an unclaimed context red on main may be masked on the combined head only
