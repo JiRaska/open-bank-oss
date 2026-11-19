@@ -6,6 +6,7 @@ import com.openbank.libs.security.DpopPolicy
 import com.openbank.libs.security.DpopProofVerifier
 import com.openbank.libs.security.Jose4jDpopProofParser
 import com.openbank.libs.security.ReplayClaim
+import com.openbank.mcp.DockerRequirement
 import com.openbank.mcp.TestJsonWebToken
 import com.openbank.mcp.infrastructure.customer.CustomerChannelAdmission.Outcome
 import io.quarkus.redis.runtime.datasource.ReactiveRedisDataSourceImpl
@@ -20,7 +21,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -56,7 +56,7 @@ class ValkeyCustomerStoresIT {
 
     @BeforeAll
     fun start() {
-        assumeTrue(DockerClientFactory.instance().isDockerAvailable, "Docker is required for this IT")
+        DockerRequirement.require("ValkeyCustomerStoresIT")
         valkey.start()
     }
 

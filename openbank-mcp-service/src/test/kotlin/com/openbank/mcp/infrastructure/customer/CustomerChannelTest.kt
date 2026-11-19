@@ -42,10 +42,12 @@ class CustomerChannelTest {
         timeoutMs: Long? = TIMEOUT_MS,
         hosts: String? = HOSTS,
         secret: String? = SECRET,
+        password: String? = PASSWORD,
     ) = CustomerStoreSettings(
         Optional.ofNullable(store),
         Optional.ofNullable(timeoutMs),
         Optional.ofNullable(hosts),
+        Optional.ofNullable(password),
         Optional.ofNullable(secret),
     )
 
@@ -71,6 +73,20 @@ class CustomerChannelTest {
         assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, hosts = null)) }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("no Redis client is configured")
+    }
+
+    @Test
+    fun `valkey without a Valkey password refuses to start, unless the hosts URI carries one`() {
+        assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, password = null)) }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no Valkey password is configured")
+        assertThatThrownBy { valkey(settings(CustomerChannel.STORE_VALKEY, password = " ")) }
+            .hasMessageContaining("no Valkey password is configured")
+        val inUri = settings(CustomerChannel.STORE_VALKEY, password = null, hosts = "redis://:s3cret@valkey.test:6379")
+        assertThat(valkey(inUri).enabled).isTrue()
+        assertThat(CustomerChannel.hostsCarryPassword(Optional.of("redis://valkey.test:6379"))).isFalse()
+        assertThat(CustomerChannel.hostsCarryPassword(Optional.of("redis://user@valkey.test:6379"))).isFalse()
+        assertThat(CustomerChannel.hostsCarryPassword(Optional.of("redis://:a@h1:6379, redis://h2:6379"))).isFalse()
     }
 
     @Test
@@ -149,6 +165,7 @@ class CustomerChannelTest {
     private companion object {
         const val TIMEOUT_MS = 250L
         const val HOSTS = "redis://valkey.test:6379"
+        const val PASSWORD = "valkey-password-test-only"
         const val SECRET = "0123456789abcdef0123456789abcdef-test-only"
         const val ALLOWLIST = "classpath:test-mcp-client-allowlist.yaml"
     }

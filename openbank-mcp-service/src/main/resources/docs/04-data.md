@@ -66,7 +66,7 @@ The MCP tool catalog and audit decision pass `ConsentContext.serviceAccount` to 
 
 ## Customer-channel shared state (Valkey)
 
-With the customer MCP channel on and `mcp.customer.shared-store=valkey` (required in a production launch; the service refuses to boot otherwise, and also without `quarkus.redis.hosts` or `mcp.customer.key-hmac-secret`), two kinds of short-lived key live in that Valkey. Neither is a system of record; losing them only reopens the protections they carry, which is why the channel fails closed (503) whenever the store cannot answer.
+With the customer MCP channel on and `mcp.customer.shared-store=valkey` (required in a production launch; the service refuses to boot otherwise, and also without `quarkus.redis.hosts`, a Valkey password or `mcp.customer.key-hmac-secret`), two kinds of short-lived key live in that Valkey. Neither is a system of record; losing them only reopens the protections they carry, which is why the channel fails closed (503) whenever the store cannot answer.
 
 | Key | Value | TTL | Purpose |
 |---|---|---|---|

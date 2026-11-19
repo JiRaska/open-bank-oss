@@ -85,3 +85,24 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 `authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
+
+## Customer-channel Valkey (`mcp-valkey`)
+
+The customer MCP channel's shared DPoP replay store and D5.3 budgets live in `mcp-valkey`
+(namespace `platform`, `openbank-infra/gitops/components/mcp/valkey.yaml`). It is deliberately
+ephemeral, so:
+
+- **A restart, reschedule or OOM-kill empties it.** For up to 365 s afterwards a proof that was
+  already used can be accepted once more, and every customer budget restarts from zero. Do not roll
+  it during customer traffic; if it restarts unexpectedly, treat the next 365 s as a reduced-assurance
+  window and check `mcp-valkey` for OOM (`kubectl -n platform describe pod -l app.kubernetes.io/name=mcp-valkey`).
+- **Full store:** `--maxmemory 128mb` with `noeviction` makes writes fail rather than evict; the channel
+  then answers 503 `replay_store_unavailable`. Never change the policy to an evicting one — eviction
+  silently reopens replay.
+- **Provisioning:** write `valkey_password` and `key_hmac_secret` (each >= 32 random bytes) to KV
+  `mcp-service/customer-store`; the `mcp-customer-store` ExternalSecret syncs them. Until then the
+  Valkey pod does not start and mcp-service runs with the customer channel off. Enabling the channel
+  without them refuses to boot.
+- **Rotation:** rotate both with the channel drained; a new HMAC secret orphans live entries for one
+  proof window.
+

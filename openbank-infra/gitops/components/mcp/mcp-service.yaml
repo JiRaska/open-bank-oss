@@ -82,10 +82,25 @@ spec:
             - name: MCP_OBO_ENABLED
               value: "true"
             # ADR-0383 P4: the customer channel's shared DPoP replay store and budgets
-            # (mcp-valkey.yaml here). Without hosts configured Quarkus deactivates the
-            # redis extension's beans and the first customer request 500s (#2872).
+            # (valkey.yaml here). With the channel on and mcp.customer.shared-store=valkey,
+            # CustomerChannel refuses to BOOT unless the hosts, the password and the key HMAC
+            # secret are all set — a misconfigured pod never starts serving. The two secret refs
+            # are optional so this pod runs (channel off) before customer-store is provisioned
+            # (customer-store-externalsecret.yaml).
             - name: QUARKUS_REDIS_HOSTS
               value: redis://mcp-valkey.platform.svc:6379
+            - name: QUARKUS_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-customer-store
+                  key: VALKEY_PASSWORD
+                  optional: true
+            - name: MCP_CUSTOMER_KEY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-customer-store
+                  key: MCP_CUSTOMER_KEY_HMAC_SECRET
+                  optional: true
             # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
             # data.openbank.rest.allow (mcp-opa-bundle ConfigMap). A PDP connectivity error
             # still fails CLOSED in McpEndpoint (money-adjacent surface — never fail-open).

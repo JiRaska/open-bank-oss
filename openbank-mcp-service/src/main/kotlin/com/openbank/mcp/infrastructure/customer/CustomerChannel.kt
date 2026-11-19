@@ -19,6 +19,7 @@ import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -120,6 +121,11 @@ class CustomerChannel @Inject constructor(
             check(settings.redisHosts.filter { it.isNotBlank() }.isPresent && redis.isResolvable) {
                 "mcp.customer.shared-store=valkey but no Redis client is configured (quarkus.redis.hosts)"
             }
+            // The replay store is a security control: an unauthenticated Valkey lets anything that
+            // reaches it delete claims (reopening replay) or reset budgets.
+            check(settings.redisPassword.filter { it.isNotBlank() }.isPresent || hostsCarryPassword(settings.redisHosts)) {
+                "mcp.customer.shared-store=valkey but no Valkey password is configured (quarkus.redis.password)"
+            }
             val secret = settings.keyHmacSecret.filter { it.isNotBlank() }.orElseThrow {
                 IllegalStateException("mcp.customer.shared-store=valkey but mcp.customer.key-hmac-secret is not set")
             }
@@ -137,6 +143,16 @@ class CustomerChannel @Inject constructor(
                 ValkeyDpopReplayStore(ds, timeout, hasher),
                 ValkeyCustomerThrottles(ds, timeout, limits, Clock.systemUTC(), hasher),
             )
+        }
+
+        /** True when every configured host URI carries a non-empty password in its user-info. */
+        fun hostsCarryPassword(hosts: Optional<String>): Boolean {
+            val list = hosts.map { h -> h.split(',').map(String::trim).filter(String::isNotEmpty) }.orElse(emptyList())
+            return list.isNotEmpty() && list.all { host ->
+                runCatching { URI(host).rawUserInfo }.getOrNull()
+                    ?.substringAfter(':', "")
+                    ?.isNotEmpty() == true
+            }
         }
 
         @Suppress("TooGenericExceptionCaught") // any parser failure must become a boot refusal, see below
@@ -200,5 +216,6 @@ class CustomerStoreSettings @Inject constructor(
     @ConfigProperty(name = "mcp.customer.shared-store") val store: Optional<String>,
     @ConfigProperty(name = "mcp.customer.shared-store-timeout-ms") val timeoutMs: Optional<Long>,
     @ConfigProperty(name = "quarkus.redis.hosts") val redisHosts: Optional<String>,
+    @ConfigProperty(name = "quarkus.redis.password") val redisPassword: Optional<String>,
     @ConfigProperty(name = "mcp.customer.key-hmac-secret") val keyHmacSecret: Optional<String>,
 )

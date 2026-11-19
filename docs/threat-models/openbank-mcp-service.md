@@ -463,9 +463,22 @@ a stub (T-T2/T-D2).
     deployment secret in every key name (required with `valkey`, boot refused otherwise).
   - *Operational requirement.* The replay Valkey MUST run `maxmemory-policy noeviction`: an evicting
     policy silently drops live `jti` entries and reopens their replay window with no error anywhere.
-  - **Residual:** no Valkey is wired for mcp-service in GitOps yet (declared as a prerequisite, not
-    provisioned), so the channel cannot be enabled in a cluster until it is — the boot gate makes
-    that a refusal rather than a silent per-pod store. Replication is asynchronous: if the primary
+  - *Store hardening (#16791, GitOps).* `mcp-valkey` (namespace `platform`) runs with `--requirepass`
+    from the `mcp-customer-store` ExternalSecret (required ref: without it the pod does not start, so
+    it never runs unauthenticated), `--maxmemory 128mb` under a 192Mi limit and an explicit
+    `--maxmemory-policy noeviction`; its ingress admits only `app.kubernetes.io/name: mcp-service`
+    (`open-bank.tech/same-namespace-ingress-from`, derived by `gen-network-policies.py`), not every
+    co-tenant of the shared namespace. mcp-service refuses to boot with `valkey` and no password.
+  - **Residual — store restart or OOM-kill.** The store is ephemeral (no RDB/AOF). A restart, a
+    reschedule or an OOM-kill empties it: every proof still inside its window (up to 365 s) can be
+    replayed once more, and every D5.3 budget restarts from zero. `noeviction` and the maxmemory
+    margin make OOM unlikely but not impossible. Prod needs an operator-managed HA store with
+    persistence; until then this is accepted for the sandbox and called out in 05-operations.
+  - **Residual:** the requirepass value is visible in the Valkey process arguments inside its own pod
+    (kubelet `$(VAR)` expansion); anyone who can exec into that pod can already read its memory.
+  - **Residual:** the channel cannot be enabled in a cluster until `mcp-service/customer-store` is
+    written to KV (password + HMAC secret) — the boot gate makes that a refusal rather than a
+    silent per-pod or unauthenticated store. Replication is asynchronous: if the primary
     acknowledges a `SET NX` and fails over before the replica has it, the promoted replica has no
     entry and that one proof can be accepted once more (a single replayed proof, still within its
     `iat` window and still bound to the token's key). `PX` is relative, so clock OFFSET between pods

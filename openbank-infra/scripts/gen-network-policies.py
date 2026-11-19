@@ -509,12 +509,55 @@ spec:
         policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
         case("non-opted workload retains both ports", allowed("payments"), [8117, 8443])
 
+    # A store annotated with open-bank.tech/same-namespace-ingress-from admits ONLY that workload
+    # from its own namespace; without the annotation every co-tenant pod is admitted (#16791).
+    with tempfile.TemporaryDirectory() as temp_dir:
+        component = pathlib.Path(temp_dir) / "fixture"
+        component.mkdir()
+        source = component / "workloads.yaml"
+        source.write_text("""\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-store
+  namespace: fixture
+  annotations: {open-bank.tech/same-namespace-ingress-from: fixture-owner}
+spec:
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: fixture-store}
+    spec:
+      containers:
+        - name: store
+          ports: [{name: redis, containerPort: 6379}]
+""", encoding="utf-8")
+
+        def same_ns_from():
+            previous_components, previous_argv = COMPONENTS, sys.argv
+            try:
+                globals()["COMPONENTS"] = temp_dir
+                sys.argv = [sys.argv[0]]
+                main()
+            finally:
+                globals()["COMPONENTS"] = previous_components
+                sys.argv = previous_argv
+            docs = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+            pol = next(d for d in docs if d["metadata"]["name"] == "fixture-store-ingress-allow-list")
+            return [peer.get("podSelector") for rule in pol["spec"]["ingress"] for peer in rule["from"]
+                    if "podSelector" in peer and "namespaceSelector" not in peer]
+
+        case("annotated store admits only its named same-namespace client", same_ns_from(),
+             [{"matchLabels": {"app.kubernetes.io/name": "fixture-owner"}}])
+        source.write_text(source.read_text(encoding="utf-8").replace(
+            "  annotations: {open-bank.tech/same-namespace-ingress-from: fixture-owner}\n", ""), encoding="utf-8")
+        case("unannotated store keeps the open same-namespace rule", same_ns_from(), [{}])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction, atomic publication and port scoping (27 cases)")
+    print("self-test ok: dependency extraction, atomic publication, port scoping and named same-namespace clients (29 cases)")
     return 0
 
 def main():
@@ -595,6 +638,11 @@ def main():
                 # workloads may have callers hidden in Secrets or runtime discovery.
                 "port_scoped": (meta.get("annotations", {}) or {}).get(
                     "open-bank.tech/port-scoped-ingress") == "true",
+                # A store that exactly ONE workload may talk to (e.g. mcp-valkey, the customer
+                # channel's replay store): its same-namespace rule names that workload instead of
+                # every co-tenant pod in a shared namespace (#16791).
+                "same_ns_from": ((meta.get("annotations", {}) or {}).get(
+                    "open-bank.tech/same-namespace-ingress-from") or "").strip() or None,
             }
             ns_dir.setdefault(ns, os.path.dirname(path))
             blob = "\n".join(blob_parts)
@@ -821,7 +869,11 @@ def main():
             for p in gateway_backends.get((ns, wl_name), set())
         }
 
-        rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
+        if wl.get("same_ns_from"):
+            rules = [{"from": [{"podSelector": {"matchLabels": {
+                "app.kubernetes.io/name": wl["same_ns_from"]}}}]}]  # one named same-namespace client
+        else:
+            rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:
             port_callers = {port: {ADMIN_UI_NS} for port in http_ports}  # BFF dynamic discovery
             for caller in callers:

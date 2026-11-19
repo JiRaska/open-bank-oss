@@ -4,11 +4,9 @@ package com.openbank.mcp
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
@@ -37,6 +35,7 @@ class CustomerChannelBootGuardIT {
         .withPassword("boot-guard-test-only")
     private val valkey: GenericContainer<*> = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine"))
         .withExposedPorts(6379)
+        .withCommand("valkey-server", "--requirepass", VALKEY_PASSWORD)
     private val runner: String = System.getProperty("openbank.test.mcp.runner")
         ?: error("openbank.test.mcp.runner is not set — run the customerBootGuardIT task")
 
@@ -52,24 +51,31 @@ class CustomerChannelBootGuardIT {
 
     @BeforeAll
     fun start() {
-        assumeTrue(DockerClientFactory.instance().isDockerAvailable, "Docker is required for this IT")
+        DockerRequirement.require("CustomerChannelBootGuardIT")
         postgres.start()
         valkey.start()
     }
 
     @AfterAll
     fun stop() {
+        allowlist.delete()
         if (postgres.isRunning) postgres.stop()
         if (valkey.isRunning) valkey.stop()
     }
 
     private class Run(val exited: Boolean, val exitCode: Int?, val output: String)
 
-    /** Launches the fast-jar; returns once it exits, or once [readyMarker] appears (then kills it). */
+    /**
+     * Launches the fast-jar; returns once it exits, or once [readyMarker] appears. The child never
+     * outlives the call (destroyForcibly in `finally`), its log is deleted, and the environment is
+     * cleared of every inherited variable this test controls, so a developer's or CI runner's
+     * `MCP_*` / `QUARKUS_REDIS_*` / `QUARKUS_DATASOURCE_*` cannot decide the outcome.
+     */
     private fun launch(extraEnv: Map<String, String>, readyMarker: String? = null): Run {
         val log = Files.createTempFile("mcp-boot-guard", ".log").toFile()
         val pb = ProcessBuilder(javaBin(), "-jar", runner).redirectErrorStream(true).redirectOutput(log)
         pb.environment().apply {
+            keys.removeIf { k -> INHERITED_PREFIXES.any { k.startsWith(it) } || k == "POSTGRES_PASSWORD" }
             put("QUARKUS_DATASOURCE_JDBC_URL", postgres.jdbcUrl)
             put(
                 "QUARKUS_DATASOURCE_REACTIVE_URL",
@@ -86,17 +92,22 @@ class CustomerChannelBootGuardIT {
             putAll(extraEnv)
         }
         val process = pb.start()
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(BOOT_SECONDS)
-        while (System.nanoTime() < deadline) {
-            if (process.waitFor(POLL_MS, TimeUnit.MILLISECONDS)) return Run(true, process.exitValue(), log.readText())
-            if (readyMarker != null && log.readText().contains(readyMarker)) {
-                process.destroy()
-                process.waitFor(BOOT_SECONDS, TimeUnit.SECONDS)
-                return Run(false, null, log.readText())
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(BOOT_SECONDS)
+            while (System.nanoTime() < deadline) {
+                if (process.waitFor(POLL_MS, TimeUnit.MILLISECONDS)) {
+                    return Run(true, process.exitValue(), log.readText())
+                }
+                if (readyMarker != null && log.readText().contains(readyMarker)) return Run(false, null, log.readText())
             }
+            return Run(false, null, log.readText())
+        } finally {
+            if (process.isAlive) {
+                process.destroyForcibly()
+                process.waitFor(BOOT_SECONDS, TimeUnit.SECONDS)
+            }
+            log.delete()
         }
-        process.destroyForcibly()
-        return Run(false, null, log.readText())
     }
 
     private fun javaBin() = File(System.getProperty("java.home"), "bin/java").path
@@ -126,8 +137,28 @@ class CustomerChannelBootGuardIT {
     @Test
     fun `valkey without the key HMAC secret refuses to boot`() {
         assertRefused(
-            launch(mapOf("MCP_CUSTOMER_SHARED_STORE" to "valkey", "QUARKUS_REDIS_HOSTS" to valkeyUrl())),
+            launch(
+                mapOf(
+                    "MCP_CUSTOMER_SHARED_STORE" to "valkey",
+                    "QUARKUS_REDIS_HOSTS" to valkeyUrl(),
+                    "QUARKUS_REDIS_PASSWORD" to VALKEY_PASSWORD,
+                ),
+            ),
             "key-hmac-secret is not set",
+        )
+    }
+
+    @Test
+    fun `valkey without a password refuses to boot`() {
+        assertRefused(
+            launch(
+                mapOf(
+                    "MCP_CUSTOMER_SHARED_STORE" to "valkey",
+                    "QUARKUS_REDIS_HOSTS" to valkeyUrl(),
+                    "MCP_CUSTOMER_KEY_HMAC_SECRET" to SECRET,
+                ),
+            ),
+            "no Valkey password is configured",
         )
     }
 
@@ -137,6 +168,7 @@ class CustomerChannelBootGuardIT {
             mapOf(
                 "MCP_CUSTOMER_SHARED_STORE" to "valkey",
                 "QUARKUS_REDIS_HOSTS" to valkeyUrl(),
+                "QUARKUS_REDIS_PASSWORD" to VALKEY_PASSWORD,
                 "MCP_CUSTOMER_KEY_HMAC_SECRET" to SECRET,
             ),
             readyMarker = "started in",
@@ -149,6 +181,8 @@ class CustomerChannelBootGuardIT {
 
     private companion object {
         const val SECRET = "0123456789abcdef0123456789abcdef-test-only"
+        const val VALKEY_PASSWORD = "boot-guard-valkey-test-only"
+        val INHERITED_PREFIXES = listOf("MCP_", "QUARKUS_REDIS_", "QUARKUS_DATASOURCE_")
         const val BOOT_SECONDS = 90L
         const val POLL_MS = 250L
         const val TAIL = 4000

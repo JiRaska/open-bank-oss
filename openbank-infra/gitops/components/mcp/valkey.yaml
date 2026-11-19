@@ -1,14 +1,25 @@
 # Cross-replica DPoP replay store and customer budgets for mcp-service (ADR-0383 P4, ADR-0385).
 # ValkeyDpopReplayStore backs the customer channel's single-use jti claim so a replayed DPoP proof is
-# rejected on every replica, not just the one that first saw it — same shape as the fleet's
-# other TTL-bounded shared caches (RedisIdempotencyStore/RedisApprovalStore in
-# openbank-libs-runtime). Ephemeral on purpose — persistence is disabled (--save ""
-# --appendonly no); a restart just clears in-flight nonce claims, which only re-opens the
-# same replay window a fresh pod already has, not a new one.. Prod should use an
-# operator-managed HA Redis. Named mcp-valkey (not the bare per-ns `redis`) because
-# `platform` is a shared namespace (copilot-service already owns `copilot-redis` there).
-# Pinned to the valkey uid 999/gid 1000 for PSS restricted; /data is a writable emptyDir so
-# the root fs can stay read-only.
+# rejected on every replica, not just the one that first saw it.
+#
+# Ephemeral on purpose (--save "" --appendonly no), and that has a cost worth stating plainly: a
+# Valkey restart or OOM-kill EMPTIES the keyspace, which REOPENS replay for every proof still inside
+# its window (up to 365 s) and RESETS every D5.3 budget. That is a real, bounded weakening, recorded
+# as a residual in the mcp-service threat model and in 05-operations; prod should use an
+# operator-managed HA store with persistence.
+#
+# Memory: --maxmemory sits well below the container limit (128mb vs 192Mi) so Valkey refuses writes
+# before the kernel OOM-kills it, and --maxmemory-policy noeviction is explicit: an evicting policy
+# would silently delete live replay entries. A full store answers errors, which mcp-service turns
+# into 503 (fail closed).
+#
+# Auth: requirepass from the mcp-customer-store Secret (ExternalSecret beside this file, KV
+# mcp-service/customer-store). The Secret ref is REQUIRED here, so without the provisioned value this
+# pod does not start — it never runs unauthenticated. Named mcp-valkey (not the bare per-ns `redis`)
+# because `platform` is a shared namespace; ingress admits only mcp-service pods
+# (open-bank.tech/same-namespace-ingress-from, read by gen-network-policies.py).
+# Pinned to the valkey uid 999/gid 1000 for PSS restricted; /data is a writable emptyDir so the root
+# fs can stay read-only.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,6 +28,8 @@ metadata:
   labels:
     app.kubernetes.io/name: mcp-valkey
     app.kubernetes.io/part-of: mcp-service
+  annotations:
+    open-bank.tech/same-namespace-ingress-from: mcp-service
 spec:
   replicas: 1
   # Terminate-first, deliberately (#3545). This is a single-writer cache on an emptyDir
@@ -46,7 +59,24 @@ spec:
       containers:
         - name: redis
           image: docker.io/valkey/valkey:9.1.3-alpine
-          args: ["--save", "", "--appendonly", "no"]
+          # $(VALKEY_PASSWORD) is expanded by the kubelet from the env below; no shell, no value in git.
+          args:
+            - "--save"
+            - ""
+            - "--appendonly"
+            - "no"
+            - "--maxmemory"
+            - "128mb"
+            - "--maxmemory-policy"
+            - "noeviction"
+            - "--requirepass"
+            - "$(VALKEY_PASSWORD)"
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-customer-store
+                  key: VALKEY_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
