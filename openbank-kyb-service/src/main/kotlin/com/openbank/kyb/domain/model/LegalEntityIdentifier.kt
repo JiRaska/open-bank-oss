@@ -120,7 +120,7 @@ object IdentifierChecksums {
     fun valid(scheme: IdentifierScheme, value: String): Boolean = when (scheme) {
         IdentifierScheme.CZ_ICO, IdentifierScheme.SK_ICO -> ico(value)
         IdentifierScheme.PL_NIP -> nip(value)
-        IdentifierScheme.FR_SIREN -> luhn(value)
+        IdentifierScheme.FR_SIREN -> siren(value)
         IdentifierScheme.LEI -> mod97(value)
         IdentifierScheme.EU_VAT -> EuVatChecksums.valid(value)
         else -> true
@@ -141,6 +141,15 @@ object IdentifierChecksums {
         val check = sum % MOD_11
         return check != MOD_10 && check == value.last() - '0'
     }
+
+    /**
+     * French SIREN: 9 digits, Luhn-valid, and not `000000000`. The all-zero number passes Luhn but
+     * is never assigned; that is LOCAL POLICY of this module, not a published rule (python-stdnum
+     * `fr.siren` accepts it, and no INSEE document states the exclusion that this module found).
+     * Monaco-registered entities inside a French VAT number are a different path
+     * ([EuVatChecksums]) and are unaffected.
+     */
+    fun siren(value: String): Boolean = value != SIREN_UNASSIGNED && luhn(value)
 
     /** Luhn (ISO/IEC 7812-1), used by the French SIREN. */
     fun luhn(value: String): Boolean {
@@ -177,6 +186,7 @@ object IdentifierChecksums {
     private const val ICO_LENGTH = 8
     private const val NIP_LENGTH = 10
     private const val LEI_LENGTH = 20
+    private const val SIREN_UNASSIGNED = "000000000"
     private const val MOD_10 = 10
     private const val MOD_11 = 11
     private const val MOD_97 = 97
@@ -189,26 +199,51 @@ object IdentifierChecksums {
 }
 
 /**
- * National check digits inside an EU VAT number (`CC` + national part). Countries listed in
- * [valid] are checked; any other prefix passes on format alone, because an unimplemented
- * algorithm must not reject a real number. The algorithms follow each tax authority's published
- * rule (the same ones python-stdnum implements).
+ * National check digits inside an EU VAT number (`CC` + national part). EVERY member-state prefix
+ * the VIES service knows is dispatched to its own rule (see [EuVatNationalRules] for the states added
+ * in #16774); a prefix that is not listed is REJECTED, and a state that is deliberately only
+ * shape-checked must be named in [SHAPE_ONLY_STATES] with its reason, so an unimplemented algorithm
+ * can no longer pass silently. Prefixes: the 27 member states (Greece is `EL`) plus `XI`
+ * (Northern Ireland, goods). Source for the prefix list: https://ec.europa.eu/taxation_customs/vies/.
  */
 object EuVatChecksums {
+
+    /** States accepted on shape alone, each with the cited reason. Empty: every VIES prefix has a rule. */
+    val SHAPE_ONLY_STATES: Map<String, String> = emptyMap()
+
+    private val RULES: Map<String, (String) -> Boolean> = mapOf(
+        "AT" to this::at, "BE" to EuVatNationalRules::be, "BG" to EuVatCentralSouthEast::bg,
+        "CY" to EuVatMediterranean::cy, "CZ" to this::czDic, "DE" to this::de, "DK" to EuVatNordicBaltic::dk,
+        "EE" to EuVatNordicBaltic::ee, "EL" to EuVatMediterranean::el, "ES" to EuVatNationalRules::es,
+        "FI" to EuVatNordicBaltic::fi, "FR" to this::fr, "HR" to EuVatCentralSouthEast::hr,
+        "HU" to EuVatCentralSouthEast::hu, "IE" to EuVatNationalRules::ie, "IT" to EuVatNationalRules::it,
+        "LT" to EuVatNordicBaltic::lt, "LU" to EuVatNationalRules::lu, "LV" to EuVatNordicBaltic::lv,
+        "MT" to EuVatMediterranean::mt, "NL" to EuVatNationalRules::nl, "PL" to IdentifierChecksums::nip,
+        "PT" to EuVatNationalRules::pt, "RO" to EuVatCentralSouthEast::ro, "SE" to EuVatNordicBaltic::se,
+        "SI" to EuVatCentralSouthEast::si, "SK" to this::sk, "XI" to EuVatMediterranean::xi,
+    )
 
     fun valid(vat: String): Boolean {
         val country = vat.take(2)
         val national = vat.drop(2)
-        return when (country) {
-            "CZ" -> czDic(national)
-            "SK" -> national.length == SK_LENGTH && national.all(Char::isDigit) && national.toLong() % MOD_11 == 0L
-            "PL" -> IdentifierChecksums.nip(national)
-            "DE" -> de(national)
-            "FR" -> fr(national)
-            "AT" -> at(national)
-            else -> true
-        }
+        if (country in SHAPE_ONLY_STATES) return true
+        return RULES[country]?.invoke(national) ?: false
     }
+
+    /**
+     * SK IČ DPH: 10 digits, first digit not 0, third digit one of 2, 3, 4, 7, 8, 9, number divisible
+     * by 11. The Slovak tax authority's published material gives the 10-digit shape only
+     * (https://www.financnasprava.sk/_img/pfsedit/Dokumenty_PFS/Infoservis/Aktualne_informacie/dph/2016/2016.03.21_IC_DPH_EU.pdf);
+     * the third-digit and mod 11 arithmetic is per python-stdnum `sk.dph`
+     * (https://arthurdejong.org/python-stdnum/doc/2.2/stdnum.sk.dph.html). stdnum additionally lets
+     * a Slovak rodné číslo through before applying the rule and its own source calls that unclear;
+     * this validator applies the rule to every number, which is the stricter reading.
+     */
+    fun sk(n: String): Boolean = n.length == SK_LENGTH &&
+        n.all(Char::isDigit) &&
+        n[0] != '0' &&
+        n[2] in SK_THIRD_DIGITS &&
+        n.toLong() % MOD_11 == 0L
 
     /**
      * Czech DIČ (zákon 280/2009 Sb. § 130): a legal entity uses its IČO (8 digits, never starting
@@ -233,7 +268,7 @@ object EuVatChecksums {
     }
 
     /** DE USt-IdNr: 9 digits, ISO 7064 MOD 11,10 over the first eight. */
-    private fun de(n: String): Boolean {
+    internal fun de(n: String): Boolean {
         if (n.length != DE_LENGTH || !n.all(Char::isDigit) || n[0] == '0') return false
         var product = MOD_10
         for (i in 0 until DE_LENGTH - 1) {
@@ -249,7 +284,7 @@ object EuVatChecksums {
      * (SIREN prefix `000`), which carry no Luhn digit. An alphanumeric key (the newer allocation
      * scheme) has a different, unpublished derivation, so it passes on format alone.
      */
-    private fun fr(n: String): Boolean {
+    internal fun fr(n: String): Boolean {
         if (n.length != FR_LENGTH) return false
         val key = n.take(2)
         val siren = n.drop(2)
@@ -260,7 +295,7 @@ object EuVatChecksums {
     }
 
     /** AT UID: `U` + 8 digits; odd positions doubled with digit sum, check = (10 − (sum + 4) mod 10) mod 10. */
-    private fun at(n: String): Boolean {
+    internal fun at(n: String): Boolean {
         if (n.length != AT_LENGTH || n[0] != 'U' || !n.drop(1).all(Char::isDigit)) return false
         val d = n.drop(1).map { it - '0' }
         val sum = (0 until AT_LENGTH - 2).sumOf { i ->
@@ -273,6 +308,7 @@ object EuVatChecksums {
     private const val RC_LENGTH_SHORT = 9
     private const val RC_LENGTH_LONG = 10
     private const val SK_LENGTH = 10
+    private const val SK_THIRD_DIGITS = "234789"
     private const val DE_LENGTH = 9
     private const val FR_LENGTH = 11
     private const val AT_LENGTH = 9

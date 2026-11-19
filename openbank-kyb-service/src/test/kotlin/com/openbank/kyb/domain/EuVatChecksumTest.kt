@@ -26,7 +26,7 @@ class EuVatChecksumTest {
             "CZ5301011232", // natural person: CZ + 10-digit rodné číslo
             "CZ000101001", // natural person: CZ + 9-digit pre-1954 rodné číslo
             "CZ699127220", // "special" 9-digit DIČ (6xxxxxxxx) with its own check digit
-            "SK2000000002", // SK: 10 digits divisible by 11
+            "SK1983589520", // SK: 10 digits, first not 0, third in 2,3,4,7,8,9, divisible by 11
             "PL1234561001", // PL: NIP
             "DE123456788", // DE: ISO 7064 MOD 11,10
             "FR11123456782", // FR: numeric key = (12 + 3 * (SIREN mod 97)) mod 97
@@ -48,7 +48,10 @@ class EuVatChecksumTest {
             "CZ1234567", // 7 digits: no CZ DIČ has that length
             "CZ91234565", // 8-digit DIČ never starts with 9 (IČO checksum itself holds)
             "CZ699127221", // special DIČ check digit wrong (month 91: not a rodné číslo either)
-            "SK2000000003",
+            "SK1983589521", // SK: not divisible by 11
+            "SK9309064974", // SK: divisible by 11 but third digit is 0
+            "SK0895446915", // SK: divisible by 11, third digit ok, first digit 0
+            "SK2000000002", // SK: divisible by 11, third digit 0 (accepted before #16774)
             "PL1234561002",
             "DE123456789",
             "FR12123456782", // numeric key wrong
@@ -70,8 +73,8 @@ class EuVatChecksumTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["NL123456789B01", "IE1234567T", "GB123456789"])
-    fun `countries without an implemented checksum still pass on format`(raw: String) {
-        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw).isSuccess).describedAs(raw).isTrue()
+    @ValueSource(strings = ["GB123456789", "GR123456783", "XX12345678", "CH12345678"])
+    fun `a prefix with no rule is rejected, never passed on format`(raw: String) {
+        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw).isFailure).describedAs(raw).isTrue()
     }
 }
