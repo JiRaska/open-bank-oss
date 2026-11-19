@@ -237,6 +237,7 @@ data class McpProposalReceipt(
 /** The customer's view: the exact canonical instruction and the hash the device will sign. */
 data class PaymentProposalView(
     val id: UUID,
+    val partyId: UUID,
     val status: String,
     val mcpClientId: String,
     val operationType: PaymentProposalOperationType,
@@ -256,6 +257,7 @@ data class PaymentProposalView(
     companion object {
         fun of(p: PaymentProposal, now: OffsetDateTime) = PaymentProposalView(
             id = p.id,
+            partyId = p.partyId,
             status = p.effectiveStatus(now).name,
             mcpClientId = p.mcpClientId,
             operationType = p.payload.operationType,

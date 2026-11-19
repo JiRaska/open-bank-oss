@@ -12,6 +12,7 @@ import com.openbank.delegation.application.port.out.ProposalLimits
 import com.openbank.delegation.application.port.out.openDuplicateOf
 import com.openbank.delegation.domain.event.PaymentProposalLifecycleEvent
 import com.openbank.delegation.domain.model.PaymentProposal
+import com.openbank.delegation.domain.model.PaymentProposalOperationType
 import com.openbank.delegation.domain.model.PaymentProposalStatus
 import com.openbank.delegation.infrastructure.persistence.entity.PaymentProposalEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -127,20 +128,57 @@ class PaymentProposalRepositoryImpl(
             }
         }.awaitSuspending()
 
+    /**
+     * Set-based on purpose: a grant revocation must NEVER be blocked by a proposal row. No row is
+     * loaded through the domain (a legacy or malformed row would fail validation there and abort
+     * the revoke); one UPDATE moves every PENDING row of the grant to REJECTED and RETURNING
+     * supplies just the columns the lifecycle event carries.
+     */
     override fun rejectPendingForGrant(grantId: UUID, now: OffsetDateTime): Uni<Void> =
         Panache.getSession().flatMap { session ->
-            session.createNativeQuery(LOCK_PENDING_BY_GRANT_SQL, PaymentProposalEntity::class.java)
+            session.createNativeQuery<Array<Any?>>(REJECT_BY_GRANT_SQL)
                 .setParameter("grant", grantId)
+                .setParameter("now", now)
                 .resultList
                 .flatMap { rows ->
                     var chain: Uni<Void> = Uni.createFrom().voidItem()
-                    rows.map { it.toDomain() }.forEach { p ->
-                        val next = if (p.isOpen(now)) p.reject(now) else p.expire(now)
-                        chain = chain.flatMap { write(session, p, next, now) }
+                    rows.forEach { row ->
+                        chain = chain.flatMap { outboxRepository.persistInTransaction(rejectedOutbox(row, now)) }
                     }
                     chain
                 }
         }
+
+    private fun rejectedOutbox(row: Array<Any?>, now: OffsetDateTime): OutboxMessage {
+        val event = PaymentProposalLifecycleEvent(
+            aggregateId = row[0] as UUID,
+            partyId = row[1] as UUID,
+            grantId = row[2] as UUID,
+            mcpClientId = row[3] as String,
+            status = PaymentProposalStatus.REJECTED,
+            revision = (row[4] as Number).toLong(),
+            operationType = PaymentProposalOperationType.valueOf(row[5] as String),
+            amount = (row[6] as java.math.BigDecimal).toPlainString(),
+            currency = row[7].toString(),
+            payloadSha256 = row[8].toString(),
+            expiresAt = toOffset(row[9]),
+            occurredAt = now.toInstant(),
+        )
+        return OutboxMessage(
+            aggregateId = event.aggregateId,
+            eventType = event.eventType,
+            payload = objectMapper.writeValueAsString(event),
+            createdAt = event.occurredAt,
+        )
+    }
+
+    private fun toOffset(value: Any?): OffsetDateTime = when (value) {
+        is OffsetDateTime -> value
+        is java.time.Instant -> value.atOffset(java.time.ZoneOffset.UTC)
+        is java.time.LocalDateTime -> value.atOffset(java.time.ZoneOffset.UTC)
+        is java.sql.Timestamp -> value.toInstant().atOffset(java.time.ZoneOffset.UTC)
+        else -> error("unexpected expires_at type ${value?.javaClass}")
+    }
 
     private fun write(
         session: Mutiny.Session,
@@ -195,9 +233,13 @@ class PaymentProposalRepositoryImpl(
             "select 1 from (select pg_advisory_xact_lock(hashtextextended('payment-proposal:' || :party, 0))) l"
         const val FIND_BY_ID_SQL = "select * from delegation_payment_proposals where id = :id"
         const val LOCK_BY_ID_SQL = "$FIND_BY_ID_SQL for update"
-        const val LOCK_PENDING_BY_GRANT_SQL =
-            "select * from delegation_payment_proposals where grant_id = :grant and status = 'PENDING' " +
-                "order by id for update"
+        const val REJECT_BY_GRANT_SQL = """
+            update delegation_payment_proposals
+               set status = 'REJECTED', revision = revision + 1, decided_at = :now
+             where grant_id = :grant and status = 'PENDING'
+         returning id, party_id, grant_id, mcp_client_id, revision, operation_type, amount, currency,
+                   payload_sha256, expires_at
+        """
         const val FIND_BY_PARTY_SQL =
             "select * from delegation_payment_proposals where party_id = :party order by created_at desc, id"
         const val UPDATE_SQL = """

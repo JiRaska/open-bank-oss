@@ -15,6 +15,7 @@ import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
@@ -236,6 +237,57 @@ class PaymentProposalApiIT {
         assertThat(outboxCount(id, "PaymentProposalRejected")).isEqualTo(1)
     }
 
+    // ---- the grant's own write path ----
+
+    @Inject
+    lateinit var grants: com.openbank.delegation.infrastructure.persistence.repository.DelegationRepositoryImpl
+
+    private fun <T> onEventLoop(block: suspend () -> T): T = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+        io.smallrye.mutiny.coroutines.uni(
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
+        ) {
+            block()
+        }
+    }
+
+    /** Any event: this drives the repository's revoke write, not the service's event builder. */
+    private class TestGrantEvent(override val aggregateId: UUID) :
+        com.openbank.libs.domain.event.DomainEvent(Instant.now()) {
+        override val aggregateType = "DelegationGrant"
+        override val eventType = "TestGrantClosed"
+        override val version = 1L
+    }
+
+    @Test
+    fun `revoking the grant rejects its pending proposals in the same write, even a malformed row`() {
+        val good = seedProposal()
+        val grant = grantOf(good)
+        val malformed = seedProposal(grant = grant, hashOverride = "0".repeat(64)) // fails domain load
+        val revoked = onEventLoop { grants.findById(grant) }!!
+            .revoke(party, "customer disconnected the client", java.time.OffsetDateTime.now())
+        onEventLoop { grants.save(revoked, TestGrantEvent(grant)) }
+        assertThat(rowStatus(good)).isEqualTo("REJECTED")
+        assertThat(rowStatus(malformed)).isEqualTo("REJECTED")
+        assertThat(outboxCount(malformed, "PaymentProposalRejected")).isEqualTo(1)
+        assertThat(grantStatus(grant)).isEqualTo("REVOKED")
+    }
+
+    private fun grantOf(proposal: UUID): UUID = jdbc().use { c ->
+        c.createStatement().executeQuery("select grant_id from delegation_payment_proposals where id = '$proposal'")
+            .use {
+                it.next()
+                UUID.fromString(it.getString(1))
+            }
+    }
+
+    private fun grantStatus(grant: UUID): String = jdbc().use { c ->
+        c.createStatement().executeQuery("select status from delegation_grants where id = '$grant'")
+            .use {
+                it.next()
+                it.getString(1)
+            }
+    }
+
     // ---- helpers ----
 
     private fun create(
@@ -284,7 +336,9 @@ class PaymentProposalApiIT {
                 insert into delegation_grants
                     (id, grantor_party_id, grantee_party_id, resource_type, resource_id, valid_from, status,
                      grantee_type, grantee_client_id, grantee_key_thumbprint)
-                values ('$id', '$party', '${DelegationGrant.mcpClientGranteeId(CLIENT)}', 'ACCOUNT', '$account', now() - interval '1 day', 'ACTIVE',
+                values ('$id', '$party', '${DelegationGrant.mcpClientGranteeId(
+                    CLIENT,
+                )}', 'ACCOUNT', '$account', now() - interval '1 day', 'ACTIVE',
                         'MCP_CLIENT', '$CLIENT', '$JKT')
                 """.trimIndent(),
             )
@@ -295,8 +349,11 @@ class PaymentProposalApiIT {
         return id
     }
 
-    private fun seedProposal(createdAt: Instant = Instant.now()): UUID {
-        val grant = seedGrant()
+    private fun seedProposal(
+        createdAt: Instant = Instant.now(),
+        grant: UUID = seedGrant(),
+        hashOverride: String? = null,
+    ): UUID {
         val id = UUID.randomUUID()
         jdbc().use { c ->
             c.prepareStatement(
@@ -314,7 +371,7 @@ class PaymentProposalApiIT {
                 s.setObject(5, account)
                 s.setString(6, IBAN)
                 s.setString(7, "Elektrárna Praha a.s.")
-                s.setString(8, hashOf(id))
+                s.setString(8, hashOverride ?: hashOf(id))
                 s.setTimestamp(9, Timestamp.from(createdAt))
                 s.setTimestamp(10, Timestamp.from(createdAt.plus(24, ChronoUnit.HOURS)))
                 s.executeUpdate()
