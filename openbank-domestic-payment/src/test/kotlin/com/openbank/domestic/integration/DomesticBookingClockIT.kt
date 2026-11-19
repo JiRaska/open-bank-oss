@@ -129,8 +129,8 @@ class DomesticBookingClockIT {
     private fun create(): UUID {
         val response = given().contentType("application/json").header("Idempotency-Key", "clock-${UUID.randomUUID()}")
             .body(
-                """{"debtorAccountId":"${UUID.randomUUID()}","debtorAccountNumber":"1234567890",
-                "debtorBankCode":"0800","debtorName":"Synthetic payer","creditorAccountNumber":"9876543210",
+                """{"debtorAccountId":"${UUID.randomUUID()}","debtorAccountNumber":"1234567899",
+                "debtorBankCode":"0800","debtorName":"Synthetic payer","creditorAccountNumber":"9876543211",
                 "creditorBankCode":"0100","creditorName":"Synthetic payee","amount":1234.56,"currency":"CZK",
                 "priority":"STANDARD","endToEndId":"CLOCK-IT"}""",
             ).post("/api/v1/domestic-payments")

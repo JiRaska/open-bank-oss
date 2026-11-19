@@ -4,6 +4,7 @@
 
 package com.openbank.aml.domain.monitoring
 
+import com.openbank.libs.domain.money.CurrencyCode
 import java.math.BigDecimal
 import java.time.Instant
 
@@ -20,7 +21,7 @@ data class AmountBand(
 ) {
     init {
         require(code.matches(CODE) && code != CounterScheme.ALL_BAND) { "invalid band code" }
-        require(currency.matches(CURRENCY)) { "band currency is three upper-case letters" }
+        require(CurrencyCode.isCanonical(currency)) { "band currency is an active ISO 4217 code" }
         require(lowerInclusive.signum() >= 0 && upperExclusive > lowerInclusive) { "band bounds are not ordered" }
     }
 
@@ -29,7 +30,6 @@ data class AmountBand(
 
     private companion object {
         val CODE = Regex("[A-Z][A-Z0-9_]{0,63}")
-        val CURRENCY = Regex("[A-Z]{3}")
     }
 }
 

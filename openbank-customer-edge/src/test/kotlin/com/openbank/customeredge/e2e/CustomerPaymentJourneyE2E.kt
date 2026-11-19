@@ -116,7 +116,7 @@ class CustomerPaymentJourneyE2E {
         assertThat(instruction.path("debtorAccountNumber").asText()).endsWith("2000145399")
         assertThat(instruction.path("debtorBankCode").asText()).isEqualTo("0800")
         assertThat(instruction.path("debtorName").asText()).isEqualTo("Jana Nova")
-        assertThat(instruction.path("creditorAccountNumber").asText()).isEqualTo("123456789")
+        assertThat(instruction.path("creditorAccountNumber").asText()).isEqualTo("123456788")
         assertThat(instruction.path("creditorBankCode").asText()).isEqualTo("0100")
         assertThat(instruction.path("amount").decimalValue()).isEqualByComparingTo(BigDecimal("150.25"))
         assertThat(header(sent, "Idempotency-Key")).containsExactly("journey-key-1")
@@ -245,7 +245,7 @@ class CustomerPaymentJourneyE2E {
         const val PAYMENTS = "/api/v1/domestic-payments"
         const val LOOKUP = "$PAYMENTS/submissions/lookup"
         const val DEBTOR_IBAN = "CZ6508000000192000145399"
-        const val CREDITOR = "123456789/0100"
+        const val CREDITOR = "123456788/0100"
 
         fun consume(challenge: String) = "/api/v1/sca/challenges/$challenge/consume"
     }

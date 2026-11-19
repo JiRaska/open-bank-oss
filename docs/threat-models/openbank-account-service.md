@@ -1214,3 +1214,11 @@ Rollback: revert the commit; nothing is migrated and nothing calls the route.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
+
+## 2026-11-18 - IBAN check digits from the shared libs-domain generator (#16748)
+
+`IbanGenerator` computed ISO 7064 check digits with its own copy. It now uses
+`IbanCheckDigits.build`, which computes them once for the platform and re-validates the result
+through `Iban`. Generated IBANs are byte-identical (`IbanGeneratorTest` unchanged and green);
+the gain is that a spec fix in libs-domain reaches every account opened. No new caller, grant,
+data class or endpoint. Residual risk: none new. Rollback: revert.
