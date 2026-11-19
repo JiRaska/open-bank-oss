@@ -136,4 +136,60 @@ class RodneCisloTest {
         val arabic = "7605060342".map { (it - '0' + 0x0660).toChar() }.joinToString("")
         assertThat(RodneCislo.parse(arabic)).isInstanceOf(RodneCislo.Invalid::class.java)
     }
+
+    // ── future-birthdate rule (overload with today) ───────────────────────────────
+
+    private val today = LocalDate.of(2026, 11, 19)
+
+    // Synthetic checksum-valid number for [d], built from parts (no literal birth number in source).
+    private fun tenDigit(d: LocalDate): String {
+        val head = "%02d%02d%02d".format(d.year % 100, d.monthValue, d.dayOfMonth)
+        for (suffix in 100..999) {
+            val nine = head + suffix
+            val r = (nine.toLong() % 11).toInt()
+            if (r != 10) return nine + r
+        }
+        error("no valid suffix")
+    }
+
+    private fun nineDigit(d: LocalDate): String =
+        "%02d%02d%02d".format(d.year % 100, d.monthValue, d.dayOfMonth) + "123"
+
+    @Test
+    fun `10-digit number dated tomorrow is Invalid with the future reason`() {
+        val r = RodneCislo.parse(tenDigit(today.plusDays(1)), today)
+        assertThat(r).isEqualTo(RodneCislo.Invalid("birthdate is in the future"))
+        assertThat(RodneCislo.isValid(tenDigit(today.plusDays(1)), today)).isFalse()
+    }
+
+    @Test
+    fun `10-digit number dated today or in the distant past is Parsed`() {
+        assertThat(RodneCislo.parse(tenDigit(today), today)).isInstanceOf(RodneCislo.Parsed::class.java)
+        assertThat(RodneCislo.parse(tenDigit(LocalDate.of(1960, 3, 4)), today))
+            .isInstanceOf(RodneCislo.Parsed::class.java)
+        assertThat(RodneCislo.isValid(tenDigit(today), today)).isTrue()
+        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(1960, 3, 4)), today)).isTrue()
+    }
+
+    @Test
+    fun `9-digit number is judged against today too`() {
+        // 9-digit numbers exist only for birth years up to 1953, so with today before that the date is future.
+        val earlyToday = LocalDate.of(1950, 6, 15)
+        assertThat(RodneCislo.parse(nineDigit(earlyToday.plusDays(1)), earlyToday))
+            .isEqualTo(RodneCislo.Invalid("birthdate is in the future"))
+        assertThat(RodneCislo.parse(nineDigit(earlyToday), earlyToday)).isInstanceOf(RodneCislo.Parsed::class.java)
+        assertThat(RodneCislo.parse(nineDigit(LocalDate.of(1930, 1, 2)), today))
+            .isInstanceOf(RodneCislo.Parsed::class.java)
+    }
+
+    @Test
+    fun `a structurally invalid number keeps its structural reason, not the future one`() {
+        assertThat(RodneCislo.parse("12345", today)).isEqualTo(RodneCislo.parse("12345"))
+    }
+
+    @Test
+    fun `the one-argument form is structure only and still accepts a future birthdate`() {
+        assertThat(RodneCislo.parse(tenDigit(LocalDate.of(2040, 5, 6)))).isInstanceOf(RodneCislo.Parsed::class.java)
+        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(2040, 5, 6)))).isTrue()
+    }
 }
