@@ -34,6 +34,7 @@ dependencies {
     // Reuse the existing fleet contract validator version for POST response schema proofs.
     testImplementation("com.networknt:json-schema-validator:1.5.9")
     testImplementation(libs.mockk)
+    testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
