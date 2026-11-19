@@ -3406,37 +3406,48 @@ class CustomerEdgeResource(
             else -> return proposalRefused(party, id, "PROPOSAL_MALFORMED")
         }
         if (!binding.storeApproved) return created // SCA refused or store refused: no payment was sent
-        val paymentId = if (created.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
-            extractTextField(objectMapper, (created.entity as? String).orEmpty(), "id")
-        } else {
-            null
-        }
-        // A failed payment leaves the proposal APPROVED (retryable with a fresh SCA, idempotent by id);
-        // only a created payment is recorded as executed.
-        val recorded = paymentId?.let {
-            upstream.post(
-                "$delegationServiceUrl/api/v1/payment-proposals/$id/execution",
-                party,
-                objectMapper.writeValueAsString(
-                    mapOf("partyId" to party, "payloadSha256" to proposal.payloadSha256, "paymentId" to it),
+        // From here the customer's challenge is spent and the store says APPROVED: whatever happens
+        // next — including an exception while recording — the outcome is audited.
+        var paymentId: String? = null
+        var executed = false
+        try {
+            paymentId = if (created.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+                extractTextField(objectMapper, (created.entity as? String).orEmpty(), "id")
+            } else {
+                null
+            }
+            // A failed payment leaves the proposal APPROVED (retryable with a fresh SCA, idempotent
+            // by id); only a created payment is recorded as executed.
+            executed = paymentId?.let { pid ->
+                upstream.post(
+                    "$delegationServiceUrl/api/v1/payment-proposals/$id/execution",
+                    party,
+                    objectMapper.writeValueAsString(
+                        mapOf("partyId" to party, "payloadSha256" to proposal.payloadSha256, "paymentId" to pid),
+                    ),
+                    "mcp-proposal-execution-$id-$pid",
+                ).statusInfo.family == Response.Status.Family.SUCCESSFUL
+            } ?: false
+        } finally {
+            audit.emit(
+                // A payment that exists but whose execution the store did not record is its own
+                // outcome: money moved and the proposal still reads APPROVED until reconciled.
+                eventType = when {
+                    paymentId != null && !executed -> "CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED"
+                    else -> "CUSTOMER_MCP_PROPOSAL_APPROVED"
+                },
+                partyId = party,
+                operation = "mcp-proposals.approve",
+                result = if (executed) "SUCCESS" else "FAILURE",
+                resourceId = id.toString(),
+                details = mapOf(
+                    "paymentId" to paymentId,
+                    "payloadSha256" to proposal.payloadSha256,
+                    "mcpClientId" to proposal.mcpClientId,
+                    "executionRecorded" to executed.toString(),
                 ),
-                "mcp-proposal-execution-$id-$it",
             )
         }
-        val executed = recorded?.statusInfo?.family == Response.Status.Family.SUCCESSFUL
-        audit.emit(
-            eventType = "CUSTOMER_MCP_PROPOSAL_APPROVED",
-            partyId = party,
-            operation = "mcp-proposals.approve",
-            result = if (executed) "SUCCESS" else "FAILURE",
-            resourceId = id.toString(),
-            details = mapOf(
-                "paymentId" to paymentId,
-                "payloadSha256" to proposal.payloadSha256,
-                "mcpClientId" to proposal.mcpClientId,
-                "executionRecorded" to executed.toString(),
-            ),
-        )
         return created
     }
 
@@ -3460,7 +3471,11 @@ class CustomerEdgeResource(
      * business acting-for context.
      */
     private fun appSessionCustomer(): CustomerIdentity? {
+        // azp alone names the client; the audience is what only the bank app's own login carries
+        // (the openbank-edge audience mapper exists on the openbank-app client alone — an MCP
+        // client's token is audienced to mcp-service). Both, or no proposal access.
         if (jwt.getClaim<Any?>("azp") != APP_CLIENT_ID || jwt.containsClaim("act")) return null
+        if (jwt.audience?.contains(EDGE_AUDIENCE) != true) return null
         return customer().takeIf { it.actingFor == null }
     }
 
@@ -6274,6 +6289,7 @@ class CustomerEdgeResource(
     companion object {
         /** Dynamic-linking keys an additive caller may never supply (see [scaGate]). */
         private const val APP_CLIENT_ID = "openbank-app"
+        private const val EDGE_AUDIENCE = "openbank-edge"
         private const val MCP_PROPOSAL_APP_ONLY = "Proposals can only be viewed and approved in the bank app"
         internal val PAYMENT_LINKING_KEYS = setOf("amount", "currency", "creditor", "partyId")
 

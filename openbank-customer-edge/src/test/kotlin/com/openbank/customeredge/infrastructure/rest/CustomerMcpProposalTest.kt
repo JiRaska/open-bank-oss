@@ -66,6 +66,14 @@ class CustomerMcpProposalTest {
     }
 
     @Test
+    fun `unpaired surrogates, private-use and unassigned code points are unsafe`() {
+        for (bad in listOf("a\uD800b", "a\uE000b", "a\u0378b", "Pay\u202Eeman")) {
+            assertThat(CustomerMcpProposal.safeText(bad)).isFalse()
+        }
+        assertThat(CustomerMcpProposal.safeText("Elektrárna Praha a.s.")).isTrue()
+    }
+
+    @Test
     fun `a malformed amount is PROPOSAL_HASH_INVALID, not an exception`() {
         assertThat(proposal(amount = "1.234").refusalFor(party, VECTOR, now)).isEqualTo("PROPOSAL_HASH_INVALID")
     }

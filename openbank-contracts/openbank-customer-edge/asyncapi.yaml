@@ -121,6 +121,8 @@ channels:
         $ref: '#/components/messages/auditEvent_CUSTOMER_TRANSFER_INITIATED'
       customermcpproposalapproved:
         $ref: '#/components/messages/auditEvent_CUSTOMER_MCP_PROPOSAL_APPROVED'
+      customermcpproposalexecutionunrecorded:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED'
       customermcpproposalrefused:
         $ref: '#/components/messages/auditEvent_CUSTOMER_MCP_PROPOSAL_REFUSED'
       customermcpproposalrejected:
@@ -362,6 +364,17 @@ components:
         Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path
         (ADR-0383 D6 MCP payment-proposal approval surface).
         Carries the envelope below with `eventType: CUSTOMER_MCP_PROPOSAL_APPROVED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED:
+      name: CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED
+      title: Customer audit event CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path
+        (ADR-0383 D6): a payment was created for an approved proposal but the store did not record
+        its execution — money moved while the proposal still reads APPROVED until reconciled.
+        Carries the envelope below with `eventType: CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED`.
       payload:
         $ref: '#/components/schemas/AnalyticsEnvelope'
     auditEvent_CUSTOMER_MCP_PROPOSAL_REFUSED:

@@ -172,6 +172,17 @@ Trust boundaries:
   - **Replay / double execution.** The store records APPROVED only after the gate reports the
     challenge spent (`ProposalScaBinding.consumed`), by hash CAS, so a second approval is refused;
     the payment idempotency key is the proposal id, so a race cannot create two payments.
+  - **App session = `azp openbank-app` + audience `openbank-edge` + no `act`.** The audience mapper
+    exists only on the `openbank-app` client, so an MCP client's token (audienced to mcp-service)
+    fails even if it named the app's azp. Residual: `openbank-app` is a public client that also
+    admits `http://localhost:*` redirects, so a local attacker program can complete the app's own
+    login flow; tracked with the PDP gap under #16612 / #16848.
+  - **Retry body stability.** The retry replays under the same key (`mcp-proposal-<id>`) whatever
+    SCA challenge id is presented — the challenge is a header the payment service never sees. The
+    payee, amount, currency and reference come from the immutable stored instruction; the edge
+    re-derives only the debtor's account number and legal name. If those changed between attempts
+    the payment service sees a different body under the same key and refuses it as key reuse —
+    a failed retry, never a second payment.
   - Residuals: the store trusts the edge's report of SCA (as every edge-gated route does); the VoP
     display and push coalescing of D6 are app/notification work not in this slice.
   Tests: `McpProposalApprovalTest`, `CustomerMcpProposalTest`.

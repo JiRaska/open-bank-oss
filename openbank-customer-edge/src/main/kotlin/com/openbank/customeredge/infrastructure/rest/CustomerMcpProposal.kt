@@ -84,8 +84,8 @@ internal data class CustomerMcpProposal(
     companion object {
         const val APPROVAL_PREFIX = "mcp-proposal:"
 
-        /** Same rule as the store (ADR-0383 D7): NFC, no Cc/Cf/Zl/Zp, no markup, no `://`. */
-        private val UNSAFE = Regex("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}<>\\[\\]`]|://")
+        /** Same rule as the store (ADR-0383 D7): NFC, no Cc/Cf/Zl/Zp/Cs/Co/Cn, no markup, no `://`. */
+        private val UNSAFE = Regex("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}\\p{Co}\\p{Cn}<>\\[\\]`]|://")
 
         fun safeText(value: String): Boolean =
             Normalizer.isNormalized(value, Normalizer.Form.NFC) && !UNSAFE.containsMatchIn(value)

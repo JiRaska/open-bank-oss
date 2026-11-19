@@ -5,6 +5,7 @@
 package com.openbank.customeredge
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.CustomerMcpProposal
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
@@ -37,9 +38,16 @@ class McpProposalApprovalTest {
     private fun hash(type: String = "DOMESTIC_PAYMENT", iban: String = CZ, currency: String = "CZK") =
         CustomerMcpProposal.canonicalSha256(id, party, type, account, iban, NAME, "1250.50", currency, null)
 
-    private fun resource(up: UpstreamClient, azp: String = "openbank-app", act: Boolean = false) = CustomerEdgeResource(
+    private val audit: EdgeAuditPublisher = mockk(relaxed = true)
+
+    private fun resource(
+        up: UpstreamClient,
+        azp: String = "openbank-app",
+        act: Boolean = false,
+        aud: Set<String> = setOf("openbank-edge"),
+    ) = CustomerEdgeResource(
         up,
-        mockk(relaxed = true),
+        audit,
         inMemoryPaymentSessionStore(),
         mockk(relaxed = true),
         mockk(relaxed = true),
@@ -50,6 +58,7 @@ class McpProposalApprovalTest {
             every { subject } returns party.toString()
             every { getClaim<Any?>("azp") } returns azp
             every { containsClaim("act") } returns act
+            every { audience } returns aud
         }
         objectMapper = ObjectMapper()
         partyMergeResolver = mockk { every { resolve(any()) } answers { firstArg() } }
@@ -223,6 +232,35 @@ class McpProposalApprovalTest {
                 "mcp-proposal-approve-$id-$SCA",
             )
             up.post(match { it.contains("/sepa-payments") }, any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `an app-client token without the edge audience cannot reach the approval`() {
+        val up = upstream()
+        val r = resource(up, aud = setOf("openbank-mcp"))
+        assertThat(r.approveMcpProposal(id, body(), SCA).status).isEqualTo(403)
+        assertThat(r.listMcpProposals().status).isEqualTo(403)
+        verify(exactly = 0) { up.get(match { it.contains("/payment-proposals") }, any()) }
+    }
+
+    @Test
+    fun `a payment the store did not record is audited as its own outcome, even when recording throws`() {
+        val up = upstream()
+        every { up.post(match { it.endsWith("/execution") }, any(), any(), any()) } throws
+            RuntimeException("store down")
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            resource(up).approveMcpProposal(id, body(), SCA)
+        }.isInstanceOf(RuntimeException::class.java)
+        verify(exactly = 1) {
+            audit.emit(
+                eventType = "CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED",
+                partyId = party.toString(),
+                operation = "mcp-proposals.approve",
+                result = "FAILURE",
+                resourceId = id.toString(),
+                details = any(),
+            )
         }
     }
 
