@@ -63,12 +63,12 @@ class SchemeGatewayAdapter(
         // #16772: an account no Czech bank can issue never becomes valid, so re-driving it is an
         // endless retry. Answer it TERMINALLY, before anything is transmitted, with the ISO 20022
         // reason the scheme itself would give (AC01 IncorrectAccountNumber); the activity maps that
-        // to REJECTED / INVALID_ACCOUNT_NUMBER like any scheme reject.
+        // to REJECTED / INVALID_ACCOUNT_NUMBER, recorded as rejected before transmission.
         val debtorIban = CzechDomesticIban.fromAccountNumber(payment.debtorAccountNumber, payment.debtorBankCode)
         val creditorIban = CzechDomesticIban.fromAccountNumber(payment.creditorAccountNumber, payment.creditorBankCode)
         if (debtorIban == null || creditorIban == null) {
             log.warnf("Payment %s carries a non-issuable Czech account; rejected locally, not transmitted", payment.id)
-            return SchemeSubmissionOutcome(accepted = false, reasonCode = INCORRECT_ACCOUNT_NUMBER)
+            return SchemeSubmissionOutcome(accepted = false, reasonCode = INCORRECT_ACCOUNT_NUMBER, transmitted = false)
         }
         val creditorAgentBic = bankCodeToBic(payment.creditorBankCode)
 

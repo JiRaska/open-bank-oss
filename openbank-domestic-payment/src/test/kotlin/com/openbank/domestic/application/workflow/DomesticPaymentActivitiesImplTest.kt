@@ -683,14 +683,17 @@ class DomesticPaymentActivitiesImplTest {
         val validated = payment(status = DomesticPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(validated.id) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns
-            SchemeSubmissionOutcome(accepted = false, reasonCode = "AC01")
+            SchemeSubmissionOutcome(accepted = false, reasonCode = "AC01", transmitted = false)
 
         val result = activitiesWithScheme.submitScheme(validated.id)
 
         assertThat(result).isEqualTo(DomesticPaymentStatus.REJECTED)
         coVerify {
             paymentRepository.update(
-                match { it.rejectReason == DomesticRejectReason.INVALID_ACCOUNT_NUMBER },
+                match {
+                    it.rejectReason == DomesticRejectReason.INVALID_ACCOUNT_NUMBER &&
+                        it.rejectDetail == "rejected before transmission: AC01"
+                },
                 any(),
             )
         }

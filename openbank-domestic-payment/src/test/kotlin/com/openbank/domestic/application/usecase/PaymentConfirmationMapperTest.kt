@@ -106,6 +106,17 @@ class PaymentConfirmationMapperTest {
         assertThat(ibanChecksumValid(creditorIban)).describedAs("creditorIban=%s", creditorIban).isTrue()
     }
 
+    @Test
+    fun `a prefixed account keeps its prefix in its own BBAN slot`() {
+        // #16772 review: "19-19" used to collapse to "1919" in the base slot - a confirmation naming
+        // an account the payer never paid from.
+        val p = payment(status = DomesticPaymentStatus.SETTLED).copy(debtorAccountNumber = "19-19")
+
+        @Suppress("UNCHECKED_CAST")
+        val document = PaymentConfirmationMapper.toConfirmationData(p)["document"] as Map<String, Any?>
+        assertThat(document["debtorIban"]).isEqualTo("CZ1908000000190000000019")
+    }
+
     /** Standard IBAN validation (ISO 7064 MOD 97-10): rearrange, letters -> digits, mod 97 == 1. */
     private fun ibanChecksumValid(iban: String): Boolean {
         val rearranged = iban.substring(4) + iban.substring(0, 4)

@@ -49,11 +49,4 @@ class CzechDomesticIbanTest {
         assertThat(CzechDomesticIban.fromAccountNumber("18-2000145399", "0800")).isNull()
         assertThat(CzechDomesticIban.fromAccountNumber("19-2000145399", "0800")).isNotNull()
     }
-
-    @Test
-    fun `the canonical IBAN is a validated kernel Iban`() {
-        val result = CzechDomesticIban.fromAccountNumber("19-2000145399", "2000")
-        assertThat(result).isEqualTo("CZ3820000000192000145399")
-        assertThat(Iban.of(result!!).bban).isEqualTo("20000000192000145399")
-    }
 }

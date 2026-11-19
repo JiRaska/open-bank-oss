@@ -95,6 +95,7 @@ class SchemeGatewayAdapterTest {
 
         assertThat(outcome.accepted).isFalse()
         assertThat(outcome.reasonCode).isEqualTo("AC01")
+        assertThat(outcome.transmitted).isFalse()
         verify(exactly = 0) { client.submitCreditTransfer(any()) }
     }
 
@@ -105,6 +106,7 @@ class SchemeGatewayAdapterTest {
 
         assertThat(outcome.accepted).isFalse()
         assertThat(outcome.reasonCode).isEqualTo("AC01")
+        assertThat(outcome.transmitted).isFalse()
         verify(exactly = 0) { client.submitCreditTransfer(any()) }
     }
 

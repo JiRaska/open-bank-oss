@@ -224,6 +224,37 @@ class SettlementAdapterTest {
     }
 
     @Test
+    fun `settle keeps the creditor prefix in its own BBAN slot`(): Unit = runBlocking {
+        // #16772 review: the old private builder concatenated "19-19" to "1919" and padded it into
+        // the base slot, so the payee lookup asked about a different account.
+        val p = payment().copy(creditorAccountNumber = "19-19", creditorBankCode = "0800")
+        val ibanSlot = slot<String>()
+        coEvery { accountLookup.findAccountIdByIban(capture(ibanSlot)) } returns UUID.randomUUID()
+        val reqSlot = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(reqSlot)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(echo(reqSlot.captured)).build())
+        }
+
+        adapter().settle(p)
+
+        assertThat(ibanSlot.captured).isEqualTo("CZ1908000000190000000019")
+    }
+
+    @Test
+    fun `settle does not look up a creditor whose account fails the national mod-11 checksum`(): Unit = runBlocking {
+        val p = payment().copy(creditorAccountNumber = "1234567890")
+        val reqSlot = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(reqSlot)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(echo(reqSlot.captured)).build())
+        }
+
+        adapter().settle(p)
+
+        coVerify(exactly = 0) { accountLookup.findAccountIdByIban(any()) }
+        assertThat(reqSlot.captured.targetAccountId).isNull()
+    }
+
+    @Test
     fun `settle books debit-only (no targetAccountId) for an external transfer`(): Unit = runBlocking {
         val p = payment().copy(transferScope = DomesticTransferScope.EXTERNAL)
         val reqSlot = slot<InitiateTransactionRequest>()

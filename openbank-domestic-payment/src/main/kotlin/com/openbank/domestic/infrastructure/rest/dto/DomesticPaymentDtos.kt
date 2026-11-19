@@ -137,8 +137,9 @@ data class CreateDelegatedDomesticPaymentRequest(
 }
 
 /**
- * #16748: presence and length are not validity. The account must be one a Czech bank could issue
- * (shape + ČNB mod-11 on prefix and base), or it is a 400 here — before any Idempotency-Key is bound
+ * #16748: presence and length are not validity. The account number must be one a Czech bank could
+ * issue (ČNB mod-11 on prefix and base; the bank code is checked for four-digit shape only — there
+ * is no registry of assigned codes here), or it is a 400 here — before any Idempotency-Key is bound
  * and long before the scheme adapter would have to build an IBAN for it.
  */
 internal fun czechAccount(accountNumber: String, bankCode: String, field: String): String {
