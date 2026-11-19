@@ -4,7 +4,6 @@
 
 package com.openbank.treasury.domain.reference
 
-import com.openbank.treasury.domain.model.Isin
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable
@@ -80,23 +79,17 @@ class ReferencePayloadsTest {
     }
 
     @Test
-    fun `a security accepts exactly what the shared Isin check accepts`() {
+    fun `a security takes a valid ISIN and rejects a wrong check digit, case, length and empty`() {
         val bond = SecurityPayload(
             "XS0000000017", "Example bond", "ISSUER-1", SecurityType.BOND, "USD",
             LocalDate.parse("2020-01-01"), LocalDate.parse("2030-01-01"), BigDecimal("1000"),
             BigDecimal("2.5"), "ANNUAL", "30/360", "FOLLOWING", "TARGET2",
         )
-        listOf(
-            "XS0000000017",
-            "US0378331005",
-            "US0378331006",
-            "xs0000000017",
-            "XS000000001",
-            "XS00000000170",
-            "",
-        ).forEach {
-            val accepted = runCatching { bond.copy(isin = it).validate() }.isSuccess
-            assertThat(accepted).describedAs("isin '$it'").isEqualTo(Isin.isValid(it))
+        // published example ISINs, expectations written out (not derived from Isin.isValid)
+        bond.copy(isin = "US0378331005").validate()
+        bond.copy(isin = "XS0000000017").validate()
+        listOf("US0378331006", "xs0000000017", "XS000000001", "XS00000000170", "").forEach {
+            invalid { bond.copy(isin = it).validate() }
         }
     }
 
