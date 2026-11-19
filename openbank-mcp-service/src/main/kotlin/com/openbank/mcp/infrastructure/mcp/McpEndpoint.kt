@@ -284,7 +284,14 @@ class McpEndpoint(
                     ),
                 )
             }
-            metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
+            metrics.toolCallCompleted(
+                toolTag,
+                decision,
+                result,
+                Duration.ofNanos(System.nanoTime() - startedAt),
+                // ADR-0384 D1: the channel the resolver's admitting branch recorded, never a claim.
+                McpMetricsPort.ChannelTags(ctx.channel),
+            )
         }
 
         // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
