@@ -115,6 +115,8 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.pact.provider)
+    // consumer: AccountRegistryPactConsumerTest publishes the analytics→account consumer contract
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
@@ -168,6 +170,38 @@ tasks.register<Test>("providerPactTest") {
     group = "verification"
     testClassesDirs = providerPactTestSourceSet.output.classesDirs
     classpath = providerPactTestSourceSet.runtimeClasspath
+    pactBrokerSystemProperties.forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
+// Consumer contracts regenerate independently of the full test suite. Mirrors the
+// `consumerPactTest` block in `openbank.quarkus-service`: this module applies its plugins
+// explicitly instead of that convention, so the source set + task are declared here. The
+// pact-drift gate invokes `:openbank-analytics-sink:consumerPactTest` for every PR that
+// touches this module's consumer tests — without this task the drift shard fails with
+// "task 'consumerPactTest' not found", which is exactly how a consumer module silently
+// escapes regeneration. pact.rootDir + writer.overwrite mirror the convention's Test
+// block (pacts are derived data, ADR-0063: regeneration must be authoritative).
+val consumerPactTestSourceSet =
+    sourceSets.create("consumerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*PactConsumerTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath = sourceSets.main.get().output + configurations.testCompileClasspath.get()
+        runtimeClasspath = output + sourceSets.main.get().output + configurations.testRuntimeClasspath.get()
+    }
+kotlin.target.compilations.getByName("consumerPactTest")
+    .associateWith(kotlin.target.compilations.getByName("main"))
+
+tasks.register<Test>("consumerPactTest") {
+    description = "Regenerates consumer Pact contracts without compiling unrelated service tests."
+    group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = consumerPactTestSourceSet.output.classesDirs
+    classpath = consumerPactTestSourceSet.runtimeClasspath
+    filter.includeTestsMatching("*.contract.*PactConsumerTest")
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    systemProperty("pact.writer.overwrite", "true")
     pactBrokerSystemProperties.forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
