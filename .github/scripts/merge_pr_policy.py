@@ -98,6 +98,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '67641bd6ce24a54b632c50d16d229ce1bd579843',
     # merge-train.py of #16832 after merging #16760 at 0dbf1b25c9 (main with #16700), reviewed with that PR.
     '25f1786d171b1ab122685d39314fd850fc019b85',
+    # merge-train.py of the #16843/#16874 follow-up stacked on #16832 (c5e853c27d), reviewed with that PR.
+    '82746dd0548f1f2e352fefbe97cb2aa9a801df5b',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

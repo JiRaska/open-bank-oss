@@ -106,6 +106,10 @@ EXPEDITE_LABEL = "merge-priority:expedite"
 # `train/<run>-<attempt>` shape is hard-coded in merge_train_carrier.py, check-security-checklist.py and
 # security.yml, and an expedite carrier is judged by exactly the same rules as any other carrier.
 EXPEDITE_CONTEXT = "merge-train/expedite-carrier"
+# App marker on an expedited PR's head: settle opened the expedite window for it over main <sha>. Read
+# back by expedite_candidate: a head still carrying it for the SAME main was given the window and the
+# lane produced nothing (build deferred it, publish refused it), so it is passed over this tick (#16874).
+EXPEDITE_WINDOW_CONTEXT = "merge-train/expedite-window"
 EXPEDITE_CARRIER_TITLE = "merge-train expedite carrier"
 EXPEDITE_LANE_DEFAULT = False      # MERGE_TRAIN_EXPEDITE_LANE; "false" = the label only reorders, as before
 EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is a policy, not an identity
@@ -994,23 +998,55 @@ def parse_selftest_inputs(text: str) -> dict[str, list[str]]:
 
 GATE_CMD_KEYS_RE = re.compile(r"^\s+(run|selftest):\s*(.*)$")   # NOT selftest_inputs: those are the gate's SUBJECTS
 PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./@-]*/[A-Za-z0-9_./@-]*$")   # after normpath: repo-relative, has a `/`
+# A single-segment directory token (`docs/`, `build-logic/`) loses its `/` under normpath and would fail
+# PATH_TOKEN_RE; it is a directory only when the raw token ended in `/` (#16843).
+DIR_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.@-]*$")
+# A file token with one of these extensions is EXECUTED code when a gate names it (`python3 dir/x.py`,
+# `bash dir/x.sh`, `node x.mjs`); the directory holding one is where the judge's code lives.
+EXEC_SCRIPT_EXT_RE = re.compile(r"\.(py|sh|bash|js|mjs|cjs|ts|pl|rb)$")
+# Code ROOTS handed to an interpreter: each `:`-element of these assignments, and the `-s` start
+# directory of `python3 -m unittest discover`. Code under them runs, so the directory is judge.
+CODE_ROOT_ENV_RE = re.compile(r"(?:^|[\s;&|(])(?:PYTHONPATH|NODE_PATH|PERL5LIB|RUBYLIB)=([^\s\"';|&)]+)")
 
 
 def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]:
-    """(files, directories) every repo path the gates.yaml entries of `gate_ids` name in `run` and
-    `selftest` — the code that JUDGES — by simple tokenisation of those strings (security review of #16832:
-    gates run scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py, which no
-    prefix covers). NOT `selftest_inputs`: those are the SUBJECTS a gate checks (eight services' src/main
-    for event-contract-code-agreement); a subject edit cannot make a red gate pass vacuously, at worst it
-    breaks it, and refusing it would send exactly the legitimate main-red fixes (#16599's class) to a
-    human — the inverse of #16675. A token with `/` and an extension is a file; a `/`-token without one,
-    or ending in `/`, a directory. Tokens split on whitespace, shell punctuation AND `:` (PYTHONPATH-style
-    lists), normalised with posixpath.normpath (`./x`, `a/./b`); `..`-relative and absolute tokens, globs,
-    `$VAR`s, flags and URLs are dropped — never a blanket refusal for an odd slash token: over-refusal is
-    what bit before. No import parsing, no spawn."""
+    """(files, directories) the repo paths the gates.yaml entries of `gate_ids` name in `run` and
+    `selftest` that are the code that JUDGES, by simple tokenisation of those strings (security review of
+    #16832: gates run scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py,
+    which no prefix covers). NOT `selftest_inputs`: those are the SUBJECTS a gate checks (eight services'
+    src/main for event-contract-code-agreement); a subject edit cannot make a red gate pass vacuously, at
+    worst it breaks it, and refusing it would send exactly the legitimate main-red fixes (#16599's class)
+    to a human — the inverse of #16675. Every named FILE counts (a token with `/` and an extension). A
+    named DIRECTORY (a `/`-token without an extension, or ending in `/` — a single segment like `docs/`
+    included, #16843) counts only when the gate EXECUTES code under it: it holds a named script token
+    (EXEC_SCRIPT_EXT_RE), or it is a code root (`PYTHONPATH=dir`, `unittest discover -s dir`). A directory
+    a gate merely scans, diffs or generates into is its SUBJECT, not its judge (review of #16832:
+    gen-network-policies-drift-gate diffs openbank-infra/gitops/components/, shellcheck lints
+    openbank-infra/scripts/ — the legitimate fixes for those reds edit exactly those trees). Tokens split
+    on whitespace, shell punctuation AND `:` (PYTHONPATH-style lists), normalised with posixpath.normpath
+    (`./x`, `a/./b`); `..`-relative and absolute tokens, globs, `$VAR`s, flags and URLs are dropped —
+    never a blanket refusal for an odd slash token: over-refusal is what bit before. No import parsing,
+    no spawn. `.github/` prefixes and FIX_JUDGE_FILES stay refused by fix_evidence regardless."""
     files: set[str] = set()
     dirs: set[str] = set()
+    # Per GATE: a directory one gate scans is not made judge by a script another red gate executes under it.
+    named_dirs: dict[str, set[str]] = {}
+    exec_files: dict[str, set[str]] = {}
+    roots: dict[str, set[str]] = {}
     gid, key = None, None
+
+    def path_token(tok: str) -> tuple[str, bool] | None:
+        """(normalised repo path, is_dir) for a token that names one, else None."""
+        if not tok or tok.startswith(("$", "-", "#", "/")) or "*" in tok or "{" in tok or "/" not in tok:
+            return None
+        as_dir = tok.endswith("/")
+        p = posixpath.normpath(tok)
+        if p.startswith("..") or p == ".":
+            return None
+        if not PATH_TOKEN_RE.match(p) and not (as_dir and DIR_SEGMENT_RE.match(p)):
+            return None
+        return p, as_dir or not re.search(r"\.[A-Za-z0-9]+$", p.rsplit("/", 1)[-1])
+
     for ln in text.splitlines():
         m = GATE_ID_RE.match(ln)
         if m:
@@ -1026,17 +1062,28 @@ def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]
         else:
             key = None
             continue
-        for tok in re.split(r"[\s\"'|;&()<>=,:\[\]`]+", rest):
-            if not tok or tok.startswith(("$", "-", "#", "/")) or "*" in tok or "{" in tok or "/" not in tok:
+        for assignment in CODE_ROOT_ENV_RE.findall(rest):
+            for entry in assignment.split(":"):
+                pt = path_token(entry)
+                if pt and pt[1]:
+                    roots.setdefault(gid, set()).add(pt[0] + "/")
+        toks = re.split(r"[\s\"'|;&()<>=,:\[\]`]+", rest)
+        discover = "discover" in toks
+        for i, tok in enumerate(toks):
+            pt = path_token(tok)
+            if pt is None:
                 continue
-            as_dir = tok.endswith("/")
-            p = posixpath.normpath(tok)
-            if p.startswith("..") or p == "." or not PATH_TOKEN_RE.match(p):
-                continue
-            if as_dir or not re.search(r"\.[A-Za-z0-9]+$", p.rsplit("/", 1)[-1]):
-                dirs.add(p + "/")
+            p, is_dir = pt
+            if is_dir:
+                named_dirs.setdefault(gid, set()).add(p + "/")
+                if discover and i > 0 and toks[i - 1] == "-s":
+                    roots.setdefault(gid, set()).add(p + "/")
             else:
                 files.add(p)
+                if EXEC_SCRIPT_EXT_RE.search(p):
+                    exec_files.setdefault(gid, set()).add(p)
+    for g, named in named_dirs.items():
+        dirs |= {d for d in named if d in roots.get(g, ()) or any(f.startswith(d) for f in exec_files.get(g, ()))}
     return files, dirs
 
 
@@ -3612,18 +3659,41 @@ def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: d
 
 
 
-def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int | None:
-    """The first expedited train candidate the lane may serve now, or None. Order is the train's own."""
+def expedite_window_held(gh, head: str, base: str) -> bool:
+    """`head` was given the expedite window over THIS main on an earlier tick (EXPEDITE_WINDOW_CONTEXT
+    names `base`) and no expedite carrier came of it — the caller has already established that none is
+    open. A moved main is a fresh attempt: the marker names the main it was opened over."""
+    state, desc = gh.app_statuses(head).get(EXPEDITE_WINDOW_CONTEXT, ("", ""))
+    return state == "success" and desc.endswith(f"over main {base}")
+
+
+def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int, base: str | None = None) -> int | None:
+    """The first expedited train candidate the lane may serve now, or None. Order is the train's own,
+    except (#16874) that a candidate whose head HELD the window over this very main and got nothing
+    from it (its one-member train was deferred by the build — gate code beside a regeneration commit,
+    #13400 — or refused by publish) is passed over for the next expedited candidate this tick, so one
+    perpetually deferred member cannot starve every other expedited PR (#16807 held the slot ~6 h while
+    #16852, the main-red fix, waited). When every expedited candidate has had its turn over this main,
+    the first is served again: a rotation bounded by the number of expedited candidates, never a
+    permanent exclusion. Still one expedited PR per tick: the chosen one, never a later one past it."""
     labels = {p["number"]: p for p in gh.open_prs()}
-    for m in train_waiting:
-        if not is_expedited(labels.get(m.number) or {}):
-            continue
-        why = expedite_problem(gh, git, repo, m.number, cap)
-        if why is None:
-            return m.number
-        log(f"expedite lane: #{m.number} not served — {why}")
-        return None   # one expedited PR per tick: the first in order, never a later one past it
-    return None
+    expedited = [m for m in train_waiting if is_expedited(labels.get(m.number) or {})]
+    if not expedited:
+        return None
+    held = [m for m in expedited if base and expedite_window_held(gh, m.head_sha, base)]
+    fresh = [m for m in expedited if m not in held]
+    m = (fresh or held)[0]
+    if held and fresh:
+        log(f"expedite lane: {[h.number for h in held]} held the window over main {base[:12]} and nothing was built — "
+            f"passed over for #{m.number} this tick (#16874)")
+    elif held:
+        log(f"expedite lane: every expedited candidate {[h.number for h in held]} has held the window over main "
+            f"{base[:12]} — rotation restarts at #{m.number}")
+    why = expedite_problem(gh, git, repo, m.number, cap)
+    if why is None:
+        return m.number
+    log(f"expedite lane: #{m.number} not served — {why}")
+    return None   # one expedited PR per tick: the chosen one, never a later one past it
 
 
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
@@ -4078,11 +4148,17 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             and holder is None and not strict_carrier_open and not main_red
             and not summary["updated"] and not summary["strict"] and not summary["merged"]
             and not summary.get("stack_window") and not summary.get("deferral_window")):
-        n = expedite_candidate(gh, git, repo, train_waiting, expedite_cap)
+        n = expedite_candidate(gh, git, repo, train_waiting, expedite_cap, base)
         if n is not None:
             log(f"expedite lane: #{n} may ride its own carrier over main {base[:12]} beside carrier #{pending_carrier}")
             summary["in_flight"] = False
             summary["expedite_window"] = n
+            # The window is recorded on the head it was opened for, naming this main (#16874): if the lane
+            # builds nothing from it (a deferred one-member train), the next tick passes this head over.
+            head = next((m.head_sha for m in train_waiting if m.number == n), None)
+            desc = f"expedite window over main {base}"
+            if head and gh.app_statuses(head).get(EXPEDITE_WINDOW_CONTEXT, ("", "")) != ("success", desc):
+                gh.post_status(head, "success", desc, context=EXPEDITE_WINDOW_CONTEXT)
     # Strict priority (#15827): a holder GREEN on a head that contains live main but not merged in this
     # tick's strict_lane (a train in flight, merge refused, source intent re-read, main moved under the
     # read) would be pushed behind main by the next carrier and restart its full CI. For ONE tick per
@@ -4547,22 +4623,89 @@ def gate_level_fix_self_test(check) -> None:
     check("refusal visibility: note_not_fix records the head the refusal is about",
           cache.get(NOT_FIX_HEAD_KEY, {}).get(20) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
     # Paths a RED gate's entry names outside .github/ (security review of #16832): tokenised, both revs.
-    gates_named = ("gates:\n  - id: adr-registry\n    run: |\n      python3 openbank-infra/scripts/check-db-migration.py --root docs/adr/ > /dev/null\n"
+    gates_named = ("gates:\n  - id: adr-registry\n    run: |\n      PYTHONPATH=build-logic/ python3 openbank-infra/scripts/check-db-migration.py --root docs/adr/ > /dev/null\n"
                    "    selftest_inputs: [\"openbank-infra/scripts/lib/db.py\"]\n"
                    "  - id: green-one\n    run: python3 openbank-infra/scripts/other.py\n")
     fs, ds = gate_named_paths(gates_named, {"adr-registry"})
-    check("named paths: a red gate's run/selftest yield its files and directories; its selftest_inputs (subjects) and a green gate's paths do not",
-          fs == {"openbank-infra/scripts/check-db-migration.py"} and "docs/adr/" in ds
+    check("named paths: a red gate's run/selftest yield its files and code-root directories; its selftest_inputs (subjects), a scanned "
+          "directory (`--root docs/adr/`) and a green gate's paths do not",
+          fs == {"openbank-infra/scripts/check-db-migration.py"} and ds == {"build-logic/"}
           and "openbank-infra/scripts/lib/db.py" not in fs and "openbank-infra/scripts/other.py" not in fs, f"{fs} {ds}")
     fs, ds = gate_named_paths("gates:\n  - id: n\n    run: |\n      PYTHONPATH=a:openbank-infra/scripts python3 ./openbank-infra/scripts/x.py openbank-infra/./scripts/y.py ../up.py /dev/null --root=docs/adr/\n", {"n"})
-    check("named paths: `./x`, `a/./b` normalise, `PYTHONPATH=a:dir` splits on `:`, `..` and absolute tokens are dropped",
-          fs == {"openbank-infra/scripts/x.py", "openbank-infra/scripts/y.py"} and ds == {"openbank-infra/scripts/", "docs/adr/"}, f"{fs} {ds}")
+    check("named paths: `./x`, `a/./b` normalise, `PYTHONPATH=a:dir` splits on `:` (a code root), `..` and absolute tokens are dropped, "
+          "`--root=docs/adr/` is a subject",
+          fs == {"openbank-infra/scripts/x.py", "openbank-infra/scripts/y.py"} and ds == {"openbank-infra/scripts/"}, f"{fs} {ds}")
+    # #16843: a single-segment directory token (`build-logic/`, `docs/`) loses its `/` under normpath and was
+    # dropped by PATH_TOKEN_RE; recorded as a directory from the raw token. Both are named here; both hold
+    # executed code (a PYTHONPATH root, a `python3 docs/x.py`), so both are judge.
+    fs, ds = gate_named_paths("gates:\n  - id: n\n    run: PYTHONPATH=build-logic/ python3 docs/x.py --root=docs/\n", {"n"})
+    check("named paths (#16843): single-segment directory tokens `PYTHONPATH=build-logic/` and `--root=docs/` are recognised",
+          ds == {"build-logic/", "docs/"} and fs == {"docs/x.py"}, f"{fs} {ds}")
+    # Review of #16832: a directory a gate SCANS, DIFFS or GENERATES INTO is its subject, never its judge —
+    # the real shapes: shellcheck's `for root in ... openbank-infra/scripts`, gen-network-policies-drift-gate's
+    # `git diff --exit-code openbank-infra/gitops/components/`, service-runbook-drift's `docs/runbooks/`.
+    # A directory counts only when the gate executes code under it: a named script token, a PYTHONPATH
+    # root, or `unittest discover -s`. Named FILES always count.
+    gates_subject = ("gates:\n  - id: s\n    run: |\n"
+                     "      for root in .github/scripts openbank-infra/scripts; do\n"
+                     "        shellcheck -S warning $(find \"$root\" -name '*.sh')\n"
+                     "      done\n"
+                     "  - id: g\n    run: |\n"
+                     "      python3 openbank-infra/scripts/gen-network-policies.py\n"
+                     "      git add -A --intent-to-add openbank-infra/gitops/components/\n"
+                     "      git diff --exit-code openbank-infra/gitops/components/ docs/runbooks/ --root=docs/\n"
+                     "  - id: t\n    run: |\n"
+                     "      python3 -m unittest discover -s perf/tests -p 'test_*.py'\n"
+                     "      # the harness lives in openbank-infra/tests/promtool/ (prose names the directory)\n"
+                     "      bash openbank-infra/tests/promtool/run.sh\n"
+                     "      ls -s docs/build/\n")
+    fs, ds = gate_named_paths(gates_subject, {"s", "g"})
+    check("named paths (subject dirs): a scanned (`for root in`), diffed (`git diff`) or generated-into directory is NOT judge; the "
+          "executed script still is",
+          fs == {"openbank-infra/scripts/gen-network-policies.py"} and ds == set(), f"{fs} {ds}")
+    fs, ds = gate_named_paths(gates_subject, {"t"})
+    check("named paths (code roots): `unittest discover -s dir` and a directory holding a named `bash dir/run.sh` are judge; "
+          "`-s` outside a discover is not",
+          fs == {"openbank-infra/tests/promtool/run.sh"} and ds == {"perf/tests/", "openbank-infra/tests/promtool/"}, f"{fs} {ds}")
+    # Per gate: the directory red gate `s` SCANS is not made judge by the script red gate `g` executes under it.
+    gates_pair = gates_subject.replace("gen-network-policies.py", "x.py").replace("      done\n", "      done\n      echo openbank-infra/scripts/\n")
+    fs, ds = gate_named_paths(gates_pair, {"s", "g"})
+    check("named paths (per gate): a directory one red gate scans is not judge because ANOTHER red gate executes a script under it",
+          "openbank-infra/scripts/" not in ds and fs == {"openbank-infra/scripts/x.py"}, f"{fs} {ds}")
+    # REAL text: this checkout's own gates.yaml (synthetic fixtures once hid 355/355 UNKNOWN, #16832). The
+    # subject directories of the review finding must not be judge; the code roots and named scripts must be.
+    real_gates = pathlib.Path(GATES_YAML)
+    if real_gates.is_file():
+        rtext = real_gates.read_text(encoding="utf-8")
+        rids = set(gate_ids(rtext))
+        want = {"gen-network-policies-drift-gate", "shellcheck", "service-runbook-drift", "governance-script-unit-tests"}
+        rfs, rds = gate_named_paths(rtext, want)
+        rfs_net, rds_net = gate_named_paths(rtext, {"gen-network-policies-drift-gate"})
+        rfs_sh, rds_sh = gate_named_paths(rtext, {"shellcheck"})
+        rfs_rb, rds_rb = gate_named_paths(rtext, {"service-runbook-drift"})
+        rfs_gu, rds_gu = gate_named_paths(rtext, {"governance-script-unit-tests"})
+        check("real gates.yaml: the four gates of the review finding exist (a renamed gate makes this case vacuous)",
+              want <= rids, str(sorted(want - rids)))
+        check("real gates.yaml: gen-network-policies-drift-gate names its generator as judge and NOT openbank-infra/gitops/components/",
+              "openbank-infra/scripts/gen-network-policies.py" in rfs_net and "openbank-infra/gitops/components/" not in rds_net
+              and not any(d.startswith("openbank-infra/gitops/") for d in rds_net), f"{rfs_net} {rds_net}")
+        check("real gates.yaml: shellcheck (lints openbank-infra/scripts/) names no judge directory at all",
+              rds_sh == set(), f"{rfs_sh} {rds_sh}")
+        check("real gates.yaml: service-runbook-drift names its generator, NOT docs/runbooks/",
+              "openbank-infra/scripts/generate-service-runbooks.py" in rfs_rb and "docs/runbooks/" not in rds_rb, f"{rfs_rb} {rds_rb}")
+        check("real gates.yaml: governance-script-unit-tests' `unittest discover -s` roots are judge directories",
+              {"openbank-infra/scripts/", "perf/tests/"} <= rds_gu, f"{rfs_gu} {rds_gu}")
+        all_fs, all_ds = gate_named_paths(rtext, rids)
+        check("real gates.yaml: no judge directory is a top-level service, docs or gitops tree (over-refusal is what bit before)",
+              not any(d.startswith(("openbank-infra/gitops/", "docs/")) or re.fullmatch(r"openbank-[a-z-]+/src/main/", d) for d in all_ds),
+              str(sorted(all_ds)))
     def ngit(*a, **_k):
         if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
             return _R(0, gates_named)
         return git(*a, **_k)
     named_edits = {"a" * 39 + "2": "openbank-infra/scripts/check-db-migration.py", "a" * 39 + "3": "docs/adr/0011-under-named-dir.md",
-                   "a" * 39 + "4": "openbank-infra/scripts/lib/db.py", "a" * 39 + "5": "openbank-infra/scripts/other.py"}
+                   "a" * 39 + "4": "openbank-infra/scripts/lib/db.py", "a" * 39 + "5": "openbank-infra/scripts/other.py",
+                   "a" * 39 + "9": "build-logic/helper.py"}
     files.update(named_edits)
     for h_ in named_edits:
         heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
@@ -4571,8 +4714,12 @@ def gate_level_fix_self_test(check) -> None:
     nf_n = cache_n.get(NOT_FIX_KEY, {})
     check("named paths (live): a head editing the script a RED gate's run names (outside .github/) is refused, naming the path",
           got_n["a" * 39 + "2"] == [] and "check-db-migration.py" in nf_n.get(40, "") and "names in its run/selftest" in nf_n.get(40, ""), f"{got_n['a' * 39 + '2']} {nf_n.get(40)}")
-    check("named paths (live): a head editing a file under a directory the red gate's run names is refused",
-          got_n["a" * 39 + "3"] == [] and "docs/adr/0011-under-named-dir.md" in nf_n.get(41, ""), f"{got_n['a' * 39 + '3']} {nf_n.get(41)}")
+    check("named paths (live): a head editing a file under a directory the red gate merely SCANS (`--root docs/adr/`) is the fix, gate-verified",
+          got_n["a" * 39 + "3"] == [MR] and 41 not in nf_n and cache_n.get((FIX_STRENGTH_KEY, "a" * 39 + "3", MR), (0, ""))[0] == V,
+          f"{got_n['a' * 39 + '3']} {nf_n.get(41)}")
+    check("named paths (live, #16843): a head editing a file under a single-segment code root (`PYTHONPATH=build-logic/`) is refused",
+          got_n["a" * 39 + "9"] == [] and "build-logic/helper.py" in nf_n.get(44, "") and "names in its run/selftest" in nf_n.get(44, ""),
+          f"{got_n['a' * 39 + '9']} {nf_n.get(44)}")
     check("named paths (live): a head editing a red gate's declared selftest INPUT outside .github/ is still the fix, gate-verified "
           "(subjects are not judge code)",
           got_n["a" * 39 + "4"] == [MR] and 42 not in nf_n and cache_n.get((FIX_STRENGTH_KEY, "a" * 39 + "4", MR), (0, ""))[0] == V,
@@ -10515,6 +10662,48 @@ def self_test() -> int:
             check("expedite (E10): never beside a running strict reservation (the holder is not pre-empted)",
                   held[1] is None and held[2] == 0, f"{s} {st} held={held}")
             gh.head_checks.clear()
+            exp_reset()
+
+            # #16874: an expedited member the build always DEFERS must not hold the expedite window forever.
+            # pK (gate code) and p2 both carry the label; pK is made the oldest, and the builder defers pK's
+            # one-member train every tick, exactly as TrainBuilder.build does for gate code beside a
+            # regeneration commit (#13400). A main that really needs regeneration cannot stand in here: the
+            # fixture's derived gate then reads main red, which closes the expedite lane before it opens.
+            # Tick 1 opens the window for pK and the lane builds nothing; tick 2 passes pK over for p2, whose
+            # expedite carrier is published. Without the marker tick 2 re-opens the window for pK, as it did
+            # for #16807 every tick for ~6 h while #16852 (the main-red fix) waited.
+            real_build = TrainBuilder.build
+
+            def deferring_build(self, base_, members_):
+                rest = [m_ for m_ in members_ if m_.number != 38]
+                out_ = real_build(self, base_, rest) if rest else (base_, [], [])
+                if len(rest) < len(members_):
+                    self.deferred = [*getattr(self, "deferred", []), 38]
+                return out_
+            TrainBuilder.build = deferring_build
+            exp_setup()                                              # p1's carrier runs; p2 expedited
+            open_only("pK")
+            gh.prs[38]["labels"] = [{"name": EXPEDITE_LABEL}]
+            gh.prs[38]["created_at"] = "2025-12-01"                  # the oldest expedited candidate
+            main_e12 = gh.main_sha()
+            s1, st1 = exp_tick()
+            pk_head = gh.prs[38]["head"]["sha"]
+            mark1 = gh.app_statuses(pk_head).get(EXPEDITE_WINDOW_CONTEXT, ("", ""))
+            ex1 = [c for c in exp_open() if c.get("expedite")]
+            check("expedite (E12, #16874): tick 1 opens the window for the oldest expedited member; its one-member train is deferred "
+                  "(not dropped, no notice), nothing is built, and the window is recorded on its head naming main",
+                  s1.get("expedite_window") == 38 and st1 == "idle" and ex1 == [] and gh.prs[38]["state"] == "open"
+                  and not any(n == 38 for n, _ in gh.comments) and mark1 == ("success", f"expedite window over main {main_e12}"),
+                  f"{s1} st={st1} ex={len(ex1)} mark={mark1} comments={gh.comments}")
+            s2, st2 = exp_tick()
+            ex2 = [c for c in exp_open() if c.get("expedite")]
+            check("expedite (E13, #16874): tick 2 passes the deferred holder over — the next expedited PR gets the window and its "
+                  "expedite carrier is published",
+                  s2.get("expedite_window") == 2 and st2 == "published" and len(ex2) == 1 and carrier_members(ex2[0]) == [2]
+                  and gh.prs[38]["state"] == "open", f"{s2} st={st2} ex={[carrier_members(c) for c in ex2]}")
+            check("expedite (E14, #16874): a window marker for a DIFFERENT main does not pass the head over (a moved main is a fresh attempt)",
+                  expedite_window_held(gh, pk_head, main_e12) and not expedite_window_held(gh, pk_head, "0" * 40), str(mark1))
+            TrainBuilder.build = real_build
             exp_reset()
 
             # SPECULATIVE STACKING (ADR-0343 amendment 2026-11-09): while strict holder pW (35) runs CI on an
