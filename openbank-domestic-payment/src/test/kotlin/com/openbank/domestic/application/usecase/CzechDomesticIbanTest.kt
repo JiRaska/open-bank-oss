@@ -49,4 +49,13 @@ class CzechDomesticIbanTest {
         assertThat(CzechDomesticIban.fromAccountNumber("18-2000145399", "0800")).isNull()
         assertThat(CzechDomesticIban.fromAccountNumber("19-2000145399", "0800")).isNotNull()
     }
+
+    @Test
+    fun `an IBAN-form account is held to the same national checksum as the split form`() {
+        // #16772 review: a mod-97-valid CZ IBAN can still carry a BBAN no Czech bank issues.
+        assertThat(CzechDomesticIban.canonical("CZ0708000000001234567890", "0800")).isNull()
+        assertThat(CzechDomesticIban.canonical("CZ1908000000190000000019", "0800"))
+            .isEqualTo("CZ1908000000190000000019")
+        assertThat(CzechDomesticIban.canonical("19-19", "0800")).isEqualTo("CZ1908000000190000000019")
+    }
 }

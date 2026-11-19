@@ -1156,11 +1156,18 @@ prefix and base (`openbank-libs-domain` `CzechAccountNumber.isValid`), lays the 
 That is the one ISO 7064 implementation, and it validates its result. The bank code is checked for
 four-digit shape only, because no registry of assigned ČNB codes exists here.
 
+One normalisation, `CzechDomesticIban.canonical`, serves the scheme, settlement and confirmation
+paths. It accepts the split form (`prefix-base`) or a stored CZ IBAN. For the IBAN form, it slices
+the BBAN into bank code, prefix and base and runs the same mod-11 check, because mod-97 alone does
+not prove the account is issuable.
+
 - **Tampering / integrity:** a mis-built IBAN names the wrong account, and nothing notices because
   the IBAN itself passes mod-97. When the coordinates denote no issuable account, the scheme adapter
   sends nothing. It returns the ISO reason the scheme would give (`AC01` IncorrectAccountNumber),
   marked `transmitted = false`. The payment ends terminally `REJECTED` / `INVALID_ACCOUNT_NUMBER`,
-  and its audit detail reads "rejected before transmission". It is neither held as an ambiguous
+  and its audit detail reads "rejected before transmission". The scheme-dispatch marker the
+  activity claims before calling the adapter is cleared again, so `scheme_dispatched_at` never
+  claims a dispatch that did not happen. It is neither held as an ambiguous
   dispatch nor re-driven forever. The settlement lookup skips such a creditor (booking debit-only).
   The confirmation shows `number/bankCode` as entered instead of making up an IBAN.
 - **Spoofing / input validation:** an invalid account gets a 400 `VALIDATION_ERROR` naming the field
@@ -1168,12 +1175,14 @@ four-digit shape only, because no registry of assigned ČNB codes exists here.
 - **Denial of service:** none new; the check is pure arithmetic on ≤20 digits.
 - **Information disclosure:** the error names the field and bank code, never the account number.
 
-**Existing data.** A read-only sandbox query found 7 of 116 account-service accounts whose own
-number fails mod-11. The query treats `accounts.account_number` as the 24-character CZ IBAN, takes
-characters 9–14 as the prefix and 15–24 as the base, and applies the decree weights. All 7 were
-orphan seed data: no party row, zero balance, no standing orders. The owner CLOSED them through the
-admin UI on 2026-11-19 instead of re-issuing them (#16798 closed). A fresh count afterwards: 0
-non-closed accounts fail the check.
+**Existing data and rollout.** The rule deliberately has no exemption for accounts issued before
+the generator enforced mod-11. Such an account gets a 400 on every domestic payment it originates
+and a terminal AC01 when it is the counterparty. So before this rule is enabled in an environment,
+any account-service account whose own number fails mod-11 must be closed or re-issued. Count them
+by reading `accounts.account_number` as the 24-character CZ IBAN, taking characters 9–14 as the
+prefix and 15–24 as the base, and applying the decree weights to each. The count must be 0 among
+non-closed accounts. Only the sandbox environment exists today, and the count must reach 0 again
+before rollout to any other environment.
 
 **Residual risk.** A payment already stored with a mod-11-invalid account is now rejected terminally
 before transmission, which is the intended fail-closed outcome. An unassigned but well-formed bank

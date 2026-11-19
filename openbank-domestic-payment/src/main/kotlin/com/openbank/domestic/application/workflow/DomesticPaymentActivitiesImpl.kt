@@ -407,6 +407,10 @@ open class DomesticPaymentActivitiesImpl(
                 DomesticPaymentStatus.REJECTED to rejectReasonFor(outcome.reasonCode)
             }
             val rejectDetail = if (nextStatus == DomesticPaymentStatus.REJECTED) rejectDetailFor(outcome) else null
+            // #16772: a verdict reached locally sent nothing, so the marker claimed above must not
+            // keep asserting a dispatch. Cleared before the status write: if that write fails,
+            // Temporal retries, re-claims, and the adapter answers the same local AC01 again.
+            if (!outcome.transmitted) paymentRepository.clearSchemeDispatch(paymentId)
             val updated = payment.transitionTo(nextStatus, reason, rejectDetail, clock = clock)
             val event = OutboxMessage(
                 aggregateId = updated.id,

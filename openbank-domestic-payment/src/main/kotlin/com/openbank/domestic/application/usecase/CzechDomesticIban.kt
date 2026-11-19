@@ -48,9 +48,19 @@ internal object CzechDomesticIban {
      */
     fun canonical(accountNumber: String, bankCode: String): String? {
         val raw = accountNumber.replace(" ", "").uppercase()
-        if (raw.startsWith(COUNTRY)) return raw.takeIf { Iban.isValid(it) }
+        if (raw.startsWith(COUNTRY)) {
+            // mod-97 proves the IBAN is well-formed, not that its BBAN is issuable: slice it and
+            // hold it to the same national checksum as the split form.
+            if (raw.length != CZ_IBAN_LENGTH || !Iban.isValid(raw)) return null
+            val bban = raw.substring(BBAN_START)
+            val prefix = bban.substring(BANK_CODE_LENGTH, BANK_CODE_LENGTH + PREFIX_LENGTH)
+            val base = bban.substring(BANK_CODE_LENGTH + PREFIX_LENGTH)
+            return raw.takeIf { CzechAccountNumber.isValid(prefix, base) }
+        }
         return fromAccountNumber(accountNumber, bankCode)
     }
 
     private const val COUNTRY = "CZ"
+    private const val CZ_IBAN_LENGTH = 24
+    private const val BBAN_START = 4
 }

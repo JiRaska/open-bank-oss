@@ -170,6 +170,12 @@ class DomesticPaymentMoneyBoundaryIT {
         assertThat(refused.jsonPath().getList<String>("violations.field")).containsExactly(field)
         assertThat(refused.body().asString()).doesNotContain(account)
         assertThat(countPayments(key)).isZero()
+
+        // The key was never bound: a valid request under the same key is a fresh create, not a 409.
+        val retry = post(key, body("10.00", "CZK"))
+        assertThat(retry.statusCode).isEqualTo(201)
+        assertThat(retry.header("X-Idempotency-Replayed")).isNull()
+        assertThat(countPayments(key)).isEqualTo(1)
     }
 
     private fun expectedProblem(code: String, field: String, amount: String, currency: String): Map<String, Any?> {

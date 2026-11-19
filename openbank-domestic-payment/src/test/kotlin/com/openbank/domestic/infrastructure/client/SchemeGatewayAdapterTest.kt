@@ -89,6 +89,20 @@ class SchemeGatewayAdapterTest {
     }
 
     @Test
+    fun `a stored account already in valid CZ IBAN form is transmitted unchanged`(): Unit = runBlocking {
+        // #16772 review: the scheme path must normalise exactly like settlement and confirmations.
+        every { client.submitCreditTransfer(any()) } answers { call ->
+            assertThat(call.invocation.args[0] as String).contains("CZ1908000000190000000019")
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        }
+
+        val outcome = adapter.submit(payment().copy(creditorAccountNumber = "CZ1908000000190000000019"))
+
+        assertThat(outcome.accepted).isTrue()
+        verify(exactly = 1) { client.submitCreditTransfer(any()) }
+    }
+
+    @Test
     fun `bbanToIban refuses an account that fails the national mod-11 checksum`(): Unit = runBlocking {
         // #16772 review: terminal AC01, never a re-drivable "unavailable" and never transmitted.
         val outcome = adapter.submit(payment().copy(creditorAccountNumber = "1234567890"))

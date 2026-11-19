@@ -697,6 +697,8 @@ class DomesticPaymentActivitiesImplTest {
                 any(),
             )
         }
+        // Nothing was dispatched, so the marker must not claim it was (#16772 review).
+        coVerify(exactly = 1) { paymentRepository.clearSchemeDispatch(validated.id) }
     }
 
     @Test
