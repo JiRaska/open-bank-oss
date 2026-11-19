@@ -71,7 +71,10 @@ class IdentifierSpecConformanceTest {
         val rows = File(path).readLines().map { it.split('\t') }.filter { it.size >= 3 && it[0] in validators }
         assertTrue(rows.size > MIN_ROWS * validators.size, "only ${rows.size} oracle rows for ${validators.keys}")
         val problems = judgeDifferential(rows) { id, value -> validators.getValue(id)(value) }
-        assertTrue(problems.isEmpty(), "${problems.size} problem(s); first $SHOWN:\n" + problems.take(SHOWN).joinToString("\n"))
+        assertTrue(
+            problems.isEmpty(),
+            "${problems.size} problem(s); first $SHOWN:\n" + problems.take(SHOWN).joinToString("\n"),
+        )
         val tagged = rows.count { it.getOrElse(REASON) { "" }.startsWith("known-defect") }
         println("IDENTIFIER_DIFFERENTIAL module=$MODULE rows=${rows.size} disagreements=0 known_defect_rows=$tagged")
     }
@@ -113,7 +116,10 @@ class IdentifierSpecConformanceTest {
                 }
             }
             taggedByDefect.keys.filter { it !in liveByDefect }.forEach {
-                problems += "$it: all ${taggedByDefect.getValue(it)} tagged rows agree: the defect is fixed, remove it from KNOWN_DEFECTS"
+                problems +=
+                    "$it: all ${taggedByDefect.getValue(
+                        it,
+                    )} tagged rows agree: the defect is fixed, remove it from KNOWN_DEFECTS"
             }
             return problems
         }
