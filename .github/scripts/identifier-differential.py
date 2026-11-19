@@ -45,6 +45,7 @@ from stdnum.cz import rc as std_rc
 from stdnum.eu import vat as std_vat
 from stdnum.fr import siren as std_siren
 from stdnum.pl import nip as std_nip
+from stdnum.sk import rc as std_sk_rc
 
 
 def _rc_divergence(v: str):
@@ -132,6 +133,16 @@ def _at_fn_divergence(v: str):
     return "KYB caps the number at 6 digits (local bound, not a published rule)" if len(digits) > 6 else None
 
 
+def _eu_vat_divergence(v: str):
+    """Where kyb's EuVatChecksums is deliberately stricter than stdnum.eu.vat."""
+    cc, national = v[:2], v[2:]
+    if cc == "CZ" and national.isdigit() and len(national) in (9, 10) and not (len(national) == 9 and national[0] == "6"):
+        return _rc_divergence(national)          # a CZ DIČ of a natural person is a birth number
+    if cc == "SK" and national.isdigit() and len(national) == 10 and std_sk_rc.is_valid(national):
+        return "stdnum's own source says it is unclear whether an RČ can be a SK VAT number; kyb does not accept it"
+    return None
+
+
 def _none(_v: str):
     return None
 
@@ -144,7 +155,7 @@ ORACLES = {
     "sk-ico": (_ico, _none),
     "pl-nip": (std_nip.is_valid, _none),
     "fr-siren": (std_siren.is_valid, _none),
-    "eu-vat": (std_vat.is_valid, _none),
+    "eu-vat": (std_vat.is_valid, _eu_vat_divergence),
     "lei": (std_lei.is_valid, _none),
     "isin": (std_isin.is_valid, _none),
     "pan-luhn": (std_luhn.is_valid, _none),
@@ -159,10 +170,11 @@ ORACLES = {
 # the marker must go). A known defect can neither be forgotten nor silently fixed.
 _ISO3166 = frozenset(c.alpha_2 for c in pycountry.countries) | {"XS", "EU", "XA", "XB", "XC", "XD", "XF", "QS", "QT"}
 # kyb EuVatChecksums verifies CZ, SK, PL, DE, FR and AT; every other member state is accepted on
-# shape alone (`else -> true`), which the reference rejects when the check digit is wrong.
+# shape alone (`else -> true`), which the reference rejects when the check digit is wrong; the SK
+# check is mod 11 only, missing the official rule that the third digit is one of 2,3,4,7,8,9.
 _EU_VAT_CHECKED = frozenset({"CZ", "SK", "PL", "DE", "FR", "AT"})
 KNOWN_DEFECTS = {
-    "eu-vat": ("#16774", lambda v: v[:2] not in _EU_VAT_CHECKED),
+    "eu-vat": ("#16774", lambda v: v[:2] not in _EU_VAT_CHECKED or (v[:2] == "SK" and (v[2] == "0" or v[4] not in "234789"))),
     "currency": ("#16821", lambda v: v in {"BGN", "CUC"}),
     "isin": ("#16773", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
