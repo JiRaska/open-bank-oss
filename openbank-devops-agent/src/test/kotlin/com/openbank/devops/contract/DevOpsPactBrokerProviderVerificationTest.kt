@@ -13,6 +13,7 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
@@ -53,5 +54,7 @@ class DevOpsPactBrokerProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext) {
         context.verifyInteraction()
+        given().post("/api/v1/devops/findings/11111111-1111-4111-8111-111111111111/approve")
+            .then().statusCode(403)
     }
 }
