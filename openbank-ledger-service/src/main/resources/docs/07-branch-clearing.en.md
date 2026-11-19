@@ -13,3 +13,5 @@ Deploy Ledger V48/readers and Account context readers before new Transaction V24
 Synthetic branch requests use `/api/v1/journals/branch-payments/synthetic`, which requires authenticated synthetic origin. Either trusted request carrier preserves that origin; an absent/refused decision fails before a real journal can be recorded. Receipt replay cannot cross synthetic and real origins.
 
 Per-payment elimination includes every descendant reached through `reversal_of`, including reversals of reversals. The snapshot applies `asOf` to each individual journal date, so a later correction cannot rewrite an earlier result. Opposite one-sided reversals remain separate reconciliation breaks even when their bank and book totals cancel.
+
+The single-journal reversal API returns 409 for a journal using the inter-branch clearing accounts. Reverse the Transaction payment so Ledger can post the counterpayment across both books atomically.

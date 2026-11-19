@@ -253,6 +253,10 @@ class LedgerService(
             throw JournalReversalConflictException("Journal ${original.id} is not POSTED — already reversed")
         }
 
+        if (original.lines.any { isInterBranchClearingAccount(it.glAccountId) }) {
+            throw JournalReversalConflictException("Inter-branch clearing requires a paired Transaction reversal")
+        }
+
         // Period lock (#869): a reversal inherits the original entry's date (reverse() preserves
         // entryDate), so reversing a prior-year entry would post into that year. If that year is
         // ATTESTED the period is locked — block it; corrections to a closed year must be booked as

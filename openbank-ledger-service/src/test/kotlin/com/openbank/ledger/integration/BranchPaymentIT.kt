@@ -3,13 +3,20 @@
 
 package com.openbank.ledger.integration
 
+import com.openbank.ledger.application.port.out.JournalRepository
 import com.openbank.ledger.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
+import io.smallrye.mutiny.coroutines.asUni
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.Test
@@ -289,6 +296,27 @@ class BranchPaymentIT {
         }
     }
 
+    @Inject
+    lateinit var journals: JournalRepository
+
+    @Test
+    fun `single-journal reversal cannot split an inter-branch payment`() {
+        connection().use { db ->
+            val payment = Payment()
+            register(db, payment)
+            val ids = postedIds(payment)
+            for (id in ids) {
+                given().contentType("application/json").body(
+                    mapOf("reason" to "single-journal reversal", "reversedBy" to UUID.randomUUID()),
+                ).post("/api/v1/journals/$id/reverse").then().statusCode(409)
+            }
+            assertThat(postedIds(payment)).isEqualTo(ids)
+            assertCounts(db, payment, 2, 2)
+            assertEconomics(db, payment)
+            assertThat(snapshot(payment).getBoolean("clearingBalanced")).isTrue()
+        }
+    }
+
     @Test
     fun `opposite one-sided reversals stay broken per payment until reversal chains restore both pairs`() {
         connection().use { db ->
@@ -302,15 +330,15 @@ class BranchPaymentIT {
             register(db, first)
             val firstIds = postedIds(first)
             val secondIds = postedIds(second)
-            val firstReversal = reverse(db, firstIds.first())
-            val secondReversal = reverse(db, secondIds.last())
+            val firstReversal = seedHistoricalReversal(firstIds.first())
+            val secondReversal = seedHistoricalReversal(secondIds.last())
             try {
                 val broken = snapshot(first)
                 assertThat(broken.getList<Number>("lines.clearing").sumOf { it.toDouble() }).isZero()
                 assertThat(broken.getBoolean("clearingBalanced")).isFalse()
             } finally {
-                reverse(db, firstReversal)
-                reverse(db, secondReversal)
+                seedHistoricalReversal(firstReversal)
+                seedHistoricalReversal(secondReversal)
             }
             assertThat(snapshot(first).getBoolean("clearingBalanced")).isTrue()
         }
@@ -322,12 +350,12 @@ class BranchPaymentIT {
             val future = Payment(date = LocalDate.of(2026, 11, 19))
             register(db, future)
             val ids = postedIds(future)
-            reverse(db, ids.first())
+            seedHistoricalReversal(ids.first())
             try {
                 assertThat(snapshot(future, future.date.minusDays(1)).getBoolean("clearingBalanced")).isTrue()
                 assertThat(snapshot(future).getBoolean("clearingBalanced")).isFalse()
             } finally {
-                reverse(db, ids.last())
+                seedHistoricalReversal(ids.last())
             }
             assertThat(snapshot(future).getBoolean("clearingBalanced")).isTrue()
         }
@@ -336,20 +364,14 @@ class BranchPaymentIT {
     private fun postedIds(payment: Payment): List<UUID> = post(payment.payload()).then().statusCode(200)
         .extract().jsonPath().getList<String>("journalIds").map(UUID::fromString)
 
-    private fun reverse(db: Connection, id: UUID): UUID {
-        given().contentType("application/json").body(
-            mapOf(
-                "reason" to "clearing regression",
-                "reversedBy" to UUID.fromString("00000000-0000-0000-0000-000000000001"),
-            ),
-        ).post("/api/v1/journals/$id/reverse").then().statusCode(200)
-        return db.prepareStatement("SELECT id FROM journal_entries WHERE reversal_of=?").use { statement ->
-            statement.setObject(1, id)
-            statement.executeQuery().use { rows ->
-                assertThat(rows.next()).isTrue()
-                rows.getObject(1, UUID::class.java)
-            }
-        }
+    // Seed a historical inconsistency below the protected API to exercise reconciliation.
+    private fun seedHistoricalReversal(id: UUID): UUID = VertxContextSupport.subscribeAndAwait {
+        CoroutineScope(Dispatchers.Unconfined).async {
+            val original = checkNotNull(journals.findById(id))
+            val reversal = original.reverse(UUID.randomUUID(), UUID.randomUUID())
+                .copy(entryNumber = journals.nextEntryNumber())
+            journals.saveReversal(reversal, original.id, original.entryDate, emptyList()).id
+        }.asUni()
     }
 
     private fun snapshot(payment: Payment, date: LocalDate = payment.date) = given()

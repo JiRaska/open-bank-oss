@@ -13,6 +13,19 @@ import java.time.LocalDate
 import java.util.UUID
 
 private const val GBP_ACCOUNT_INDEX = 3
+private val INTER_BRANCH_CLEARING_ACCOUNTS = BranchPaymentCurrency.supportedCodes().associate { code ->
+    val currency = BranchPaymentCurrency.of(code)
+    currency to UUID.fromString("a0000000-0000-0000-0000-00000000129${currency.accountIndex()}")
+}
+
+private fun BranchPaymentCurrency.accountIndex(): Int = when (this) {
+    BranchPaymentCurrency.CZK -> 0
+    BranchPaymentCurrency.EUR -> 1
+    BranchPaymentCurrency.USD -> 2
+    BranchPaymentCurrency.GBP -> GBP_ACCOUNT_INDEX
+}
+
+internal fun isInterBranchClearingAccount(id: UUID): Boolean = id in INTER_BRANCH_CLEARING_ACCOUNTS.values
 
 data class BranchPaymentReceipt(val transactionId: UUID, val bankId: UUID, val journalIds: List<UUID>)
 
@@ -56,7 +69,13 @@ data class BranchPaymentRequest(
         val source = sourceAccountId
         val target = targetAccountId
         val crossBook = source != null && target != null && sourceBookId != targetBookId
-        val clearing = if (crossBook) account("129") else account("110")
+        val clearing = if (crossBook) {
+            INTER_BRANCH_CLEARING_ACCOUNTS.getValue(
+                BranchPaymentCurrency.of(currency),
+            )
+        } else {
+            account("110")
+        }
         fun line(gl: UUID, side: JournalSide, sub: UUID? = null) =
             JournalLineRequest(gl, side, amount, currency, null, amount, currency, sub)
         fun journal(suffix: String, book: UUID?, lines: List<JournalLineRequest>) = PostJournalCommand(
@@ -104,16 +123,10 @@ data class BranchPaymentRequest(
     }
 
     private fun account(prefix: String): UUID {
-        val index = when (BranchPaymentCurrency.of(currency)) {
-            BranchPaymentCurrency.CZK -> 0
-            BranchPaymentCurrency.EUR -> 1
-            BranchPaymentCurrency.USD -> 2
-            BranchPaymentCurrency.GBP -> GBP_ACCOUNT_INDEX
-        }
+        val index = BranchPaymentCurrency.of(currency).accountIndex()
         val suffix = when (prefix) {
             "210" -> if (index == 0) "000002" else "00210$index"
-            "110" -> if (index == 0) "000001" else "00110$index"
-            else -> "00129$index"
+            else -> if (index == 0) "000001" else "00110$index"
         }
         return UUID.fromString("a0000000-0000-0000-0000-000000$suffix")
     }
