@@ -15,7 +15,9 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.io.File
+import java.time.Clock
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 /**
  * Spec conformance of this module's identifier validators (#16748).
@@ -33,7 +35,7 @@ import java.time.LocalDate
 class IdentifierSpecConformanceTest {
 
     private val validators: Map<String, (String) -> Boolean> = mapOf(
-        "cz-rc" to { raw -> RodneCislo.isValid(raw, AS_OF) },
+        "cz-rc" to { raw -> RodneCislo.isValid(raw, CLOCK) },
         "iban" to Iban.Companion::isValid,
         "cz-account" to ::czechAccount,
         "currency" to { raw -> runCatching { CurrencyCode.of(raw) }.isSuccess },
@@ -105,6 +107,10 @@ class IdentifierSpecConformanceTest {
 
         /** The caller-supplied "today" the RČ vectors and the oracle are judged against (cz-rc.json `as_of`). */
         val AS_OF: LocalDate = LocalDate.parse(asOfFromVectors())
+
+        /** Noon UTC on as_of: the same civil date in Prague, so the Prague-zone rule is judged on as_of itself. */
+        val CLOCK: Clock = Clock.fixed(AS_OF.atTime(NOON, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        private const val NOON = 12
 
         private fun asOfFromVectors(): String {
             val stream = IdentifierSpecConformanceTest::class.java

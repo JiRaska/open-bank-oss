@@ -63,9 +63,11 @@
     "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/reference/ReferencePayloads.kt": 1
   },
   "mod97": {
-    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 7
+    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/EuVatNationalRules.kt": 3,
+    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 7,
+    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/VatDigits.kt": 1
   },
   "rc-structure-only": {
-    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 2
+    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 3
   }
 }

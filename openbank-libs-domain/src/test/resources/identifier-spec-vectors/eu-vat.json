@@ -169,7 +169,11 @@
     {
       "module": "openbank-kyb-service",
       "symbol": "LegalEntityIdentifier.parse(EU_VAT)",
-      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt",
+      "also_files": [
+        "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/EuVatNationalRules.kt",
+        "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/VatDigits.kt"
+      ]
     }
   ],
   "differential": true

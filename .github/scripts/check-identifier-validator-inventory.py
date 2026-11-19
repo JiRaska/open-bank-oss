@@ -170,6 +170,10 @@ def build(root: pathlib.Path):
                         problems.append(f"{v['identifier']}: vector names {impl['symbol']!r} but the test's lambda "
                                         f"{line.group(1).strip()!r} does not invoke {missing}")
             claimed.setdefault(f, []).append(v["identifier"])
+            for extra in impl.get("also_files", []):
+                if not (root / extra).is_file():
+                    problems.append(f"{v['identifier']}: also_files entry {extra!r} does not exist")
+                claimed.setdefault(extra, []).append(v["identifier"])
             simple = impl["symbol"].split("(")[0].split(".")[-2] if "." in impl["symbol"] else impl["symbol"]
             defects = sorted({c["known_defect"]["issue"] for c in v["cases"] if c.get("known_defect")})
             rows.append({
