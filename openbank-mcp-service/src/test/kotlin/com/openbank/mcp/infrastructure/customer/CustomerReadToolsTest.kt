@@ -189,4 +189,22 @@ class CustomerReadToolsTest {
         assertThat((out as CustomerReadTools.Outcome.Refused).unavailable).isTrue()
         verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
     }
+
+    @Test
+    fun `a downstream 5xx or timeout is an audited unavailable refusal that drops the cached grant`() {
+        every { exchange.exchange(any(), any(), any()) } returns "exchanged"
+        every { downstream.balances(any(), any()) } throws jakarta.ws.rs.WebApplicationException(503)
+        val out = tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        val refused = out as CustomerReadTools.Outcome.Refused
+        assertThat(refused.unavailable).isTrue()
+        assertThat(refused.invalidateGrant).isTrue()
+    }
+
+    @Test
+    fun `an unexpected exchange failure is an unavailable refusal, never an escape`() {
+        every { exchange.exchange(any(), any(), any()) } throws IllegalStateException("boom")
+        val out = tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+        assertThat((out as CustomerReadTools.Outcome.Refused).unavailable).isTrue()
+        verify(exactly = 0) { downstream.balances(any(), any()) }
+    }
 }

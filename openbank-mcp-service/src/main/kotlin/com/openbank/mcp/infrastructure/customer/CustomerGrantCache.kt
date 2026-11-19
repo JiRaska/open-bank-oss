@@ -40,7 +40,7 @@ class CustomerGrantCache(
         }
     }
 
-    private class Entry(val grants: List<CustomerGrant>, val expiresAt: Instant)
+    private class Entry(val grants: List<CustomerGrant>, val expiresAt: Instant, val storedAt: Instant)
 
     private val entries = ConcurrentHashMap<GrantKey, Entry>()
 
@@ -56,7 +56,7 @@ class CustomerGrantCache(
         val bound = fresh.mapNotNull { it.validTo }.minOrNull()
         val expiresAt = now.plus(ttl).let { if (bound != null && bound.isBefore(it)) bound else it }
         if (entries.size >= maxEntries) evict(now)
-        entries[key] = Entry(fresh, expiresAt)
+        entries[key] = Entry(fresh, expiresAt, now)
         return fresh
     }
 
@@ -64,10 +64,17 @@ class CustomerGrantCache(
         entries.remove(key)
     }
 
+    /** At the cap: drop expired entries first, then the oldest single entries — never the whole cache. */
     private fun evict(now: Instant) {
         entries.entries.removeIf { !now.isBefore(it.value.expiresAt) }
-        if (entries.size >= maxEntries) entries.clear()
+        while (entries.size >= maxEntries) {
+            val oldest = entries.entries.minByOrNull { it.value.storedAt } ?: return
+            entries.remove(oldest.key, oldest.value)
+        }
     }
+
+    /** Test/diagnostic view: whether [key] currently has a stored entry. */
+    internal fun isCached(key: GrantKey): Boolean = entries.containsKey(key)
 
     companion object {
         val MAX_TTL: Duration = Duration.ofSeconds(30)

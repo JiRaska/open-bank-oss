@@ -467,11 +467,17 @@ a stub (T-T2/T-D2).
     `opa test` (10/10; veto and grant check each removed went red) and by `opa eval` against the
     regenerated `mcp-opa-bundle` (must-ALLOW balance read; must-DENY scope escalation,
     propose_payment, operator on the channel; control operator read off-channel ALLOW).
+  - *Unbound exchanged token (accepted, ADR-0383 D4).* The downstream token is a plain bearer, not
+    DPoP-bound. D4 accepts this explicitly: it is in-cluster only and never leaves mcp-service, so its
+    protection is the lifetime (`expires_in` <= 60 s, refused otherwise), the single audience, the
+    single read scope, `azp` = the exchange client (each verified on the answer, a token failing any
+    is refused), and the downstream PDP's read-only rule. A pod-memory or in-cluster network capture
+    therefore yields at most 60 s of reads of one service for one customer.
   - *Fail-closed.* Lookup error, empty grant set, exchange failure (including an unconfigured
-    exchange secret) and a downstream 401/403 are all refusals, audited `DENIED`
+    exchange secret), a downstream 401/403 and a downstream 5xx/timeout are all refusals, audited `DENIED`
     (`UNAVAILABLE` for lookup/exchange outages). Only positive lookups are cached, at most
     `mcp.customer.grant-cache-ttl` (default 15 s, capped at 30 s in code) and never past a grant's
-    `validTo`; a downstream 401/403 drops the entry. Results pass `McpPiiMasker` then
+    `validTo`; a downstream 401/403 or 5xx/timeout drops the entry. With the channel OFF, a customers-realm token is refused 401 `invalid_token` and never served on the anonymous path. At the cache cap, expired entries are evicted first, then the oldest single entries. Results pass `McpPiiMasker` then
     `McpUntrustedData.wrap`, as on the staff path.
   - **Residual, and why the channel stays off:** (1) downstream services validate only the STAFF
     realm today, so an exchanged customers-realm token is refused by balance/transaction-service until

@@ -41,7 +41,12 @@ class KeycloakCustomerTokenExchangeTest {
         every { endpoint.exchange(any(), any(), any(), any(), any(), any(), any(), any()) } returns node
     }
 
-    private val good = mapOf("sub" to subject, "aud" to listOf("openbank-balance-service"))
+    private val good = mapOf(
+        "sub" to subject,
+        "aud" to listOf("openbank-balance-service"),
+        "azp" to "openbank-mcp-service",
+        "scope" to "mcp-customer-balance-read",
+    )
 
     @Test
     fun `a well-formed answer for the customer and audience is accepted`() {
@@ -100,5 +105,26 @@ class KeycloakCustomerTokenExchangeTest {
     fun `with no client secret configured nothing is exchanged`() {
         assertThatThrownBy { exchanger(secret = null).exchange("s", subject, DownstreamAudience.BALANCE) }
             .isInstanceOf(TokenExchangeRefused::class.java).hasMessageContaining("secret")
+    }
+
+    @Test
+    fun `a token carrying a scope beyond the requested read scope is refused`() {
+        respond(answer(jwt(good + ("scope" to "mcp-customer-balance-read accounts:read"))))
+        assertThatThrownBy { exchanger().exchange("s", subject, DownstreamAudience.BALANCE) }
+            .isInstanceOf(TokenExchangeRefused::class.java).hasMessageContaining("beyond")
+    }
+
+    @Test
+    fun `a token without the requested scope is refused`() {
+        respond(answer(jwt(good + ("scope" to "mcp-customer-transaction-read"))))
+        assertThatThrownBy { exchanger().exchange("s", subject, DownstreamAudience.BALANCE) }
+            .isInstanceOf(TokenExchangeRefused::class.java).hasMessageContaining("lacks")
+    }
+
+    @Test
+    fun `a token issued to another client is refused`() {
+        respond(answer(jwt(good + ("azp" to "openbank-services"))))
+        assertThatThrownBy { exchanger().exchange("s", subject, DownstreamAudience.BALANCE) }
+            .isInstanceOf(TokenExchangeRefused::class.java).hasMessageContaining("not issued")
     }
 }

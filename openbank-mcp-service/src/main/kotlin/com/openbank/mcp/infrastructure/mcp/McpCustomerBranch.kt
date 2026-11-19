@@ -198,6 +198,7 @@ internal class McpCustomerBranch(
             Response.ok(McpResponse(id = id, result = result.result)).build()
         }
         is CustomerReadTools.Outcome.Refused -> {
+            if (result.invalidateGrant) grantCache.invalidate(key)
             val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
             audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
             toolError(id, if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)

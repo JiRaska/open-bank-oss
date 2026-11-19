@@ -50,7 +50,13 @@ class CustomerReadTools @Inject constructor(
         /** [grantId] is the grant the call ran under; null for `list_accounts` (it reads no account). */
         data class Allowed(val result: ToolCallResult, val capability: String, val grantId: UUID?) : Outcome
 
-        data class Refused(val reason: String, val capability: String?, val unavailable: Boolean = false) : Outcome
+        /** [invalidateGrant]: the caller drops the cached grant (the read failed after the grant was used). */
+        data class Refused(
+            val reason: String,
+            val capability: String?,
+            val unavailable: Boolean = false,
+            val invalidateGrant: Boolean = false,
+        ) : Outcome
 
         /** The downstream refused the exchanged token: the grant may have changed. Caller invalidates. */
         data class DownstreamRejected(val reason: String, val capability: String) : Outcome
@@ -175,13 +181,18 @@ class CustomerReadTools @Inject constructor(
         return Read(tool, accountId, limit)
     }
 
+    @Suppress("TooGenericExceptionCaught") // every downstream failure must become one audited refusal
     private fun exchangeAndRead(read: Read, caller: Caller, capability: String, grant: CustomerGrant): Outcome {
         val balance = read.tool == GET_BALANCE
         val audience = if (balance) DownstreamAudience.BALANCE else DownstreamAudience.TRANSACTION
         val token = try {
             exchange.exchange(caller.rawToken, caller.subject, audience)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: TokenExchangeRefused) {
             return Outcome.Refused(e.message ?: "token exchange refused", capability, unavailable = true)
+        } catch (e: Exception) {
+            return Outcome.Refused("token exchange failed: ${e.javaClass.simpleName}", capability, unavailable = true)
         }
         val body = try {
             if (balance) {
@@ -192,8 +203,19 @@ class CustomerReadTools @Inject constructor(
             } else {
                 downstream.transactions(token, read.accountId, read.limit)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: DownstreamRefused) {
             return Outcome.DownstreamRejected(e.message ?: "downstream refused", capability)
+        } catch (e: Exception) {
+            // A 5xx, a timeout or a malformed body: refused, audited by the caller, and the cached
+            // grant dropped so the next call re-resolves it rather than retrying on a stale answer.
+            return Outcome.Refused(
+                "downstream read failed: ${e.javaClass.simpleName}",
+                capability,
+                unavailable = true,
+                invalidateGrant = true,
+            )
         }
         return Outcome.Allowed(render(body), capability, grant.grantId)
     }

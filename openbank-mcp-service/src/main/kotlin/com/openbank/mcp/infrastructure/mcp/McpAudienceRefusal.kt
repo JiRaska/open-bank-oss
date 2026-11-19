@@ -17,25 +17,28 @@ import org.jboss.logging.Logger
 internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, private val metrics: McpMetricsPort) {
     private val log = Logger.getLogger(McpAudienceRefusal::class.java)
 
-    fun respond(method: String, params: JsonNode): Response {
+    fun respond(method: String, params: JsonNode, reason: Reason = Reason.FOREIGN_AUDIENCE): Response {
         // The method is caller-supplied and this runs before the NUL guard: bounded and control-free.
-        log.warnf("rejected %s: bearer token audience does not include this server", McpInputBounds.logSafe(method))
+        log.warnf("rejected %s: %s", McpInputBounds.logSafe(method), reason.description)
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
         // Bounded like every other audit write (#16628); a NUL-carrying request is not audited at all.
         if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
             throttle.auditAnonymousCall(
                 McpInputBounds.echo(params.path("name").asText("")),
                 McpInputBounds.auditKeys(params.path("arguments")),
-                "token audience mismatch",
+                reason.auditReason,
             )
         }
         return Response.status(Response.Status.UNAUTHORIZED)
-            .header("WWW-Authenticate", CHALLENGE)
+            .header("WWW-Authenticate", "Bearer error=\"invalid_token\", error_description=\"${reason.description}\"")
             .build()
     }
 
-    private companion object {
-        const val CHALLENGE =
-            "Bearer error=\"invalid_token\", error_description=\"token audience does not include this server\""
+    /** Why a presented token is refused before any method runs. Descriptions are constants, never input. */
+    enum class Reason(val description: String, val auditReason: String) {
+        FOREIGN_AUDIENCE("token audience does not include this server", "token audience mismatch"),
+
+        /** ADR-0383 D1: a customers-realm token while the customer channel is off. */
+        CUSTOMER_CHANNEL_OFF("customer channel is not enabled", "customer channel not enabled"),
     }
 }

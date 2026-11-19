@@ -71,7 +71,8 @@ interface CustomerTokenEndpointClient {
  * otherwise widen what the token can do:
  * - `expires_in` present and at most [MAX_LIFETIME_SECONDS] (ADR-0383 D4: <= 60 s);
  * - the token's `sub` is the customer's — never a different principal;
- * - its `aud` names the requested downstream service.
+ * - its `aud` names the requested downstream service;
+ * - its `azp` is mcp-service's exchange client, and its `scope` is the one read scope asked for.
  * The claims are read without a signature check: the token came from the issuer over the channel
  * mcp-service already trusts for it, and the downstream service verifies the signature itself.
  */
@@ -120,6 +121,15 @@ class KeycloakCustomerTokenExchange @Inject constructor(
         val aud = claims.path("aud")
         val audiences = if (aud.isArray) aud.map { it.asText() } else listOf(aud.asText(""))
         refuseUnless(audience.clientId in audiences, "exchanged token is not for ${audience.clientId}")
+        // Issued to mcp-service's own exchange client, and carrying no scope beyond the one read scope
+        // asked for: a realm that added a default or optional scope would otherwise widen the token.
+        refuseUnless(claims.path("azp").asText(null) == clientId, "exchanged token was not issued to $clientId")
+        val scopes = claims.path("scope").asText("").split(' ').filter { it.isNotBlank() }.toSet()
+        refuseUnless(audience.scope in scopes, "exchanged token lacks the requested scope ${audience.scope}")
+        refuseUnless(
+            (scopes - audience.scope - ALLOWED_EXTRA_SCOPES).isEmpty(),
+            "exchanged token carries scopes beyond ${audience.scope}",
+        )
         return token
     }
 
@@ -140,6 +150,13 @@ class KeycloakCustomerTokenExchange @Inject constructor(
 
     companion object {
         const val MAX_LIFETIME_SECONDS = 60L
+
+        /**
+         * Scopes Keycloak may add on its own that grant no data access. Empty: the requester client
+         * declares no default client scopes (gen-mcp-realm-clients.py), so the exchanged token should
+         * carry exactly the one requested read scope.
+         */
+        val ALLOWED_EXTRA_SCOPES: Set<String> = emptySet()
         private const val JWS_PARTS = 3
         private const val GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
         private const val ACCESS_TOKEN = "urn:ietf:params:oauth:token-type:access_token"

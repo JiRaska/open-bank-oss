@@ -109,6 +109,7 @@ class McpCustomerDelegationIT {
         override fun balances(token: String, accountId: UUID): JsonNode {
             tokens += token
             if (refuse) throw DownstreamRefused(403)
+            if (fail5xx) throw jakarta.ws.rs.WebApplicationException(503)
             return mapper.readTree("""{"accountId":"$accountId","available":"42.00"}""")
         }
 
@@ -122,6 +123,9 @@ class McpCustomerDelegationIT {
 
             @Volatile
             var refuse = false
+
+            @Volatile
+            var fail5xx = false
         }
     }
 
@@ -138,6 +142,7 @@ class McpCustomerDelegationIT {
         Exchange.fail = false
         Downstream.tokens.clear()
         Downstream.refuse = false
+        Downstream.fail5xx = false
         TestPolicyDecisionPoint.customerQueries.clear()
         TestPolicyDecisionPoint.customerDeny = false
         TestPolicyDecisionPoint.customerOutage = false
@@ -233,6 +238,17 @@ class McpCustomerDelegationIT {
         grants.answer = grant(CustomerCapabilities.READ_BALANCES)
         downstream.refuse = true
         call("get_balance").body("result.isError", equalTo(true))
+        val before = grants.asked.size
+        call("get_balance")
+        assertThat(grants.asked.size).isGreaterThan(before)
+    }
+
+    @Test
+    fun `a downstream 5xx is an audited refusal and drops the cached grant`() {
+        grants.answer = grant(CustomerCapabilities.READ_BALANCES)
+        Downstream.fail5xx = true
+        call("get_balance").body("result.content[0].text", equalTo("Authorization unavailable"))
+        assertThat(recorder.events.last().result).isEqualTo(AuditResult.DENIED)
         val before = grants.asked.size
         call("get_balance")
         assertThat(grants.asked.size).isGreaterThan(before)

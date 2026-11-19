@@ -104,4 +104,31 @@ class CustomerGrantCacheTest {
         assertThatThrownBy { CustomerGrantCache(source, Duration.ofSeconds(31), clock) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `at the cap it evicts expired entries first, then only the oldest, never everything`() {
+        val small = CustomerGrantCache(source, Duration.ofSeconds(15), clock, maxEntries = 3)
+        source.answer = { listOf(grant()) }
+        val expiring = key.copy(partyId = UUID.randomUUID())
+        source.answer = { listOf(grant(validTo = clock.now.plusSeconds(1))) }
+        small.grants(expiring)
+        source.answer = { listOf(grant()) }
+        val k1 = key.copy(partyId = UUID.randomUUID())
+        val k2 = key.copy(partyId = UUID.randomUUID())
+        clock.now = clock.now.plusSeconds(1)
+        small.grants(k1)
+        clock.now = clock.now.plusMillis(1)
+        small.grants(k2)
+        // Full (3) — the expired entry goes first; k1 and k2 survive.
+        val k3 = key.copy(partyId = UUID.randomUUID())
+        small.grants(k3)
+        assertThat(small.isCached(expiring)).isFalse()
+        assertThat(listOf(k1, k2, k3).map { small.isCached(it) }).containsOnly(true)
+        // Full again with nothing expired — only the oldest (k1) is dropped.
+        clock.now = clock.now.plusMillis(1)
+        val k4 = key.copy(partyId = UUID.randomUUID())
+        small.grants(k4)
+        assertThat(small.isCached(k1)).isFalse()
+        assertThat(listOf(k2, k3, k4).map { small.isCached(it) }).containsOnly(true)
+    }
 }
