@@ -10,6 +10,7 @@ import com.openbank.psd2.application.port.out.TransactionServiceClient
 import com.openbank.psd2.domain.model.DomesticCzPayment
 import com.openbank.psd2.domain.model.ObAccountRef
 import com.openbank.psd2.domain.model.ObAmount
+import com.openbank.psd2.domain.model.PaymentInitiationResponse
 import com.openbank.psd2.domain.model.PaymentProduct
 import com.openbank.psd2.domain.model.SipoPayment
 import io.mockk.coVerify
@@ -52,14 +53,14 @@ class PaymentSymbolValidationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["0", "0308", "1234567890"])
-    fun `one to ten digits pass the symbol check`(good: String) {
+    fun `one to ten digits pass for VS and SS`(good: String) {
         // Boundary: reaches consent (mock unstubbed throws MockKException), i.e. past the symbol check.
-        val thrown = runCatching { run(PaymentProduct.DOMESTIC_CZ, domestic(vs = good, ss = good, ks = good)) }
+        val thrown = runCatching { run(PaymentProduct.DOMESTIC_CZ, domestic(vs = good, ss = good, ks = "0308")) }
             .exceptionOrNull()
         assertThat(thrown).isNotInstanceOf(Psd2RequestFormatException::class.java)
     }
 
-    private fun run(product: PaymentProduct, payment: Any) = runBlocking {
+    private fun run(product: PaymentProduct, payment: Any): PaymentInitiationResponse = runBlocking {
         service.initiatePayment(InitiatePaymentCommand("tpp-1", "consent-1", product, payment, "idem-1"))
     }
 
@@ -84,4 +85,21 @@ class PaymentSymbolValidationTest {
         msisdn = null,
         currency = "CZK",
     )
+
+    @ParameterizedTest
+    @ValueSource(strings = ["", " "])
+    fun `a blank symbol is treated as absent, as it was before this check`(blank: String) {
+        val thrown = runCatching { run(PaymentProduct.DOMESTIC_CZ, domestic(vs = blank, ss = blank, ks = blank)) }
+            .exceptionOrNull()
+        assertThat(thrown).isNotInstanceOf(Psd2RequestFormatException::class.java)
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `the constant symbol stops at four digits, as the domestic-payment column does`() {
+        val four = runCatching { run(PaymentProduct.DOMESTIC_CZ, domestic(ks = "9999")) }.exceptionOrNull()
+        assertThat(four).isNotInstanceOf(Psd2RequestFormatException::class.java)
+        assertThatThrownBy { run(PaymentProduct.DOMESTIC_CZ, domestic(ks = "12345")) }
+            .isInstanceOf(Psd2RequestFormatException::class.java)
+            .hasMessageContaining("constantSymbol must be 1-4")
+    }
 }

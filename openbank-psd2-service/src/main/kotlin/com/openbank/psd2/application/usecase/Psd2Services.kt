@@ -296,22 +296,24 @@ class PaymentInitiationService(
 }
 
 /**
- * VS/SS/KS are 1-10 ASCII digits (libs-domain [CzechPaymentSymbol]). Checked before consent, like
- * the CZK rule, so a malformed symbol is a 400 and never joins the remittance string downstream.
+ * VS/SS are 1-10 ASCII digits and KS 1-4 (libs-domain [CzechPaymentSymbol]; KS matches the
+ * domestic-payment column). Checked before consent, like the CZK rule, so a malformed symbol is a
+ * 400 and never joins the remittance string downstream. Blank is "no symbol": TPPs send "" for an
+ * unused field, and that was accepted before this check existed.
  */
 internal fun requireValidPaymentSymbols(payment: Any) {
     val symbols = when (payment) {
         is DomesticCzPayment -> listOf(
-            "variableSymbol" to payment.variableSymbol,
-            "specificSymbol" to payment.specificSymbol,
-            "constantSymbol" to payment.constantSymbol,
+            CzechPaymentSymbol.VARIABLE to payment.variableSymbol,
+            CzechPaymentSymbol.SPECIFIC to payment.specificSymbol,
+            CzechPaymentSymbol.CONSTANT to payment.constantSymbol,
         )
-        is SipoPayment -> listOf("variableSymbol" to payment.variableSymbol)
+        is SipoPayment -> listOf(CzechPaymentSymbol.VARIABLE to payment.variableSymbol)
         else -> emptyList()
     }
-    for ((field, value) in symbols) {
-        if (value != null && !CzechPaymentSymbol.isValid(value)) {
-            throw Psd2RequestFormatException("$field must be 1-${CzechPaymentSymbol.MAX_LENGTH} digits")
+    for ((kind, value) in symbols) {
+        if (!value.isNullOrBlank() && !kind.isValid(value.trim())) {
+            throw Psd2RequestFormatException("${kind.fieldName} must be 1-${kind.maxLength} digits")
         }
     }
 }
