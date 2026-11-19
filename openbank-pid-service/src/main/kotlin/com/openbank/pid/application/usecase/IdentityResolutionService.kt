@@ -114,13 +114,10 @@ class IdentityResolutionService(
      */
     fun computeBlindIndex(birthNumberRaw: String): String? {
         val pepper = pepperHex.orElse("").takeIf { it.isNotBlank() } ?: return null
-        val rc = RodneCislo.parse(birthNumberRaw)
-        if (rc !is RodneCislo.Parsed || isFuture(rc)) return null
+        val rc = RodneCislo.parse(birthNumberRaw, LocalDate.now(clock))
+        if (rc !is RodneCislo.Parsed) return null
         return BlindIndex.compute(pepper.decodeHex(), rc.canonical)
     }
-
-    /** [RodneCislo] is clock-free, so a not-yet-happened birthdate parses as valid; reject it here. */
-    private fun isFuture(rc: RodneCislo.Parsed): Boolean = rc.birthdate.isAfter(LocalDate.now(clock))
 
     // ── internal ─────────────────────────────────────────────────────────────────
 
@@ -146,7 +143,7 @@ class IdentityResolutionService(
             return null
         }
 
-        val rcResult = RodneCislo.parse(raw)
+        val rcResult = RodneCislo.parse(raw, LocalDate.now(clock))
         if (rcResult is RodneCislo.Invalid) {
             Log.warn(
                 "IdentityResolutionService: RČ parse failed (${rcResult.reason}) — " +
@@ -155,12 +152,6 @@ class IdentityResolutionService(
             return null
         }
         val rc = rcResult as RodneCislo.Parsed
-        if (isFuture(rc)) {
-            Log.warn(
-                "IdentityResolutionService: RČ birthdate is in the future — skipping tier-1, falling through to tier-2",
-            )
-            return null
-        }
 
         val pepperBytes = pepper.decodeHex()
         val blindIndex = BlindIndex.compute(pepperBytes, rc.canonical)

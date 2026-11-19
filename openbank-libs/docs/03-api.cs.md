@@ -73,6 +73,10 @@ nikdy nevyhodí výjimku.
 Odmítá čísla, která nikdy nebyla vydána: 9místný tvar po roce 1953, výjimku „zbytek 10 → 0“
 po roce 1985 a měsíc +20/+70 před rokem 2004.
 
+`parse(raw)` kontroluje jen strukturu: neodmítá datum narození v budoucnosti. Kdo přijímá osobu,
+volá `parse(raw, today)` (`today = LocalDate.now(clock)`), které pro datum narození po `today` vrací
+`Invalid("birthdate is in the future")`; stejné přetížení má `isValid`.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin

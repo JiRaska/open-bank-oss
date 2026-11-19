@@ -267,15 +267,9 @@ class PartyService : PartyUseCase {
         return BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical) to RC_KEY_VERSION
     }
 
-    /**
-     * A birth number this service accepts as a person's: well-formed AND not for a birthdate that has
-     * not happened yet. [RodneCislo] is clock-free and parses a 10-digit number with year digits 27..53 as
-     * 2027..2053, so the future check lives here, against the service clock.
-     */
-    private fun parseBirthNumber(raw: String): RodneCislo.Parsed? {
-        val rc = RodneCislo.parse(raw) as? RodneCislo.Parsed ?: return null
-        return rc.takeUnless { it.birthdate.isAfter(LocalDate.now(clock)) }
-    }
+    /** A birth number accepted as a person's: well-formed and not dated after today (service clock). */
+    private fun parseBirthNumber(raw: String): RodneCislo.Parsed? =
+        RodneCislo.parse(raw, LocalDate.now(clock)) as? RodneCislo.Parsed
 
     override fun isDedupAvailable(): Boolean = rcPepper.filter { it.isNotBlank() }.isPresent
 

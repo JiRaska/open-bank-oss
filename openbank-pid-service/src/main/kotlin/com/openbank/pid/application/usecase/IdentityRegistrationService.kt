@@ -163,16 +163,9 @@ class IdentityRegistrationService(
             )
             return null
         }
-        val parsed = RodneCislo.parse(raw)
+        val parsed = RodneCislo.parse(raw, LocalDate.now(clock))
         if (parsed !is RodneCislo.Parsed) {
-            Log.warn("IdentityRegistrationService: RČ unparseable — registering without the RČ blind index")
-            return null
-        }
-        // RodneCislo is clock-free: a 10-digit number for a date that has not happened yet parses as valid.
-        if (parsed.birthdate.isAfter(LocalDate.now(clock))) {
-            Log.warn(
-                "IdentityRegistrationService: RČ birthdate is in the future — registering without the RČ blind index",
-            )
+            Log.warn("IdentityRegistrationService: RČ invalid or future-dated — registering without the RČ blind index")
             return null
         }
         return BlindIndex.compute(pepper.decodeHex(), parsed.canonical)
