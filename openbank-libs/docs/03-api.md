@@ -65,8 +65,9 @@ Odmítá čísla, která nikdy nebyla vydána: 9místný tvar po roce 1953, výj
 po roce 1985 a měsíc +20/+70 před rokem 2004.
 
 `parse(raw)` kontroluje jen strukturu: neodmítá datum narození v budoucnosti. Kdo přijímá osobu,
-volá `parse(raw, today)` (`today = LocalDate.now(clock)`), které pro datum narození po `today` vrací
-`Invalid("birthdate is in the future")`; stejné přetížení má `isValid`.
+volá `parse(raw, clock)` (a `isValid(raw, clock)`) s vlastními hodinami `Clock`: „dnešek“ si libs počítá
+v `Europe/Prague`, protože rodné číslo je české občanské datum, a pro pozdější datum narození vrací
+`Invalid("birthdate is in the future")`.
 
 ## domain/identifiers — typesafe IDs
 

@@ -6,7 +6,10 @@ package com.openbank.libs.identity
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 class RodneCisloTest {
 
@@ -137,17 +140,20 @@ class RodneCisloTest {
         assertThat(RodneCislo.parse(arabic)).isInstanceOf(RodneCislo.Invalid::class.java)
     }
 
-    // ── future-birthdate rule (overload with today) ───────────────────────────────
+    // ── future-birthdate rule (overload with a Clock; business zone Europe/Prague) ──
+
+    private fun clockAt(instant: String): Clock = Clock.fixed(Instant.parse(instant), ZoneOffset.UTC)
 
     private val today = LocalDate.of(2026, 11, 19)
+    private val noon = clockAt("2026-11-19T12:00:00Z")
 
     // Synthetic checksum-valid number for [d], built from parts (no literal birth number in source).
-    private fun tenDigit(d: LocalDate): String {
+    private fun tenDigit(d: LocalDate, checkOffset: Int = 0): String {
         val head = "%02d%02d%02d".format(d.year % 100, d.monthValue, d.dayOfMonth)
         for (suffix in 100..999) {
             val nine = head + suffix
             val r = (nine.toLong() % 11).toInt()
-            if (r != 10) return nine + r
+            if (r != 10) return nine + (r + checkOffset) % 10
         }
         error("no valid suffix")
     }
@@ -157,34 +163,52 @@ class RodneCisloTest {
 
     @Test
     fun `10-digit number dated tomorrow is Invalid with the future reason`() {
-        val r = RodneCislo.parse(tenDigit(today.plusDays(1)), today)
+        val r = RodneCislo.parse(tenDigit(today.plusDays(1)), noon)
         assertThat(r).isEqualTo(RodneCislo.Invalid("birthdate is in the future"))
-        assertThat(RodneCislo.isValid(tenDigit(today.plusDays(1)), today)).isFalse()
+        assertThat(RodneCislo.isValid(tenDigit(today.plusDays(1)), noon)).isFalse()
     }
 
     @Test
     fun `10-digit number dated today or in the distant past is Parsed`() {
-        assertThat(RodneCislo.parse(tenDigit(today), today)).isInstanceOf(RodneCislo.Parsed::class.java)
-        assertThat(RodneCislo.parse(tenDigit(LocalDate.of(1960, 3, 4)), today))
+        assertThat(RodneCislo.parse(tenDigit(today), noon)).isInstanceOf(RodneCislo.Parsed::class.java)
+        assertThat(RodneCislo.parse(tenDigit(LocalDate.of(1960, 3, 4)), noon))
             .isInstanceOf(RodneCislo.Parsed::class.java)
-        assertThat(RodneCislo.isValid(tenDigit(today), today)).isTrue()
-        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(1960, 3, 4)), today)).isTrue()
+        assertThat(RodneCislo.isValid(tenDigit(today), noon)).isTrue()
+        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(1960, 3, 4)), noon)).isTrue()
     }
 
     @Test
-    fun `9-digit number is judged against today too`() {
-        // 9-digit numbers exist only for birth years up to 1953, so with today before that the date is future.
+    fun `9-digit number is judged against the clock too`() {
+        // 9-digit numbers exist only for birth years up to 1953, so with a 1950 clock the date is future.
+        val early = clockAt("1950-06-15T12:00:00Z")
         val earlyToday = LocalDate.of(1950, 6, 15)
-        assertThat(RodneCislo.parse(nineDigit(earlyToday.plusDays(1)), earlyToday))
+        assertThat(RodneCislo.parse(nineDigit(earlyToday.plusDays(1)), early))
             .isEqualTo(RodneCislo.Invalid("birthdate is in the future"))
-        assertThat(RodneCislo.parse(nineDigit(earlyToday), earlyToday)).isInstanceOf(RodneCislo.Parsed::class.java)
-        assertThat(RodneCislo.parse(nineDigit(LocalDate.of(1930, 1, 2)), today))
+        assertThat(RodneCislo.parse(nineDigit(earlyToday), early)).isInstanceOf(RodneCislo.Parsed::class.java)
+        assertThat(RodneCislo.parse(nineDigit(LocalDate.of(1930, 1, 2)), noon))
             .isInstanceOf(RodneCislo.Parsed::class.java)
     }
 
     @Test
-    fun `a structurally invalid number keeps its structural reason, not the future one`() {
-        assertThat(RodneCislo.parse("12345", today)).isEqualTo(RodneCislo.parse("12345"))
+    fun `winter - a child born in Prague today at 00-30 CET is valid while the UTC date is still yesterday`() {
+        val clock = clockAt("2026-11-19T23:30:00Z") // 00:30 CET on 2026-11-20
+        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(2026, 11, 20)), clock)).isTrue()
+        assertThat(RodneCislo.parse(tenDigit(LocalDate.of(2026, 11, 21)), clock))
+            .isEqualTo(RodneCislo.Invalid("birthdate is in the future"))
+    }
+
+    @Test
+    fun `summer - a child born in Prague today at 00-30 CEST is valid while the UTC date is still yesterday`() {
+        val clock = clockAt("2026-07-19T22:30:00Z") // 00:30 CEST on 2026-07-20
+        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(2026, 7, 20)), clock)).isTrue()
+        assertThat(RodneCislo.isValid(tenDigit(LocalDate.of(2026, 7, 21)), clock)).isFalse()
+    }
+
+    @Test
+    fun `structure is checked before the date - a future number with a broken checksum keeps the checksum reason`() {
+        val future = today.plusDays(1)
+        assertThat(RodneCislo.parse(tenDigit(future, checkOffset = 1), noon))
+            .isEqualTo(RodneCislo.Invalid("checksum mismatch"))
     }
 
     @Test
