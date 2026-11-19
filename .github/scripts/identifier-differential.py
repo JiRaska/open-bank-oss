@@ -214,6 +214,8 @@ def _vat_birthdate(v: str):
     try:
         if cc == "CZ" and len(n) in (9, 10):
             return _rc_birthdate(n)
+        if cc == "SK" and len(n) == 10 and not _sk_official(n):
+            return _rc_birthdate(n)           # the RČ branch of stdnum.sk.dph
         if cc == "BG" and len(n) == 10:
             return std_bg_egn.get_birth_date(n)
         if cc == "LV" and len(n) == 11 and n[0] in "0123":
@@ -242,9 +244,9 @@ def _eu_vat_divergence(v: str):
         return ("Belgian check digits are 97 - (first eight digits mod 97); stdnum accepts any congruent pair, "
                 "including 98 and 99")
     if cc == "SK" and national.isdigit() and len(national) == 10 and not _sk_official(national):
-        # stdnum.sk.dph accepts a birth number before it applies the official rule, and its own
-        # source says it is unclear whether that is allowed. The official rule is the oracle.
-        return "stdnum accepts a Slovak RČ as a VAT number though its source calls that unclear; the official rule fails"
+        # stdnum.sk.dph accepts EITHER the official rule OR a Slovak birth number (RČ). The RČ branch is kept,
+        # judged by the strict RČ rules (and the future bound) like every other RČ
+        return _rc_divergence(national)
     return None
 
 
@@ -295,7 +297,7 @@ KNOWN_DEFECTS = {
     "currency-bgn": ("#16821", "currency", lambda v: v == "BGN"),
     "isin-prefix-not-iso3166": ("#16773", "isin", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
-for _cc, _issue in (("CZ", "#16896"), ("BG", "#16897"), ("LV", "#16897"), ("RO", "#16897")):
+for _cc, _issue in (("CZ", "#16896"), ("SK", "#16897"), ("BG", "#16897"), ("LV", "#16897"), ("RO", "#16897")):
     KNOWN_DEFECTS[f"eu-vat-future-birthdate-{_cc}"] = (
         _issue, "eu-vat", (lambda cc: lambda v: v[:2] == cc and (_vat_birthdate(v) or AS_OF) > AS_OF)(_cc))
 for _cc in _EU_VAT_SHAPE_ONLY:

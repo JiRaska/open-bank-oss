@@ -152,6 +152,28 @@
       "policy": "spec"
     },
     {
+      "value": "SK7605060001",
+      "valid": true,
+      "rule": "SK natural person: a valid Slovak birth number is accepted (stdnum.sk.dph accepts RČ or the official rule)",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "SK0331010009",
+      "valid": false,
+      "rule": "SK natural person: a never-issued birth number (+20 month in 2003) is rejected",
+      "stdnum_divergence": "stdnum accepts the +20 month before 2004; see #16748",
+      "known_defect": {
+        "issue": "#16897",
+        "current": true,
+        "why": "kyb's SK check is mod 11 only; the RČ branch is not judged by the RČ rules yet"
+      },
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
       "value": "C248215732",
       "valid": false,
       "rule": "digit in country prefix",
