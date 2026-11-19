@@ -18,6 +18,9 @@
 #                   string, ISO 4217 or not (libs-domain `CurrencyCode` knows the list).
 #   isin-regex      `[A-Z]{2}[A-Z0-9]{9}` — an ISIN shape check, which accepts every wrong check
 #                   digit and every non-ISO-3166 prefix.
+#   rc-structure-only  `RodneCislo.parse(x)` / `isValid(x)` with ONE argument: structure only, it accepts
+#                   a birth number for a date that has not happened. Callers that accept a person use
+#                   the overload with `today`; the baseline holds the legitimate structure-only callers.
 #   currency-jdk    `java.util.Currency.getInstance` as a check — it knows WITHDRAWN codes
 #                   (DEM, FRF, CSK), so it accepts currencies that no longer exist.
 #
@@ -51,6 +54,9 @@ PATTERNS = {
     "currency-regex": re.compile(r"\[A-Z\]\{3\}"),
     "isin-regex": re.compile(r"\[A-Z\]\{2\}\[A-Z0-9\]\{9\}"),
     "currency-jdk": re.compile(r"Currency\.getInstance|getAvailableCurrencies"),
+    # RodneCislo.parse/isValid with ONE argument checks structure only and does not reject a birthdate
+    # in the future; a caller that accepts a person passes `today` (the clock stays with the caller)
+    "rc-structure-only": re.compile(r"RodneCislo\.(?:parse|isValid)\(\s*[^,()\n]+(?:\([^()\n]*\))?[^,()\n]*\)"),
 }
 OWNER = "openbank-libs-domain/"
 BASELINE = pathlib.Path(".github/gates/identifier-validator-baseline.json")
@@ -78,11 +84,11 @@ def compare(counts, baseline):
         have, allowed = counts.get(cat, {}), baseline.get(cat, {})
         for f, n in sorted(have.items()):
             if n > allowed.get(f, 0):
-                problems.append(
-                    f"NEW {cat}: {f} has {n} (baseline {allowed.get(f, 0)}) — validate with "
-                    "openbank-libs-domain (Iban / CzechAccountNumber / RodneCislo / "
-                    "CurrencyCode) instead of a hand-rolled copy"
-                )
+                hint = ("pass `today`: RodneCislo.parse(raw, LocalDate.now(clock)); the one-argument form is structure "
+                        "only and accepts a birthdate in the future" if cat == "rc-structure-only" else
+                        "validate with openbank-libs-domain (Iban / CzechAccountNumber / RodneCislo / CurrencyCode) "
+                        "instead of a hand-rolled copy")
+                problems.append(f"NEW {cat}: {f} has {n} (baseline {allowed.get(f, 0)}) — {hint}")
         for f, n in sorted(allowed.items()):
             if have.get(f, 0) < n:
                 problems.append(
@@ -128,6 +134,9 @@ def self_test() -> int:
             ("second currency regex", 'val C2 = Regex("^[A-Z]{3}$")\n', 1),
             ("named-constant mod-97", "for (d in s) r = (r * 10 + d) % MOD_97\n", 1),
             ("named-constant modulus 97", "val x = n % MODULUS_97\n", 1),
+            ("new one-arg RodneCislo.parse", "val rc = RodneCislo.parse(raw)\n", 1),
+            ("new one-arg RodneCislo.isValid", "if (RodneCislo.isValid(n)) x()\n", 1),
+            ("two-arg RodneCislo.parse with a call is fine", "val rc = RodneCislo.parse(raw, LocalDate.now(clock))\n", 0),
             ("not a mod-97: 1997", "val year = 1997\n", 0),
             ("not a mod-97: MOD_970", "val k = MOD_970\n", 0),
         ]

@@ -64,5 +64,11 @@
   },
   "mod97": {
     "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 7
+  },
+  "rc-structure-only": {
+    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt": 2,
+    "openbank-party-service/src/main/kotlin/com/openbank/party/application/usecase/PartyService.kt": 3,
+    "openbank-pid-service/src/main/kotlin/com/openbank/pid/application/usecase/IdentityRegistrationService.kt": 1,
+    "openbank-pid-service/src/main/kotlin/com/openbank/pid/application/usecase/IdentityResolutionService.kt": 2
   }
 }
