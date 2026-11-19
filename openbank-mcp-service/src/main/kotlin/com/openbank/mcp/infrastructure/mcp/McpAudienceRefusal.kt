@@ -37,7 +37,12 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
         val call = method == "tools/call" && !McpInputBounds.containsNul(params)
         val windowed = reason == Reason.CUSTOMER_CHANNEL_OFF
         val auditable = call && (!windowed || throttle.shouldAuditRefusal(CHANNEL_OFF_AUDIT_KEY + (source ?: UNKNOWN)))
-        if (call && windowed && !auditable) metrics.auditSuppressed(McpMetricsPort.AuditSuppression.CUSTOMER_CHANNEL_OFF)
+        if (call &&
+            windowed &&
+            !auditable
+        ) {
+            metrics.auditSuppressed(McpMetricsPort.AuditSuppression.CUSTOMER_CHANNEL_OFF)
+        }
         if (auditable) {
             throttle.auditAnonymousCall(
                 McpInputBounds.echo(params.path("name").asText("")),

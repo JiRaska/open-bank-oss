@@ -85,7 +85,9 @@ class McpCustomerChannelOffIT {
             )
             repeat(times) {
                 given().contentType(ContentType.JSON).header("Authorization", "DPoP t")
-                    .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""")
+                    .body(
+                        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""",
+                    )
                     .post("/mcp").then().statusCode(401)
             }
         }
