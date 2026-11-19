@@ -28,7 +28,11 @@ enum class IdentifierScheme(val country: String?, val displayName: String, val p
     NL_KVK("NL", "KVK-nummer", Regex("^\\d{8}$"), checksum = false),
     LEI(null, "LEI", Regex("^[A-Z0-9]{18}\\d{2}$"), checksum = true),
     EUID(null, "EUID", Regex("^[A-Z]{2}[A-Z0-9]{1,10}\\.[A-Z0-9.\\-]{1,30}$"), checksum = false),
-    EU_VAT(null, "VAT", Regex("^[A-Z]{2}[A-Z0-9]{2,12}$"), checksum = true),
+
+    // The national part is 2..13 characters: the longest forms are the 13-digit RO CNP of a natural
+    // person (stdnum/ro/cf.py `validate`), then 12 for NL, SE, LT and XI; the shape check runs before
+    // any rule, so a cap below 13 would make the RO natural-person rule unreachable through parse.
+    EU_VAT(null, "VAT", Regex("^[A-Z]{2}[A-Z0-9]{2,13}$"), checksum = true),
     DUNS(null, "DUNS", Regex("^\\d{9}$"), checksum = false),
     ;
 
