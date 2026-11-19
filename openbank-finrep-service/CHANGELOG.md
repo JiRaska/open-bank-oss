@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.2...finrep-service-v0.20.0) (2026-11-19)
+
+
+### Features
+
+* **finrep:** enable OpenTelemetry tracing + trace contract ([#16752](https://github.com/JiRaska/open-bank-oss/issues/16752)) ([621c287](https://github.com/JiRaska/open-bank-oss/commit/621c287c64c09f687c1010723cb5ed5c839cd011))
+
 ## [0.19.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.1...finrep-service-v0.19.2) (2026-11-16)
 
 
