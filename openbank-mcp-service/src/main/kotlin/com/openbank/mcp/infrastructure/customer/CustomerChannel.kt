@@ -123,7 +123,12 @@ class CustomerChannel @Inject constructor(
             }
             // The replay store is a security control: an unauthenticated Valkey lets anything that
             // reaches it delete claims (reopening replay) or reset budgets.
-            check(settings.redisPassword.filter { it.isNotBlank() }.isPresent || hostsCarryPassword(settings.redisHosts)) {
+            check(
+                settings.redisPassword.filter {
+                    it.isNotBlank()
+                }.isPresent ||
+                    hostsCarryPassword(settings.redisHosts),
+            ) {
                 "mcp.customer.shared-store=valkey but no Valkey password is configured (quarkus.redis.password)"
             }
             val secret = settings.keyHmacSecret.filter { it.isNotBlank() }.orElseThrow {
@@ -148,11 +153,12 @@ class CustomerChannel @Inject constructor(
         /** True when every configured host URI carries a non-empty password in its user-info. */
         fun hostsCarryPassword(hosts: Optional<String>): Boolean {
             val list = hosts.map { h -> h.split(',').map(String::trim).filter(String::isNotEmpty) }.orElse(emptyList())
-            return list.isNotEmpty() && list.all { host ->
-                runCatching { URI(host).rawUserInfo }.getOrNull()
-                    ?.substringAfter(':', "")
-                    ?.isNotEmpty() == true
-            }
+            return list.isNotEmpty() &&
+                list.all { host ->
+                    runCatching { URI(host).rawUserInfo }.getOrNull()
+                        ?.substringAfter(':', "")
+                        ?.isNotEmpty() == true
+                }
         }
 
         @Suppress("TooGenericExceptionCaught") // any parser failure must become a boot refusal, see below

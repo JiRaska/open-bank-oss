@@ -223,6 +223,11 @@ openbao:
     - pricing-console
     - pricing-service
     - temporal/db
+  unprovisioned:
+    - names: [mcp-service/customer-store]
+      reason: "customer MCP channel store secrets (Valkey requirepass + key HMAC secret); the channel is off and mcp-valkey stays down until the owner writes both properties (05-operations, customer-store-externalsecret.yaml)"
+      issue: 16590
+      review_by: 2027-01-31
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
