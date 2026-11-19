@@ -27,13 +27,10 @@ import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
-import io.restassured.RestAssured.given
-import io.restassured.http.ContentType
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.OffsetDateTime
@@ -48,7 +45,9 @@ import java.util.UUID
  * `@Consumer` scopes this class to mcp-service's pact; the event pacts stay with
  * [DelegationEventPactFolderProviderVerificationTest], which skips HTTP interactions.
  * The caller is presented as mcp-service's own verified service-account (azp + preferred_username),
- * the only identity the handler admits.
+ * the only identity the handler admits. The negative half (a non-mcp caller is refused 403) lives
+ * in [McpClientGrantIdentityGuardIT]: a plain `@Test` here cannot resolve the
+ * [PactVerificationContext] the `@BeforeEach` takes.
  */
 @QuarkusTest
 @TestProfile(DelegationMcpClientGrantPactFolderProviderVerificationTest.ResolverDouble::class)
@@ -80,27 +79,6 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         context?.verifyInteraction()
-    }
-
-    /**
-     * The negative half of the contract (ADR-0279 #3): a caller that is NOT mcp-service's own
-     * service-account must be refused by the handler's in-code identity guard, or the pact above
-     * would stay green even if the provider stopped enforcing authz.
-     */
-    @Test
-    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])
-    @OidcSecurity(
-        claims = [
-            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
-            Claim(key = "azp", value = "openbank-services"),
-            Claim(key = "preferred_username", value = "service-account-openbank-services"),
-        ],
-    )
-    fun `a caller that is not mcp-service is refused 403`() {
-        given().port(testPort.toInt()).contentType(ContentType.JSON)
-            .body("""{"grantorPartyId":"$PARTY","clientId":"$CLIENT","keyThumbprint":"$JKT"}""")
-            .post("/api/v1/delegations/mcp-client/resolve")
-            .then().statusCode(403)
     }
 
     /** Enables [FakeResolver] for this class only (a Kotlin bean class is final, so no QuarkusMock). */
