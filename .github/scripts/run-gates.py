@@ -607,10 +607,18 @@ def _trace_mode() -> str:
 def _selftest_trace_file(gate, is_pr: bool):
     """(trace_file or None, note). Tracing is opt-in via OB_SELFTEST_TRACE (CI sets `require`)."""
     mode = _trace_mode()
-    # Pull requests only. A finding fails only there (see execute), and tracing costs ~2x the
-    # self-test time (measured over the estate: 420 s -> 919 s), which main need not pay to
-    # produce warnings: the PR that introduces an undeclared read is where it is caught.
-    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs") or not is_pr:
+    # Every event, push to main included (#16895). This used to be pull-request-only, on the
+    # argument that tracing costs ~2x the self-test time (estate: 420 s -> 919 s) and that the PR
+    # introducing an undeclared read is where it gets caught. The second half is false: a
+    # corpus-walking self-test starts reading a NEW file when an unrelated PR adds one (#16621
+    # added e2e/mcp-harness/; three self-tests read it), and that PR need not touch the gate, so
+    # its own run skips the self-test. main then stayed green while every later PR touching those
+    # shards went red, and the merge train blamed them. Red on main at the commit that caused
+    # the drift is the point. The cost is paid per shard, inside the 2x traced timeout already
+    # granted below, and is excluded from the budget comparison (traced_cost) -- the same
+    # envelope every PR touching run-gates.py already runs in, since that traces all self-tests.
+    del is_pr  # kept in the signature: callers pass it, and the event no longer decides
+    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs"):
         return None, ""
     # A self-test that drives Gradle (a daemon plus forked JVMs) does not finish under `strace -f`
     # within the shard timeout: test-provenance-cache's ran >10 min traced and the shard was
@@ -731,10 +739,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
             if trace_file and (rc == 0) == want_pass:
                 found = _judge_trace(gate, root, trace_file, r, buf)
-                # Tracing happens only on a pull request (_selftest_trace_file), where a self-test
-                # runs because the gate or its declared inputs changed — the moment a new
-                # undeclared read is introduced. Never on main: there a scanning self-test's
-                # corpus grows with no one touching the gate, and that must not turn main red.
+                # Fails on every event, push to main included (#16895): a scanning self-test's
+                # corpus grows with no one touching the gate, and main must go red at the commit
+                # that grew it, not leave the red to whichever PR next runs the self-test.
                 undeclared_fail = found
         finally:
             if trace_file:
@@ -1935,6 +1942,32 @@ def self_test():
                 bad.append("require mode fails a gate that opted out with selftest_trace: false")
             if not _trace_refused(g, None):
                 bad.append("require mode no longer fails a gate whose self-test could not be traced")
+            # #16895: a push to main traces too, and an undeclared read there FAILS the gate.
+            # Before the fix both held only on a pull request, so main stayed green over drift.
+            pushed, _ = _selftest_trace_file(g, False)
+            if not pushed:
+                bad.append("a self-test was not traced on a push event (main hides drift)")
+            else:
+                os.unlink(pushed)
+            saved_argv, saved_analyse = sit.strace_argv, sit.analyse
+            try:
+                sit.strace_argv = lambda _f: []
+                sit.analyse = lambda *_a, **_k: (["undeclared/read.txt"], [], [])
+                (tmp / "declared").mkdir(exist_ok=True)
+                (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                    "gates:\n  - id: u\n    name: u\n    group: t\n    run: \"true\"\n"
+                    "    selftest: \"true\"\n    selftest_expect: pass\n"
+                    "    selftest_inputs: [declared/]\n"
+                )
+                gu = load(tmp)[0]
+                for pr in (True, False):
+                    ru = execute(gu, tmp, is_pr=pr, timeout=5)
+                    if ru.status != "failed" or "undeclared/read.txt" not in ru.output:
+                        bad.append(f"undeclared self-test read did not fail the gate "
+                                   f"(is_pr={pr}): got {ru.status}")
+                man.write_text(SELF_TEST_MANIFEST)
+            finally:
+                sit.strace_argv, sit.analyse = saved_argv, saved_analyse
         finally:
             sit.strace_usable = saved_usable
             if saved_mode is None:
