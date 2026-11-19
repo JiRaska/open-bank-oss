@@ -146,3 +146,10 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## API identity on the mTLS listener
 
 In production, `/api/*` accepts only bearer authentication, on both the plain HTTP listener and the client-authenticated mTLS listener, and requires an authenticated caller. A trusted client certificate is required for the TLS handshake on the mTLS listener but is transport authentication only: it cannot replace the caller's OIDC bearer token, so a certificate without a bearer receives HTTP 401. `GET /api/v1/info` and `GET /api/v1/config` remain public metadata. Route roles and OPA still decide what an authenticated caller may do. `StandingOrderListenerAuthParityIT` uses the production listener shape and verifies over real HTTP that a certificate-only request receives 401.
+
+## Debtor IBAN on a SEPA execution
+
+`debtor_iban` is a copy taken when the order was created. account-service can re-issue an account's number
+while keeping its id, so at execution `StandingOrderDueConsumer` asks account-service for the debit account's
+current number by id and uses it. The stored copy is only the fallback when account-service cannot answer, so
+an outage never blocks a due order.

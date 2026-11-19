@@ -134,3 +134,10 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Identita API na mTLS listeneru
 
 V produkci `/api/*` přijímá pouze bearer autentizaci, a to na prostém HTTP listeneru i na mTLS listeneru s ověřením klienta, a vyžaduje přihlášeného volajícího. Důvěryhodný klientský certifikát je na mTLS listeneru podmínkou TLS spojení, ale slouží jen k autentizaci transportu: nenahrazuje OIDC bearer token volajícího, takže certifikát bez beareru dostane HTTP 401. `GET /api/v1/info` a `GET /api/v1/config` zůstávají veřejná metadata. Role endpointu a OPA nadále rozhodují, co smí přihlášený volající dělat. `StandingOrderListenerAuthParityIT` používá produkční podobu listenerů a přes skutečné HTTP ověřuje, že požadavek pouze s certifikátem dostane 401.
+
+## IBAN plátce při provedení SEPA příkazu
+
+`debtor_iban` je kopie pořízená při vzniku příkazu. account-service může číslo účtu vydat znovu a zachovat
+jeho id, proto `StandingOrderDueConsumer` při provedení zjistí aktuální číslo debetního účtu podle id a použije
+ho. Uložená kopie slouží jen jako záloha, když account-service neodpoví, takže výpadek nikdy nezablokuje
+splatný příkaz.

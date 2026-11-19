@@ -183,3 +183,13 @@ before it expires; without a reload period the process would keep presenting the
 the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
 After a renewal the new certificate is in use within an hour, with no restart. The
 `tls-certificate-reload` gate keeps every such configuration covered.
+
+## Account number re-issue (V35)
+
+An early generator issued CZ account numbers that pass IBAN mod-97 but fail the CNB mod-11 check, and
+domestic-payment refuses such numbers. `AccountNumberReissueJob` (`openbank.account.number-reissue.enabled`,
+off by default, `interval` 10m) re-issues every one with `IbanGenerator`. Per account, in one transaction: the
+number changes, a row goes to `account_number_reissue` (old, new, reason, time) and an `AccountNumberReissued`
+event goes to the outbox. The account id, owner and balance do not change. The job is idempotent: it acts only
+on numbers that fail the check. The gauge `openbank.account.number_invalid` is re-counted from the store after
+every pass; it must read 0, and -1 means not measured yet. Rollback is in the header of `V35`.

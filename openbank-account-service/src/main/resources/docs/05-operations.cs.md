@@ -182,3 +182,13 @@ obnoví před expirací; bez této volby by proces dál předkládal ten starý,
 neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
 se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
 žádná taková konfigurace nevypadla.
+
+## Přečíslování účtů (V35)
+
+Starý generátor vydával české účty, které projdou IBAN mod-97, ale neprojdou kontrolou ČNB mod-11, a
+domestic-payment je odmítá. `AccountNumberReissueJob` (`openbank.account.number-reissue.enabled`, ve
+výchozím stavu vypnutý, `interval` 10 min) každé takové číslo vydá znovu přes `IbanGenerator`. Pro každý účet
+v jedné transakci: změní se číslo, zapíše se řádek do `account_number_reissue` (staré, nové, důvod, čas) a do
+outboxu událost `AccountNumberReissued`. Id účtu, majitel ani zůstatek se nemění. Job je idempotentní: sahá jen
+na čísla, která kontrolou neprojdou. Gauge `openbank.account.number_invalid` se po každém průchodu přepočítá
+ze store a musí ukázat 0; -1 znamená „ještě neměřeno". Rollback je v hlavičce `V35`.
