@@ -200,3 +200,7 @@ operator's word.
   today, so its exit cannot be recorded and it stays monitored (#15992).
 - A case approved while screening was off is not monitored.
 - No operator screen exists in the admin UI yet. The four routes above are the reviewer surface.
+
+## EU VAT check digits (#16748)
+
+`EU_VAT` identifiers are checked against the national check digit for CZ, SK, PL, DE, FR and AT before any register is asked; other prefixes pass on format. CZ DIČ is CZ + IČO, CZ + rodné číslo, or the special 6xxxxxxxx form. FR accepts Monaco SIRENs (prefix 000) and alphanumeric keys on format. Stored identifiers are restored without re-running the checksum, so a tightened rule never makes an onboarded case unreadable.

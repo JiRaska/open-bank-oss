@@ -49,6 +49,7 @@ import base64
 import importlib.util
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -143,57 +144,205 @@ def directory_manifests(root, rev, path):
     return files
 
 
+SYMLINK_MODE = "120000"
+JSONNET = re.compile(r"\.(jsonnet|libsonnet)$")
+
+
+def tree_modes(root, rev, paths):
+    """{path: mode} for exactly the given repo paths at `rev` (one ls-tree call; missing paths
+    are simply absent). Paths are passed literally, never resolved through the filesystem."""
+    paths = sorted({p for p in paths if p and p != "."})
+    if not paths:
+        return {}
+    out = {}
+    for line in git(root, "ls-tree", "-z", "--full-tree", rev, "--", *paths).split("\0"):
+        if line:
+            meta, _, name = line.partition("\t")
+            if name in paths:  # ls-tree also lists siblings of intermediate directories
+                out[name] = meta.split()[0]
+    return out
+
+
+def prefixes(path):
+    parts = [p for p in path.split("/") if p]
+    return ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+
+
+def assert_component_tree(root, rev, component):
+    """Fail closed when the component directory, any directory above it, or any entry anywhere
+    beneath it is a symlink (Argo's repo-server follows links git stores as blobs, so the bytes
+    this checker copies would not be the bytes Argo renders), or when it carries jsonnet."""
+    path = f"{COMPONENTS_DIR}/{component}"
+    for name, mode in tree_modes(root, rev, prefixes(path)).items():
+        if mode == SYMLINK_MODE:
+            raise PinError(f"{component}: {name} is a symlink at {rev[:12]}; fail closed")
+    try:
+        listing = git(root, "ls-tree", "-r", "-t", "-z", f"{rev}:{path}").split("\0")
+    except PinError as error:
+        raise PinError(f"{path} does not exist at {rev[:12]}") from error
+    for line in listing:
+        if not line:
+            continue
+        meta, _, name = line.partition("\t")
+        if meta.split()[0] == SYMLINK_MODE:
+            raise PinError(f"{component}: {path}/{name} is a symlink at {rev[:12]}; fail closed")
+        if JSONNET.search(name):
+            raise PinError(f"{component}: {path}/{name} is jsonnet at {rev[:12]}; Argo may evaluate "
+                           f"it, a derived pin cannot reproduce that; fail closed")
+
+
 def component_files(root, rev, component):
     """The manifest copy for a pin: admin-ui (declared) copies its whole directory as slice 1
     did; a derived component copies what Argo renders from its directory."""
     path = f"{COMPONENTS_DIR}/{component}"
+    if not COMPONENT.fullmatch(component):
+        raise PinError(f"{component!r} is not a valid component name")
+    assert_component_tree(root, rev, component)
     if component in PINNABLE:
         return tree_files(root, rev, path)
     return directory_manifests(root, rev, path)
 
 
+# Manifests are loaded with a loader that knows only the YAML core schema. Anything else
+# (!!binary, !!timestamp, !!set, !!python/*, custom tags, `<<` merge keys, duplicate keys) is a
+# place where what this checker parses and what kustomize/Argo parse can disagree, so it is a
+# parse failure and the component is not pinnable.
+CORE_TAGS = {f"tag:yaml.org,2002:{t}": c for t, c in (
+    ("str", yaml.SafeLoader.construct_yaml_str), ("int", yaml.SafeLoader.construct_yaml_int),
+    ("float", yaml.SafeLoader.construct_yaml_float), ("bool", yaml.SafeLoader.construct_yaml_bool),
+    ("null", yaml.SafeLoader.construct_yaml_null), ("map", yaml.SafeLoader.construct_yaml_map),
+    ("seq", yaml.SafeLoader.construct_yaml_seq))}
+
+
+class StrictLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        if isinstance(node, yaml.MappingNode):
+            seen = set()
+            for key_node, _ in node.value:
+                key = self.construct_object(key_node, deep=True)
+                try:
+                    duplicate = key in seen
+                except TypeError as error:
+                    raise yaml.constructor.ConstructorError(
+                        None, None, f"unhashable mapping key {key!r}", key_node.start_mark) from error
+                if duplicate:
+                    raise yaml.constructor.ConstructorError(
+                        None, None, f"duplicate mapping key {key!r}", key_node.start_mark)
+                seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
+def _reject_tag(loader, node):
+    raise yaml.constructor.ConstructorError(None, None, f"tag {node.tag!r} is outside the core "
+                                            f"schema", node.start_mark)
+
+
+StrictLoader.yaml_constructors = dict(CORE_TAGS)
+StrictLoader.yaml_constructors[None] = _reject_tag
+StrictLoader.yaml_multi_constructors = {}
+StrictLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag in CORE_TAGS]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()}
+
+
+def _no_duplicate_pairs(pairs):
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError(f"duplicate JSON key in {keys}")
+    return dict(pairs)
+
+
+def _scalars(obj, path=(), stack=()):
+    """(position, text) for EVERY string scalar in a parsed document: mapping keys and values,
+    sequence items, at any depth. Positions, not identities: an alias that repeats a scalar
+    yields it once per place it appears. bytes are decoded; a self-referencing alias raises."""
+    if isinstance(obj, (dict, list)):
+        if id(obj) in stack or len(stack) > 200:
+            raise ValueError("recursive or too deeply nested document")
+        stack = stack + (id(obj),)
+        items = obj.items() if isinstance(obj, dict) else enumerate(obj)
+        for k, v in items:
+            if isinstance(obj, dict):
+                yield from _scalars(k, path + (("<key>", repr(k)),), stack)
+            yield from _scalars(v, path + (k,), stack)
+    elif isinstance(obj, (bytes, bytearray)):
+        yield path, bytes(obj).decode("latin-1")
+    elif isinstance(obj, str):
+        yield path, obj
+
+
 def _pod_spec(doc):
+    """(pod spec, its position in doc) for a pod-bearing kind, else (None, None)."""
     kind = doc.get("kind")
     spec = doc.get("spec")
     if not isinstance(spec, dict):
-        return None
+        return None, None
     if kind == "Pod":
-        return spec
+        return spec, ("spec",)
+    path = ("spec",)
     if kind == "CronJob":
         spec = ((spec.get("jobTemplate") or {}).get("spec") or {})
+        path = ("spec", "jobTemplate", "spec")
     elif kind not in POD_TEMPLATE_KINDS:
-        return None
+        return None, None
     template = spec.get("template") if isinstance(spec, dict) else None
-    return template.get("spec") if isinstance(template, dict) else None
+    if not isinstance(template, dict) or not isinstance(template.get("spec"), dict):
+        return None, None
+    return template["spec"], path + ("template", "spec")
 
 
-def _doc_images(doc):
-    """Image strings a parsed manifest document attributes to a container (or a kustomization
-    `images:` entry). `kind: List` is walked."""
+def _doc_images(doc, path=()):
+    """(position, image) for every image string a parsed manifest document attributes to a
+    container (or a kustomization `images:` entry). `kind: List` is walked."""
     if isinstance(doc, list):
-        return [i for d in doc for i in _doc_images(d)]
+        return [x for i, d in enumerate(doc) for x in _doc_images(d, path + (i,))]
     if not isinstance(doc, dict):
         return []
     if doc.get("kind") == "List":
-        return _doc_images(doc.get("items") or [])
+        items = doc.get("items") or []
+        return [x for i, d in enumerate(items if isinstance(items, list) else [])
+                for x in _doc_images(d, path + ("items", i))]
     if doc.get("kind") == "Kustomization":
-        return [v for e in doc.get("images") or [] if isinstance(e, dict)
-                for v in (e.get("name"), e.get("newName")) if isinstance(v, str)]
-    pod = _pod_spec(doc)
+        images = doc.get("images") or []
+        return [(path + ("images", i, f), e[f]) for i, e in enumerate(images if isinstance(images, list) else [])
+                if isinstance(e, dict) for f in ("name", "newName") if isinstance(e.get(f), str)]
+    pod, pod_path = _pod_spec(doc)
     if not isinstance(pod, dict):
         return []
-    return [c["image"] for key in CONTAINER_KEYS for c in pod.get(key) or []
-            if isinstance(c, dict) and isinstance(c.get("image"), str)]
+    out = []
+    for key in CONTAINER_KEYS:
+        containers = pod.get(key) or []
+        for i, c in enumerate(containers if isinstance(containers, list) else []):
+            if isinstance(c, dict) and isinstance(c.get("image"), str):
+                out.append((path + pod_path + (key, i, "image"), c["image"]))
+    return out
+
+
+def _mentions_registry(text):
+    return REGISTRY in text.lower()
 
 
 def parse_images(name, data):
-    """Every container image the file `name` declares, or None when it cannot be parsed."""
+    """Every container image the file `name` declares, or None when it cannot be parsed or
+    when ANY string scalar anywhere in it mentions the fleet registry at a position that is
+    not an attributed container/initContainer/ephemeralContainer image or kustomize
+    `images:` entry (annotation, env value, ConfigMap data, an alias of an image, a key...)."""
     try:
         text = data.decode("utf-8")
-        docs = [json.loads(text)] if name.endswith(".json") else list(yaml.safe_load_all(text))
-    except (UnicodeDecodeError, ValueError, yaml.YAMLError):
+        if name.endswith(".json"):
+            docs = [json.loads(text, object_pairs_hook=_no_duplicate_pairs)]
+        else:
+            docs = list(yaml.load_all(text, Loader=StrictLoader))
+        images = []
+        for d in docs:
+            attributed = dict(_doc_images(d))
+            for position, scalar in _scalars(d):
+                if _mentions_registry(scalar) and attributed.get(position) != scalar:
+                    return None
+            images.extend(attributed.values())
+    except (UnicodeDecodeError, ValueError, RecursionError, yaml.YAMLError):
         return None
-    return [i for d in docs for i in _doc_images(d)]
+    return images
 
 
 def derived_image(files):
@@ -205,8 +354,9 @@ def derived_image(files):
         images = parse_images(name, data)
         if images is None:
             return None
-        fleet = [i for i in images if REGISTRY in i]
-        if data.count(REGISTRY.encode()) != len(fleet):
+        fleet = [i for i in images if _mentions_registry(i)]
+        # Second, independent guard: the raw byte count must agree with the parsed one.
+        if data.lower().count(REGISTRY.encode()) != len(fleet):
             return None
         for image in fleet:
             match = FLEET_REF.fullmatch(image)
@@ -325,54 +475,246 @@ def check_hold(component, pin, holds, image_changed):
 # top-level manifests, which is what a PLAIN directory source renders; recurse/include/exclude
 # (or jsonnet/plugin/kustomize/helm options) would make main render a different set, so the
 # contract asserts their absence rather than assuming it.
-APPS_DIRS = ("openbank-infra/gitops/apps", "openbank-infra/gitops/bootstrap")
+GITOPS_DIR = "openbank-infra/gitops"
+THIS_REPO = "github.com/jiraska/open-bank-oss"
+APP_KINDS = ("Application", "ApplicationSet")
+SOURCE_OPTIONS = ("directory", "helm", "kustomize", "plugin", "chart")
+
+
+def normalise_repo(url):
+    """Repository identity of an Argo repoURL: scheme, user, `.git`, case and slashes dropped."""
+    u = str(url or "").strip().lower()
+    u = re.sub(r"^[a-z+]+://", "", u)
+    u = re.sub(r"^[^@/]+@", "", u)
+    u = u.replace(":", "/", 1) if re.match(r"^[^/]+:[^0-9]", u) else u
+    u = u.rstrip("/")
+    return u[:-4] if u.endswith(".git") else u
+
+
+def normalise_path(path):
+    """A source path the way Argo resolves it against the repo root. Backslashes are NOT
+    rewritten: a path holding one fails closed in assert_argo_sources_safe instead."""
+    p = posixpath.normpath(str(path if path is not None else "") or ".")
+    p = p.lstrip("/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p.rstrip("/") or "."
+
+
+def _source_dicts(obj):
+    """Every dict under a `source:` key or in a `sources:` list, at any depth, with a flag for
+    being one of several (multi-source). ApplicationSet templates and generator-level
+    templates are all found this way."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "source" and isinstance(v, dict):
+                yield v, False
+            elif k == "sources" and isinstance(v, list):
+                yield from ((s, True) for s in v if isinstance(s, dict))
+            yield from _source_dicts(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _source_dicts(v)
+
+
+def _may_hold_application(data):
+    # Cheap prefilter over ~1000 files. A document whose kind is Application/ApplicationSet
+    # contains the literal word unless it is spelled through an escape (backslash), a tag
+    # (`!`), or a non-UTF-8 encoding; all of those are parsed rather than skipped.
+    return (b"Application" in data or b"\\" in data or b"!" in data
+            or data[:2] in (b"\xff\xfe", b"\xfe\xff") or b"\x00" in data)
+
 
 def application_sources(root, rev):
-    """[(file, source dict)] for every Argo Application source under APPS_DIRS at `rev`."""
+    """[(file, source dict, multi_source)] for every Argo Application and ApplicationSet source
+    (spec.source, spec.sources[], templates at any depth) anywhere under GITOPS_DIR at `rev`."""
+    return [(name, src, multi) for name, doc in application_docs(root, rev)
+            for src, multi in _source_dicts(doc.get("spec") or {})]
+
+
+def application_docs(root, rev):
+    """[(file, doc)] for every Argo Application/ApplicationSet document under GITOPS_DIR."""
     out = []
-    for base in APPS_DIRS:
-        try:
-            names = git(root, "ls-tree", "-r", "--name-only", rev, f"{base}/").split()
-        except PinError:
+    listing = git(root, "ls-tree", "-r", rev, f"{GITOPS_DIR}/")
+    blobs = []
+    for line in listing.splitlines():
+        meta, _, name = line.partition("\t")
+        parts = meta.split()
+        if len(parts) == 3 and parts[1] == "blob" and re.search(r"\.(ya?ml|json)$", name):
+            blobs.append((name, parts[2]))
+    if not blobs:
+        return out
+    batch = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"], check=True,
+                           input="".join(f"{sha}\n" for _, sha in blobs).encode(),
+                           capture_output=True).stdout
+    offset = 0
+    for name, _sha in blobs:
+        header_end = batch.index(b"\n", offset)
+        size = int(batch[offset:header_end].split()[2])
+        data = batch[header_end + 1:header_end + 1 + size]
+        offset = header_end + 1 + size + 1
+        if not _may_hold_application(data):
             continue
-        for name in names:
-            if not re.search(r"\.ya?ml$", name):
+        try:
+            text = data.decode("utf-8")
+            docs = ([json.loads(text)] if name.endswith(".json")
+                    else list(yaml.load_all(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))))
+        except (UnicodeDecodeError, ValueError, yaml.YAMLError) as error:
+            raise PinError(f"{name} at {rev[:12]} does not parse: {error}") from error
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") not in APP_KINDS:
                 continue
-            try:
-                docs = list(yaml.safe_load_all(git(root, "show", f"{rev}:{name}")))
-            except yaml.YAMLError as error:
-                raise PinError(f"{name} at {rev[:12]} does not parse: {error}") from error
-            for doc in docs:
-                if not isinstance(doc, dict) or doc.get("kind") != "Application":
-                    continue
-                spec = doc.get("spec") or {}
-                sources = ([spec["source"]] if isinstance(spec.get("source"), dict) else []) + [
-                    s for s in spec.get("sources") or [] if isinstance(s, dict)]
-                out.extend((name, src) for src in sources)
+            out.append((name, doc))
     return out
 
 
 def assert_plain_directory_source(root, rev, component):
-    """Raise unless every Application rendering components/<component> (or pins/<component>)
-    does so as a plain, non-recursive directory, and at least one does."""
+    """Raise unless every Application/ApplicationSet source rendering components/<component>
+    (or pins/<component>) does so as this repo's plain, non-recursive, single source, and at
+    least one does. Paths are normalised as Argo resolves them; a source from any other
+    repoURL that resolves to the component path fails closed."""
     targets = {f"{COMPONENTS_DIR}/{component}", f"{PINS_DIR}/{component}"}
     found = 0
-    for name, src in application_sources(root, rev):
-        if str(src.get("path", "")).rstrip("/") not in targets:
-            continue
-        found += 1
-        extra = [k for k in ("directory", "helm", "kustomize", "plugin", "chart") if k in src]
+    for name, src, multi in application_sources(root, rev):
+        path = normalise_path(src.get("path"))
+        options = [k for k in SOURCE_OPTIONS if k in src]
         directory = src.get("directory")
-        if extra == ["directory"] and isinstance(directory, dict) and not {
-                k: v for k, v in directory.items() if v not in (None, False, "", {}, [])}:
+        plain = options == [] or (options == ["directory"] and isinstance(directory, dict) and not {
+            k: v for k, v in directory.items() if v not in (None, False, "", {}, [])})
+        if path not in targets:
+            # A recursing parent directory renders the component too.
+            recurse = isinstance(directory, dict) and directory.get("recurse") not in (None, False, "", "false")
+            if recurse and any(t.startswith("" if path == "." else path + "/") for t in targets):
+                raise PinError(f"{component}: {name} renders {src.get('path')!r} recursively, which "
+                               f"includes the component; a derived pin cannot reproduce that")
             continue
-        if extra:
-            raise PinError(f"{component}: {name} renders {src.get('path')} with source options "
-                           f"{extra} ({directory!r}); a derived pin copies only the plain top-level "
+        if normalise_repo(src.get("repoURL")) != THIS_REPO:
+            raise PinError(f"{component}: {name} has a source at {src.get('path')!r} from repoURL "
+                           f"{src.get('repoURL')!r}, not this repository; fail closed")
+        found += 1
+        if multi:
+            raise PinError(f"{component}: {name} renders {src.get('path')!r} as one of several "
+                           f"sources; a derived pin renders as a single source")
+        if not plain:
+            raise PinError(f"{component}: {name} renders {src.get('path')!r} with source options "
+                           f"{options} ({directory!r}); a derived pin copies only the plain top-level "
                            f"directory, so it would not render what main renders")
     if not found:
-        raise PinError(f"{component}: no Argo Application under {', '.join(APPS_DIRS)} renders "
+        raise PinError(f"{component}: no Argo Application under {GITOPS_DIR} renders "
                        f"{COMPONENTS_DIR}/{component} at {rev[:12]}")
+
+
+# ApplicationSet generators whose output this checker does not evaluate. Argo is never
+# emulated: if one of them could reach a target path, the component is not pinnable.
+OPAQUE_GENERATORS = ("git", "matrix", "merge", "plugin", "scmProvider", "clusterDecisionResource")
+GLOB = re.compile(r"[*?\[{]")
+
+
+def static_prefix(path):
+    """The directory part of `path` before its first template or glob character, normalised;
+    None when nothing static precedes it (the path could be anywhere)."""
+    raw = str(path or "")
+    cut = min([i for i in (raw.find("{{"), *(m.start() for m in [GLOB.search(raw)] if m)) if i >= 0],
+              default=None)
+    if cut is None:
+        return normalise_path(raw)
+    head = raw[:cut]
+    head = head[:head.rfind("/") + 1] if "/" in head else ""
+    p = normalise_path(head)
+    return None if p == "." else p
+
+
+def _covers(prefix, target):
+    return prefix is None or prefix == "." or target == prefix or target.startswith(prefix + "/")
+
+
+def _generators(obj):
+    """Every generator mapping under spec.generators, including those nested in matrix/merge."""
+    if isinstance(obj, list):
+        for g in obj:
+            yield from _generators(g)
+    elif isinstance(obj, dict):
+        for kind, body in obj.items():
+            if kind in ("matrix", "merge") and isinstance(body, dict):
+                yield kind, body
+                yield from _generators(body.get("generators") or [])
+            elif kind != "selector":
+                yield kind, body
+
+
+def assert_argo_sources_safe(root, rev, component):
+    """Fail closed on every Argo construct whose rendered source path this checker would have
+    to emulate: templated path/repoURL, templatePatch, opaque generators over the component, a
+    backslash or a symlink in a source path, or jsonnet options on a source of the component."""
+    targets = {f"{COMPONENTS_DIR}/{component}", f"{PINS_DIR}/{component}"}
+    docs = application_docs(root, rev)
+    raw_paths = set()
+    for name, doc in docs:
+        spec = doc.get("spec") or {}
+        appset = doc.get("kind") == "ApplicationSet"
+        if appset and "templatePatch" in spec:
+            raise PinError(f"{component}: {name} is an ApplicationSet with templatePatch, which can "
+                           f"rewrite any source path; fail closed")
+        template_prefixes = []
+        for src, _ in _source_dicts(spec):
+            raw = str(src.get("path") if src.get("path") is not None else "")
+            repo = str(src.get("repoURL") or "")
+            if "\\" in raw:
+                raise PinError(f"{component}: {name} has a source path with a backslash ({raw!r}); "
+                               f"fail closed")
+            templated = "{{" in raw or "{{" in repo
+            prefix = static_prefix(raw)
+            if templated:
+                if prefix is None:
+                    raise PinError(f"{component}: {name} has a templated source path {raw!r} with no "
+                                   f"static prefix; it may render anything under {GITOPS_DIR}; fail closed")
+                if any(_covers(prefix, t) for t in targets):
+                    raise PinError(f"{component}: {name} has a templated source ({raw!r}, repoURL "
+                                   f"{repo!r}) whose static prefix {prefix!r} covers the component; "
+                                   f"fail closed")
+            else:
+                raw_paths.add(raw)
+            template_prefixes.append(prefix)
+            if normalise_path(raw) in targets:
+                directory = src.get("directory")
+                if isinstance(directory, dict) and "jsonnet" in directory:
+                    raise PinError(f"{component}: {name} renders {raw!r} with jsonnet options; fail closed")
+        if not appset:
+            continue
+        for kind, body in _generators(spec.get("generators") or []):
+            if kind not in OPAQUE_GENERATORS:
+                continue
+            gen_prefixes = list(template_prefixes)
+            if kind == "git" and isinstance(body, dict):
+                for entry in (body.get("directories") or []) + (body.get("files") or []):
+                    p = entry.get("path") if isinstance(entry, dict) else None
+                    if p is not None and "\\" in str(p):
+                        raise PinError(f"{component}: {name} has a git generator path with a "
+                                       f"backslash ({p!r}); fail closed")
+                    gen_prefixes.append(static_prefix(p))
+            for prefix in gen_prefixes:
+                if any(_covers(prefix, t) for t in targets):
+                    raise PinError(f"{component}: {name} has a {kind} generator whose static path "
+                                   f"{prefix!r} covers the component; a derived pin cannot emulate "
+                                   f"what it generates; fail closed")
+    # Resolve every static source path against the git tree, literally: any symlinked
+    # component of it can make Argo render the component from a path this checker never matched.
+    wanted = set()
+    for raw in raw_paths:
+        segs = []
+        for seg in raw.split("/"):
+            if seg == "..":
+                break
+            if seg not in ("", "."):
+                segs.append(seg)
+        wanted.update(prefixes("/".join(segs)))
+        norm = normalise_path(raw)
+        if norm != ".":
+            wanted.update(prefixes(norm))
+    for name, mode in tree_modes(root, rev, wanted).items():
+        if mode == SYMLINK_MODE:
+            raise PinError(f"{component}: Argo source path component {name} is a symlink at "
+                           f"{rev[:12]}; fail closed")
 
 
 def tip_contract(root, component, pin, old, main_rev):
@@ -384,6 +726,7 @@ def tip_contract(root, component, pin, old, main_rev):
     if pin["image"] != tip_image:
         raise PinError(f"{component}: image {pin['image']!r} is not the image the component runs on "
                        f"main now ({tip_image!r})")
+    assert_argo_sources_safe(root, main_rev, component)
     if component not in PINNABLE:
         assert_plain_directory_source(root, main_rev, component)
     if old is None:
@@ -508,6 +851,7 @@ def check_state(root, rev, main_rev):
         if pin["image"] != pinnable_image(component, tip_files):
             raise PinError(f"{component}: image {pin['image']!r} is not the image the component "
                            f"runs on main now")
+        assert_argo_sources_safe(root, main_rev, component)
         if component not in PINNABLE:
             assert_plain_directory_source(root, main_rev, component)
         check_hold(component, pin, holds, image_changed=False)
@@ -661,6 +1005,7 @@ def self_test():
         apps = root / "openbank-infra/gitops/apps"
         apps.mkdir(parents=True)
         aml_app = ("kind: Application\nspec:\n  source:\n    targetRevision: main\n"
+                   "    repoURL: git@github.com:JiRaska/open-bank-oss.git\n"
                    f"    path: {COMPONENTS_DIR}/aml\n")
         (apps / "aml.yaml").write_text(aml_app)
         multi = root / COMPONENTS_DIR / "payments"
@@ -767,11 +1112,142 @@ def self_test():
         run("commit", "-qam", "plain app")
         expect("plain directory source with empty options", a1, svc_files("aml", tip(), m4, "t1", d1), ok=True)
 
+        # Path normalisation, repoURL, multi-source and ApplicationSet: each variant renders
+        # the component on Argo and must reach the option check rather than escape it.
+        repo = "    repoURL: https://github.com/JiRaska/open-bank-oss\n"
+        recurse = "    directory:\n      recurse: true\n"
+        elsewhere = root / "openbank-infra/gitops/clusters/x"
+        elsewhere.mkdir(parents=True)
+        for label, where, body, fragment in (
+                ("leading ./ path", "apps", f"kind: Application\nspec:\n  source:\n{repo}"
+                 f"    path: ./{COMPONENTS_DIR}/aml\n{recurse}", "source options"),
+                ("double-slash trailing-slash path", "apps", "kind: Application\nspec:\n  source:\n"
+                 f"{repo}    path: openbank-infra//gitops/components/aml/\n{recurse}", "source options"),
+                ("dot-dot path", "apps", "kind: Application\nspec:\n  source:\n"
+                 f"{repo}    path: {COMPONENTS_DIR}/../components/aml\n{recurse}", "source options"),
+                ("multi-source", "apps", "kind: Application\nspec:\n  sources:\n"
+                 f"    - repoURL: https://github.com/JiRaska/open-bank-oss\n      path: {COMPONENTS_DIR}/aml\n"
+                 "    - repoURL: https://github.com/JiRaska/open-bank-oss\n      path: pins/aml\n",
+                 "several sources"),
+                ("ApplicationSet template", "clusters", "kind: ApplicationSet\nspec:\n  generators: []\n"
+                 "  template:\n    spec:\n      source:\n        repoURL: https://github.com/JiRaska/open-bank-oss\n"
+                 f"        path: {COMPONENTS_DIR}/aml\n        directory:\n          recurse: true\n",
+                 "source options"),
+                ("foreign repoURL", "clusters", "kind: Application\nspec:\n  source:\n"
+                 f"    repoURL: https://github.com/evil/fork\n    path: {COMPONENTS_DIR}/aml\n",
+                 "not this repository"),
+                ("recursing parent directory", "clusters", "kind: Application\nspec:\n  source:\n"
+                 f"{repo}    path: openbank-infra/gitops/components\n{recurse}", "recursively")):
+            extra_app = (apps if where == "apps" else elsewhere) / "extra.yaml"
+            extra_app.write_text(body)
+            run("add", "-A")
+            run("commit", "-qm", f"argo variant {label}")
+            expect(f"argo {label}", a1, svc_files("aml", tip(), m4, "t1", d1), ok=False, fragment=fragment)
+            extra_app.unlink()
+            run("add", "-A")
+            run("commit", "-qm", f"drop {label}")
+        expect("plain directory source after variants", a1, svc_files("aml", tip(), m4, "t1", d1), ok=True)
+
+        # Round 3: constructs whose rendered path Argo computes and this checker does not.
+        # Each must fail closed; none is emulated.
+        appset = ("kind: ApplicationSet\nspec:\n  generators:\n{gens}  template:\n    spec:\n"
+                  "      source:\n        repoURL: {repo}\n        path: {path}\n{extra}")
+        listgen = "    - list:\n        elements: [{a: b}]\n"
+        gitgen = "    - git:\n        repoURL: x\n        directories:\n          - path: " \
+                 f"{COMPONENTS_DIR}/*\n"
+        ours = "https://github.com/JiRaska/open-bank-oss"
+        for label, body, fragment in (
+                ("templated path", appset.format(gens=listgen, repo=ours, extra="",
+                 path=f"'{COMPONENTS_DIR}/{{{{name}}}}'"), "templated source"),
+                ("templated path without static prefix", appset.format(gens=listgen, repo=ours, extra="",
+                 path="'{{path}}'"), "no static prefix"),
+                ("templated repoURL", appset.format(gens=listgen, repo="'{{repo}}'", extra="",
+                 path=f"{COMPONENTS_DIR}/aml"), "templated source"),
+                ("templatePatch", appset.format(gens=listgen, repo=ours, path="openbank-infra/gitops/apps",
+                 extra="  templatePatch: '{}'\n"), "templatePatch"),
+                ("git directories generator over components/*", appset.format(
+                    gens=gitgen, repo=ours, extra="", path="openbank-infra/gitops/apps"), "git generator"),
+                ("matrix generator", appset.format(gens="    - matrix:\n        generators:\n"
+                 "          - list: {elements: []}\n", repo=ours, extra="",
+                 path=f"{COMPONENTS_DIR}/aml"), "matrix generator"),
+                ("plugin generator over the parent", appset.format(gens="    - plugin: {configMapRef: "
+                 "{name: x}}\n", repo=ours, extra="", path=COMPONENTS_DIR), "plugin generator"),
+                ("backslash path", "kind: Application\nspec:\n  source:\n"
+                 f"{repo}    path: 'openbank-infra\\gitops\\components\\aml'\n", "backslash"),
+                ("jsonnet source option", "kind: Application\nspec:\n  source:\n"
+                 f"{repo}    path: {COMPONENTS_DIR}/aml\n    directory:\n      jsonnet: {{libs: [x]}}\n",
+                 "jsonnet options")):
+            extra_app = elsewhere / "round3.yaml"
+            extra_app.write_text(body)
+            run("add", "-A")
+            run("commit", "-qm", f"round3 {label}")
+            expect(f"argo {label}", a1, svc_files("aml", tip(), m4, "t1", d1), ok=False,
+                   fragment=fragment)
+            extra_app.unlink()
+            run("add", "-A")
+            run("commit", "-qm", f"drop {label}")
+        unrelated = appset.format(gens=listgen, repo=ours, extra="", path="'openbank-infra/gitops/other/{{n}}'")
+        (elsewhere / "round3.yaml").write_text(unrelated)
+        run("add", "-A")
+        run("commit", "-qm", "unrelated templated appset")
+        expect("templated ApplicationSet elsewhere does not block aml", a1, svc_files("aml", tip(), m4, "t1", d1), ok=True)
+        (elsewhere / "round3.yaml").unlink()
+        run("add", "-A")
+        run("commit", "-qm", "drop unrelated appset")
+
+        # Jsonnet file and symlinks in the component tree, or in a source path.
+        def tree_case(label, mutate, undo, fragment):
+            pin_now = svc_files("aml", tip(), m4, "t1", d1)
+            mutate()
+            run("add", "-A")
+            run("commit", "-qm", f"tree {label}")
+            expect(f"tree {label}", a1, pin_now, ok=False, fragment=fragment)
+            try:
+                render(root, "aml", tip(), m4, "t1", d1)
+                failures.append(f"render {label}: expected rejection, got a pin")
+            except PinError as error:
+                if fragment not in str(error):
+                    failures.append(f"render {label}: wrong reason {error}")
+            undo()
+            run("add", "-A")
+            run("commit", "-qm", f"undo {label}")
+        tree_case("jsonnet file", lambda: (aml / "x.jsonnet").write_text("{}\n"),
+                  lambda: (aml / "x.jsonnet").unlink(), "jsonnet")
+        tree_case("libsonnet in a subdirectory", lambda: (aml / "policy" / "l.libsonnet").write_text("{}\n"),
+                  lambda: (aml / "policy" / "l.libsonnet").unlink(), "jsonnet")
+        tree_case("symlinked manifest file", lambda: (aml / "link.yaml").symlink_to("aml-service.yaml"),
+                  lambda: (aml / "link.yaml").unlink(), "symlink")
+        tree_case("symlink to a non-manifest", lambda: (aml / "notes.txt").symlink_to("/etc/passwd"),
+                  lambda: (aml / "notes.txt").unlink(), "symlink")
+        real_aml = root / "aml-real"
+
+        def link_dir():
+            aml.rename(real_aml)
+            aml.symlink_to(real_aml)
+
+        def unlink_dir():
+            aml.unlink()
+            real_aml.rename(aml)
+        tree_case("symlinked component dir", link_dir, unlink_dir, "symlink")
+        pin_now = svc_files("aml", tip(), m4, "t1", d1)
+        (root / "openbank-infra/gitops/alias").symlink_to("components")
+        (elsewhere / "round3.yaml").write_text("kind: Application\nspec:\n  source:\n"
+                                              f"{repo}    path: openbank-infra/gitops/alias/aml\n")
+        run("add", "-A")
+        run("commit", "-qm", "source through a symlinked directory")
+        expect("argo source path through a symlink", a1, pin_now, ok=False, fragment="symlink")
+        (root / "openbank-infra/gitops/alias").unlink()
+        (elsewhere / "round3.yaml").unlink()
+        run("add", "-A")
+        run("commit", "-qm", "drop symlinked source")
+        expect("plain directory source after round 3", a1, svc_files("aml", tip(), m4, "t1", d1), ok=True)
+
         # Parsed image derivation: shapes a line regex misses must not yield a single image.
         good = {"d.yaml": aml_yaml.encode()}
         if derived_image(good) != svc_image:
             failures.append(f"derived_image: block-style single image not derived: {derived_image(good)}")
         second = f"{REGISTRY}/openbank-ledger-service:x"
+        same = f"{svc_image}:z"  # same repository: only the differential guards can reject it
         for label, extra in (
                 ("flow-style second image", {"f.yaml": (
                     "kind: Pod\nspec: {containers: [{name: x, image: '" + second + "'}]}\n").encode()}),
@@ -782,9 +1258,52 @@ def self_test():
                     f"        - name: x\n          image: {second}\n").encode()}),
                 ("unattributed registry mention", {"c.yaml": (
                     f"kind: ConfigMap\ndata:\n  x: {second}\n").encode()}),
-                ("unparseable manifest", {"u.yaml": b"kind: [unclosed\n"})):
+                ("unparseable manifest", {"u.yaml": b"kind: [unclosed\n"}),
+                # Parser differentials: the raw byte count and the parse must not be fooled.
+                ("escaped registry string", {"e.yaml": (
+                    "kind: Pod\nspec:\n  containers:\n    - name: x\n      image: \"2\\x36"
+                    + same[2:] + "\"\n").encode()}),
+                ("escaped registry in annotation", {"e2.yaml": (
+                    "kind: ConfigMap\nmetadata:\n  annotations:\n    a: \"2\\u0036"
+                    + same[2:] + "\"\n").encode()}),
+                ("!!binary-encoded image", {"b.yaml": (
+                    "kind: Pod\nspec:\n  containers:\n    - name: x\n      image: !!binary "
+                    + base64.b64encode(same.encode()).decode() + "\n").encode()}),
+                ("!!binary in a ConfigMap", {"b2.yaml": (
+                    "kind: ConfigMap\nbinaryData:\n  x: !!binary "
+                    + base64.b64encode(same.encode()).decode() + "\n").encode()}),
+                ("custom tag", {"t.yaml": b"kind: ConfigMap\ndata: !custom {x: y}\n"}),
+                ("!!set hiding an escaped registry string", {"s.yaml": (
+                    "kind: ConfigMap\nmetadata:\n  annotations:\n    x: !!set {\"2\\x36"
+                    + same[2:] + "\": null}\n").encode()}),
+                ("registry string in an annotation", {"a.yaml": (
+                    f"kind: ConfigMap\nmetadata:\n  annotations:\n    img: {same}\n").encode()}),
+                ("registry string as a mapping key", {"k.yaml": (
+                    f"kind: ConfigMap\ndata:\n  \"{same}\": x\n").encode()}),
+                ("duplicate image key", {"dk.yaml": (
+                    "kind: Pod\nspec:\n  containers:\n    - name: x\n"
+                    f"      image: {same}\n      image: {svc_image}:y\n").encode()})):
             if derived_image({**good, **extra}) is not None:
                 failures.append(f"derived_image: {label} still derived a single image")
+
+        aliased = {"d.yaml": (
+            f"kind: Deployment\nspec:\n  template:\n    metadata:\n      annotations:\n"
+            f"        first: &img \"{svc_image}:t\"\n    spec:\n      containers:\n"
+            f"        - name: x\n          image: *img\n").encode()}
+        if derived_image(aliased) is not None:
+            failures.append("derived_image: alias reuse of an image into an annotation still derived")
+        aliased2 = {"d.yaml": (
+            f"kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"
+            f"        - name: x\n          image: &img \"{svc_image}:t\"\n          env:\n"
+            f"            - name: y\n              value: *img\n").encode()}
+        if derived_image(aliased2) is not None:
+            failures.append("derived_image: alias reuse of an image into an env value still derived")
+        folded = {"d.yaml": (
+            "kind: Pod\nspec:\n  containers:\n    - name: x\n      image: \"" + svc_image + ":t\"\n"
+            "metadata:\n  annotations:\n    n: \"" + REGISTRY[:10] + "\\\n      " + REGISTRY[10:]
+            + "/openbank-ledger-service\"\n").encode()}
+        if derived_image(folded) is not None:
+            failures.append("derived_image: line-continued registry string in an annotation still derived")
 
         # The image must be the one main runs NOW, not the one at the pin's manifest_sha.
         before_move = tip()

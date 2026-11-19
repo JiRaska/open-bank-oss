@@ -59,6 +59,7 @@ val iban = Iban.of("CZ65 0800 0000 1920 0014 5399")
 iban.value          // "CZ6508000000192000145399" (no spaces)
 iban.formatted()    // "CZ65 0800 0000 1920 0014 5399"
 iban.countryCode    // "CZ"
+iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
 
@@ -346,4 +347,4 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 
 - `CurrencyCode.of` odmítá kódy ISO 4217 stažené z oběhu (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...), přestože je `java.util.Currency` stále zná. `CurrencyCode.isCanonical(code)` říká, zda je řetězec přesně platný kód velkými písmeny.
 - `IbanCheckDigits.compute/build` je jediný generátor kontrolních číslic ISO 7064 MOD 97-10; validace zůstává v `Iban.isValid`.
-- `CzechPaymentSymbol.isValid` / `requireValid`: variabilní, specifický a konstantní symbol mají 1-10 číslic ASCII.
+- `CzechPaymentSymbol.VARIABLE|SPECIFIC|CONSTANT` s `isValid` / `normalise`: VS a SS mají 1-10 číslic ASCII, KS 1-4 (limit sloupce v domestic-payment); prázdná hodnota znamená, že symbol chybí.
