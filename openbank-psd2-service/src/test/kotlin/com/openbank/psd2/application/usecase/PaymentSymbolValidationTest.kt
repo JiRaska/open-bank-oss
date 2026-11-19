@@ -77,14 +77,8 @@ class PaymentSymbolValidationTest {
         requestedExecutionDate = null,
     )
 
-    private fun account() = ObAccountRef(
-        iban = "CZ6508000000192000145399",
-        bban = null,
-        pan = null,
-        maskedPan = null,
-        msisdn = null,
-        currency = "CZK",
-    )
+    // Positional on purpose: the account reference has card-named optional fields that are irrelevant here.
+    private fun account() = ObAccountRef("CZ6508000000192000145399", null, null, null, null, "CZK")
 
     @ParameterizedTest
     @ValueSource(strings = ["", " "])
@@ -101,5 +95,13 @@ class PaymentSymbolValidationTest {
         assertThatThrownBy { run(PaymentProduct.DOMESTIC_CZ, domestic(ks = "12345")) }
             .isInstanceOf(Psd2RequestFormatException::class.java)
             .hasMessageContaining("constantSymbol must be 1-4")
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `the value that passed validation is the value forwarded - padded symbols are trimmed, blanks dropped`() {
+        val forwarded = withNormalisedPaymentSymbols(domestic(vs = " 123 ", ss = "", ks = "0308 ")) as DomesticCzPayment
+        assertThat(forwarded.variableSymbol).isEqualTo("123")
+        assertThat(forwarded.specificSymbol).isNull()
+        assertThat(forwarded.constantSymbol).isEqualTo("0308")
     }
 }
