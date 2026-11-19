@@ -202,4 +202,4 @@ operátora.
 
 ## Kontrolní číslice DIČ v EU (#16748)
 
-Identifikátory `EU_VAT` se před dotazem do registru ověřují národní kontrolní číslicí pro CZ, SK, PL, DE, FR a AT; ostatní prefixy projdou podle formátu. České DIČ je CZ + IČO, CZ + rodné číslo nebo zvláštní tvar 6xxxxxxxx. FR přijímá monacké SIREN (prefix 000) a alfanumerické klíče podle formátu. Uložené identifikátory se obnovují bez nové kontroly, takže zpřísněné pravidlo nikdy neznemožní čtení již přijatého případu.
+Identifikátory `EU_VAT` se před dotazem do registru ověřují národním pravidlem kontrolní číslice pro každý prefix VIES (27 členských států, `EL` pro Řecko a `XI`); prefix bez pravidla je odmítnut a žádný neprojde jen podle formátu (#16774). SK navíc vyžaduje nenulovou první číslici a třetí číslici 2, 3, 4, 7, 8 nebo 9. `FR_SIREN` `000000000` se odmítá jako nikdy nepřidělený (lokální pravidlo). České DIČ je CZ + IČO, CZ + rodné číslo nebo zvláštní tvar 6xxxxxxxx. FR přijímá monacké SIREN (prefix 000) a alfanumerické klíče podle formátu. Uložené identifikátory se obnovují bez nové kontroly, takže zpřísněné pravidlo nikdy neznemožní čtení již přijatého případu.
