@@ -70,6 +70,7 @@ class McpEndpointTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(registry)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, toolsListCacheTtlMs)
@@ -493,6 +494,55 @@ class McpEndpointTest {
         ep.handle(rpc("tools/list"))
 
         assertThat(counting.calls.get()).isEqualTo(16)
+    }
+
+    @Test
+    fun `a request whose headers cannot be read is refused 401, never admitted (fail closed)`() {
+        val unwired = McpEndpoint(
+            registry = McpToolRegistry(
+                StubReads(mapper),
+                StubReads(mapper),
+                StubReads(mapper),
+                StubReads(mapper),
+                StubMarketingReachPort(mapper),
+                McpPiiMasker(mapper),
+                mapper,
+            ),
+            pdp = allowAll(),
+            auditor = McpCallAuditor(audit),
+            callerResolver = CallerContextResolver(
+                testAgentJwt(),
+                false,
+                fakeSessionRepo(),
+                customerIssuer = java.util.Optional.empty(),
+            ),
+            mapper = mapper,
+            serverName = "openbank-mcp",
+            serverVersion = "0.1.0",
+            protocolVersion = "2025-06-18",
+        ).apply {
+            metrics = McpMetricsAdapter(registry)
+            rateLimiter = limiter
+        }
+        val resp = unwired.handle(
+            rpc(
+                "tools/call",
+                mapOf(
+                    "name" to "list_accounts",
+                    "arguments" to emptyMap<String, Any>(),
+                ),
+            ),
+        )
+        assertThat(resp.status).isEqualTo(401)
+    }
+
+    @Test
+    fun `a DPoP-scheme credential is refused 401 while the customer channel is off`() {
+        val ep = endpoint(allowAll()).apply {
+            httpRequest =
+                TestHttpRequests.withHeaders("Authorization" to "DPoP token")
+        }
+        assertThat(ep.handle(rpc("tools/list")).status).isEqualTo(401)
     }
 
     @Test

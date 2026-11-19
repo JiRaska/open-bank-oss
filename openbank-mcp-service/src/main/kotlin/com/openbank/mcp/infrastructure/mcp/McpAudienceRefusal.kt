@@ -24,8 +24,9 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
         // Bounded like every other audit write (#16628); a NUL-carrying request is not audited at all.
         // The channel-off refusal answers tokens nobody here can attribute to a subject, so its audit
         // rows share ONE per-minute window: a flood of them cannot become an audit-write amplifier.
-        val auditable = reason != Reason.CUSTOMER_CHANNEL_OFF || throttle.shouldAuditRefusal(CHANNEL_OFF_AUDIT_KEY)
-        if (auditable && method == "tools/call" && !McpInputBounds.containsNul(params)) {
+        // Only a tools/call is audited, so only a tools/call may spend that window.
+        val call = method == "tools/call" && !McpInputBounds.containsNul(params)
+        if (call && (reason != Reason.CUSTOMER_CHANNEL_OFF || throttle.shouldAuditRefusal(CHANNEL_OFF_AUDIT_KEY))) {
             throttle.auditAnonymousCall(
                 McpInputBounds.echo(params.path("name").asText("")),
                 McpInputBounds.auditKeys(params.path("arguments")),

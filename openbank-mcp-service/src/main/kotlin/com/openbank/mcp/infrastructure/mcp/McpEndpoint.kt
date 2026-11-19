@@ -164,11 +164,23 @@ class McpEndpoint(
             params,
         )
             // ADR-0383 D1: with the channel OFF no branch admits a customers-realm token, and it must
-            // never fall through to the anonymous path either: refused 401 invalid_token.
-            ?: audienceRefusal.takeIf { customerBranch == null && callerResolver.presentsCustomerRealmToken() }
+            // never fall through to the anonymous path either: refused 401 invalid_token. That covers
+            // a `DPoP`-scheme credential too: the staff tenant only reads `Bearer`, so such a request
+            // reaches here with NO identity and would otherwise be served as anonymous
+            // (McpCustomerChannelOffTenantIT, measured with real tenants).
+            ?: audienceRefusal.takeIf { customerBranch == null && presentsCustomerCredential }
                 ?.respond(method, params, McpAudienceRefusal.Reason.CUSTOMER_CHANNEL_OFF)
             ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
     }
+
+    private val presentsCustomerCredential: Boolean
+        get() {
+            if (callerResolver.presentsCustomerRealmToken()) return true
+            // FAIL CLOSED: a request whose headers cannot be read is refused, never let through.
+            if (!::httpRequest.isInitialized) return true
+            val authorization = httpRequest.getHeader(AUTHORIZATION_HEADER)?.trimStart() ?: return false
+            return authorization.startsWith(DPOP_SCHEME, ignoreCase = true)
+        }
 
     @POST
     @Suppress("ReturnCount")
@@ -513,6 +525,7 @@ class McpEndpoint(
 
         const val DPOP_HEADER = "DPoP"
         const val AUTHORIZATION_HEADER = "Authorization"
+        const val DPOP_SCHEME = "DPoP "
 
         const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 

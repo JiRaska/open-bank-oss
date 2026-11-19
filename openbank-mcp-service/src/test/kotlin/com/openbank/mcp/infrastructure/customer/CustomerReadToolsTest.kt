@@ -221,9 +221,15 @@ class CustomerReadToolsTest {
     @Test
     fun `a cancellation propagates instead of becoming a refusal`() {
         every { exchange.exchange(any(), any(), any()) } returns "exchanged"
-        every { downstream.balances(any(), any()) } throws kotlin.coroutines.cancellation.CancellationException("cancelled")
+        every { downstream.balances(any(), any()) } throws
+            kotlin.coroutines.cancellation.CancellationException("cancelled")
         org.assertj.core.api.Assertions.assertThatThrownBy {
-            tools.call(CustomerReadTools.GET_BALANCE, args("accountId" to account.toString()), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+            tools.call(
+                CustomerReadTools.GET_BALANCE,
+                args("accountId" to account.toString()),
+                caller,
+                listOf(grant(CustomerCapabilities.READ_BALANCES)),
+            )
         }.isInstanceOf(kotlin.coroutines.cancellation.CancellationException::class.java)
     }
 }

@@ -10,9 +10,9 @@ import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
-import org.hamcrest.Matchers.containsString
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
@@ -63,7 +63,9 @@ class McpCustomerChannelOffIT {
         recorder.clear()
         repeat(10) {
             given().contentType(ContentType.JSON).header("Authorization", "DPoP t")
-                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""")
+                .body(
+                    """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""",
+                )
                 .post("/mcp").then().statusCode(401)
         }
         // One per minute window; two only if the run straddles a boundary.
