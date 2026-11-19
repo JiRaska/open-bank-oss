@@ -39,8 +39,8 @@ class IdentityRegistrationServiceTest {
     private val pepper = "00112233445566778899aabbccddeeff"
 
     private val testClock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
-    private fun service(withPepper: Boolean = true) =
-        IdentityRegistrationService(repo, if (withPepper) Optional.of(pepper) else Optional.empty(), testClock)
+    private fun service(withPepper: Boolean = true, clock: Clock = testClock) =
+        IdentityRegistrationService(repo, if (withPepper) Optional.of(pepper) else Optional.empty(), clock)
 
     private fun command(partyId: UUID, rc: String? = "490101123", sub: String? = "sub-1", eudiSub: String? = null) =
         RegisterIdentityCommand(
@@ -101,13 +101,13 @@ class IdentityRegistrationServiceTest {
         error("no valid suffix")
     }
 
-    private suspend fun registeredTypes(rc: String): List<ExternalIdType> {
+    private suspend fun registeredTypes(rc: String, clock: Clock = testClock): List<ExternalIdType> {
         val id = UUID.randomUUID()
         coEvery { repo.findByExternalId(any(), any()) } returns null
         coEvery { repo.findById(id) } returns null
         val saved = slot<Party>()
         coEvery { repo.save(capture(saved)) } answers { saved.captured }
-        service().register(command(id, rc = rc))
+        service(clock = clock).register(command(id, rc = rc))
         return saved.captured.externalIds.map { it.type }
     }
 
@@ -120,6 +120,16 @@ class IdentityRegistrationServiceTest {
     fun `an RC whose birthdate is today is indexed`(): Unit = runBlocking {
         assertThat(registeredTypes(rcFor(LocalDate.of(2024, 1, 15)))).contains(ExternalIdType.BIRTH_NUMBER)
     }
+
+    @Test
+    fun `an RC dated today in Prague is indexed at 00-30 CET while the UTC date is still yesterday`(): Unit =
+        runBlocking {
+            val clock = Clock.fixed(Instant.parse("2026-11-19T23:30:00Z"), ZoneOffset.UTC)
+            assertThat(registeredTypes(rcFor(LocalDate.of(2026, 11, 20)), clock)).contains(ExternalIdType.BIRTH_NUMBER)
+            assertThat(
+                registeredTypes(rcFor(LocalDate.of(2026, 11, 21)), clock),
+            ).doesNotContain(ExternalIdType.BIRTH_NUMBER)
+        }
 
     @Test
     fun `an RC from far in the past is indexed`(): Unit = runBlocking {

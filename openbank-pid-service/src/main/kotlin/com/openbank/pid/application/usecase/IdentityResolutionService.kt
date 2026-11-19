@@ -23,7 +23,6 @@ import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
-import java.time.LocalDate
 import java.util.Optional
 import java.util.UUID
 
@@ -114,7 +113,7 @@ class IdentityResolutionService(
      */
     fun computeBlindIndex(birthNumberRaw: String): String? {
         val pepper = pepperHex.orElse("").takeIf { it.isNotBlank() } ?: return null
-        val rc = RodneCislo.parse(birthNumberRaw, LocalDate.now(clock))
+        val rc = RodneCislo.parse(birthNumberRaw, clock)
         if (rc !is RodneCislo.Parsed) return null
         return BlindIndex.compute(pepper.decodeHex(), rc.canonical)
     }
@@ -143,7 +142,7 @@ class IdentityResolutionService(
             return null
         }
 
-        val rcResult = RodneCislo.parse(raw, LocalDate.now(clock))
+        val rcResult = RodneCislo.parse(raw, clock)
         if (rcResult is RodneCislo.Invalid) {
             Log.warn(
                 "IdentityResolutionService: RČ parse failed (${rcResult.reason}) — " +

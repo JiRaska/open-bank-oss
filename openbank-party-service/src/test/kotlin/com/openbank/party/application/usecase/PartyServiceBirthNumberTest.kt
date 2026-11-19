@@ -56,8 +56,7 @@ class PartyServiceBirthNumberTest {
         error("no valid suffix")
     }
 
-    private suspend fun createdIndex(rc: String): String? {
-        val service = newService()
+    private suspend fun createdIndex(rc: String, service: PartyService = newService()): String? {
         val savedSlot = slot<Party>()
         val eventSlot = slot<PartyEvent>()
         coEvery { service.partyRepo.findByEmail(any()) } returns null
@@ -95,6 +94,18 @@ class PartyServiceBirthNumberTest {
     fun `createParty indexes a birth number dated today`(): Unit = runBlocking {
         assertThat(createdIndex(rcFor(today))).isNotNull()
     }
+
+    @Test
+    fun `createParty indexes a child born in Prague today at 00-30 CET while the UTC date is still yesterday`(): Unit =
+        runBlocking {
+            val service = newService().apply {
+                clock =
+                    Clock.fixed(Instant.parse("2026-11-19T23:30:00Z"), ZoneOffset.UTC)
+            }
+
+            assertThat(createdIndex(rcFor(LocalDate.of(2026, 11, 20)), service)).isNotNull()
+            assertThat(createdIndex(rcFor(LocalDate.of(2026, 11, 21)), service)).isNull()
+        }
 
     @Test
     fun `createParty indexes a birth number from the distant past`(): Unit = runBlocking {

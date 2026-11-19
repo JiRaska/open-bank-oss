@@ -111,7 +111,7 @@ Every mutation emits a domain event to `party.events`; `audit-service` persists 
 - ✅ Security headers: CSP `default-src 'self'`, HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy
 - ✅ Resilience: fault-tolerant outbox dispatcher (circuit breaker / retry / timeout / bulkhead)
 - ✅ Secrets: dev placeholders (`CHANGE_ME_LOCAL_DEV_ONLY`) must be overridden via Vault in prod
-- ✅ A birth number for a birthdate in the future is treated as invalid against the service clock (no blind index; resolution falls through to tier-2) — the shared parser is clock-free
+- ✅ A birth number dated after today (Europe/Prague, from the service clock) is invalid: no blind index is computed and tier-1 is skipped, so resolution falls through to tier-2
 - ⚠️ Idempotency on mutations: no `Idempotency-Key` cache yet (creation deduplicated on bankID `sub`) — tracked enhancement
 - ⚠️ Birth-number blind-index dedup (true one-person = one-party matching): roadmap item, not implemented
 - ⚠️ `openapi.yaml` drift vs the live resource — tracked follow-up (see [03 — API](./03-api.md))

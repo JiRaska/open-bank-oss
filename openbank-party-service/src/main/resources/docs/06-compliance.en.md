@@ -107,7 +107,7 @@ Every mutation emits a domain event on `openbank.party.events`, consumed by `aud
 - ✅ Secrets must be overridden in prod (`CHANGE_ME_LOCAL_DEV_ONLY` placeholders fail-fast intent)
 - ✅ Data-minimisation: birth number only as a blind index; identifiers exact-match only, fuzzy search on names only
 - ✅ Poison-pill-safe Kafka consumer
-- ✅ A birth number for a birthdate in the future is treated as invalid (no blind index, no lookup) against the service clock — the shared parser is clock-free
+- ✅ A birth number dated after today (Europe/Prague, from the service clock) is invalid: no blind index is computed for it, and search takes no blind-index path. An exact identifier match on the stored `tax_id` still applies
 - ⚠️ OPA is advisory (not yet enforcing) — flip is a later ADR-0034 phase
 - ⚠️ OpenAPI contract drift vs implementation — to reconcile (see `03-api.md`)
 - ⚠️ Retention figures (10y vs 2555d) need reconciliation before go-live

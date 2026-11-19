@@ -22,7 +22,6 @@ import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
-import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.Optional
 import java.util.UUID
@@ -163,7 +162,7 @@ class IdentityRegistrationService(
             )
             return null
         }
-        val parsed = RodneCislo.parse(raw, LocalDate.now(clock))
+        val parsed = RodneCislo.parse(raw, clock)
         if (parsed !is RodneCislo.Parsed) {
             Log.warn("IdentityRegistrationService: RČ invalid or future-dated — registering without the RČ blind index")
             return null

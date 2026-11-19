@@ -294,6 +294,15 @@ class IdentityResolutionServiceTest {
     }
 
     @Test
+    fun `computeBlindIndex accepts an RC dated today in Prague at 00-30 CET while the UTC date is still yesterday`() {
+        val boundary = Clock.fixed(Instant.parse("2026-11-19T23:30:00Z"), ZoneOffset.UTC)
+        val atBoundary = IdentityResolutionService(repo, adjudication, Optional.of(testPepperHex), boundary)
+
+        assertThat(atBoundary.computeBlindIndex(rcFor(LocalDate.of(2026, 11, 20)))).isNotNull()
+        assertThat(atBoundary.computeBlindIndex(rcFor(LocalDate.of(2026, 11, 21)))).isNull()
+    }
+
+    @Test
     fun `computeBlindIndex rejects tomorrow, accepts today and the distant past`() {
         assertThat(svc.computeBlindIndex(rcFor(today.plusDays(1)))).isNull()
         assertThat(svc.computeBlindIndex(rcFor(today))).isNotNull()
