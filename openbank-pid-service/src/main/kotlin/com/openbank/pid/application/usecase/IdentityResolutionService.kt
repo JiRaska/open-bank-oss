@@ -22,6 +22,8 @@ import com.openbank.pid.domain.model.VerificationTrigger
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.time.Clock
+import java.time.LocalDate
 import java.util.Optional
 import java.util.UUID
 
@@ -54,6 +56,7 @@ class IdentityResolutionService(
     private val adjudication: IdentityAdjudicationUseCase,
     @ConfigProperty(name = "openbank.pid.birth-number-pepper")
     private val pepperHex: Optional<String>,
+    private val clock: Clock,
 ) : ResolveIdentityUseCase,
     ResolveByIndexUseCase {
 
@@ -112,9 +115,12 @@ class IdentityResolutionService(
     fun computeBlindIndex(birthNumberRaw: String): String? {
         val pepper = pepperHex.orElse("").takeIf { it.isNotBlank() } ?: return null
         val rc = RodneCislo.parse(birthNumberRaw)
-        if (rc is RodneCislo.Invalid) return null
-        return BlindIndex.compute(pepper.decodeHex(), (rc as RodneCislo.Parsed).canonical)
+        if (rc !is RodneCislo.Parsed || isFuture(rc)) return null
+        return BlindIndex.compute(pepper.decodeHex(), rc.canonical)
     }
+
+    /** [RodneCislo] is clock-free, so a not-yet-happened birthdate parses as valid; reject it here. */
+    private fun isFuture(rc: RodneCislo.Parsed): Boolean = rc.birthdate.isAfter(LocalDate.now(clock))
 
     // ── internal ─────────────────────────────────────────────────────────────────
 
@@ -149,6 +155,12 @@ class IdentityResolutionService(
             return null
         }
         val rc = rcResult as RodneCislo.Parsed
+        if (isFuture(rc)) {
+            Log.warn(
+                "IdentityResolutionService: RČ birthdate is in the future — skipping tier-1, falling through to tier-2",
+            )
+            return null
+        }
 
         val pepperBytes = pepper.decodeHex()
         val blindIndex = BlindIndex.compute(pepperBytes, rc.canonical)

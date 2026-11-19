@@ -22,6 +22,7 @@ import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.Optional
 import java.util.UUID
@@ -165,6 +166,13 @@ class IdentityRegistrationService(
         val parsed = RodneCislo.parse(raw)
         if (parsed !is RodneCislo.Parsed) {
             Log.warn("IdentityRegistrationService: RČ unparseable — registering without the RČ blind index")
+            return null
+        }
+        // RodneCislo is clock-free: a 10-digit number for a date that has not happened yet parses as valid.
+        if (parsed.birthdate.isAfter(LocalDate.now(clock))) {
+            Log.warn(
+                "IdentityRegistrationService: RČ birthdate is in the future — registering without the RČ blind index",
+            )
             return null
         }
         return BlindIndex.compute(pepper.decodeHex(), parsed.canonical)

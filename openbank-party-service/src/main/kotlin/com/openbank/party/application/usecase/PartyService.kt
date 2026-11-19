@@ -50,6 +50,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.util.Optional
 import java.util.UUID
 
@@ -262,17 +263,25 @@ class PartyService : PartyUseCase {
     private fun computeRcBlindIndex(taxId: String?): Pair<String?, Int?> {
         if (taxId == null) return null to null
         val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null to null
-        val rc = RodneCislo.parse(taxId)
-        if (rc !is RodneCislo.Parsed) return null to null
+        val rc = parseBirthNumber(taxId) ?: return null to null
         return BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical) to RC_KEY_VERSION
+    }
+
+    /**
+     * A birth number this service accepts as a person's: well-formed AND not for a birthdate that has
+     * not happened yet. [RodneCislo] is clock-free and parses a 10-digit number with year digits 27..53 as
+     * 2027..2053, so the future check lives here, against the service clock.
+     */
+    private fun parseBirthNumber(raw: String): RodneCislo.Parsed? {
+        val rc = RodneCislo.parse(raw) as? RodneCislo.Parsed ?: return null
+        return rc.takeUnless { it.birthdate.isAfter(LocalDate.now(clock)) }
     }
 
     override fun isDedupAvailable(): Boolean = rcPepper.filter { it.isNotBlank() }.isPresent
 
     override suspend fun resolvePartyByRc(cmd: ResolvePartyByRcCommand): Party? {
         val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null
-        val rc = RodneCislo.parse(cmd.rawRc)
-        if (rc !is RodneCislo.Parsed) return null
+        val rc = parseBirthNumber(cmd.rawRc) ?: return null
         val index = BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical)
         return partyRepo.findByRcBlindIndex(index)
     }
@@ -484,7 +493,7 @@ class PartyService : PartyUseCase {
         if (!query.namesOnly && birthDates.isEmpty()) {
             normalizeIdentifier(raw)?.let { id ->
                 val limit = query.limit.coerceIn(1, MAX_PAGE_SIZE)
-                val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
+                val byIndex = if (parseBirthNumber(raw) != null) {
                     resolvePartyByRc(ResolvePartyByRcCommand(raw))
                 } else {
                     null
