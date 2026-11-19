@@ -18,6 +18,7 @@ import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
 import com.openbank.domestic.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.domestic.application.port.out.SchemeSubmissionOutcome
 import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
@@ -405,11 +406,11 @@ open class DomesticPaymentActivitiesImpl(
             } else {
                 DomesticPaymentStatus.REJECTED to rejectReasonFor(outcome.reasonCode)
             }
-            val rejectDetail = if (nextStatus == DomesticPaymentStatus.REJECTED) {
-                "scheme reject: ${outcome.reasonCode}"
-            } else {
-                null
-            }
+            val rejectDetail = if (nextStatus == DomesticPaymentStatus.REJECTED) rejectDetailFor(outcome) else null
+            // #16772: a verdict reached locally sent nothing, so the marker claimed above must not
+            // keep asserting a dispatch. Cleared before the status write: if that write fails,
+            // Temporal retries, re-claims, and the adapter answers the same local AC01 again.
+            if (!outcome.transmitted) paymentRepository.clearSchemeDispatch(paymentId)
             val updated = payment.transitionTo(nextStatus, reason, rejectDetail, clock = clock)
             val event = OutboxMessage(
                 aggregateId = updated.id,
@@ -529,7 +530,15 @@ open class DomesticPaymentActivitiesImpl(
 // its intended class silently steals that annotation.
 
 /** Map the scheme's `pacs.002` reason code to the rail's reject reason (ADR-0104 D4). */
+/** #16772: a verdict reached locally must not claim the scheme said it. */
+private fun rejectDetailFor(outcome: SchemeSubmissionOutcome): String = if (outcome.transmitted) {
+    "scheme reject: ${outcome.reasonCode}"
+} else {
+    "rejected before transmission: ${outcome.reasonCode}"
+}
+
 private fun rejectReasonFor(reasonCode: String?): DomesticRejectReason = when (reasonCode) {
+    "AC01" -> DomesticRejectReason.INVALID_ACCOUNT_NUMBER
     "AC04", "AC06" -> DomesticRejectReason.BENEFICIARY_ACCOUNT_CLOSED
     "RC01" -> DomesticRejectReason.INVALID_BANK_CODE
     "AM05" -> DomesticRejectReason.INSUFFICIENT_FUNDS
