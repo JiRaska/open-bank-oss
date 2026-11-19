@@ -45,7 +45,6 @@ from stdnum.cz import rc as std_rc
 from stdnum.eu import vat as std_vat
 from stdnum.fr import siren as std_siren
 from stdnum.pl import nip as std_nip
-from stdnum.sk import rc as std_sk_rc
 
 
 def _rc_divergence(v: str):
@@ -133,13 +132,20 @@ def _at_fn_divergence(v: str):
     return "KYB caps the number at 6 digits (local bound, not a published rule)" if len(digits) > 6 else None
 
 
+def _sk_official(n: str) -> bool:
+    """Slovak DIČ: 10 digits, first digit not 0, third digit in 2,3,4,7,8,9, divisible by 11."""
+    return n[0] != "0" and n[2] in "234789" and int(n) % 11 == 0
+
+
 def _eu_vat_divergence(v: str):
     """Where kyb's EuVatChecksums is deliberately stricter than stdnum.eu.vat."""
     cc, national = v[:2], v[2:]
     if cc == "CZ" and national.isdigit() and len(national) in (9, 10) and not (len(national) == 9 and national[0] == "6"):
         return _rc_divergence(national)          # a CZ DIČ of a natural person is a birth number
-    if cc == "SK" and national.isdigit() and len(national) == 10 and std_sk_rc.is_valid(national):
-        return "stdnum's own source says it is unclear whether an RČ can be a SK VAT number; kyb does not accept it"
+    if cc == "SK" and national.isdigit() and len(national) == 10 and not _sk_official(national):
+        # stdnum.sk.dph accepts a birth number before it applies the official rule, and its own
+        # source says it is unclear whether that is allowed. The official rule is the oracle.
+        return "stdnum accepts a Slovak RČ as a VAT number though its source calls that unclear; the official rule fails"
     return None
 
 
@@ -185,11 +191,11 @@ def expected(identifier: str, value: str):
     verdict = bool(ref(value))
     reason = divergence(value) if verdict else None
     if reason:
-        return False, reason
+        verdict = False
     defect = KNOWN_DEFECTS.get(identifier)
     if defect and defect[1](value):
         return verdict, f"known-defect {defect[0]}"
-    return verdict, "stdnum"
+    return verdict, reason or "stdnum"
 
 
 def _gen_rc(r: random.Random) -> str:
