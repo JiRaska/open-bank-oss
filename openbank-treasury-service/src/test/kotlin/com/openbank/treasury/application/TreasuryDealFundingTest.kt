@@ -172,16 +172,15 @@ class TreasuryDealFundingTest {
         }
 
     @Test
-    fun `a farther-dated outflow counts - A 800k at D+5 then B 800k at D+1 is refused`(): Unit =
-        runBlocking {
-            // A books 800k valued D+5; B (800k, valued D+1, BEFORE A) must still see A: both would
-            // settle from the same 1M, leaving the contra account 600k short.
-            assertThat(book(placement("800000.00", value = monday.plusDays(5))).state).isEqualTo(DealState.BOOKED)
-            val b = service.draft(placement("800000.00", value = monday.plusDays(1)), DealFixtures.dealer)
-            service.submit(b.id, DealFixtures.dealer)
-            assertThatThrownBy { runBlocking { service.approve(b.id, DealFixtures.approver) } }
-                .isInstanceOf(FundingExceededException::class.java)
-            assertThat(service.get(b.id).deal.state).isEqualTo(DealState.PENDING_APPROVAL)
-            assertThat(metered).containsExactly("CZK")
-        }
+    fun `a farther-dated outflow counts - A 800k at D+5 then B 800k at D+1 is refused`(): Unit = runBlocking {
+        // A books 800k valued D+5; B (800k, valued D+1, BEFORE A) must still see A: both would
+        // settle from the same 1M, leaving the contra account 600k short.
+        assertThat(book(placement("800000.00", value = monday.plusDays(5))).state).isEqualTo(DealState.BOOKED)
+        val b = service.draft(placement("800000.00", value = monday.plusDays(1)), DealFixtures.dealer)
+        service.submit(b.id, DealFixtures.dealer)
+        assertThatThrownBy { runBlocking { service.approve(b.id, DealFixtures.approver) } }
+            .isInstanceOf(FundingExceededException::class.java)
+        assertThat(service.get(b.id).deal.state).isEqualTo(DealState.PENDING_APPROVAL)
+        assertThat(metered).containsExactly("CZK")
+    }
 }

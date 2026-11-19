@@ -512,10 +512,9 @@ class DealRepositoryImpl(
         return q.singleResult.map { BigDecimal(it.toString()) }
     }
 
-    override suspend fun pendingOutflows(currency: String, excludeDealId: UUID?): BigDecimal =
-        Panache.withSession {
-            Panache.getSession().flatMap { pendingOutflows(it, currency, excludeDealId) }
-        }.awaitSuspending()
+    override suspend fun pendingOutflows(currency: String, excludeDealId: UUID?): BigDecimal = Panache.withSession {
+        Panache.getSession().flatMap { pendingOutflows(it, currency, excludeDealId) }
+    }.awaitSuspending()
 
     /**
      * #12115: the committed outflows a funding-consuming write (approve) was vetted against,
