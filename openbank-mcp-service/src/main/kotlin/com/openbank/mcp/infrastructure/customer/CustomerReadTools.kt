@@ -303,10 +303,6 @@ class CustomerReadTools @Inject constructor(
         return ToolCallResult(listOf(ToolContent(text = McpUntrustedData.wrap(masked))))
     }
 
-    private fun accountIdOf(arguments: JsonNode): UUID? = arguments.path(ACCOUNT_ID)
-        .takeIf { it.isTextual && UUID_SHAPE.matches(it.asText()) }
-        ?.let { UUID.fromString(it.asText()) }
-
     companion object {
         private const val HUMAN = "HUMAN"
         const val LIST_ACCOUNTS = "list_accounts"
@@ -318,7 +314,6 @@ class CustomerReadTools @Inject constructor(
         const val PROPOSE_ACTION = "propose.payment"
         private const val ACCOUNT_ID = "accountId"
         const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        private val UUID_SHAPE = Regex(UUID_PATTERN)
     }
 }
 
@@ -327,6 +322,12 @@ private fun uuidProp() = mapOf(
     "pattern" to CustomerReadTools.UUID_PATTERN,
     "description" to "accountId from list_accounts",
 )
+
+private val ACCOUNT_UUID_SHAPE = Regex(CustomerReadTools.UUID_PATTERN)
+
+private fun accountIdOf(arguments: JsonNode): UUID? = arguments.path("accountId")
+    .takeIf { it.isTextual && ACCOUNT_UUID_SHAPE.matches(it.asText()) }
+    ?.let { UUID.fromString(it.asText()) }
 
 private fun proposeSchema(): Map<String, Any> = schema(
     mapOf(
