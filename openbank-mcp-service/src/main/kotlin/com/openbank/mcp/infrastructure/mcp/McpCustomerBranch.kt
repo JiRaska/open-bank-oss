@@ -28,6 +28,7 @@ import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -157,6 +158,7 @@ internal class McpCustomerBranch(
     ): Response? {
         // initialize / ping / notifications and unknown methods carry no data: the shared dispatch answers them.
         if (method != TOOLS_LIST && method != TOOLS_CALL) return null
+        val startedAt = System.nanoTime()
         metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
         val ctx = outcome.context
         val grants = grantsFor(outcome, jwt)
@@ -165,14 +167,41 @@ internal class McpCustomerBranch(
         val tool = McpInputBounds.echo(params.path("name").asText(""))
         val args = params.path("arguments")
         val known = grants as? Grants.Known ?: run {
-            audit(ctx.agentId, tool, params, (grants as Grants.Unknown).reason, ctx.actChain, decision = UNAVAILABLE)
+            audit(
+                ctx.agentId,
+                tool,
+                params,
+                (grants as Grants.Unknown).reason,
+                ctx.actChain,
+                decision = UNAVAILABLE,
+                startedAt = startedAt,
+            )
             return toolError(id, AUTHZ_UNAVAILABLE)
         }
         // The subject token of the D4 exchange is the customer's own token — the one admission just
         // matched against the DPoP proof's `ath`. Never any credential of mcp-service's.
         val subjectToken = jwt.rawToken ?: authorization?.substringAfter(DPOP_SCHEME, "").orEmpty()
-        val caller = CustomerReadTools.Caller(ctx.agentId, subjectToken, outcome.client.clientId)
-        return respond(tools.call(tool, args, caller, known.grants), known.key, ctx, tool, params, id)
+        val caller = CustomerReadTools.Caller(
+            ctx.agentId,
+            subjectToken,
+            outcome.client.clientId,
+            grantKey = known.key,
+            sessionId = sessionOf(jwt),
+        )
+        return respond(tools.call(tool, args, caller, known.grants), known.key, ctx, tool, params, id, startedAt)
+    }
+
+    /**
+     * The token's session (`sid`), one input of a proposal's derived Idempotency-Key. Bounded and
+     * shape-checked; anything else reads as "no session", which only narrows replay to the key triple.
+     */
+    private fun sessionOf(jwt: JsonWebToken): String? {
+        val raw = when (val claim = jwt.getClaim<Any?>(CLAIM_SESSION_ID)) {
+            is String -> claim
+            is JsonString -> claim.string
+            else -> null
+        }
+        return raw?.takeIf { SESSION_SHAPE.matches(it) }
     }
 
     @Suppress("LongParameterList")
@@ -183,6 +212,7 @@ internal class McpCustomerBranch(
         tool: String,
         params: JsonNode,
         id: JsonNode,
+        startedAt: Long,
     ): Response = when (result) {
         is CustomerReadTools.Outcome.Allowed -> {
             audit(
@@ -194,14 +224,15 @@ internal class McpCustomerBranch(
                 decision = McpCallAuditor.Decision.ALLOW,
                 capability = result.capability,
                 consentId = result.grantId?.let { DELEGATION_PREFIX + it } ?: DELEGATION_PREFIX.trimEnd(':'),
+                startedAt = startedAt,
             )
             Response.ok(McpResponse(id = id, result = result.result)).build()
         }
         is CustomerReadTools.Outcome.Refused -> {
             if (result.invalidateGrant) grantCache.invalidate(key)
             val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
-            audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
-            toolError(id, if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
+            audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability, startedAt = startedAt)
+            toolError(id, result.message ?: if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
         }
         is CustomerReadTools.Outcome.DownstreamRejected -> {
             // The grant may have been revoked since it was cached: forget it, so the next call asks again.
@@ -214,6 +245,7 @@ internal class McpCustomerBranch(
                 ctx.actChain,
                 McpCallAuditor.Decision.DENY,
                 result.capability,
+                startedAt = startedAt,
             )
             toolError(id, NOT_PERMITTED)
         }
@@ -256,7 +288,13 @@ internal class McpCustomerBranch(
         decision: McpCallAuditor.Decision = McpCallAuditor.Decision.DENY,
         capability: String? = null,
         consentId: String = NO_CONSENT,
+        startedAt: Long = System.nanoTime(),
     ) = runBlocking {
+        val result = if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED
+        // Same series and labels as the staff path (openbank_mcp_tool_calls): an unknown tool name is
+        // the single UNMAPPED value, never itself — the audit row keeps the exact name.
+        val toolTag = if (tools.capabilityOf(tool) != null) tool else McpMetricsPort.UNMAPPED_TOOL
+        metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
         auditor.toolCallCompleted(
             McpCallAuditor.ToolCall(
                 agentId = agentId,
@@ -264,7 +302,7 @@ internal class McpCustomerBranch(
                 tool = tool,
                 capability = capability,
                 decision = decision,
-                result = if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED,
+                result = result,
                 reason = reason,
                 argumentKeys = McpInputBounds.auditKeys(params.path("arguments")),
                 actChain = actChain,
@@ -282,6 +320,8 @@ internal class McpCustomerBranch(
         const val TOOLS_LIST = "tools/list"
         const val DPOP_SCHEME = "DPoP "
         const val CLAIM_PARTY_ID = "party_id"
+        const val CLAIM_SESSION_ID = "sid"
+        val SESSION_SHAPE = Regex("^[A-Za-z0-9._:-]{1,128}$")
         const val DELEGATION_PREFIX = "delegation:"
         const val NO_ACTIVE_GRANT = "no active MCP_CLIENT grant (ADR-0383 D3)"
         const val LOOKUP_UNAVAILABLE = "delegation grant lookup unavailable"

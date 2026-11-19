@@ -22,10 +22,11 @@ import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * The customer channel's tool surface (ADR-0383 D3/D4): three READS, each offered only while one of
- * the caller's active `MCP_CLIENT` grants carries the delegation capability it needs, and each call
- * checked against the grant of the ONE account it names. Nothing here writes; `propose_payment` is
- * not on this channel in this slice.
+ * The customer channel's tool surface (ADR-0383 D3/D4/D6): three READS and one PROPOSAL, each
+ * offered only while one of the caller's active `MCP_CLIENT` grants carries the delegation
+ * capability it needs, and each call checked against the grant of the ONE account it names.
+ * `propose_payment` writes only a PENDING proposal to delegation-service's store
+ * ([CustomerPaymentProposer]); it can neither approve nor execute, and moves no money.
  *
  * Order on a call, cheapest refusal first: unknown tool → argument shape → is this account in a
  * grant that carries this tool's capability → mcp-service's PDP → exchange the customer's token for a 60-second token
@@ -42,9 +43,20 @@ class CustomerReadTools @Inject constructor(
     private val downstream: CustomerDownstream,
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
+    private val proposer: CustomerPaymentProposer,
 ) {
-    /** The authenticated caller, as admission verified it. */
-    data class Caller(val subject: String, val rawToken: String, val clientId: String)
+    /**
+     * The authenticated caller, as admission verified it. [grantKey] is the verified grant triple
+     * (required to propose — the store finds the grant from it) and [sessionId] the token's session,
+     * both part of the proposal's derived Idempotency-Key.
+     */
+    data class Caller(
+        val subject: String,
+        val rawToken: String,
+        val clientId: String,
+        val grantKey: GrantKey? = null,
+        val sessionId: String? = null,
+    )
 
     sealed interface Outcome {
         /** [grantId] is the grant the call ran under; null for `list_accounts` (it reads no account). */
@@ -56,6 +68,8 @@ class CustomerReadTools @Inject constructor(
             val capability: String?,
             val unavailable: Boolean = false,
             val invalidateGrant: Boolean = false,
+            /** Fixed, safe text for the client; null means the generic refusal text. */
+            val message: String? = null,
         ) : Outcome
 
         /** The downstream refused the exchanged token: the grant may have changed. Caller invalidates. */
@@ -106,6 +120,18 @@ class CustomerReadTools @Inject constructor(
             CustomerCapabilities.READ_TRANSACTIONS,
             "query.transaction.readonly",
         ),
+        Tool(
+            ToolDefinition(
+                name = PROPOSE_PAYMENT,
+                description = "Propose a payment from an account you have shared for payment proposals. " +
+                    "This only records a proposal: nothing is paid until you review and approve it in the " +
+                    "bank app with strong customer authentication. Reuse the same clientRequestId to retry.",
+                inputSchema = proposeSchema(),
+                service = "openbank-delegation-service",
+            ),
+            CustomerCapabilities.PROPOSE_PAYMENT,
+            PROPOSE_ACTION,
+        ),
     ).associateBy { it.definition.name }
 
     /** Tools whose capability at least one active grant carries. No grant ⇒ no tools. */
@@ -125,11 +151,44 @@ class CustomerReadTools @Inject constructor(
             policy(spec, caller, shared.flatMap { it.capabilities }.toSet())?.let { return it }
             return Outcome.Allowed(render(accounts(shared)), capability, null)
         }
+        if (tool == PROPOSE_PAYMENT) return propose(spec, arguments, caller, grants)
         val read = readOf(tool, arguments) ?: return Outcome.Refused("invalid arguments", capability)
         val grant = grants.firstOrNull { it.accountId == read.accountId && it.allows(capability) }
             ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
         policy(spec, caller, grant.capabilities)?.let { return it }
         return exchangeAndRead(read, caller, capability, grant)
+    }
+
+    /**
+     * ADR-0383 D6, cheapest refusal first: argument validation → a grant over the DEBTOR account
+     * carrying the propose capability → the PDP (`propose.payment`) → the store. No token is
+     * exchanged: the store is called on mcp-service's own service-account, the one identity it
+     * admits to create, with the verified grant triple so the store finds the grant itself.
+     */
+    @Suppress("ReturnCount")
+    private fun propose(spec: Tool, arguments: JsonNode, caller: Caller, grants: List<CustomerGrant>): Outcome {
+        val capability = spec.capability
+        val instruction = try {
+            CustomerPaymentProposer.parse(arguments)
+        } catch (e: IllegalArgumentException) {
+            val detail = e.message ?: "invalid arguments"
+            return Outcome.Refused("invalid arguments: $detail", capability, message = "Invalid arguments: $detail")
+        }
+        val key = caller.grantKey
+            ?: return Outcome.Refused("no verified grant key for a proposal", capability, unavailable = true)
+        val grant = grants.firstOrNull { it.accountId == instruction.debtorAccountId && it.allows(capability) }
+            ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
+        policy(spec, caller, grant.capabilities)?.let { return it }
+        return when (val result = proposer.propose(instruction, key, caller.sessionId)) {
+            is CustomerPaymentProposer.Result.Proposed -> Outcome.Allowed(render(result.body), capability, grant.grantId)
+            is CustomerPaymentProposer.Result.Refused -> Outcome.Refused(
+                result.reason,
+                capability,
+                unavailable = result.unavailable,
+                invalidateGrant = result.invalidateGrant,
+                message = result.message,
+            )
+        }
     }
 
     /**
@@ -249,6 +308,10 @@ class CustomerReadTools @Inject constructor(
         const val LIST_ACCOUNTS = "list_accounts"
         const val GET_BALANCE = "get_balance"
         const val LIST_TRANSACTIONS = "list_transactions"
+        const val PROPOSE_PAYMENT = "propose_payment"
+
+        /** The staff registry's action name for the same tool (`McpToolRegistry`), on this channel too. */
+        const val PROPOSE_ACTION = "propose.payment"
         private const val ACCOUNT_ID = "accountId"
         const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         private val UUID_SHAPE = Regex(UUID_PATTERN)
@@ -260,6 +323,46 @@ private fun uuidProp() = mapOf(
     "pattern" to CustomerReadTools.UUID_PATTERN,
     "description" to "accountId from list_accounts",
 )
+
+private fun proposeSchema(): Map<String, Any> = schema(
+    mapOf(
+        CustomerPaymentProposer.DEBTOR to uuidProp(),
+        CustomerPaymentProposer.IBAN to mapOf(
+            "type" to "string",
+            "pattern" to McpInputBounds.IBAN_PATTERN,
+            "description" to "Creditor IBAN, uppercase, no spaces",
+        ),
+        CustomerPaymentProposer.NAME to mapOf(
+            "type" to "string",
+            "minLength" to 1,
+            "maxLength" to CustomerPaymentProposer.MAX_NAME,
+        ),
+        CustomerPaymentProposer.AMOUNT to mapOf(
+            "type" to "string",
+            "pattern" to "^(0|[1-9][0-9]{0,6})(\\.[0-9]{1,2})?$",
+            "description" to "Plain decimal, at most two decimals, e.g. 12.50",
+        ),
+        CustomerPaymentProposer.CURRENCY to mapOf("type" to "string", "enum" to listOf("CZK", "EUR")),
+        CustomerPaymentProposer.REFERENCE to mapOf(
+            "type" to "string",
+            "minLength" to 1,
+            "maxLength" to CustomerPaymentProposer.MAX_REFERENCE,
+        ),
+        CustomerPaymentProposer.REQUEST_ID to mapOf(
+            "type" to "string",
+            "pattern" to "^[A-Za-z0-9._-]{8,64}$",
+            "description" to "Your id for this proposal; reuse it on a retry",
+        ),
+    ),
+    listOf(
+        CustomerPaymentProposer.DEBTOR,
+        CustomerPaymentProposer.IBAN,
+        CustomerPaymentProposer.NAME,
+        CustomerPaymentProposer.AMOUNT,
+        CustomerPaymentProposer.CURRENCY,
+        CustomerPaymentProposer.REQUEST_ID,
+    ),
+) + ("additionalProperties" to false)
 
 private fun schema(props: Map<String, Any>, required: List<String>): Map<String, Any> = buildMap {
     put("type", "object")

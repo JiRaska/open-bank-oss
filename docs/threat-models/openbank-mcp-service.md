@@ -437,6 +437,37 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-19 (ADR-0383 D6, #16590) — customer `propose_payment` writes a PENDING proposal to
+  delegation-service's store. Still behind `mcp.customer.enabled` (off).** This is the customer
+  channel only; the staff-path `propose_payment` still refuses (T-E4 unchanged).
+  - *Elevation of privilege.* The tool is offered and run only for the DEBTOR account an active
+    `MCP_CLIENT` grant carrying `ACCOUNT_PROPOSE_PAYMENT` covers; a read grant cannot propose, and a
+    propose grant over one account cannot propose from another. `mcp_rest_ext.rego` now admits
+    exactly one write on the channel, `propose.payment` with that capability; `approve`,
+    `execution` and every other action stay under the channel veto (`opa test` 17/17; removing the
+    tool entry, the capability check or the action match each turned the matching tests red). The
+    store call (`PaymentProposalStoreClient`) declares ONE method, create, on mcp-service's own
+    `m2m` identity, which the store admits to create and to nothing else; any answer other than
+    `PENDING` is refused, fail closed. No customer token is exchanged for it.
+  - *Tampering.* Arguments are model-composed and validated before any call to the store's own
+    rules: IBAN via `McpInputBounds.requireIban`, amount a plain decimal string (positive, <= 2
+    decimals, <= 1,000,000.00, never a JSON number), currency CZK|EUR fixing the rail (CZK needs a
+    CZ IBAN), creditor name and reference trimmed, NFC-normalised and REFUSED on Cc/Cf/Zl/Zp,
+    markup brackets, backtick or `://`; unknown arguments refused.
+  - *Repudiation / duplicates.* The store's `Idempotency-Key` is derived, never client-supplied:
+    SHA-256 over (party, `azp`, `cnf.jkt`, token `sid`, the model's `clientRequestId`), so an MCP
+    retry replays the first answer and two clients or customers cannot share a key. Every call is
+    audited and metered on `openbank_mcp_tool_calls` (unknown tool names as the unmapped label).
+  - *Information disclosure.* The result is the proposal id, PENDING, amount, currency, masked
+    creditor IBAN and a bank-rendered summary containing no model-composed text, through
+    `McpPiiMasker` then `McpUntrustedData.wrap`. Store refusals map to fixed texts (limit reached,
+    request id reused, in progress, invalid instruction, not permitted); a 403 also drops the cached
+    grant, so a revoked or expired grant is re-resolved on the next call.
+  - *Contract.* Consumer pact for `POST /api/v1/payment-proposals` (literal path, 201 PENDING and
+    403 no grant) in `pacts/openbank-mcp-service-openbank-delegation-service.json`. Its provider
+    replay needs the delegation-side `@State` handlers, which can only land after the store route
+    (#16853) and the HTTP replay class (#16793) are both on main.
+
 - **2026-11-18 (ADR-0383 D3/D4, #16590) — customer grant lookup, exchanged downstream tokens, read
   tools. Still behind `mcp.customer.enabled` (off).** An admitted customer now sees only the read
   tools its active `MCP_CLIENT` grants allow, and every read runs on the customer's own exchanged

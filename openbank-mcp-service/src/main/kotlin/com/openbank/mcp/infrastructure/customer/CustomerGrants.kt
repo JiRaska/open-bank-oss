@@ -41,4 +41,7 @@ object CustomerCapabilities {
     const val VIEW_DETAILS = "ACCOUNT_VIEW_DETAILS"
     const val READ_BALANCES = "ACCOUNT_READ_BALANCES"
     const val READ_TRANSACTIONS = "ACCOUNT_READ_TRANSACTIONS"
+
+    /** ADR-0383 D6: may PROPOSE a payment from the account; approving stays with the customer's SCA. */
+    const val PROPOSE_PAYMENT = "ACCOUNT_PROPOSE_PAYMENT"
 }

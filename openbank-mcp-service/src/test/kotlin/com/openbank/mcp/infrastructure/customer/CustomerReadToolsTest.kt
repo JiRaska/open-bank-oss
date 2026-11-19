@@ -31,7 +31,8 @@ class CustomerReadToolsTest {
             return verdict()
         }
     }
-    private val tools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper)
+    private val proposer: CustomerPaymentProposer = mockk()
+    private val tools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper, proposer)
     private val caller = CustomerReadTools.Caller(
         "c0ffee00-0000-0000-0000-000000000001",
         "customer-token",
@@ -139,8 +140,8 @@ class CustomerReadToolsTest {
     }
 
     @Test
-    fun `a write tool is not on this channel`() {
-        val out = tools.call("propose_payment", args(), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+    fun `a tool that is not on this channel is refused`() {
+        val out = tools.call("execute_payment", args(), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
         assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
     }
 
