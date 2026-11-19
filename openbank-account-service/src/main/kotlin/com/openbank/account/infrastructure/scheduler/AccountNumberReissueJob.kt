@@ -5,6 +5,8 @@
 package com.openbank.account.infrastructure.scheduler
 
 import com.openbank.account.application.usecase.AccountNumberReissueService
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -13,6 +15,7 @@ import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -27,11 +30,13 @@ import java.util.concurrent.atomic.AtomicLong
 class AccountNumberReissueJob(
     private val service: AccountNumberReissueService,
     private val registry: MeterRegistry,
+    private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.account.number-reissue.enabled", defaultValue = "false")
     private val enabled: Boolean,
 ) {
     private val log = Logger.getLogger(AccountNumberReissueJob::class.java)
     private val invalid = AtomicLong(NOT_MEASURED)
+    private var liveness: WorkflowLivenessRecorder? = null
 
     @PostConstruct
     fun register() {
@@ -39,6 +44,8 @@ class AccountNumberReissueJob(
             .description("Accounts whose CZ account number fails the CNB mod-11 check; -1 until first measured")
             .tag("service", "account")
             .register(registry)
+        // Disabled, it registers no heartbeat: an off job must not read as stale (ADR-0237).
+        if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
     @Scheduled(
@@ -53,6 +60,7 @@ class AccountNumberReissueJob(
         try {
             val report = service.reissueInvalid()
             invalid.set(report.remaining.toLong())
+            if (report.failed == 0) liveness?.recordSuccess()
             log.infof(
                 "account-number reissue: scanned=%d reissued=%d skipped=%d failed=%d remaining=%d",
                 report.scanned,
@@ -69,5 +77,7 @@ class AccountNumberReissueJob(
     companion object {
         const val INVALID_METRIC = "openbank.account.number_invalid"
         const val NOT_MEASURED = -1L
+        const val WORKFLOW_NAME = "account-number-reissue"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(10)
     }
 }

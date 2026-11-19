@@ -12,6 +12,7 @@ import com.openbank.account.application.port.out.StoredAccountNumber
 import com.openbank.account.infrastructure.persistence.entity.AccountEntity
 import com.openbank.account.infrastructure.persistence.entity.AccountNumberReissueEntity
 import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
@@ -67,7 +68,7 @@ class AccountNumberReissueRepositoryImpl(
         }.awaitSuspending()
 
     private fun auditRow(reissue: AccountNumberReissue) = AccountNumberReissueEntity().also {
-        it.id = UUID.randomUUID()
+        it.id = Ids.newId()
         it.accountId = reissue.accountId
         it.oldAccountNumber = reissue.oldAccountNumber
         it.newAccountNumber = reissue.newAccountNumber
