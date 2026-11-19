@@ -20,7 +20,12 @@ interface SchemeGatewayPort {
  * The scheme's verdict on a submitted credit transfer, mapped from the `pacs.002` `TxSts`.
  * [accepted] is true for `ACSC`; [reasonCode] carries the `ExternalStatusReason1Code` on reject.
  */
-data class SchemeSubmissionOutcome(val accepted: Boolean, val reasonCode: String?)
+data class SchemeSubmissionOutcome(
+    val accepted: Boolean,
+    val reasonCode: String?,
+    /** False when the verdict was reached locally and nothing was sent to the scheme (#16772). */
+    val transmitted: Boolean = true,
+)
 
 /**
  * Thrown when the scheme gateway is unreachable; the rail holds the payment in VALIDATED.
