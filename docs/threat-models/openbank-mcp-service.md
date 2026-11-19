@@ -481,7 +481,7 @@ a stub (T-T2/T-D2).
     exchange secret), a downstream 401/403 and a downstream 5xx/timeout are all refusals, audited `DENIED`
     (`UNAVAILABLE` for lookup/exchange outages). Only positive lookups are cached, at most
     `mcp.customer.grant-cache-ttl` (default 15 s, capped at 30 s in code) and never past a grant's
-    `validTo`; a downstream 401/403 or 5xx/timeout drops the entry. With the channel OFF, a customers-realm token is refused 401 `invalid_token` and never served on the anonymous path. At the cache cap, expired entries are evicted first, then the oldest single entries. Results pass `McpPiiMasker` then
+    `validTo`; a downstream 401/403 or 5xx/timeout drops the entry. With the channel OFF, a customers-realm token (and any `DPoP`-scheme credential) is refused 401 `invalid_token` and never served on the anonymous path. At the cache cap the oldest stored entry is evicted (insertion order, O(1)); storing a key already held evicts nothing; expired entries are dropped when next read. A lookup in flight across an invalidation does not re-cache its answer. Results pass `McpPiiMasker` then
     `McpUntrustedData.wrap`, as on the staff path.
   - **Residual, and why the channel stays off:** (1) downstream services validate only the STAFF
     realm today, so an exchanged customers-realm token is refused by balance/transaction-service until

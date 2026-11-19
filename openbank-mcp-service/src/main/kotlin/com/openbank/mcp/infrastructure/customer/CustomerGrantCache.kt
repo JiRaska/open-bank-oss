@@ -10,7 +10,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Short-lived cache in front of [CustomerGrantSource] (ADR-0383 D3 "on every call").
@@ -21,7 +20,8 @@ import java.util.concurrent.ConcurrentHashMap
  * `validTo` of the grants it holds; [invalidate] drops it the moment a downstream service refuses
  * the customer's exchanged token, and a lookup already in flight when that happens does not re-cache
  * its (possibly pre-revocation) answer. A revocation therefore takes effect within [ttl] at the latest.
- * At the cap the oldest entry is evicted (insertion order, O(1)); a refresh never evicts.
+ * At the cap the oldest stored entry is evicted (insertion order, O(1)); a store of a present key
+ * never evicts. Expired entries are dropped when next read.
  */
 @ApplicationScoped
 class CustomerGrantCache(
@@ -42,44 +42,52 @@ class CustomerGrantCache(
         }
     }
 
-    private class Entry(val grants: List<CustomerGrant>, val expiresAt: Instant, val seq: Long)
+    private class Entry(val grants: List<CustomerGrant>, val expiresAt: Instant)
 
-    private val entries = ConcurrentHashMap<GrantKey, Entry>()
-
-    /** Insertion order, for O(1) oldest-first eviction. Stale pairs (re-inserted keys) are skipped. */
-    private val order = ArrayDeque<Pair<GrantKey, Long>>()
+    /**
+     * Insertion-ordered, guarded by [lock]. A re-store of a present key keeps its position, so the
+     * map's eldest entry is always the oldest stored one and eviction is O(1) — with no side
+     * structure that could grow past [maxEntries].
+     */
+    private val entries = LinkedHashMap<GrantKey, Entry>()
     private val lock = Any()
-    private var nextSeq = 0L
 
     /**
      * Bumped by every [invalidate]. A lookup that started before an invalidation must not cache its
      * answer: it may be the pre-revocation grant set. One counter for all keys is conservative (an
      * unrelated invalidation skips caching one concurrent answer) and needs no per-key state to bound.
      */
-    @Volatile
     private var generation = 0L
 
     /** The active grants for [key]; throws [GrantLookupUnavailable] when the answer is unknown. */
     fun grants(key: GrantKey): List<CustomerGrant> {
         val now = clock.instant()
-        entries[key]?.let { if (now.isBefore(it.expiresAt)) return it.grants else entries.remove(key, it) }
-        val startedAt = generation
+        val startedAt = synchronized(lock) {
+            val held = entries[key]
+            if (held != null) {
+                if (now.isBefore(held.expiresAt)) return held.grants
+                entries.remove(key)
+            }
+            generation
+        }
         val fresh = source.resolve(key)
         if (fresh.isEmpty() || ttl.isZero) {
-            entries.remove(key)
+            synchronized(lock) { entries.remove(key) }
             return fresh
         }
         val bound = fresh.mapNotNull { it.validTo }.minOrNull()
         val expiresAt = now.plus(ttl).let { if (bound != null && bound.isBefore(it)) bound else it }
         synchronized(lock) {
             if (generation != startedAt) return fresh
-            // A refresh of a key already held replaces it in place: it never evicts anything.
-            if (!entries.containsKey(key)) {
-                while (entries.size >= maxEntries && evictOldest()) Unit
+            // A store of a key already held replaces it in place: it never evicts anything.
+            if (key !in entries) {
+                val eldest = entries.keys.iterator()
+                while (entries.size >= maxEntries && eldest.hasNext()) {
+                    eldest.next()
+                    eldest.remove()
+                }
             }
-            val seq = nextSeq++
-            entries[key] = Entry(fresh, expiresAt, seq)
-            order.addLast(key to seq)
+            entries[key] = Entry(fresh, expiresAt)
         }
         return fresh
     }
@@ -91,19 +99,11 @@ class CustomerGrantCache(
         }
     }
 
-    /** Drops the oldest live entry; false when none is left. O(1) amortised: each queued pair is popped once. Caller holds [lock]. */
-    private fun evictOldest(): Boolean {
-        while (true) {
-            val (key, seq) = order.removeFirstOrNull() ?: return false
-            if (entries[key]?.seq == seq) {
-                entries.remove(key)
-                return true
-            }
-        }
-    }
-
     /** Test/diagnostic view: whether [key] currently has a stored entry. */
-    internal fun isCached(key: GrantKey): Boolean = entries.containsKey(key)
+    internal fun isCached(key: GrantKey): Boolean = synchronized(lock) { key in entries }
+
+    /** Test/diagnostic view: everything this cache holds, which must never exceed [maxEntries]. */
+    internal fun storedSize(): Int = synchronized(lock) { entries.size }
 
     companion object {
         val MAX_TTL: Duration = Duration.ofSeconds(30)

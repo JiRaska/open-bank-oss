@@ -153,4 +153,16 @@ class CustomerGrantCacheTest {
         source.answer = { emptyList() }
         assertThat(target.grants(key)).isEmpty()
     }
+
+    @Test
+    fun `many refreshes below the cap never grow what the cache holds`() {
+        val small = CustomerGrantCache(source, Duration.ofSeconds(15), clock, maxEntries = 100)
+        source.answer = { listOf(grant()) }
+        val keys = (1..10).map { key.copy(partyId = UUID.randomUUID()) }
+        repeat(1_000) {
+            clock.now = clock.now.plusSeconds(16)
+            keys.forEach { small.grants(it) }
+            assertThat(small.storedSize()).isLessThanOrEqualTo(keys.size)
+        }
+    }
 }

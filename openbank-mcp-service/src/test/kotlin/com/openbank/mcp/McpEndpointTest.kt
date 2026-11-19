@@ -546,6 +546,26 @@ class McpEndpointTest {
     }
 
     @Test
+    fun `the DPoP scheme is matched case-insensitively with any RFC 7235 whitespace`() {
+        listOf("DPoP\ttoken", "dpop token", "  DPOP\ttoken").forEach { header ->
+            val ep = endpoint(allowAll()).apply { httpRequest = TestHttpRequests.withHeaders("Authorization" to header) }
+            assertThat(ep.handle(rpc("tools/list")).status).describedAs(header).isEqualTo(401)
+        }
+        val bearer = endpoint(allowAll()).apply { httpRequest = TestHttpRequests.withHeaders("Authorization" to "Bearer x") }
+        assertThat(bearer.handle(rpc("tools/list")).status).isNotEqualTo(401)
+    }
+
+    @Test
+    fun `an Authorization header that throws on read is refused, never admitted`() {
+        val throwing = io.mockk.mockk<io.vertx.core.http.HttpServerRequest>(relaxed = true) {
+            io.mockk.every { getHeader(any<String>()) } throws IllegalStateException("broken request")
+        }
+        val ep = endpoint(allowAll()).apply { httpRequest = throwing }
+        assertThat(ep.handle(rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>()))).status)
+            .isEqualTo(401)
+    }
+
+    @Test
     fun `tools call is allowed when the PDP permits`() {
         val resp = body(
             endpoint(allowAll()).handle(

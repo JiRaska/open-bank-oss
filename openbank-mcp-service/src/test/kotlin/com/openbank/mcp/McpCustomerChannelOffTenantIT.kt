@@ -31,7 +31,7 @@ import java.security.PrivateKey
  *   `Authorization: DPoP <token>` request reaches the endpoint with NO identity. The endpoint's
  *   channel-off refusal answers it 401 `invalid_token`; before it existed this was served 200 as
  *   anonymous. The same refusal also backstops a staff tenant misconfigured to accept a
- *   customers-realm token (`McpCustomerChannelOffIT`, substituted token source).
+ *   customers-realm token (`McpCustomerChannelOffIT`, substituted verifier).
  */
 @QuarkusTest
 @TestProfile(McpCustomerChannelOffTenantIT.StaffTenantOnly::class)
@@ -80,7 +80,9 @@ class McpCustomerChannelOffTenantIT {
     fun `a real customers-realm Bearer token is refused 401 by the staff tenant before the endpoint`() {
         recorder.clear()
         val token = sign(OidcItKeys.pair("customers").private, CUSTOMERS, "c0ffee00-0000-0000-0000-0000000000f3")
-        call(token).statusCode(401)
+        // The endpoint's challenge is absent: this 401 is Quarkus OIDC's, not the channel-off refusal.
+        val challenge = call(token).statusCode(401).extract().header("WWW-Authenticate").orEmpty()
+        assertThat(challenge).doesNotContain("customer channel is not enabled")
         // No audit row: the request never reached McpEndpoint.
         assertThat(recorder.events).isEmpty()
     }

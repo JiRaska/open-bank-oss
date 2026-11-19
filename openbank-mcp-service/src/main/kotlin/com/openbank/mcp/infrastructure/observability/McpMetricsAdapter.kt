@@ -119,6 +119,17 @@ class McpMetricsAdapter(private val registry: MeterRegistry?) : McpMetricsPort {
         }
     }
 
+    override fun auditSuppressed(reason: McpMetricsPort.AuditSuppression) {
+        registry?.let { r ->
+            Counter.builder("openbank.mcp.audit_suppressed")
+                .tag("service", SERVICE)
+                .tag("reason", reason.name.lowercase())
+                .description("MCP refusals whose audit row was suppressed by the per-source audit window")
+                .register(r)
+                .increment()
+        }
+    }
+
     override fun inputRefused(reason: McpMetricsPort.InputRefusal) {
         registry?.let { r ->
             Counter.builder("openbank.mcp.input_refused")

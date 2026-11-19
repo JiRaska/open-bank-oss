@@ -72,6 +72,33 @@ class McpCustomerChannelOffIT {
         assertThat(recorder.events.size).isBetween(1, 2)
     }
 
+    @Inject
+    lateinit var meters: io.micrometer.core.instrument.MeterRegistry
+
+    @Test
+    fun `one source's flood does not suppress another source's audit row, and suppressions are counted`() {
+        fun flood(sub: String, times: Int) {
+            CustomerTokenSource.claims = mapOf(
+                "iss" to "https://kc.open-bank.tech/realms/openbank-customers",
+                "sub" to sub,
+                "aud" to "openbank-mcp-service",
+            )
+            repeat(times) {
+                given().contentType(ContentType.JSON).header("Authorization", "DPoP t")
+                    .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}""")
+                    .post("/mcp").then().statusCode(401)
+            }
+        }
+        val suppressedBefore = meters.find("openbank.mcp.audit_suppressed").counter()?.count() ?: 0.0
+        recorder.clear()
+        flood("c0ffee00-0000-0000-0000-0000000000a1", 10)
+        val afterFirst = recorder.events.size
+        flood("c0ffee00-0000-0000-0000-0000000000a2", 1)
+        assertThat(recorder.events.size).isEqualTo(afterFirst + 1)
+        val suppressed = (meters.find("openbank.mcp.audit_suppressed").counter()?.count() ?: 0.0) - suppressedBefore
+        assertThat(suppressed).isGreaterThanOrEqualTo(8.0)
+    }
+
     @Test
     fun `control - with no token the anonymous path still answers 200`() {
         given().contentType(ContentType.JSON).body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
