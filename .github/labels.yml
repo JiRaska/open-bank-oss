@@ -179,6 +179,10 @@ labels:
     color: "b60205"
     description: "Owner-applied only: the merge train serves this PR first in its lane. Agents never apply it."
 
+  - name: "merge-priority:urgent"
+    color: "5319e7"
+    description: "Owner-applied only, capped per day: takes the strict reservation next tick. Agents never apply it."
+
   - name: "merge-priority:repair"
     color: "d93f0b"
     description: "Defer new deploy auto-merges while this repair PR is open; remove to release."

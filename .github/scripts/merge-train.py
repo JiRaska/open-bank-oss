@@ -109,6 +109,17 @@ EXPEDITE_CONTEXT = "merge-train/expedite-carrier"
 EXPEDITE_CARRIER_TITLE = "merge-train expedite carrier"
 EXPEDITE_LANE_DEFAULT = False      # MERGE_TRAIN_EXPEDITE_LANE; "false" = the label only reorders, as before
 EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is a policy, not an identity
+# Urgent strict path (ADR-0343 amendment 2026-11-19). 2026-11-19: #16835, a workflow fix routing PR builds
+# to a new runner pool, was green and up to date with main and still waited hours: `merge-train` is
+# required and posted only by the train, the strict lane serves one PR at a time behind a reservation
+# (#16760), ~15 strict PRs were queued, and expedite only reorders. An OWNER-applied, daily-capped
+# `merge-priority:urgent` label lets one green strict PR take the reservation at the next tick, pre-empting
+# a non-urgent holder whose CI is still running — once per holder head (URGENT_PREEMPT_CONTEXT on it).
+# Nothing about the merge changes: the urgent PR still merges only green on a head containing exact main.
+# On a red main every fix still comes first; a non-fix urgent PR waits for green main like any other.
+URGENT_LABEL = "merge-priority:urgent"
+URGENT_PREEMPT_CONTEXT = "merge-train/urgent-preempted"   # App marker: this head yielded main to an urgent PR once
+URGENT_DAILY_CAP_DEFAULT = 2       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 # Strict carrier (ADR-0343 amendment 2026-11-05): green strict-lane PRs that are BEHIND main are
 # batched into one execution-free tree over live main (`git merge-tree --write-tree` in settle, no
@@ -1102,6 +1113,82 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
         if res and res[1] == "failure":
             out[ctx] = res[0]
     return out
+
+
+def urgent_grant(events, owner: str) -> tuple[str | None, str]:
+    """(labelled_at, why). The LATEST `labeled` event for URGENT_LABEL decides: only the repo owner may have
+    applied it (anyone else re-applying it after the owner takes the grant away). Fail closed: unreadable
+    events, no such event, or an event without a timestamp grant nothing."""
+    if events is None:
+        return None, "label events unreadable"
+    last = None
+    for e in events:
+        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL:
+            last = e
+    if last is None:
+        return None, f"no readable {URGENT_LABEL} label event"
+    actor = (last.get("actor") or {}).get("login") or ""
+    if actor != owner:
+        return None, f"{URGENT_LABEL} applied by {actor or 'unknown'}, not the repo owner {owner}"
+    at = last.get("created_at") or ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T.*", at):
+        return None, "label event carries no timestamp"
+    return at, ""
+
+
+def urgent_refusal(n: int, events, owner: str, day_events: dict | None, cap: int) -> str | None:
+    """Why #n's urgent label grants nothing; None = admitted. Admitted when the owner applied it (urgent_grant)
+    and #n is among the first `cap` distinct PRs the owner labelled urgent on that UTC day. `day_events`
+    maps every PR labelled urgent recently (search hits) to its events; None = unreadable -> refused."""
+    at, why = urgent_grant(events, owner)
+    if at is None:
+        return why
+    if day_events is None:
+        return "today's urgent count is unreadable"
+    day = at[:10]
+    firsts: dict[int, str] = {n: at}
+    for k, evs in day_events.items():
+        if k == n:
+            continue
+        times = sorted(e.get("created_at") or "" for e in evs or []
+                       if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL
+                       and (e.get("actor") or {}).get("login") == owner and (e.get("created_at") or "")[:10] == day)
+        if times:
+            firsts[k] = times[0]
+    rank = sorted(firsts, key=lambda k: (firsts[k], k)).index(n)
+    if rank >= cap:
+        return f"daily cap reached ({rank + 1} urgent PRs on {day}, cap {cap})"
+    return None
+
+
+def is_urgent(view: dict) -> bool:
+    return any((lb.get("name") if isinstance(lb, dict) else lb) == URGENT_LABEL for lb in view.get("labels") or [])
+
+
+def urgent_prs(gh, repo: str, strict: list, cap: int) -> set[int]:
+    """The strict-lane PRs whose urgent label is admitted this tick (urgent_refusal). No labelled PR = no
+    API read at all. Every refusal is logged, once per tick."""
+    labelled = [v["number"] for _st, v in strict if is_urgent(v)]
+    if not labelled:
+        return set()
+    owner = repo.split("/", 1)[0]
+    day_events = gh.urgent_day_events()
+    out: set[int] = set()
+    for n in labelled:
+        evs = day_events[n] if day_events and n in day_events else gh.issue_events(n)
+        why = urgent_refusal(n, evs, owner, day_events, cap)
+        if why:
+            log(f"#{n:>6} urgent    not admitted: {why}")
+        else:
+            out.add(n)
+    return out
+
+
+def urgent_servable(base: str, view: dict) -> bool:
+    """A green urgent PR the strict lane can serve over THIS main: not already told it conflicts with it,
+    or that update-branch was refused over it (pre-empting for it would free main for nobody)."""
+    told = (view.get("app") or {}).get(NOTICE_CONTEXT, ("", ""))[1]
+    return not told.startswith((f"{CONFLICT_PREFIX}{base[:12]}", f"{REFUSED_PREFIX}{base[:12]}"))
 
 
 def is_expedited(p: dict) -> bool:
@@ -2741,6 +2828,38 @@ class GitHub:
     def close_carrier(self, n: int) -> None:
         api("PATCH", f"/repos/{self.repo}/pulls/{int(n)}", {"state": "closed"})
 
+    def issue_events(self, n: int) -> list | None:
+        """Every issue event of #n (who applied which label, when); None = unreadable (callers fail closed)."""
+        out: list = []
+        for page in range(1, 11):
+            code, data = api("GET", f"/repos/{self.repo}/issues/{int(n)}/events?per_page=100&page={page}")
+            if code != 200 or not isinstance(data, list):
+                log(f"::warning::#{n} issue events unreadable ({code}) — not admitted as urgent")
+                return None
+            out += data
+            if len(data) < 100:
+                return out
+        return None   # more than 1000 events: cannot be read whole, so it is not read at all
+
+    def urgent_day_events(self, days: int = 2) -> dict[int, list] | None:
+        """{PR: its issue events} for every PR labelled urgent and updated in the last `days` UTC days (a
+        label event updates the issue, so every PR labelled on a counted day is a hit). One search plus one
+        events read per hit; None when any read is incomplete — the cap then admits nothing."""
+        since = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400 * (days - 1)))
+        q = urllib.parse.quote(f'repo:{self.repo} is:pr label:"{URGENT_LABEL}" updated:>={since}')
+        code, data = api("GET", f"/search/issues?q={q}&per_page=100")
+        if code != 200 or not isinstance(data, dict) or data.get("incomplete_results") \
+                or len(data.get("items") or []) != data.get("total_count"):
+            log(f"::warning::urgent daily count unreadable ({code}) — no PR admitted as urgent")
+            return None
+        out: dict[int, list] = {}
+        for item in data["items"]:
+            evs = self.issue_events(int(item["number"]))
+            if evs is None:
+                return None
+            out[int(item["number"])] = evs
+        return out
+
     def expedite_carriers_today(self, day: str) -> int | None:
         """Expedite carriers the App opened on UTC `day` (YYYY-MM-DD), open or closed, from ONE search call
         scoped to the App's own PRs created that day (a repo opens hundreds of PRs a day, so paging the PR
@@ -2840,7 +2959,8 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
     return {"number": p["number"], "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
             "same_repo": (p["head"].get("repo") or {}).get("full_name") == repo, "head_ref": p["head"]["ref"],
             "head_sha": p["head"]["sha"], "created_at": p.get("created_at", ""), "title": p.get("title", ""),
-            "body": p.get("body") or "", "files": files}
+            "body": p.get("body") or "", "files": files,
+            "labels": [lb.get("name") if isinstance(lb, dict) else lb for lb in p.get("labels") or []]}
 
 
 # Admission prerequisites judged on the PR OBJECT (#14684). `security-checklist-money-path` runs inside
@@ -3451,7 +3571,8 @@ def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
                 strict_cap: int = STRICT_BATCH_CAP_DEFAULT, judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
                 stack: bool = SPECULATIVE_STACK_DEFAULT,
-                expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT) -> dict:
+                expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT,
+                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
@@ -3475,9 +3596,12 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
     relevant = served_relevant_fixes(gh, git, base, strict, main_red, main_cache)
+    urgent = urgent_prs(gh, repo, strict, urgent_cap)
+    preempted: list[int] = []
     holder, timed_out = strict_reservation(git, base, strict, shadow,
                                            fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
-                                           activity=gh.ci_activity, relevant=relevant)
+                                           activity=gh.ci_activity, relevant=relevant,
+                                           urgent=urgent, preempted=preempted, main_red=bool(main_red))
     # Strict carriers first (ADR-0343 amendment 2026-11-05): an open one holds the strict reservation.
     strict_carrier_open, acted = judge_strict_carriers(gh, git, repo, base, required, main_red, shadow, summary)
     if strict_carrier_open:
@@ -3790,10 +3914,28 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
         relevant = served_relevant_fixes(gh, git, base, strict, main_red, main_cache)
+        urgent = urgent_prs(gh, repo, strict, urgent_cap)
+        preempted = []
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
-                                               activity=gh.ci_activity, relevant=relevant)
+                                               activity=gh.ci_activity, relevant=relevant,
+                                               urgent=urgent, preempted=preempted, main_red=bool(main_red))
     summary["main_red"] = sorted(main_red)
+    if urgent:
+        summary["urgent"] = sorted(urgent)
+    for _st, view in strict:
+        if view["number"] in preempted and not shadow and URGENT_PREEMPT_CONTEXT not in (view.get("app") or {}):
+            # Once per head: strict_reservation reads this back and never pre-empts this head again.
+            gh.post_status(view["head_sha"], "success",
+                           "strict lane: yielded main once to an urgent PR on this head; not blamed",
+                           context=URGENT_PREEMPT_CONTEXT)
+            view.setdefault("app", {})[URGENT_PREEMPT_CONTEXT] = ("success", "")
+    if preempted:
+        summary["urgent_preempted"] = sorted(set(preempted))
+    # An admitted urgent PR the lane can serve now outranks the train's and the fast lane's turns, and is
+    # served by update-branch rather than batched into a strict carrier (one CI cycle, its own head).
+    urgent_now = (not main_red and holder is None
+                  and any(st == "green" and v["number"] in urgent and urgent_servable(base, v) for st, v in strict))
     fragments = regen_inventory_fragments(regen_text)
     fast, train_waiting = partition(git, base, cands, fragments)
     # While main is red no train is built (plan_train serves only fixes), so the train's turn after a strict
@@ -3802,7 +3944,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # behind "train's turn" for ~2 h of red main). An open carrier still keeps its turn.
     yield_why = train_turn(gh, git, base, train_waiting,
                            any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()), main_red=main_red)
-    if holder is None and not yield_why and not main_red:
+    if urgent_now and yield_why:
+        log(f"urgent strict PR served before this turn: {yield_why}")
+        yield_why = None
+    if holder is None and not yield_why and not main_red and not urgent_now:
         # A reservation already running is never affected; the fast lane only gets the gap between two.
         yield_why = fast_turn(gh, git, base,
                               [m for m in fast if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success"],
@@ -3825,7 +3970,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # main ride ONE execution-free carrier instead of taking a 2.4 h update-branch slot each. STRICT_BATCH_CAP
     # 1 (or no run id) keeps today's behaviour exactly.
     if (not strict_carrier_open and not shadow and strict_cap >= 2 and run_id and attempt and holder is None
-            and not main_red and not yield_why and not carrier_in_flight and not any_carrier_open(gh, repo)
+            and not urgent_now and not main_red and not yield_why and not carrier_in_flight and not any_carrier_open(gh, repo)
             and not summary.get("strict_tree_mismatch")
             and not any(st == "green" and git("merge-base", "--is-ancestor", base, v["head_sha"], check=False).returncode == 0
                         for st, v in strict)):
@@ -3852,7 +3997,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # Strict lane first: an update-branch it issues starts a reservation THIS tick, so the fast lane
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
-                yield_why, relevant=relevant)
+                yield_why, relevant=relevant, urgent=urgent)
     not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
     if not_fix:
         summary["not_fix"] = dict(sorted(not_fix.items()))
@@ -4321,6 +4466,142 @@ def fix_preempts_strict_self_test(check) -> None:
         return _R(0, "")
     check("main red: breakage is the diff from the last green to the FIRST red commit, not to main's tip",
           breakage_dirs(_Hist(), hgit, "c3", red, {}) == {"docs/adr"}, str(breakage_dirs(_Hist(), hgit, "c3", red, {})))
+
+
+def urgent_strict_self_test(check) -> None:
+    """ADR-0343 amendment 2026-11-19 (urgent strict path). 2026-11-19: #16835, a green, up-to-date workflow
+    fix, could not merge for hours behind ~15 queued strict PRs; expedite only reorders. An owner-applied,
+    capped `merge-priority:urgent` PR takes the strict reservation at the next tick, pre-empting a non-urgent
+    holder whose CI is still running (once per holder head); a fix for a red main still comes first."""
+    now = 2_000_000_000.0
+
+    class _R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout = rc, out
+
+    def git(*a, **_k):
+        if a[:2] == ("merge-base", "--is-ancestor"):
+            return _R(0 if a[3].startswith("cur-") else 1)
+        if a[:2] == ("show", "-s"):
+            return _R(0, str(int(now) - 60))
+        return _R(0, "")
+
+    def view(n, head, urgent=False, marked=False, fix=False, notice=None):
+        v = {"number": n, "head_sha": head, "app": {}, "labels": [URGENT_LABEL] if urgent else []}
+        if marked:
+            v["app"][URGENT_PREEMPT_CONTEXT] = ("success", "pre-empted")
+        if fix:
+            v["fix"] = ["Validate manifests"]
+        if notice:
+            v["app"][NOTICE_CONTEXT] = ("success", notice)
+        return v
+
+    def reserve(strict, urgent, red=None, preempted=None):
+        red = red or {}
+        return strict_reservation(git, "b", strict, now=now, fixes=strict_fixes(None, git, "b", strict, red),
+                                  urgent=urgent, preempted=preempted, main_red=bool(red))
+
+    holder = view(16760, "cur-holder")
+    # 1. An urgent, armed, green PR (behind main) pre-empts a non-urgent holder whose CI runs.
+    out: list = []
+    h, _t = reserve([("pending", holder), ("green", view(16835, "old-urgent", urgent=True))], {16835}, preempted=out)
+    check("urgent: a green urgent PR pre-empts a non-urgent holder whose CI is running", h is None and out == [16760],
+          f"holder={h} preempted={out}")
+    # Once per holder head: a head already pre-empted keeps main against a later urgent PR.
+    out = []
+    h, _t = reserve([("pending", view(16760, "cur-holder", marked=True)), ("green", view(16900, "old-u2", urgent=True))],
+                    {16900}, preempted=out)
+    check("urgent: a holder head pre-empted once is never pre-empted again", h == 16760 and out == [], f"holder={h} {out}")
+    # A green holder merges this tick: never interrupted.
+    h, _t = reserve([("green", holder), ("green", view(16835, "old-urgent", urgent=True))], {16835})
+    check("urgent: a GREEN holder (merging this tick) is not interrupted", h == 16760, f"holder={h}")
+    # 2. Not green, or not admitted (label/cap): held; the holder keeps main.
+    h, _t = reserve([("pending", holder), ("pending", view(16835, "old-urgent", urgent=True))], {16835})
+    check("urgent: an urgent PR whose CI is not green (behind main) pre-empts nothing", h == 16760, f"holder={h}")
+    h, _t = reserve([("pending", holder), ("green", view(16835, "old-urgent", urgent=True))], set())
+    check("urgent: a labelled PR not admitted (owner/cap refused) pre-empts nothing", h == 16760, f"holder={h}")
+    told = f"{CONFLICT_PREFIX}b: strict lane"
+    h, _t = reserve([("pending", holder), ("green", view(16835, "old-urgent", urgent=True, notice=told))], {16835})
+    check("urgent: an urgent PR that conflicts with this main pre-empts nothing", h == 16760, f"holder={h}")
+    # Once its combined head is in CI, the urgent PR holds; the pre-empted head is neither holder nor timed out.
+    h, t = reserve([("pending", view(16760, "cur-holder", marked=True)), ("pending", view(16835, "cur-urgent", urgent=True))],
+                   {16835})
+    check("urgent: the urgent PR's up-to-date head in CI holds main over the pre-empted head", h == 16835, f"holder={h}")
+    check("urgent: the pre-empted head is never blamed (not timed out)", t == [], f"timed_out={t}")
+    # 6. Main red: a fix comes first; a non-fix urgent PR pre-empts nothing until main is green.
+    red = {"Validate manifests": "failure"}
+    h, _t = reserve([("pending", view(15991, "cur-fix", fix=True)), ("green", view(16835, "old-urgent", urgent=True))],
+                    {16835}, red=red)
+    check("urgent + main red: a fix in CI keeps main against a non-fix urgent PR", h == 15991, f"holder={h}")
+
+    class _Gh:
+        def __init__(self):
+            self.updates, self.merges = [], []
+
+        def app_statuses(self, _sha):
+            return {}
+
+        def checks(self, _sha):
+            return {}
+
+        def update_branch(self, n, _head):
+            self.updates.append(n)
+            return True
+
+        def main_sha(self):
+            return "b"
+
+        def merge(self, n, _head):
+            self.merges.append(n)
+            return True
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    # The strict lane serves the urgent PR first, then — once it merged — the pre-empted PR first among the rest.
+    gh, summary = _Gh(), {"merged": []}
+    strict = [("green", view(16001, "old-a")), ("green", view(16835, "old-urgent", urgent=True))]
+    strict_lane(gh, git, "b", strict, False, False, summary, {}, {}, holder=None, timed_out=[], urgent={16835})
+    check("urgent: strict lane update-branches the urgent PR ahead of an older green strict PR",
+          gh.updates == [16835], f"updates={gh.updates}")
+    gh, summary = _Gh(), {"merged": []}
+    strict = [("green", view(16760, "old-holder")), ("green", view(16900, "old-later"))]
+    strict_lane(gh, git, "b", strict, False, False, summary, {}, {}, holder=None, timed_out=[], urgent=set())
+    check("urgent: once the urgent PR is done the pre-empted holder is served first again", gh.updates == [16760],
+          f"updates={gh.updates}")
+    gh, summary = _Gh(), {"merged": []}
+    strict = [("green", view(15991, "old-fix", fix=True)), ("green", view(16835, "old-urgent", urgent=True))]
+    fx = strict_fixes(None, git, "b", strict, red)
+    strict_lane(gh, git, "b", strict, False, False, summary, red, {}, holder=None, timed_out=[], urgent={16835})
+    check("urgent + main red: the fix is update-branched, not the non-fix urgent PR",
+          gh.updates == [15991], f"updates={gh.updates} fixes={fx}")
+    # A fix that is ALSO urgent keeps fix priority (it is a fix): served as one.
+    strict = [("green", view(15991, "old-fix", fix=True)), ("green", view(16835, "old-uf", urgent=True, fix=True))]
+    gh, summary = _Gh(), {"merged": []}
+    strict_lane(gh, git, "b", strict, False, False, summary, red, {}, holder=None, timed_out=[], urgent={16835})
+    check("urgent + main red: an urgent fix goes ahead of a non-urgent fix", gh.updates == [16835], f"updates={gh.updates}")
+
+    # 3/4. Admission: owner-applied only, capped per UTC day, fail closed.
+    def ev(actor, at, name=URGENT_LABEL, kind="labeled"):
+        return {"event": kind, "actor": {"login": actor}, "label": {"name": name}, "created_at": at}
+    day = "2026-11-19"
+    own = [ev("JiRaska", f"{day}T10:00:00Z")]
+    check("urgent: owner-applied label is admitted",
+          urgent_refusal(1, own, "JiRaska", {1: own}, 2) is None, str(urgent_refusal(1, own, "JiRaska", {1: own}, 2)))
+    bot = own + [ev("some-agent[bot]", f"{day}T11:00:00Z")]
+    check("urgent: a label (re)applied by anyone but the owner is refused",
+          (urgent_refusal(1, bot, "JiRaska", {1: bot}, 2) or "").find("not the repo owner") >= 0,
+          str(urgent_refusal(1, bot, "JiRaska", {1: bot}, 2)))
+    check("urgent: unreadable label events fail closed", urgent_refusal(1, None, "JiRaska", {1: own}, 2) is not None)
+    check("urgent: no label event at all fails closed", urgent_refusal(1, [], "JiRaska", {}, 2) is not None)
+    check("urgent: unreadable daily count fails closed", urgent_refusal(1, own, "JiRaska", None, 2) is not None)
+    hits = {1: [ev("JiRaska", f"{day}T08:00:00Z")], 2: [ev("JiRaska", f"{day}T09:00:00Z")],
+            3: [ev("JiRaska", f"{day}T10:00:00Z")], 4: [ev("JiRaska", "2026-11-18T23:00:00Z")],
+            5: [ev("intruder", f"{day}T07:00:00Z")]}
+    check("urgent: within the daily cap is admitted", urgent_refusal(2, hits[2], "JiRaska", hits, 2) is None,
+          str(urgent_refusal(2, hits[2], "JiRaska", hits, 2)))
+    r3 = urgent_refusal(3, hits[3], "JiRaska", hits, 2) or ""
+    check("urgent: the third owner label of the UTC day is refused (cap 2)", "cap" in r3, r3)
 
 
 def train_turn_main_red_self_test(check) -> None:
@@ -4846,7 +5127,8 @@ def preempting_fixes(base: str, strict: list, fixes: dict | None) -> set[int]:
 
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
                        fixes: dict | None = None, activity=None,
-                       relevant: set[int] | None = None) -> tuple[int | None, list[int]]:
+                       relevant: set[int] | None = None, urgent: set[int] | None = None,
+                       preempted: list | None = None, main_red: bool = False) -> tuple[int | None, list[int]]:
     """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
     main and whose CI is still running with nothing failed — or has just gone green, so it merges this
     tick: main is reserved for it, so neither the
@@ -4863,8 +5145,15 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
     holder_state = None
     pre = preempting_fixes(base, strict, fixes)
     relevant = relevant or set()
+    urgent = set() if main_red else (urgent or set())   # main red: fixes only; urgent waits for green main
     ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in relevant
-                     else 1 if sv[1]["number"] in fixes or sv[1]["number"] in pre else 2)
+                     else 1 if sv[1]["number"] in fixes or sv[1]["number"] in pre
+                     else 2 if sv[1]["number"] in urgent else 3)
+    # An urgent PR whose up-to-date head is in CI holds main; a head that yielded to an urgent PR then waits
+    # without holding and is never timed out for it (never blamed).
+    urgent_running = any(st == "pending" and v["number"] in urgent
+                         and git("merge-base", "--is-ancestor", base, v["head_sha"], check=False).returncode == 0
+                         for st, v in strict)
     for state, view in ordered:
         n, head = view["number"], view["head_sha"]
         if state not in ("pending", "green"):
@@ -4873,6 +5162,10 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
             continue
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
+        if (state == "pending" and urgent_running and n not in urgent
+                and URGENT_PREEMPT_CONTEXT in (view.get("app") or {})):
+            log(f"#{n:>6} strict    yielded main to an urgent PR on this head: waits, not blamed")
+            continue
         if state == "pending" and RELEASED_CONTEXT in (view.get("app") or {}):
             # Cooldown (#14302): this head already timed out once. Its CI may resume, but re-reserving
             # it on the next tick starved every other strict PR and the fast lane. It may still merge
@@ -4887,6 +5180,9 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         elif holder is None:
             holder = n
             holder_state = state
+        elif (state == "pending" and holder in urgent and n not in urgent and n not in fixes
+                and URGENT_PREEMPT_CONTEXT not in (view.get("app") or {}) and preempted is not None):
+            preempted.append(n)   # an up-to-date urgent head in CI displaced this one: recorded, once per head
     # Main-red fix pre-emption (ADR-0343 amendment 2026-11-14): a non-fix reservation whose CI is still
     # RUNNING does not hold main while a green fix waits. Since no train moves on a red main, holding it
     # for a strict PR's 30-60 min CI (re-run each time main moves) left the fix — the one PR that can turn
@@ -4904,6 +5200,23 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         log(f"#{holder:>6} strict    reservation pre-empted: main is red and fix "
             f"{', '.join(f'#{f}' for f in sorted(relevant & pre))} touches what broke it; main returns once green")
         holder = None
+    # Urgent pre-emption (ADR-0343 amendment 2026-11-19): a non-urgent holder whose CI is still RUNNING yields
+    # main to an admitted, GREEN urgent PR the lane can serve over this main — once per holder head. A green
+    # holder merges this tick and is never interrupted. Main red: no urgent pre-emption (urgent is empty).
+    elif (holder is not None and holder_state == "pending" and holder not in urgent and holder not in fixes
+            and holder not in pre):
+        ready = sorted(v["number"] for st, v in strict
+                       if st == "green" and v["number"] in urgent and urgent_servable(base, v))
+        hview = next((v for _st, v in strict if v["number"] == holder), {})
+        if ready and URGENT_PREEMPT_CONTEXT in (hview.get("app") or {}):
+            log(f"#{holder:>6} strict    keeps main: already pre-empted once by an urgent PR on this head "
+                f"(#{ready[0]} waits)")
+        elif ready:
+            log(f"#{holder:>6} strict    reservation pre-empted by urgent #{ready[0]}: not blamed, served "
+                f"first again once it is done")
+            if preempted is not None:
+                preempted.append(holder)
+            holder = None
     return holder, timed_out
 
 
@@ -5133,7 +5446,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
 def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict,
                 main_red: dict[str, str] | None = None, cache: dict | None = None,
                 holder: int | None = None, timed_out: list | None = None, yield_why: str | None = None,
-                relevant: set[int] | None = None) -> None:
+                relevant: set[int] | None = None, urgent: set[int] | None = None) -> None:
     """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
     contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
     date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
@@ -5159,6 +5472,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in (relevant or ())
                         else 1 if sv[1]["number"] in fixes else 2)  # stable: oldest first within
     relevant = relevant if main_red else set()
+    if urgent:
+        # Urgent first within each rank: on a red main every fix still precedes it (an urgent fix leads the
+        # fixes), and a non-fix urgent PR is still never updated onto a red main (below).
+        strict = sorted(strict, key=lambda sv: (0 if sv[1]["number"] in (relevant or ()) else 1 if sv[1]["number"] in fixes
+                                                else 2, sv[1]["number"] not in urgent))
     updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
     main_health_checked = False  # one final inventory read, shared by this strict-lane invocation
     for state, view in strict:
@@ -5919,6 +6237,10 @@ def check_declaration() -> int:
     for job in ("build", "publish"):
         if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
             fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
+    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as a positive integer")
+    if "URGENT_DAILY_CAP: ${{ env.MERGE_TRAIN_URGENT_DAILY_CAP }}" not in jobs.get("settle", ""):
+        fails.append("settle must carry MERGE_TRAIN_URGENT_DAILY_CAP")
     if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
         fails.append("publish must carry MERGE_TRAIN_EXPEDITE_DAILY_CAP (it re-checks the cap live)")
     # The safety is a runtime property: settle must consult the live ruleset before merging, whatever the flag says.
@@ -7030,6 +7352,7 @@ def self_test() -> int:
     retry_planner_self_test(check)
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
+    urgent_strict_self_test(check)
     selftest_skip_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
@@ -8784,10 +9107,11 @@ def self_test() -> int:
             check("fast lane: a docs/adr member is not fast-laned, and settle takes no state input",
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
                   # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
-                  # are the lane's switch and cap; judge_cap bounds a judge carrier: none is a classification.
+                  # are the lane's switch and cap; judge_cap bounds a judge carrier; urgent_cap is the urgent
+                  # path's daily cap (admission is read live): none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
                   == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "judge_cap", "stack", "expedite",
-                      "expedite_cap"})
+                      "expedite_cap", "urgent_cap"})
             reset()
 
             # Bundle verification, directly.
@@ -11852,6 +12176,9 @@ def main() -> int:
     ap.add_argument("--expedite-cap", type=int,
                     default=int(os.environ.get("EXPEDITE_DAILY_CAP", str(EXPEDITE_DAILY_CAP_DEFAULT))),
                     help="settle/publish: expedite carriers per UTC day")
+    ap.add_argument("--urgent-cap", type=int,
+                    default=int(os.environ.get("URGENT_DAILY_CAP", str(URGENT_DAILY_CAP_DEFAULT))),
+                    help="settle: distinct PRs the owner may label merge-priority:urgent per UTC day")
     ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
                     help="build/publish: settle's expedite window, the one PR number (re-validated live)")
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
@@ -11936,7 +12263,8 @@ def run_mode(gh, args, ap) -> int:
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
                     strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap, stack=args.speculative_stack == "true",
-                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap)
+                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
+                    urgent_cap=args.urgent_cap)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
     window = s.get("stack_window")

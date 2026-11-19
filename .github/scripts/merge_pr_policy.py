@@ -90,6 +90,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # merge-train.py of #16700 after merging main at 321e26ad7f (re-derived declaration budget,
     # #16785), reviewed with that PR.
     '7887f1058488cea4f26939b5ab39e7d9d909e538',
+    # merge-train.py of the urgent strict path (ADR-0343 amendment 2026-11-19), reviewed with that PR.
+    '9c725c3d151a2c3e56b6a728b9449e1314b24256',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

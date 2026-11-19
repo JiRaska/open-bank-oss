@@ -780,6 +780,19 @@ Self-tests:
 - (20) and (21): the relaxing and tightening checker pairs; (22) a relaxing detekt rule; (23) a companion threat model; (24) companions in one module.
 - `config_judge_path` (including `.gitleaksignore`, `.semgrep.yml`, `application.yaml`, a root dotfile and a `..` path) and `train_code_paths` are pinned against both the synthetic tree and the real one.
 
+### Amendment (2026-11-19) — an owner-applied urgent label takes the strict reservation
+
+Observed 2026-11-19: #16835, a workflow change routing PR builds to a new runner pool, was green on every required check and up to date with `main`, and could not merge for hours. `main-protection` requires the `merge-train` status, which only the train posts. The strict lane serves one PR at a time, expedited first and then oldest, and reserves `main` for the current holder (#16760). About 15 strict PRs were queued. `merge-priority:expedite` only reorders that queue, and its carrier lane does not apply to strict members. Only a fix for a red `main` pre-empts.
+
+Decision: a label `merge-priority:urgent`.
+- **Owner-applied only.** The latest `labeled` event for it (issue events API) must have the repository owner as actor. Unreadable events, a missing event, or a later re-application by anyone else admit nothing (fail closed).
+- **Capped.** At most `MERGE_TRAIN_URGENT_DAILY_CAP` (default 2) distinct PRs per UTC day of the owner's label event, ranked by label time. An unreadable count admits nothing.
+- **Pre-emption.** An admitted, green urgent PR that has not been told it conflicts with this `main` (or that update-branch was refused over it) takes the reservation at the next tick. A non-urgent holder whose CI is still running yields. The App marks the holder's head `merge-train/urgent-preempted`: a head yields at most once. While the urgent PR's up-to-date head is in CI, a marked head neither holds nor times out, so it is never blamed. Once the urgent PR is done, the marked PR keeps its oldest-first place among the non-urgent PRs. A green holder merges in its tick and is never interrupted. The urgent PR outranks the train's and the fast lane's turns, and is served by update-branch rather than batched into a strict carrier.
+- **Safety unchanged.** The urgent PR merges only through the ordinary strict-lane merge: green required checks on a head containing exact `main`, with the status and the merge pinned to that head.
+- **Ordering with main red.** Every fix (the relevant fix first, then the others) precedes every urgent PR. A non-fix urgent PR pre-empts nothing and is not updated onto a red `main`. An urgent PR that is itself a fix leads the fixes of its rank.
+
+Self-tests (`urgent_strict_self_test`; each fails on the pre-amendment code): an urgent PR pre-empts a running holder; once per holder head; a green holder is not interrupted; an urgent PR that is not green, not admitted, or conflicting is held; its up-to-date head holds main over the pre-empted head, which is not timed out; afterwards the pre-empted PR is served first again; main-red ordering; owner-only and fail-closed admission; the daily cap.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
