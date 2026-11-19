@@ -230,3 +230,7 @@ generated:
     generator: Password ci-metrics-ingest-token (refreshPolicy CreatedOnce)
     holders:
       - "GitHub secret CI_METRICS_TOKEN in JiRaska/openbank-app (copied by the owner, #16205)"
+  - secret: platform/mcp-service-account-ref
+    generator: Password mcp-service-account-ref-key (refreshPolicy CreatedOnce)
+    holders:
+      - "none outside the cluster: only mcp-service pods read it (accountRef HMAC key, #16678); rotation = delete the Secret and restart the pods"
