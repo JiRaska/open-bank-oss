@@ -100,7 +100,7 @@ internal object KybJson {
     fun readExtract(json: String): RegistryExtract {
         val d: ExtractDoc = mapper.readValue(json)
         return RegistryExtract(
-            identifier = LegalEntityIdentifier.of(IdentifierScheme.valueOf(d.scheme), d.value),
+            identifier = LegalEntityIdentifier.restore(IdentifierScheme.valueOf(d.scheme), d.value),
             legalName = d.legalName,
             legalFormCode = d.legalFormCode,
             legalFormClass = com.openbank.kyb.domain.model.LegalFormClass.valueOf(d.legalFormClass),

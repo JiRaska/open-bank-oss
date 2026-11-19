@@ -4,6 +4,7 @@
 
 package com.openbank.aml.domain.monitoring
 
+import com.openbank.libs.domain.money.CurrencyCode
 import java.time.Instant
 
 /**
@@ -28,7 +29,7 @@ data class CountFeatureDefinition(
     init {
         require(id.matches(Regex("[A-Za-z][A-Za-z0-9._-]{0,63}"))) { "invalid feature id" }
         require(revision > 0 && schemeRevision > 0) { "revisions are positive" }
-        require(currency.matches(Regex("[A-Z]{3}"))) { "feature currency is three upper-case letters" }
+        require(CurrencyCode.isCanonical(currency)) { "feature currency is an active ISO 4217 code" }
         require(rail == null || rail.matches(Regex("[A-Z][A-Z0-9_]{0,31}"))) { "invalid rail" }
         require(band.matches(Regex("[A-Z][A-Z0-9_]{0,63}"))) { "invalid band" }
         require(windowSeconds in 1..MAX_WINDOW_SECONDS) { "window out of range" }
