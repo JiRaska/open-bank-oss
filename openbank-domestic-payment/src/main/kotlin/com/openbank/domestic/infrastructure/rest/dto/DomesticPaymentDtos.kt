@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
+import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
@@ -49,10 +50,10 @@ data class CreateDomesticPaymentRequest(
     ): CreateDomesticPaymentCommand = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = debtorAccountId,
-        debtorAccountNumber = debtorAccountNumber,
+        debtorAccountNumber = czechAccount(debtorAccountNumber, debtorBankCode, "debtorAccountNumber"),
         debtorBankCode = debtorBankCode,
         debtorName = debtorName,
-        creditorAccountNumber = creditorAccountNumber,
+        creditorAccountNumber = czechAccount(creditorAccountNumber, creditorBankCode, "creditorAccountNumber"),
         creditorBankCode = creditorBankCode,
         creditorName = creditorName,
         // #11604: build kernel Money here, before the use case looks up or binds the Idempotency-Key.
@@ -109,10 +110,18 @@ data class CreateDelegatedDomesticPaymentRequest(
         CreateDomesticPaymentCommand(
             idempotencyKey = idempotencyKey,
             debtorAccountId = requireNotNull(debtorAccountId) { "debtorAccountId is required" },
-            debtorAccountNumber = requireNotNull(debtorAccountNumber) { "debtorAccountNumber is required" },
+            debtorAccountNumber = czechAccount(
+                requireNotNull(debtorAccountNumber) { "debtorAccountNumber is required" },
+                requireNotNull(debtorBankCode) { "debtorBankCode is required" },
+                "debtorAccountNumber",
+            ),
             debtorBankCode = requireNotNull(debtorBankCode) { "debtorBankCode is required" },
             debtorName = requireNotNull(debtorName) { "debtorName is required" },
-            creditorAccountNumber = requireNotNull(creditorAccountNumber) { "creditorAccountNumber is required" },
+            creditorAccountNumber = czechAccount(
+                requireNotNull(creditorAccountNumber) { "creditorAccountNumber is required" },
+                requireNotNull(creditorBankCode) { "creditorBankCode is required" },
+                "creditorAccountNumber",
+            ),
             creditorBankCode = requireNotNull(creditorBankCode) { "creditorBankCode is required" },
             creditorName = requireNotNull(creditorName) { "creditorName is required" },
             amount = inboundAmount(amount, currency),
@@ -125,6 +134,19 @@ data class CreateDelegatedDomesticPaymentRequest(
             endToEndId = endToEndId,
             synthetic = synthetic,
         )
+}
+
+/**
+ * #16748: presence and length are not validity. The account number must be one a Czech bank could
+ * issue (ČNB mod-11 on prefix and base; the bank code is checked for four-digit shape only — there
+ * is no registry of assigned codes here), or it is a 400 here — before any Idempotency-Key is bound
+ * and long before the scheme adapter would have to build an IBAN for it.
+ */
+internal fun czechAccount(accountNumber: String, bankCode: String, field: String): String {
+    requireValid(CzechDomesticIban.fromAccountNumber(accountNumber, bankCode) != null, field) {
+        "$field is not a valid Czech account number for bank code $bankCode"
+    }
+    return accountNumber
 }
 
 /** A domestic payment moves a strictly positive amount; Money itself admits zero and negatives. */

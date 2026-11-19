@@ -26,7 +26,7 @@ class DomesticPaymentDtosTest {
             debtorAccountNumber = "19-2000145399",
             debtorBankCode = "0800",
             debtorName = "Jan Novak",
-            creditorAccountNumber = "123456789",
+            creditorAccountNumber = "123456788",
             creditorBankCode = "0100",
             creditorName = "Brno Utility",
             amount = BigDecimal("1234.56"),
@@ -53,7 +53,7 @@ class DomesticPaymentDtosTest {
         assertThat(command.debtorAccountNumber).isEqualTo("19-2000145399")
         assertThat(command.debtorBankCode).isEqualTo("0800")
         assertThat(command.debtorName).isEqualTo("Jan Novak")
-        assertThat(command.creditorAccountNumber).isEqualTo("123456789")
+        assertThat(command.creditorAccountNumber).isEqualTo("123456788")
         assertThat(command.creditorBankCode).isEqualTo("0100")
         assertThat(command.creditorName).isEqualTo("Brno Utility")
         assertThat(command.amount).isEqualTo(Money.of(BigDecimal("1234.56"), "CZK"))
@@ -199,5 +199,42 @@ class DomesticPaymentDtosTest {
         assertThat(response.settledAt).isEqualTo(payment.settledAt)
         assertThat(response.createdAt).isEqualTo(payment.createdAt)
         assertThat(response.updatedAt).isEqualTo(payment.updatedAt)
+    }
+
+    @Test
+    fun `owner create refuses a creditor account that fails the national mod-11 checksum`() {
+        assertThatThrownBy { createRequest().copy(creditorAccountNumber = "1234567890").toCommand("idem-mod11") }
+            .isInstanceOf(ValidationFailure::class.java)
+            .hasMessageContaining("creditorAccountNumber")
+    }
+
+    @Test
+    fun `owner create refuses a debtor account that fails the national mod-11 checksum`() {
+        assertThatThrownBy { createRequest().copy(debtorAccountNumber = "18-2000145399").toCommand("idem-mod11") }
+            .isInstanceOf(ValidationFailure::class.java)
+            .hasMessageContaining("debtorAccountNumber")
+    }
+
+    @Test
+    fun `delegated create refuses a creditor account that fails the national mod-11 checksum`() {
+        val request = CreateDelegatedDomesticPaymentRequest(
+            reservationId = UUID.randomUUID(),
+            delegationId = UUID.randomUUID(),
+            actingPartyId = UUID.randomUUID(),
+            debtorAccountId = UUID.randomUUID(),
+            debtorAccountNumber = "19-2000145399",
+            debtorBankCode = "0800",
+            debtorName = "Jan Novak",
+            creditorAccountNumber = "1234567890",
+            creditorBankCode = "0800",
+            creditorName = "Brno Utility",
+            amount = BigDecimal("10.00"),
+            currency = "CZK",
+        )
+        assertThatThrownBy { request.toCommand("idem-mod11", synthetic = false) }
+            .isInstanceOf(ValidationFailure::class.java)
+            .hasMessageContaining("creditorAccountNumber")
+        assertThat(request.copy(creditorAccountNumber = "2000145399").toCommand("idem-ok", synthetic = false))
+            .isNotNull()
     }
 }
