@@ -59,6 +59,7 @@ val iban = Iban.of("CZ65 0800 0000 1920 0014 5399")
 iban.value          // "CZ6508000000192000145399" (no spaces)
 iban.formatted()    // "CZ65 0800 0000 1920 0014 5399"
 iban.countryCode    // "CZ"
+iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
 
