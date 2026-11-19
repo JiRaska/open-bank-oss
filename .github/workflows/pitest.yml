@@ -118,6 +118,14 @@ jobs:
           # money_path_services.
           - openbank-pension-service
           - openbank-pension-fund-service
+          # 2026-11-18 (ADR-0063): the three OVER_THIN_BASELINE debts pay down — the modules the
+          # thin-domain exclusion no longer covers (swift / lending / card-processing, see
+          # check-pitest-money-path-coverage.py) enter the matrix with the rest of the money path.
+          # Measured baselines 2026-11-18: swift 232 mutations/77% killed, lending 336/68%,
+          # card-processing 86/64% (event payloads excluded per the ADR-0063 noise criterion).
+          - openbank-swift-service
+          - openbank-lending-service
+          - openbank-card-processing-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
