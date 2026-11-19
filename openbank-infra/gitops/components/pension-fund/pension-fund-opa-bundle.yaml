@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "d6e4b97249f1ae58"
+    openbank.tech/policy-checksum: "c602d34709eb30f1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1435,12 +1435,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

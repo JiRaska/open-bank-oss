@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
   annotations:
-    openbank.tech/policy-checksum: "30b0031280eaeae4"
+    openbank.tech/policy-checksum: "ae79f6fe98f47fcd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1428,12 +1428,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

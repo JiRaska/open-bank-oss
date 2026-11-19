@@ -228,6 +228,9 @@ spec:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: regulatory-obligations-watcher
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: release-steward
         - namespaceSelector:
             matchLabels:

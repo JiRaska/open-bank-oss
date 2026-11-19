@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "bb6a930f1c4f301e"
+    openbank.tech/policy-checksum: "b81154d55e2a8db1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1527,12 +1527,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

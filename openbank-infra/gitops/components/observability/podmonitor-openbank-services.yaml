@@ -96,6 +96,7 @@ spec:
       - platform
       - psd2
       - referral
+      - regulatory-obligations-watcher
       - release-steward
       - risk
       - sanctions

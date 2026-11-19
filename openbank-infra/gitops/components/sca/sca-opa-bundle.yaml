@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "e8032dd7c892c8c9"
+    openbank.tech/policy-checksum: "691d8aa16d008573"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1463,12 +1463,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

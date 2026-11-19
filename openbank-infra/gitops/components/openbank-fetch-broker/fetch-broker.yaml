@@ -53,7 +53,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fetch-broker-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "aca50c9c643815a8"
+        openbank.tech/policy-checksum: "8515a395e9df2bfe"
     spec:
       serviceAccountName: openbank-fetch-broker
       automountServiceAccountToken: false

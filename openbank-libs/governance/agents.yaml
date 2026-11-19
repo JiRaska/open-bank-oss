@@ -540,9 +540,13 @@ agents:
   # run against the served bundle with a must-DENY (write/execute) and a must-ALLOW (read,
   # draft.ticket) control.
   #
-  # `enabled: false` ON PURPOSE: it needs an allow-listed outbound fetch of the cited public
-  # sources (zakonyprolidi.cz, e-sbirka.cz, eur-lex.europa.eu, cnb.cz, gsft.cz, fau.gov.cz,
-  # financnisprava.gov.cz) and a prompt in prompts/registry.yaml. Enable both in the same PR.
+  # ENABLED (ADR-0387 S4): the sources are read through openbank-fetch-broker's `web.fetch`, as
+  # resource read.public_web, on the hosts below. The host list is DERIVED from the hosts the
+  # register's `sources:` actually cite (8 on 2026-11-19; nukib.gov.cz and csu.gov.cz appear only
+  # as authority home pages, so they are not granted). Every host is `static`: no evidence yet that
+  # any cited page needs the JS renderer; one that does answers NOT_RENDERABLE and is reported as an
+  # UNVERIFIED finding, which is the signal to flip that host to `render: js`. The runtime is
+  # openbank-regulatory-obligations-watcher (weekly; its prompt is registered in prompts/).
   - id: regulatory-obligations-watcher
     plane: control
     model: deepseek-ai/DeepSeek-V3.2
@@ -553,19 +557,33 @@ agents:
       one governance issue per finding citing the source. It reads sources and may only file a
       governance issue (draft.ticket); it opens no PR and never writes the register, a report or
       a filing.
-    enabled: false
+    enabled: true
     enforcement: block
     schedule:
       weekly: Monday 06:30 UTC
     data_scope:
       read:
         - read.governance
+        - read.public_web
       pii: none
+      public_web:
+        hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
     tools:
       allow:
         - tier: read
           resources:
             - read.governance
+        - tier: read
+          resources:
+            - read.public_web
         - tier: write_proposal
           resources:
             - draft.ticket

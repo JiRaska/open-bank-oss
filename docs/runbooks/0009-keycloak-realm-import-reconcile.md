@@ -129,7 +129,7 @@ survives in it.
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
    SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... SYNTHETIC_FX_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
    TAX_REPORTING_CLIENT_SECRET=... LEDGER_PENSION_CO_CLIENT_SECRET=... PENSION_FUND_CLIENT_SECRET=... \
-   SYNTHETIC_LEDGER_SEED_CLIENT_SECRET=... MERGE_RECORDER_CI_CLIENT_SECRET=... \
+   SYNTHETIC_LEDGER_SEED_CLIENT_SECRET=... MERGE_RECORDER_CI_CLIENT_SECRET=... REGULATORY_WATCHER_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    MARKETING_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
@@ -379,6 +379,16 @@ ExternalSecret exists for it; when its component is added, the consuming env var
 pension-fund-service admits `pension-fund.reporting.read` and pension-service admits
 `pension.reporting.aggregate` for this identity alone among machines; it reaches nothing else on
 either service.
+
+### Regulatory obligations watcher (agent identity)
+
+Same recipe, one client. It is the agent's own identity for the fetch broker (ADR-0387 S4): its
+mappers set `sub` to `agent:regulatory-obligations-watcher` and add `openbank-fetch-broker` to
+`aud`, and it holds no realm role. After the import, mint one token and check both claims.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-regulatory-obligations-watcher` | `keycloak/regulatory-obligations-watcher` | `regulatory-obligations-watcher-oidc` (`regulatory-obligations-watcher`) | `REGULATORY_WATCHER_CLIENT_SECRET` |
 
 ### Pension company ledger instance (ledger-pension-co)
 

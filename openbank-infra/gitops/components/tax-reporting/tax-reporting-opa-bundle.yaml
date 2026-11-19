@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "8e34724ad7208a21"
+    openbank.tech/policy-checksum: "e56d4be09bc3d341"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1445,12 +1445,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

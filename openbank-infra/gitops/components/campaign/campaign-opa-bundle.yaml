@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: campaign-service
     app.kubernetes.io/part-of: campaign
   annotations:
-    openbank.tech/policy-checksum: "90271ec6ffb01556"
+    openbank.tech/policy-checksum: "93637032f3f3cdbb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1401,12 +1401,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

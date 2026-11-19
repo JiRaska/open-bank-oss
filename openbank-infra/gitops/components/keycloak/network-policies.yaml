@@ -182,6 +182,9 @@ spec:
               kubernetes.io/metadata.name: referral
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: regulatory-obligations-watcher
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: release-steward
         - namespaceSelector:
             matchLabels:

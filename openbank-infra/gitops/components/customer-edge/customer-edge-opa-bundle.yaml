@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "0e6adc7d08d96622"
+    openbank.tech/policy-checksum: "7bf77c7bb6555abf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2124,12 +2124,25 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
-      data_scope: {}
+      data_scope:
+        public_web:
+          hosts:
+          - eur-lex.europa.eu
+          - uoou.gov.cz
+          - www.cnb.cz
+          - www.eba.europa.eu
+          - www.fau.gov.cz
+          - www.financnisprava.gov.cz
+          - www.gsft.cz
+          - www.zakonyprolidi.cz
       tools:
         allow:
         - tier: read
           resources:
           - read.governance
+        - tier: read
+          resources:
+          - read.public_web
         - tier: write_proposal
           resources:
           - draft.ticket

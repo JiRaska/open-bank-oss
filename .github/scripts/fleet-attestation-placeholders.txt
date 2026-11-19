@@ -50,3 +50,9 @@
 #
 # REMOVE THIS LINE once auto-deploy has built and pushed the service.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fetch-broker:sandbox-4d9ef15b
+
+# 2026-11-19, ADR-0387 slice 4 (#16754). openbank-regulatory-obligations-watcher is a brand-new
+# service: its gitops manifest pins the commit that introduced the module before any image exists.
+#
+# REMOVE THIS LINE once auto-deploy has built and pushed the service.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-regulatory-obligations-watcher:sandbox-ac656ace

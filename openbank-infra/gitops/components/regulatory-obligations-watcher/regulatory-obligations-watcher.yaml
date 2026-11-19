@@ -1,0 +1,238 @@
+# regulatory-obligations-watcher (ADR-0367 decision 6, ADR-0387 S4): weekly, re-reads every source
+# the regulatory obligations register cites — ONLY through openbank-fetch-broker's web.fetch — and
+# files governance issues (draft.ticket). It never opens a PR and never writes the register.
+#
+# Identity: its own Keycloak client (openbank-regulatory-obligations-watcher, client_credentials,
+# sub agent:regulatory-obligations-watcher, aud openbank-fetch-broker, no realm role). Every
+# secret below is `optional: true` on purpose, and each absence is loud in its own way rather than
+# a crashloop: no client secret = every source UNVERIFIED and the liveness gauge never earns a
+# success (the run read nothing), no model key = every change deferred, no GitHub token = every
+# finding NOT filed. Seed OpenBao first; see docs/agents/regulatory-obligations-watcher.md.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: regulatory-obligations-watcher
+  namespace: regulatory-obligations-watcher
+  labels:
+    app.kubernetes.io/name: regulatory-obligations-watcher
+    app.kubernetes.io/part-of: regulatory-obligations-watcher
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: regulatory-obligations-watcher
+  namespace: regulatory-obligations-watcher
+  labels:
+    app.kubernetes.io/name: regulatory-obligations-watcher
+    app.kubernetes.io/part-of: regulatory-obligations-watcher
+spec:
+  replicas: 1
+  # Terminate-first (#3545): single replica, so the default surge needs room for two pods.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: regulatory-obligations-watcher
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: regulatory-obligations-watcher
+        app.kubernetes.io/part-of: regulatory-obligations-watcher
+      annotations:
+        # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
+        openbank.tech/policy-checksum: "a72135400809da19"
+    spec:
+      serviceAccountName: regulatory-obligations-watcher
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: regulatory-obligations-watcher
+          # Not built yet: auto-deploy builds it on the first merge touching the module and re-pins
+          # this line to sandbox-<sha>@sha256; until then the pod cannot pull and stays Pending.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-regulatory-obligations-watcher:sandbox-ac656ace
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8173
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: KEYCLOAK_TOKEN_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://regwatcher-db-rw.regulatory-obligations-watcher.svc:5432/openbank_regwatcher
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://regwatcher-db-rw.regulatory-obligations-watcher.svc:5432/openbank_regwatcher
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: {secretKeyRef: {name: regwatcher-db-app, key: username}}
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: {secretKeyRef: {name: regwatcher-db-app, key: password}}
+            # The ONE way this agent reads the web (ADR-0387 D1).
+            - name: FETCH_BROKER_MCP_URL
+              value: http://openbank-fetch-broker.fetch-broker.svc:8172/mcp
+            # Charter: weekly Monday 06:30 UTC (check-agent-schedule-matches-charter.py holds the two
+            # equal). Six fields (second minute hour day month weekday) — Quarkus, not crontab.
+            - name: REGULATORY_WATCHER_CHECK_CRON
+              value: "0 30 6 ? * MON"
+            # Kill switch (charter limits.kill_switch): "false" skips every run.
+            - name: OPENBANK_REGULATORY_WATCHER_ENABLED
+              value: "true"
+            - name: OPENBANK_REGULATORY_WATCHER_IDENTITY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: regulatory-obligations-watcher-oidc
+                  key: OIDC_REGULATORY_WATCHER_CLIENT_SECRET
+                  optional: true
+            - name: LLM_GATEWAY_URL
+              value: http://litellm.ai-platform.svc:4000
+            - name: OPENBANK_REGULATORY_WATCHER_MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: regulatory-obligations-watcher-model
+                  key: REGULATORY_WATCHER_MODEL_API_KEY
+                  optional: true
+            - name: GITHUB_API_URL
+              value: https://api.github.com
+            - name: GITHUB_REPO
+              value: JiRaska/open-bank-oss
+            - name: OPENBANK_REGULATORY_WATCHER_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: regulatory-obligations-watcher-github
+                  key: REGULATORY_WATCHER_GITHUB_TOKEN
+                  optional: true
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: management
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+        # draft.ticket decision point (ADR-0031 D9): the agents-only bundle, queried over localhost
+        # before every issue. Decision API bound to loopback; probes use the diagnostic listener.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=127.0.0.1:8181
+            - --diagnostic-addr=0.0.0.0:8282
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+            - name: opa-diagnostics
+              containerPort: 8282
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: opa-diagnostics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa-diagnostics
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: regulatory-obligations-watcher-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: regulatory-obligations-watcher
+  namespace: regulatory-obligations-watcher
+  labels:
+    app.kubernetes.io/name: regulatory-obligations-watcher
+    app.kubernetes.io/part-of: regulatory-obligations-watcher
+spec:
+  selector:
+    app.kubernetes.io/name: regulatory-obligations-watcher
+  ports:
+    - name: http
+      port: 8173
+      targetPort: http
+    - name: management
+      port: 8085
+      targetPort: management

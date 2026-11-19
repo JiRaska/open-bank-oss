@@ -26,9 +26,8 @@
 # NEVER hand-write a recording to clear a warning. A fabricated recording is a green gate over
 # behaviour nobody observed — worse than the gap it hides, because the gap is at least visible.
 
-awaiting_first_recording: {}
-# Empty, and that is the point: every eval suite in the tree now has a recorded run, so CI can run
-# `run-evals.py --require-recordings` and block on replay for all 5 rather than counting suites that
-# replay nothing. Both entries that used to sit here were closed by RECORDING, never by deleting the
-# entry — the gate fails on a stale declaration in either direction, so an entry cannot be cleared
-# while the gap is real.
+awaiting_first_recording:
+  # 2026-11-19, ADR-0387 S4. The suite lands with the charter that enables this agent; the first
+  # recording needs the charter's own model (deepseek-ai/DeepSeek-V3.2) through EVALS_API_KEY,
+  # which the authoring session did not hold. Close by recording, never by deleting this line.
+  regulatory-obligations-watcher: "first recording pending: needs EVALS_API_KEY for the charter model (ADR-0387 S4, #16754)"
