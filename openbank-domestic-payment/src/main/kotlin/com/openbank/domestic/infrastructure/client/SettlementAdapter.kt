@@ -15,6 +15,7 @@ import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.SettlementOutcome
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
+import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import io.micrometer.core.instrument.MeterRegistry
@@ -225,23 +226,12 @@ class SettlementAdapter(
     }
 
     /**
-     * Build a Czech IBAN (CZkk BBBB + 16-digit account part) from an account number + bank code,
-     * computing the mod-97 check digits; returns the input unchanged if it is already an IBAN, or
-     * null if the inputs cannot form a valid Czech BBAN.
+     * Canonical CZ IBAN for the creditor via the service's one builder ([CzechDomesticIban], #16772):
+     * prefix and base each in their own BBAN slot, national mod-11 checked; an existing CZ IBAN is
+     * accepted as-is when valid. Null when the coordinates denote no issuable account.
      */
-    private fun toCzIban(accountNumber: String, bankCode: String): String? {
-        val raw = accountNumber.replace(" ", "").uppercase()
-        if (raw.startsWith("CZ")) return raw
-        val acct = raw.filter { it.isDigit() }
-        val bank = bankCode.filter { it.isDigit() }
-        if (acct.isEmpty() || acct.length > IBAN_ACCOUNT_DIGITS || bank.length > IBAN_BANK_DIGITS) return null
-        val bban = bank.padStart(IBAN_BANK_DIGITS, '0') + acct.padStart(IBAN_ACCOUNT_DIGITS, '0')
-        // ISO 13616 check digits: BBAN + "CZ00" with letters→numbers (C=12, Z=35), mod 97.
-        var mod = 0
-        for (ch in bban + "123500") mod = (mod * RADIX_10 + (ch - '0')) % MOD_97
-        val check = (MOD_97_COMPLEMENT - mod).toString().padStart(2, '0')
-        return "CZ$check$bban"
-    }
+    private fun toCzIban(accountNumber: String, bankCode: String): String? =
+        CzechDomesticIban.canonical(accountNumber, bankCode)
 
     /** In-house transfers (OWN_ACCOUNTS / INTERNAL_CLIENT) settle on the bank's own ledger. */
     private fun isInHouse(payment: DomesticPayment): Boolean =
@@ -276,10 +266,5 @@ class SettlementAdapter(
         const val CONFIRMED_STATUS = "COMPLETED"
         const val MAX_DESCRIPTION = 140
         const val SETTLE_TIMEOUT_MS = 8_000L
-        const val IBAN_BANK_DIGITS = 4
-        const val IBAN_ACCOUNT_DIGITS = 16
-        const val MOD_97 = 97
-        const val MOD_97_COMPLEMENT = 98
-        const val RADIX_10 = 10
     }
 }

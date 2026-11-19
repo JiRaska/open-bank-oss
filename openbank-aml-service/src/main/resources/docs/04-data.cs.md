@@ -133,3 +133,7 @@ Monitoring po zaúčtování zaznamenává zaúčtované pohyby a počítá je p
 - Balíček, jeho dva slovníky a jeho počítané příznaky jsou **data** (`openbank.aml.monitoring.pack.*`). Dodané soubory jsou syntetické. Příznak je připnut hashem přes měnu, pásmo, směr, kanál a okno, takže úprava okna zneplatní připnutí v balíčku a služba nenastartuje.
 - Výchozí režim je SHADOW: nález se zaznamená a nic dalšího se nestane. S `openbank.aml.monitoring.evaluation.open-cases=true` nález otevře `AmlCase` typu `TRANSACTION_MONITORING` s klíčem strana, scénář a okno.
 - Dodané scénáře: opakované pohyby v pásmu pod hranicí (tři varianty měna/směr). Rychlý průtok a aktivita po dlouhé nečinnosti dodány **nejsou**: pravidlo balíčku porovnává jeden počet s minimem a tyto dva scénáře potřebují konjunkci počtů, respektive nepřítomnost.
+
+## Měny v monitoringu (#16748)
+
+Zaúčtované pohyby, pásma částek a čítací příznaky přijímají jen platný kód ISO 4217 velkými písmeny (`CurrencyCode.isCanonical`). Definice v neexistující nebo stažené měně je odmítnuta při sestavení; událost ledgeru s takovou měnou jde odmítnutou cestou do DLQ.
