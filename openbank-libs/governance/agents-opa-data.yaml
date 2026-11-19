@@ -10,7 +10,7 @@
 # MCP and REST decision is unchanged before it writes.
 #
 # Derived paths (read out of the .rego sources, never listed by hand):
-#   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
+#   data.agents.agents  (each element projected to: enabled, id, skills, tools.allow, tools.deny)
 #   data.agents.tool_tiers.deny
 #   data.agents.tool_tiers.read
 #   data.agents.tool_tiers.write_proposal
@@ -171,6 +171,7 @@ agents:
     - '*.write'
     - secrets.read.raw
 - id: card-scheme-bulletin-agent
+  enabled: false
   tools:
     allow:
     - tier: read
@@ -187,6 +188,7 @@ agents:
       resources:
       - '*'
 - id: regulatory-obligations-watcher
+  enabled: false
   tools:
     allow:
     - tier: read
@@ -203,6 +205,7 @@ agents:
       resources:
       - '*'
 - id: card-dispute-evidence-agent
+  enabled: false
   tools:
     allow:
     - tier: read
@@ -219,6 +222,7 @@ agents:
       resources:
       - '*'
 - id: treasury-dealing-assistant
+  enabled: false
   tools:
     allow:
     - treasury.deal.read
@@ -243,6 +247,7 @@ agents:
     - gh.pr.*
     - secrets.read.raw
 - id: finops-agent
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -263,6 +268,7 @@ agents:
       resources:
       - '*'
 - id: devops-agent
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -283,6 +289,7 @@ agents:
       resources:
       - '*'
 - id: control-liveness-sentinel
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -300,6 +307,7 @@ agents:
       resources:
       - '*'
 - id: governance-auditor
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -318,6 +326,7 @@ agents:
       resources:
       - '*'
 - id: release-steward
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -335,6 +344,7 @@ agents:
       resources:
       - '*'
 - id: docs-truth-agent
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -351,6 +361,7 @@ agents:
       resources:
       - '*'
 - id: authz-policy-auditor
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -367,6 +378,7 @@ agents:
       resources:
       - '*'
 - id: flaky-test-hunter
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -386,6 +398,7 @@ agents:
       resources:
       - '*'
 - id: case-coordinator
+  enabled: true
   tools:
     allow:
     - tier: read
@@ -408,6 +421,7 @@ agents:
       - gh.pr.*
       - secrets.*
 - id: kyb-analyst
+  enabled: false
   tools:
     allow:
     - tier: read
@@ -425,6 +439,7 @@ agents:
       resources:
       - '*'
 - id: business-copilot
+  enabled: false
   tools:
     allow:
     - query.balance.readonly
