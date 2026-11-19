@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.reference
 
+import com.openbank.treasury.domain.model.Isin
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable
@@ -76,6 +77,27 @@ class ReferencePayloadsTest {
         invalid { bond.copy(type = SecurityType.TREASURY_BILL).validate() }
         bond.copy(type = SecurityType.TREASURY_BILL, couponRate = null, couponFrequency = null).validate()
         assertThat(bond.references()).contains(ReferenceRef(ReferenceKind.COUNTERPARTY, "ISSUER-1"))
+    }
+
+    @Test
+    fun `a security accepts exactly what the shared Isin check accepts`() {
+        val bond = SecurityPayload(
+            "XS0000000017", "Example bond", "ISSUER-1", SecurityType.BOND, "USD",
+            LocalDate.parse("2020-01-01"), LocalDate.parse("2030-01-01"), BigDecimal("1000"),
+            BigDecimal("2.5"), "ANNUAL", "30/360", "FOLLOWING", "TARGET2",
+        )
+        listOf(
+            "XS0000000017",
+            "US0378331005",
+            "US0378331006",
+            "xs0000000017",
+            "XS000000001",
+            "XS00000000170",
+            "",
+        ).forEach {
+            val accepted = runCatching { bond.copy(isin = it).validate() }.isSuccess
+            assertThat(accepted).describedAs("isin '$it'").isEqualTo(Isin.isValid(it))
+        }
     }
 
     @Test
