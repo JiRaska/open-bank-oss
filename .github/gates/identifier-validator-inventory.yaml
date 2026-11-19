@@ -33,6 +33,3 @@
 - file: openbank-notification-service/src/main/kotlin/com/openbank/notification/application/OversightWebhook.kt
   class: masking
   reason: redacts IBAN-shaped text before an oversight webhook leaves the bank.
-- file: openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/IbanGenerator.kt
-  class: generator
-  reason: issues new IBANs; its mod-97 computes check digits for output, it never judges input.

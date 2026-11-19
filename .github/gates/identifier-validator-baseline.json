@@ -11,9 +11,6 @@
     "openbank-statement-service/src/main/kotlin/com/openbank/statement/domain/render/CurrencyScale.kt": 2
   },
   "currency-regex": {
-    "openbank-aml-service/src/main/kotlin/com/openbank/aml/domain/monitoring/BookedMovement.kt": 1,
-    "openbank-aml-service/src/main/kotlin/com/openbank/aml/domain/monitoring/CountFeatureDefinition.kt": 1,
-    "openbank-aml-service/src/main/kotlin/com/openbank/aml/domain/monitoring/CounterScheme.kt": 1,
     "openbank-anacredit-service/src/main/kotlin/com/openbank/anacredit/infrastructure/kafka/LoanExposureFactConsumer.kt": 1,
     "openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt": 1,
     "openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerHoldingsResource.kt": 1,
@@ -66,8 +63,6 @@
     "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/reference/ReferencePayloads.kt": 1
   },
   "mod97": {
-    "openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/IbanGenerator.kt": 1,
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/client/SchemeGatewayAdapter.kt": 1,
-    "openbank-swift-service/src/main/kotlin/com/openbank/swift/domain/institution/ReleasedPayment.kt": 1
+    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/client/SchemeGatewayAdapter.kt": 1
   }
 }
