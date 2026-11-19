@@ -71,7 +71,7 @@ malformed input and never throws.
 
 `RodneCislo.parse` returns `Parsed` (canonical form, birthdate, gender) or `Invalid`. It
 rejects numbers that were never issued: the 9-digit form after 1953, the remainder-10 → 0
-checksum quirk after 1985, and the +20/+70 month overflow before 2004.
+checksum quirk after 1985, and the +20/+70 month overflow before 2004. Sources: zákon č. 133/2000 Sb. § 13 for the 9/10-digit split and the 2004 overflow; MV ČR practice for the remainder-10 quirk.
 
 ## domain/identifiers — typesafe IDs
 
