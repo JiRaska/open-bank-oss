@@ -47,6 +47,7 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.HexFormat
 import java.util.UUID
@@ -3322,6 +3323,7 @@ class CustomerEdgeResource(
             "$delegationServiceUrl/api/v1/payment-proposals/$id/reject",
             party,
             objectMapper.writeValueAsString(mapOf("partyId" to party)),
+            "mcp-proposal-reject-$id",
         )
         audit.emit(
             eventType = "CUSTOMER_MCP_PROPOSAL_REJECTED",
@@ -3354,84 +3356,102 @@ class CustomerEdgeResource(
     @Path("/mcp-proposals/{id}/approve")
     @Authorize(action = "customer.mcp-proposals.decide")
     @Blocking
-    @Suppress("ReturnCount", "LongMethod") // one ordered, audited sequence; splitting it hides the order
+    @Suppress("ReturnCount", "LongMethod", "CyclomaticComplexMethod") // one ordered, audited sequence
     fun approveMcpProposal(
         @PathParam("id") id: UUID,
-        body: String,
+        body: String?,
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
     ): Response {
         val customer = appSessionCustomer() ?: return forbidden(MCP_PROPOSAL_APP_ONLY)
         val party = customer.partyId.toString()
-        val suppliedHash = extractTextField(objectMapper, body, "payloadSha256")?.lowercase()
+        val suppliedHash = body?.let { extractTextField(objectMapper, it, "payloadSha256") }?.lowercase()
             ?.takeIf { SHA256_HEX.matches(it) } ?: return badRequest("payloadSha256 is required")
         val read = upstream.get("$delegationServiceUrl/api/v1/payment-proposals/$id?partyId=$party", party)
         if (read.status != Response.Status.OK.statusCode) return notFound("Proposal not found")
         val proposal = CustomerMcpProposal.parse(objectMapper, (read.entity as? String).orEmpty())
             ?: return notFound("Proposal not found")
-        val refusal = proposal.refusalFor(customer.partyId, suppliedHash)
-        if (refusal != null) {
-            audit.emit(
-                eventType = "CUSTOMER_MCP_PROPOSAL_REFUSED",
-                partyId = party,
-                operation = "mcp-proposals.approve",
-                result = "DENIED",
-                resourceId = id.toString(),
-                details = mapOf("reason" to refusal),
-            )
-            return Response.status(Response.Status.CONFLICT)
-                .entity(mapOf("code" to refusal, "error" to "Proposal cannot be approved"))
-                .type(MediaType.APPLICATION_JSON).build()
+        proposal.refusalFor(customer.partyId, suppliedHash, OffsetDateTime.now(clock))?.let { code ->
+            return proposalRefused(party, id, code)
         }
         if (!ownsAccount(proposal.debtorAccountId, customer.partyId)) return forbidden("Debtor account is not yours")
-        val binding = ProposalScaBinding(
-            mapOf("approvalRequestId" to proposal.approvalRequestId, "payloadSha256" to proposal.payloadSha256),
-        )
-        val idempotencyKey = "mcp-proposal-$id"
-        val created = when (proposal.operationType) {
-            "DOMESTIC_PAYMENT" ->
-                initiateDomesticPayment(proposal.domesticBody(objectMapper), idempotencyKey, scaChallengeId, binding)
-            "SEPA_PAYMENT" ->
-                initiateSepaPayment(proposal.sepaBody(objectMapper), idempotencyKey, scaChallengeId, binding)
-            else -> return badRequest("Unsupported proposal type")
-        }
-        // Nothing is recorded unless the customer's challenge was actually spent on THIS proposal:
-        // a refusal before or at the settlement gate leaves it PENDING for a fresh attempt.
-        if (!binding.consumed) return created
         val decision = objectMapper.writeValueAsString(
             mapOf(
                 "partyId" to party,
                 "payloadSha256" to proposal.payloadSha256,
             ),
         )
-        val approved = upstream.post("$delegationServiceUrl/api/v1/payment-proposals/$id/approve", party, decision)
+        // Order: SCA consumed (inside the gate) -> store approve CAS -> only then the payment.
+        val binding = ProposalScaBinding(
+            mapOf("approvalRequestId" to proposal.approvalRequestId, "payloadSha256" to proposal.payloadSha256),
+        ) {
+            val approved = upstream.post(
+                "$delegationServiceUrl/api/v1/payment-proposals/$id/approve",
+                party,
+                decision,
+                "mcp-proposal-approve-$id-${scaChallengeId?.trim()}",
+            )
+            if (approved.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+                null
+            } else {
+                proposalRefused(party, id, "PROPOSAL_STORE_REFUSED:${approved.status}")
+            }
+        }
+        // The idempotency key is the proposal id: a retry after a failed payment replays, never pays twice.
+        val idempotencyKey = "mcp-proposal-$id"
+        val created = when (proposal.operationType) {
+            "DOMESTIC_PAYMENT" ->
+                initiateDomesticPayment(proposal.domesticBody(objectMapper), idempotencyKey, scaChallengeId, binding)
+            "SEPA_PAYMENT" ->
+                initiateSepaPayment(proposal.sepaBody(objectMapper), idempotencyKey, scaChallengeId, binding)
+            else -> return proposalRefused(party, id, "PROPOSAL_MALFORMED")
+        }
+        if (!binding.storeApproved) return created // SCA refused or store refused: no payment was sent
         val paymentId = if (created.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
             extractTextField(objectMapper, (created.entity as? String).orEmpty(), "id")
         } else {
             null
         }
-        if (approved.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+        // A failed payment leaves the proposal APPROVED (retryable with a fresh SCA, idempotent by id);
+        // only a created payment is recorded as executed.
+        val recorded = paymentId?.let {
             upstream.post(
                 "$delegationServiceUrl/api/v1/payment-proposals/$id/execution",
                 party,
                 objectMapper.writeValueAsString(
-                    mapOf("partyId" to party, "payloadSha256" to proposal.payloadSha256, "paymentId" to paymentId),
+                    mapOf("partyId" to party, "payloadSha256" to proposal.payloadSha256, "paymentId" to it),
                 ),
+                "mcp-proposal-execution-$id-$it",
             )
         }
+        val executed = recorded?.statusInfo?.family == Response.Status.Family.SUCCESSFUL
         audit.emit(
             eventType = "CUSTOMER_MCP_PROPOSAL_APPROVED",
             partyId = party,
             operation = "mcp-proposals.approve",
-            result = if (paymentId != null) "SUCCESS" else "FAILURE",
+            result = if (executed) "SUCCESS" else "FAILURE",
             resourceId = id.toString(),
             details = mapOf(
                 "paymentId" to paymentId,
                 "payloadSha256" to proposal.payloadSha256,
                 "mcpClientId" to proposal.mcpClientId,
-                "storeRecorded" to approved.status.toString(),
+                "executionRecorded" to executed.toString(),
             ),
         )
         return created
+    }
+
+    private fun proposalRefused(party: String, id: UUID, code: String): Response {
+        audit.emit(
+            eventType = "CUSTOMER_MCP_PROPOSAL_REFUSED",
+            partyId = party,
+            operation = "mcp-proposals.approve",
+            result = "DENIED",
+            resourceId = id.toString(),
+            details = mapOf("reason" to code),
+        )
+        return Response.status(Response.Status.CONFLICT)
+            .entity(mapOf("code" to code.substringBefore(':'), "error" to "Proposal cannot be approved"))
+            .type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -5891,8 +5911,8 @@ class CustomerEdgeResource(
                 .type(MediaType.APPLICATION_JSON)
                 .build()
         }
-        binding?.consumed = true
-        return null
+        // ADR-0383 D6: the proposal's store CAS runs HERE — after SCA, before any payment is sent.
+        return binding?.challengeSpent()
     }
 
     /**

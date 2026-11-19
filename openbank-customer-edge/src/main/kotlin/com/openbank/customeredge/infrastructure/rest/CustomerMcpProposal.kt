@@ -9,6 +9,8 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.text.Normalizer
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -32,13 +34,22 @@ internal data class CustomerMcpProposal(
     val reference: String?,
     val payloadSha256: String,
     val approvalRequestId: String,
+    val expiresAt: OffsetDateTime,
+    val executedPaymentId: String? = null,
 ) {
-    /** Null when the proposal may be approved by [customerParty] with [suppliedHash]; else a refusal code. */
-    fun refusalFor(customerParty: UUID, suppliedHash: String): String? = when {
+    /**
+     * Null when [customerParty] may approve this proposal now with [suppliedHash]; else a refusal
+     * code. PENDING is approvable; APPROVED with no payment yet is a RETRY of a payment that failed
+     * after approval (a fresh SCA is still required, and the proposal-id idempotency key means it
+     * can never pay twice). Expiry is checked HERE against the bank's clock, not left to a sweep.
+     */
+    fun refusalFor(customerParty: UUID, suppliedHash: String, now: OffsetDateTime): String? = when {
         partyId != customerParty -> "PROPOSAL_NOT_FOUND"
-        status != "PENDING" -> "PROPOSAL_NOT_PENDING"
+        !(status == "PENDING" || (status == "APPROVED" && executedPaymentId == null)) -> "PROPOSAL_NOT_PENDING"
+        !now.isBefore(expiresAt) -> "PROPOSAL_EXPIRED"
         approvalRequestId != APPROVAL_PREFIX + id -> "PROPOSAL_MALFORMED"
-        canonicalSha256() != payloadSha256 -> "PROPOSAL_HASH_INVALID"
+        !safeText(creditorName) || (reference != null && !safeText(reference)) -> "PROPOSAL_MALFORMED"
+        runCatching { canonicalSha256() }.getOrNull() != payloadSha256 -> "PROPOSAL_HASH_INVALID"
         !MessageDigest.isEqual(suppliedHash.toByteArray(), payloadSha256.toByteArray()) -> "PROPOSAL_HASH_MISMATCH"
         else -> null
     }
@@ -72,6 +83,12 @@ internal data class CustomerMcpProposal(
 
     companion object {
         const val APPROVAL_PREFIX = "mcp-proposal:"
+
+        /** Same rule as the store (ADR-0383 D7): NFC, no Cc/Cf/Zl/Zp, no markup, no `://`. */
+        private val UNSAFE = Regex("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}<>\\[\\]`]|://")
+
+        fun safeText(value: String): Boolean =
+            Normalizer.isNormalized(value, Normalizer.Form.NFC) && !UNSAFE.containsMatchIn(value)
         private const val DOMAIN = "openbank.payment-proposal.v1"
 
         @Suppress("LongParameterList")
@@ -121,6 +138,8 @@ internal data class CustomerMcpProposal(
                 reference = n.path("reference").takeIf { it.isTextual }?.asText(),
                 payloadSha256 = t("payloadSha256"),
                 approvalRequestId = t("approvalRequestId"),
+                expiresAt = OffsetDateTime.parse(t("expiresAt")),
+                executedPaymentId = n.path("executedPaymentId").takeIf { it.isTextual }?.asText(),
             )
         }.getOrNull()
     }
