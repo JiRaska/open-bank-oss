@@ -6,7 +6,7 @@ package com.openbank.devops.contract
 import javax.sql.DataSource
 
 /** Real persistence behind the consumer's read contract; no HTTP response is stubbed. */
-internal fun seedDevOpsPactFindings(dataSource: DataSource, active: Boolean) {
+fun seedDevOpsPactFindings(dataSource: DataSource, active: Boolean) {
     dataSource.connection.use { connection ->
         connection.createStatement().use { statement ->
             statement.executeUpdate("DELETE FROM findings")
