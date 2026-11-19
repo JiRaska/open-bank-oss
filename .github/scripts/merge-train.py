@@ -979,6 +979,48 @@ def parse_selftest_inputs(text: str) -> dict[str, list[str]]:
     return out
 
 
+GATE_CMD_KEYS_RE = re.compile(r"^\s+(run|selftest|selftest_inputs):\s*(.*)$")
+PATH_TOKEN_RE = re.compile(r"^\.?/?([A-Za-z0-9_][A-Za-z0-9_./@-]*/[A-Za-z0-9_./@-]*)$")
+
+
+def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]:
+    """(files, directories) every repo path the gates.yaml entries of `gate_ids` name in `run`, `selftest`
+    and `selftest_inputs`, by simple tokenisation of those strings (security review of #16832: gates run
+    scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py, which no prefix
+    covers). A token with `/` and an extension is a file; a `/`-token without one, or ending in `/`, a
+    directory. Globs, `$VAR`s, flags and URLs are dropped. No import parsing, no spawn."""
+    files: set[str] = set()
+    dirs: set[str] = set()
+    gid, key = None, None
+    for ln in text.splitlines():
+        m = GATE_ID_RE.match(ln)
+        if m:
+            gid, key = m.group(1), None
+            continue
+        if gid not in gate_ids:
+            continue
+        m = GATE_CMD_KEYS_RE.match(ln)
+        if m:
+            key, rest = m.group(1), m.group(2)
+        elif key is not None and (ln.startswith("      ") or ln.strip().startswith("- ")):
+            rest = ln
+        else:
+            key = None
+            continue
+        for tok in re.split(r"[\s\"'|;&()<>=,\[\]`]+", rest):
+            if not tok or tok.startswith(("$", "-", "http://", "https://", "#")) or "*" in tok or "{" in tok:
+                continue
+            pm = PATH_TOKEN_RE.match(tok)
+            if not pm:
+                continue
+            p = pm.group(1).rstrip(":")
+            if p.endswith("/") or not re.search(r"\.[A-Za-z0-9]+$", p.rsplit("/", 1)[-1]):
+                dirs.add(p.rstrip("/") + "/")
+            else:
+                files.add(p)
+    return files, dirs
+
+
 def selftest_skip_refusal(main_jobs: dict[str, str | None] | None, records: dict[str, list | None] | None,
                           head_files: list[str], declared: dict[str, list[str]] | None) -> str | None:
     """Why a head green on every gate shard red on main still does NOT prove it fixes that shard, or
@@ -1036,7 +1078,8 @@ FIX_CLAIM_CONTEXT = "merge-train/fix-claim"   # App marker: why this head was re
 # was defeated. So no parsing: a fail-closed PREFIX rule over the trees that hold gate scripts and their
 # helpers, the workflows, the actions, and the gate manifest, baselines and measurements.
 FIX_JUDGE_PREFIXES = (".github/scripts/", ".github/workflows/", ".github/actions/", ".github/gates/")
-FIX_JUDGE_FILES = (".github/scripts/run-gates.py",)   # covered by the prefixes; named so the rule reads whole
+FIX_JUDGE_FILES = (".github/scripts/run-gates.py",                  # covered by the prefixes; named so the rule reads whole
+                   "openbank-libs/governance/rules.yaml")             # the governance rules gates read (as in JUDGE_PATHS)
 
 
 RED_GATE_STATES = ("failed", "unfalsified")
@@ -4268,7 +4311,9 @@ def selftest_skip_fix_self_test(check) -> None:
           "judge rule (security review of 7ca5c4a1): it is merged by a human, never by its own verdict",
           got == [] and "changes the judge" in why, f"{got} {why}")
     got, why, gh, _c = live(unf, ["openbank-x/src/k/E.kt"])
-    check("live: a block-list declared directory counts", got == [MR], f"{got} {why}")
+    check("live: a block-list declared directory counts for the self-test rule, and is then refused by the named-paths rule "
+          "(a red gate's declared inputs are its judge too — security review of #16832)",
+          got == [] and "names in its run/selftest/inputs" in why, f"{got} {why}")
     got, why, gh, _c = live(content, ["openbank-y/Foo.kt"])
     check("live: a content failure on the shard keeps today's behaviour (the fix is accepted)", got == [MR], f"{got} {why}")
     got, why, gh, _c = live(None, [".github/scripts/check-g1.py"])
@@ -4458,7 +4503,8 @@ def gate_level_fix_self_test(check) -> None:
     judge_edits = {"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml",
                    "2" * 40: ".github/scripts/lib/probe.sh", "4" * 40: ".github/scripts/selftest_input_trace.py",
                    "5" * 40: ".github/gates/selftest-undeclared-inputs.baseline", "6" * 40: ".github/gates/gates.yaml",
-                   "7" * 40: ".github/scripts/run-gates.py", "8" * 40: ".github/gates/gate-runtime-measurements.json"}
+                   "7" * 40: ".github/scripts/run-gates.py", "8" * 40: ".github/gates/gate-runtime-measurements.json",
+                   "0" * 40: "openbank-libs/governance/rules.yaml"}
     service_edits = {"9" * 40: "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/Foo.kt", "1" * 40: "docs/adr/0009-q.md"}
     files.update(judge_edits); files.update(service_edits)
     for h_ in list(judge_edits) + list(service_edits):
@@ -4477,6 +4523,34 @@ def gate_level_fix_self_test(check) -> None:
           all(p.startswith(FIX_JUDGE_PREFIXES) for p in UNIVERSAL_SELFTEST_INPUTS), str(UNIVERSAL_SELFTEST_INPUTS))
     check("refusal visibility: note_not_fix records the head the refusal is about",
           cache.get(NOT_FIX_HEAD_KEY, {}).get(20) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
+    # Paths a RED gate's entry names outside .github/ (security review of #16832): tokenised, both revs.
+    gates_named = ("gates:\n  - id: adr-registry\n    run: |\n      python3 openbank-infra/scripts/check-db-migration.py --root docs/adr/ > /dev/null\n"
+                   "    selftest_inputs: [\"openbank-infra/scripts/lib/db.py\"]\n"
+                   "  - id: green-one\n    run: python3 openbank-infra/scripts/other.py\n")
+    fs, ds = gate_named_paths(gates_named, {"adr-registry"})
+    check("named paths: a red gate's run/inputs yield its files and directories, the green gate's do not",
+          fs == {"openbank-infra/scripts/check-db-migration.py", "openbank-infra/scripts/lib/db.py"} and "docs/adr/" in ds
+          and "openbank-infra/scripts/other.py" not in fs, f"{fs} {ds}")
+    def ngit(*a, **_k):
+        if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
+            return _R(0, gates_named)
+        return git(*a, **_k)
+    named_edits = {"a" * 39 + "2": "openbank-infra/scripts/check-db-migration.py", "a" * 39 + "3": "docs/adr/0011-under-named-dir.md",
+                   "a" * 39 + "4": "openbank-infra/scripts/lib/db.py", "a" * 39 + "5": "openbank-infra/scripts/other.py"}
+    files.update(named_edits)
+    for h_ in named_edits:
+        heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    gh_n, cache_n = _Gh(heads), {}
+    got_n = {h_: fix_contexts(gh_n, ngit, mb, {"number": i + 40, "head_sha": h_}, {MR: main_c}, cache_n) for i, h_ in enumerate(named_edits)}
+    nf_n = cache_n.get(NOT_FIX_KEY, {})
+    check("named paths (live): a head editing the script a RED gate's run names (outside .github/) is refused, naming the path",
+          got_n["a" * 39 + "2"] == [] and "check-db-migration.py" in nf_n.get(40, "") and "names in its run" in nf_n.get(40, ""), f"{got_n['a' * 39 + '2']} {nf_n.get(40)}")
+    check("named paths (live): a head editing a file under a directory the red gate's run names is refused",
+          got_n["a" * 39 + "3"] == [] and "docs/adr/0011-under-named-dir.md" in nf_n.get(41, ""), f"{got_n['a' * 39 + '3']} {nf_n.get(41)}")
+    check("named paths (live): a head editing a red gate's declared selftest input outside .github/ is refused",
+          got_n["a" * 39 + "4"] == [] and "lib/db.py" in nf_n.get(42, ""), f"{got_n['a' * 39 + '4']} {nf_n.get(42)}")
+    check("named paths (live): a script named only by a gate GREEN on main does not refuse — still the fix",
+          got_n["a" * 39 + "5"] == [MR] and 43 not in nf_n, f"{got_n['a' * 39 + '5']} {nf_n.get(43)}")
     # REAL text, not a synthetic fixture (the HIGH of 75ca372b was invisible to every fixture): the runner on
     # this checkout uses `__file__` in shapes a parser did not follow; the prefix rule needs none of that.
     runner = pathlib.Path(".github/scripts/run-gates.py")
@@ -5324,6 +5398,21 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
     if touched:
         return (f"the head changes the judge ({touched[0]}): a fix claim may not edit CI gates, scripts, workflows "
                 "or actions — its own green cannot verify a fix; it is merged by a human")
+    # ...and whatever the RED gates' own entries name (run, selftest, selftest_inputs) — scripts outside
+    # .github/ included — read from BOTH the base's and the head's gates.yaml, so a head cannot rename its
+    # way out. A path named only by a gate green on main does not refuse.
+    red_ids = {str(r.get("id")) for recs in (main_records or {}).values() if isinstance(recs, list)
+               for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
+    named_files, named_dirs = set(), set()
+    for text in (cached_text(git, base, GATES_YAML, cache), gates_text):
+        if text:
+            fs, ds = gate_named_paths(text, red_ids)
+            named_files |= fs
+            named_dirs |= ds
+    hit = sorted(f for f in head_files if f in named_files or f.startswith(tuple(named_dirs)))
+    if hit:
+        return (f"the head changes {hit[0]}, which a gate red on main names in its run/selftest/inputs: its own "
+                "green cannot verify a fix; it is merged by a human")
     # Head artifacts count only for the BASE shard set with a green `gates (<slug>)` job behind each.
     head_records = trusted_head_records(cached_gate_records(gh, head, ctx, None, cache), main_jobs,
                                         cached_ctx_jobs(gh, head, ctx, cache))
