@@ -620,39 +620,6 @@ jobs:
           done <<< "${ARTIFACTS}"
           echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 
-      - name: Stage identifier spec-conformance evidence (ADR-0273)
-        if: steps.build_admission.outputs.proceed == 'true'
-        # identifier-differential.yml uploads `identifier-conformance` from its scheduled main
-        # run. Spec conformance is its own dimension, so an unavailable lookup or download
-        # stages nothing and the snapshot renders "no evidence" — absence is never green, and
-        # it must not fail the image the way an incomplete execution snapshot does.
-        env:
-          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage service_ti)" || true
-          dest=openbank-admin-ui/identifier-conformance
-          mkdir -p "${dest}"
-          if ! art_id="$(python3 .github/scripts/find-latest-main-artifacts.py --repo "${REPO}" identifier-conformance)"; then
-            echo "::warning title=Spec conformance unavailable::artifact inventory lookup failed; the snapshot shows no spec-conformance evidence"
-            exit 0
-          fi
-          if [ -z "${art_id}" ]; then
-            echo "No identifier-conformance artifact from a scheduled main run; spec conformance renders as no evidence."
-            exit 0
-          fi
-          tmp="$(mktemp -d)"
-          if python3 .github/scripts/trace-admin-ui-curl.py --stage service_ti --auth github -- curl -fsS --retry 3 --retry-all-errors --retry-delay 2 \
-              -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" -L -o "${tmp}/a.zip" \
-              && unzip -tq "${tmp}/a.zip" >/dev/null 2>&1 \
-              && unzip -p "${tmp}/a.zip" identifier-conformance.json > "${dest}/identifier-conformance.json"; then
-            echo "Staged identifier-conformance artifact ${art_id}."
-          else
-            rm -f "${dest}/identifier-conformance.json"
-            echo "::warning title=Spec conformance unavailable::artifact ${art_id} could not be staged; the snapshot shows no spec-conformance evidence"
-          fi
-
       - name: Restore staged test-run history (diff-forward, #8690 option B1)
         if: steps.build_admission.outputs.proceed == 'true'
         # This step cost ~105 installation-API requests per build (5 inventory pages + up to
