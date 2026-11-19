@@ -511,7 +511,8 @@ def self_test() -> int:
     # (check() prints, and redirect_stdout is process-global).
     with ThreadPoolExecutor(max_workers=8) as pool:
         repos = list(pool.map(lambda c: fixture(c[1], c[2], c[3], c[4], **c[6]), prepared))
-    for (label, app, env, files, head_env, want, kw), (repo, base, head) in zip(prepared, repos):
+    for case, (repo, base, head) in zip(prepared, repos, strict=True):
+        label, want = case[0], case[5]
         made.append(repo)
         import contextlib
         import io
