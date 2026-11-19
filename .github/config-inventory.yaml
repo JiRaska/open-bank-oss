@@ -102,6 +102,12 @@ github:
       review_by: 2027-01-15
     - kind: variable
       names:
+        - DEPLOY_DROPPED_PIN_HOURS
+      reason: "tuning knob for the dropped-pin watch; the workflow falls back to 6 hours, so unset is the intended default"
+      issue: 16701
+      review_by: 2027-02-15
+    - kind: variable
+      names:
         - CODEQL_JAVA_ON_PR
         - ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY
       reason: "kill switch / opt-in flag; unset is the intended default"
