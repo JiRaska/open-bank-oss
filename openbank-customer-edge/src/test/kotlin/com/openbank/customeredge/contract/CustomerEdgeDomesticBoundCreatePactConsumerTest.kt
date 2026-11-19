@@ -69,7 +69,7 @@ class CustomerEdgeDomesticBoundCreatePactConsumerTest {
 
     /** The instruction exactly as the edge's `buildDomesticRequest` emits it for a delegate. */
     private val enriched = """
-        {"debtorAccountId":"$DEBTOR_ACCOUNT_ID","debtorAccountNumber":"1234567890","debtorBankCode":"0800",
+        {"debtorAccountId":"$DEBTOR_ACCOUNT_ID","debtorAccountNumber":"1234567899","debtorBankCode":"0800",
          "debtorName":"Grantor Name","creditorAccountNumber":"2000145399","creditorBankCode":"0100",
          "customerSubmissionScope":"scope-not-sent-on-the-bound-route","creditorName":"Payee",
          "amount":1500.00,"currency":"CZK","priority":"STANDARD"}
@@ -99,7 +99,7 @@ class CustomerEdgeDomesticBoundCreatePactConsumerTest {
                 o.stringValue("delegationId", DELEGATION_ID)
                 o.stringValue("actingPartyId", ACTING_PARTY_ID)
                 o.stringValue("debtorAccountId", DEBTOR_ACCOUNT_ID)
-                o.stringValue("debtorAccountNumber", "1234567890")
+                o.stringValue("debtorAccountNumber", "1234567899")
                 o.stringValue("debtorBankCode", "0800")
                 o.stringValue("debtorName", "Grantor Name")
                 o.stringValue("creditorAccountNumber", "2000145399")
