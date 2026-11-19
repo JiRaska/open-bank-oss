@@ -117,17 +117,25 @@ class CustomerGrantCacheTest {
     }
 
     @Test
-    fun `refreshing a key already held at the cap evicts nothing`() {
-        val small = CustomerGrantCache(source, Duration.ofSeconds(15), clock, maxEntries = 2)
-        source.answer = { listOf(grant()) }
-        val k1 = key.copy(partyId = UUID.randomUUID())
-        val k2 = key.copy(partyId = UUID.randomUUID())
-        small.grants(k1)
-        small.grants(k2)
-        clock.now = clock.now.plusSeconds(15)
-        small.grants(k2)
-        assertThat(small.isCached(k1)).isTrue()
-        assertThat(small.isCached(k2)).isTrue()
+    fun `storing a key that a concurrent lookup already cached evicts nothing`() {
+        lateinit var small: CustomerGrantCache
+        val held = key.copy(partyId = UUID.randomUUID())
+        var nested = false
+        source.answer = {
+            // While THIS lookup for `key` is in flight, a concurrent one caches `key` first, so the
+            // cache is at its cap of 2 with `key` already present when this answer is stored.
+            if (!nested && small.isCached(held)) {
+                nested = true
+                small.grants(key)
+            }
+            listOf(grant())
+        }
+        small = CustomerGrantCache(source, Duration.ofSeconds(15), clock, maxEntries = 2)
+        small.grants(held)
+        small.grants(key)
+        // Replacing `key` in place must not have evicted the unrelated, older `held` entry.
+        assertThat(small.isCached(held)).isTrue()
+        assertThat(small.isCached(key)).isTrue()
     }
 
     @Test
