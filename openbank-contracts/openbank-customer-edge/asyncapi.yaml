@@ -119,6 +119,12 @@ channels:
         $ref: '#/components/messages/auditEvent_CUSTOMER_TERM_DEPOSIT_OPENED'
       customertransferinitiated:
         $ref: '#/components/messages/auditEvent_CUSTOMER_TRANSFER_INITIATED'
+      customermcpproposalapproved:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_MCP_PROPOSAL_APPROVED'
+      customermcpproposalrefused:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_MCP_PROPOSAL_REFUSED'
+      customermcpproposalrejected:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_MCP_PROPOSAL_REJECTED'
       loanapplicationsubmitted:
         $ref: '#/components/messages/auditEvent_LOAN_APPLICATION_SUBMITTED'
       scadecisionrecorded:
@@ -346,6 +352,36 @@ components:
       description: |
         Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
         Carries the envelope below with `eventType: CUSTOMER_TRANSFER_INITIATED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_MCP_PROPOSAL_APPROVED:
+      name: CUSTOMER_MCP_PROPOSAL_APPROVED
+      title: Customer audit event CUSTOMER_MCP_PROPOSAL_APPROVED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path
+        (ADR-0383 D6 MCP payment-proposal approval surface).
+        Carries the envelope below with `eventType: CUSTOMER_MCP_PROPOSAL_APPROVED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_MCP_PROPOSAL_REFUSED:
+      name: CUSTOMER_MCP_PROPOSAL_REFUSED
+      title: Customer audit event CUSTOMER_MCP_PROPOSAL_REFUSED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path
+        (ADR-0383 D6 MCP payment-proposal approval surface).
+        Carries the envelope below with `eventType: CUSTOMER_MCP_PROPOSAL_REFUSED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_MCP_PROPOSAL_REJECTED:
+      name: CUSTOMER_MCP_PROPOSAL_REJECTED
+      title: Customer audit event CUSTOMER_MCP_PROPOSAL_REJECTED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path
+        (ADR-0383 D6 MCP payment-proposal approval surface).
+        Carries the envelope below with `eventType: CUSTOMER_MCP_PROPOSAL_REJECTED`.
       payload:
         $ref: '#/components/schemas/AnalyticsEnvelope'
     auditEvent_LOAN_APPLICATION_SUBMITTED:
