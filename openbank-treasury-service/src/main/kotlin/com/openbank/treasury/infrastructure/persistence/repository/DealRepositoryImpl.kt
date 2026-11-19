@@ -191,10 +191,11 @@ class DealRepositoryImpl(
         extraEvents: List<DealEvent>,
         releaseClaim: String?,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+        fundingGuard: com.openbank.treasury.application.port.out.FundingGuard?,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         val storedVersion = Panache.withTransaction {
-            val row = requireOpenClaim(releaseClaim).flatMap { lockedRow(deal.id, limitGuard) }
+            val row = requireOpenClaim(releaseClaim).flatMap { lockedRow(deal.id, limitGuard, fundingGuard) }
             row.flatMap { existing ->
                 if (existing != null && existing.rowVersion != deal.rowVersion) {
                     throw DealChangedException(
@@ -285,16 +286,24 @@ class DealRepositoryImpl(
     /**
      * The deal row, ALWAYS locked for a whole-row save (so the version comparison in [save] judges
      * the row as it stands and no concurrent save can interleave), plus the limit line when the
-     * change consumes one. Lock order everywhere: the deal row, then the limit line, so two writes
-     * on one line never deadlock.
+     * change consumes one, plus the funding line when it consumes the contra account. Lock order
+     * everywhere: the deal row, then the limit line, then the funding line, so two writes on one
+     * line never deadlock.
      */
     private fun lockedRow(
         dealId: UUID,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+        fundingGuard: com.openbank.treasury.application.port.out.FundingGuard?,
     ): Uni<DealEntity?> = find("dealId", dealId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
         .flatMap { locked ->
             limitGuard?.let { g ->
                 Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
+            }
+                ?: Uni.createFrom().item(locked)
+        }
+        .flatMap { locked ->
+            fundingGuard?.let { g ->
+                Panache.getSession().flatMap { fundingUnderLock(it, dealId, g) }.map { locked }
             }
                 ?: Uni.createFrom().item(locked)
         }
@@ -500,6 +509,55 @@ class DealRepositoryImpl(
             .setParameter("assets", ASSET_PRODUCT_NAMES)
             .setParameter("consuming", LINE_CONSUMING_PRODUCT_NAMES)
             .setParameter("czkLine", com.openbank.treasury.domain.model.CreditMeasure.CZK_LINE_PRODUCTS.map { it.name })
+        return q.singleResult.map { BigDecimal(it.toString()) }
+    }
+
+    override suspend fun pendingOutflows(currency: String, day: LocalDate, excludeDealId: UUID?): BigDecimal =
+        Panache.withSession {
+            Panache.getSession().flatMap { pendingOutflows(it, currency, day, excludeDealId) }
+        }.awaitSuspending()
+
+    /**
+     * #12115: the committed outflows a funding-consuming write (approve) was vetted against,
+     * re-measured inside its transaction under a transaction-scoped lock on the (currency) funding
+     * line — ONE key for every such write, so two bookings on one line serialise and cannot jointly
+     * overdraw the contra account — by the same [pendingOutflows] query the pre-trade check used. A
+     * booking that no longer fits is a 422, never a committed overdraw.
+     */
+    private fun fundingUnderLock(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: UUID,
+        g: com.openbank.treasury.application.port.out.FundingGuard,
+    ): Uni<Void> = session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
+        .setParameter("line", "treasury-funding:${g.currency}").singleResult
+        .flatMap { pendingOutflows(session, g.currency, g.day, dealId) }
+        .map { pending ->
+            if (!g.fits(pending)) {
+                throw com.openbank.treasury.application.port.out.FundingExceededException(g.describe(pending))
+            }
+        }.replaceWithVoid()
+
+    /**
+     * #12115: Σ principal of the OTHER ACTUAL deals whose cash is contracted to leave the [currency]
+     * contra account on or before [day] but has not moved — a [com.openbank.treasury.domain.model.Funding.PENDING_STATES]
+     * state and a funding-consuming product ([com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS],
+     * derived from the domain, never a second literal list). A SETTLED deal moved already (the
+     * balance carries it); a DRAFT or PENDING_APPROVAL one is not concluded.
+     */
+    private fun pendingOutflows(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        currency: String,
+        day: LocalDate,
+        excludeDealId: UUID?,
+    ): Uni<BigDecimal> {
+        val q = session.createNativeQuery<Any>(
+            "select coalesce(sum(principal), 0) from deals " +
+                "where kind = 'ACTUAL' and currency = :ccy and deal_id <> :d " +
+                "and product in (:products) and state in (:states) and value_date <= :day",
+        ).setParameter("ccy", currency).setParameter("d", excludeDealId ?: NO_DEAL)
+            .setParameter("products", FUNDING_CONSUMING_PRODUCT_NAMES)
+            .setParameter("states", FUNDING_PENDING_STATE_NAMES)
+            .setParameter("day", day)
         return q.singleResult.map { BigDecimal(it.toString()) }
     }
 
@@ -741,6 +799,12 @@ class DealRepositoryImpl(
 
         /** The products with posting rules today: the only ones the simulated market moves. */
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
+
+        /** #12115: derived from the domain's [com.openbank.treasury.domain.model.Funding] sets — never a second literal. */
+        val FUNDING_CONSUMING_PRODUCT_NAMES =
+            com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS.map { it.name }
+        val FUNDING_PENDING_STATE_NAMES =
+            com.openbank.treasury.domain.model.Funding.PENDING_STATES.map { it.name }
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
 

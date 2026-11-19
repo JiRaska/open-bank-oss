@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# #12115: treasury funding. Booking refuses a placement the contra (nostro) account does not
+# verifiably fund, but flows that bypass the check — a payment rail, a manual ledger journal, a
+# settlement after the balance moved — can still drive the account negative. The funding monitor
+# (treasury-funding-monitor) publishes each contra account's ledger balance; a negative one is a
+# funding breach, not a liquidity report, and needs a person before the next settlement. A dead
+# monitor is covered separately by its workflow-liveness alert (ADR-0237). Picked up by the
+# Prometheus operator automatically, same as every PrometheusRule here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-treasury-funding-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.treasury.funding
+      rules:
+        - alert: TreasuryFundingExceeded
+          # Two consecutive 15-minute monitor reads negative: one bad read cannot page, a persistent
+          # shortfall always does. A cold pod's gauges read NaN, which keeps this false until the
+          # balance is actually measured.
+          expr: min(openbank_treasury_funding_contra_balance) by (currency, gl) < 0
+          for: 15m
+          labels:
+            severity: critical
+            team: treasury
+          annotations:
+            summary: "A treasury contra account is negative"
+            description: >-
+              The {{ $labels.currency }} nostro / settlement account (GL {{ $labels.gl }}) ended a
+              monitor pass below zero: treasury booked or settled against money the account did not
+              hold, or an outflow bypassed the booking-time funding check. Read the account's
+              journals for the day (GET /api/v1/journals on the ledger), identify the unfunded
+              outflow, and either book the covering borrowing through the normal deal lifecycle or
+              reverse the offending deal.

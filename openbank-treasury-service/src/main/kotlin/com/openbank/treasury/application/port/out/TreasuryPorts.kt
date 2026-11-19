@@ -63,6 +63,9 @@ data class CommandKey(val key: String, val action: String, val dealId: UUID)
 /** An outbox event to commit with the deal row. */
 data class DealEvent(val eventType: String, val payload: String)
 
+// TooManyFunctions: one persistence operation per lifecycle query the use cases need; splitting the
+// port would only scatter the one aggregate's contract.
+@Suppress("TooManyFunctions")
 interface DealRepository {
     /**
      * Persist the deal (row + new timeline entries), an optional ledger journal reference and an
@@ -91,6 +94,13 @@ interface DealRepository {
          * committing a joint breach.
          */
         limitGuard: ExposureGuard? = null,
+        /**
+         * #12115: a funding-consuming write (approve of an asset deal): in the SAME transaction,
+         * after locking the deal row, take the (currency) funding line lock and re-measure the
+         * committed outflows; past the guard's balance it refuses (FundingExceededException, 422)
+         * instead of committing a joint overdraw.
+         */
+        fundingGuard: FundingGuard? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */
@@ -110,6 +120,14 @@ interface DealRepository {
 
     /** Outstanding placed principal with [counterpartyId] in [currency], excluding [excludeDealId]. */
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
+
+    /**
+     * #12115: cash committed to leave the [currency] contra account on or before [day]: Σ principal
+     * of ACTUAL deals in a [com.openbank.treasury.domain.model.Funding.PENDING_STATES] state whose
+     * product consumes funding ([com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS]),
+     * excluding [excludeDealId].
+     */
+    suspend fun pendingOutflows(currency: String, day: LocalDate, excludeDealId: UUID?): BigDecimal
 
     /**
      * Every PENDING_APPROVAL deal carrying a senior limit override, across all counterparties and
