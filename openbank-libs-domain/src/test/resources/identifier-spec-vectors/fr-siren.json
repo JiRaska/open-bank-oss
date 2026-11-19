@@ -6,28 +6,42 @@
   ],
   "cases": [
     {
-      "value": "732829320",
+      "value": "482157393",
       "valid": true,
-      "rule": "real SIREN",
-      "stdnum": true
+      "rule": "synthetic SIREN, Luhn",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "732829321",
+      "value": "482157394",
       "valid": false,
       "rule": "Luhn mismatch",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "73282932",
+      "value": "48215739",
       "valid": false,
       "rule": "8 digits",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "000000000",
-      "valid": true,
-      "rule": "all zeros satisfies Luhn",
-      "stdnum": true
+      "valid": false,
+      "rule": "all-zero SIREN satisfies Luhn but is not assignable",
+      "stdnum_divergence": "stdnum.fr.siren accepts it",
+      "known_defect": {
+        "issue": "#16880",
+        "current": true,
+        "why": "kyb checks length and Luhn only"
+      },
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [

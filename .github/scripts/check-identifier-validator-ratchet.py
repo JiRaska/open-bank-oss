@@ -44,6 +44,8 @@ import tempfile
 PATTERNS = {
     "mod97": re.compile(
         r"(?<![0-9])97\s*\.toBigInteger|BigInteger\.valueOf\(\s*97\s*\)|%\s*97(?![0-9])|\.mod\(\s*97(?![0-9])"
+        # a NAMED constant is the same computation: `% MOD_97`, `% MODULUS_97`, `Mod97`, `mod97`
+        r"|%\s*\(?[A-Za-z_]*97\b|\b(?:MOD|MODULUS)_?97\b|\b[Mm]od97\b"
     ),
     "iban-regex": re.compile(r"\[A-Z\]\{2\}(?:\[0-9\]|\\\\d)\{2\}"),
     "currency-regex": re.compile(r"\[A-Z\]\{3\}"),
@@ -124,7 +126,10 @@ def self_test() -> int:
             ("new percent 97", "var r = (r * 10 + d) % 97\n", 1),
             ("new IBAN regex", 'val IBAN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")\n', 1),
             ("second currency regex", 'val C2 = Regex("^[A-Z]{3}$")\n', 1),
+            ("named-constant mod-97", "for (d in s) r = (r * 10 + d) % MOD_97\n", 1),
+            ("named-constant modulus 97", "val x = n % MODULUS_97\n", 1),
             ("not a mod-97: 1997", "val year = 1997\n", 0),
+            ("not a mod-97: MOD_970", "val k = MOD_970\n", 0),
         ]
         failed = False
         for name, extra, want in cases:

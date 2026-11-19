@@ -47,24 +47,39 @@ from stdnum.fr import siren as std_siren
 from stdnum.pl import nip as std_nip
 
 
+# Sources for the birth-number rules below (RČ). Each rule carries its own citation; where the rule
+# is established practice rather than statute, it says so and claims no paragraph.
+_RC_LAW = "https://www.zakonyprolidi.cz/cs/2000-133"       # zákon č. 133/2000 Sb., § 13: the birth number
+_RC_MVCR = "https://www.mvcr.cz/clanek/rodne-cislo.aspx"    # MV ČR: structure and history of the number
+
+
 def _rc_divergence(v: str):
-    """Documented rules where RodneCislo is stricter than stdnum.cz.rc. None = no divergence."""
+    """Rules where RodneCislo is stricter than stdnum.cz.rc. None = no divergence.
+
+    This is the oracle's own model of the rules and shares its author with the Kotlin parser and
+    RodneCisloReference; the citations are what make it checkable against something else."""
     if v.isdigit() and not v.isascii():
+        # a digit is 0-9: the number is defined over ASCII decimal digits [zákon 133/2000 Sb. § 13, via _RC_LAW]
         return "only ASCII digits 0-9 are birth-number digits"
     if not v.isdigit() or len(v) not in (9, 10):
         return None
     yy, mm = int(v[0:2]), int(v[2:4])
     if len(v) == 9 and yy > 53:
+        # the 9-digit form was issued up to 1953 only [MV ČR description, _RC_MVCR; established practice, no paragraph claimed]
         return "9-digit form issued only for birth years up to 1953"
     if mm not in (*range(1, 13), *range(21, 33), *range(51, 63), *range(71, 83)):
+        # the month field carries M, M+50 (women); M+20 / M+70 are the overflow encodings [_RC_LAW § 13; _RC_MVCR]
         return "month is none of the M, M+20, M+50, M+70 encodings"
     if len(v) == 9 and (21 <= mm <= 32 or 71 <= mm <= 82):
+        # the overflow was introduced for the 10-digit form in 2004 [_RC_MVCR; practice, no paragraph claimed]
         return "9-digit form never carries the +20/+70 overflow"
     if (21 <= mm <= 32 or 71 <= mm <= 82) and yy < 4:
+        # +20/+70 overflow exists only from 2004 [_RC_MVCR; practice, no paragraph claimed]
         return "+20/+70 month overflow exists only from 2004"
     if len(v) == 10 and int(v[:9]) % 11 == 10:
         year = 2000 + yy if (mm > 20 and mm < 50) or mm > 70 or yy <= 53 else 1900 + yy
         if year > 1985:
+            # remainder 10 (check digit 0) was issued only until 1985 [_RC_MVCR; practice, no paragraph claimed]
             return "remainder-10 check quirk valid only for birth years up to 1985"
     return None
 
@@ -100,9 +115,16 @@ def _ico(v: str) -> bool:
 
 
 _ACTIVE_ISO4217 = frozenset(c.alpha_3 for c in pycountry.currencies)
-# ISO 4217 codes with no minor unit (precious metals, SDR, testing, no-currency): CurrencyCode
-# rejects them on purpose because a Money amount needs a scale.
-_NO_MINOR_UNIT = frozenset({"XAG", "XAU", "XBA", "XBB", "XBC", "XBD", "XDR", "XPD", "XPT", "XSU", "XTS", "XUA", "XXX"})
+# Codes that are ACTIVE in ISO 4217 but that CurrencyCode rejects on purpose. Each entry is local
+# Money policy, not spec: a monetary amount needs a minor unit to scale at. The reason and the
+# source of the underlying fact are per code, never a blanket set.
+_ISO_LIST = "https://www.six-group.com/en/products-services/financial-information/data-standards.html"
+_JDK_CCY = "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Currency.html"
+LOCAL_CURRENCY_POLICY = {
+    **{c: ("ISO 4217 lists no minor unit for it (precious metal, SDR, testing or no-currency code)", _ISO_LIST)
+       for c in ("XAG", "XAU", "XBA", "XBB", "XBC", "XBD", "XDR", "XPD", "XPT", "XSU", "XTS", "XUA", "XXX")},
+    "UYW": ("active ISO 4217 unit-of-account code that the JDK 25 currency data does not carry, so there is no minor unit", _JDK_CCY),
+}
 
 
 def _currency(v: str) -> bool:
@@ -115,11 +137,8 @@ _JDK_UNKNOWN = frozenset({"UYW"})
 
 
 def _currency_divergence(v: str):
-    if v in _NO_MINOR_UNIT:
-        return "ISO 4217 code without a minor unit cannot denominate Money"
-    if v in _JDK_UNKNOWN:
-        return "active ISO 4217 code unknown to java.util.Currency: no minor unit available"
-    return None
+    policy = LOCAL_CURRENCY_POLICY.get(v)
+    return f"local Money policy: {policy[0]}" if policy else None
 
 
 def _at_fn(v: str) -> bool:
@@ -149,6 +168,12 @@ def _eu_vat_divergence(v: str):
     return None
 
 
+def _siren_divergence(v: str):
+    if v == "000000000":
+        return "an all-zero SIREN is not assignable (Luhn passes, but it is never allocated)"
+    return None
+
+
 def _none(_v: str):
     return None
 
@@ -160,7 +185,7 @@ ORACLES = {
     "cz-ico": (_ico, _none),
     "sk-ico": (_ico, _none),
     "pl-nip": (std_nip.is_valid, _none),
-    "fr-siren": (std_siren.is_valid, _none),
+    "fr-siren": (std_siren.is_valid, _siren_divergence),
     "eu-vat": (std_vat.is_valid, _eu_vat_divergence),
     "lei": (std_lei.is_valid, _none),
     "isin": (std_isin.is_valid, _none),
@@ -175,15 +200,23 @@ ORACLES = {
 # disagreement only on such rows AND fails once none of them disagrees (the defect is fixed, so
 # the marker must go). A known defect can neither be forgotten nor silently fixed.
 _ISO3166 = frozenset(c.alpha_2 for c in pycountry.countries) | {"XS", "EU", "XA", "XB", "XC", "XD", "XF", "QS", "QT"}
-# kyb EuVatChecksums verifies CZ, SK, PL, DE, FR and AT; every other member state is accepted on
-# shape alone (`else -> true`), which the reference rejects when the check digit is wrong; the SK
-# check is mod 11 only, missing the official rule that the third digit is one of 2,3,4,7,8,9.
-_EU_VAT_CHECKED = frozenset({"CZ", "SK", "PL", "DE", "FR", "AT"})
+# Each defect is ONE predicate on ONE implementation behaviour, never a per-identifier blanket:
+#   id -> (issue, identifier, manifests(value))
+# `manifests` is true where the implementation is currently WRONG (it accepts a value the reference
+# rejects). Only rows whose expected verdict is False can carry it, so a regression that rejects a
+# valid value is never tagged and always fails. The Kotlin judge fails a defect whose tagged rows
+# all agree (fixed -> the marker must go) and any disagreement that is not tagged.
+_EU_VAT_SHAPE_ONLY = ("ES", "IT", "NL", "BE", "PT", "IE", "DK", "FI", "SE", "LU", "SI", "HR", "HU", "RO", "BG",
+                      "EE", "LV", "LT", "EL", "CY", "MT")
 KNOWN_DEFECTS = {
-    "eu-vat": ("#16774", lambda v: v[:2] not in _EU_VAT_CHECKED or (v[:2] == "SK" and (v[2] == "0" or v[4] not in "234789"))),
-    "currency": ("#16821", lambda v: v in {"BGN", "CUC"}),
-    "isin": ("#16773", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
+    "eu-vat-sk-third-digit": ("#16774", "eu-vat", lambda v: v[:2] == "SK" and (v[2] == "0" or v[4] not in "234789")),
+    "fr-siren-all-zero": ("#16880", "fr-siren", lambda v: v == "000000000"),
+    "currency-cuc": ("#16821", "currency", lambda v: v == "CUC"),
+    "currency-bgn": ("#16821", "currency", lambda v: v == "BGN"),
+    "isin-prefix-not-iso3166": ("#16773", "isin", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
+for _cc in _EU_VAT_SHAPE_ONLY:
+    KNOWN_DEFECTS[f"eu-vat-shape-only-{_cc}"] = ("#16774", "eu-vat", (lambda cc: lambda v: v[:2] == cc)(_cc))
 
 
 def expected(identifier: str, value: str):
@@ -192,9 +225,10 @@ def expected(identifier: str, value: str):
     reason = divergence(value) if verdict else None
     if reason:
         verdict = False
-    defect = KNOWN_DEFECTS.get(identifier)
-    if defect and defect[1](value):
-        return verdict, f"known-defect {defect[0]}"
+    if not verdict:
+        for defect_id, (issue, ident, manifests) in KNOWN_DEFECTS.items():
+            if ident == identifier and manifests(value):
+                return verdict, f"known-defect {defect_id} {issue}"
     return verdict, reason or "stdnum"
 
 
@@ -279,6 +313,8 @@ def _gen_nip(r: random.Random) -> str:
 
 
 def _gen_siren(r: random.Random) -> str:
+    if r.random() < 0.01:
+        return "000000000"
     return _fix_last(r, _digits(r, 8), std_luhn.is_valid)
 
 
@@ -371,6 +407,20 @@ def vectors(directory: pathlib.Path) -> int:
         for c in d["cases"]:
             live = bool(ref(c["value"]))
             checked += 1
+            if bool(c["valid"]) != expected(d["identifier"], c["value"])[0]:
+                print(f"::error::{f.name} {c['value']!r} ({c['rule']}): vector says valid={c['valid']} but the oracle's "
+                      f"narrowed expectation is {expected(d['identifier'], c['value'])[0]} — vector and oracle disagree")
+                bad += 1
+            origin = c.get("origin")
+            if origin not in ("synthetic", "published"):
+                print(f"::error::{f.name} {c['value']!r}: origin must be 'synthetic' or 'published', got {origin!r}")
+                bad += 1
+            elif origin == "published" and not str(c.get("cite", "")).startswith("https://"):
+                print(f"::error::{f.name} {c['value']!r}: a published value needs an https `cite`")
+                bad += 1
+            if c.get("policy") not in ("spec", "local") or (c.get("policy") == "local" and not c.get("policy_reason")):
+                print(f"::error::{f.name} {c['value']!r}: policy must be 'spec', or 'local' with a policy_reason")
+                bad += 1
             if c.get("stdnum") != live:
                 print(f"::error::{f.name} {c['value']!r}: recorded stdnum={c.get('stdnum')} but stdnum says {live}")
                 bad += 1
@@ -400,6 +450,13 @@ def self_test() -> int:
             v = gen(r)
             if not ORACLES[identifier][0](v) and expected(identifier, v)[0]:
                 ok = False
+    # a known defect tags only rows the reference REJECTS: a valid value from a shape-only member
+    # state must never be tagged (a regression rejecting it has to fail, not be tolerated).
+    r = random.Random(3)
+    valid_it = next(v for v in (_gen_eu_vat(r) for _ in range(5000)) if v[:2] == "IT" and std_vat.is_valid(v))
+    ok &= expected("eu-vat", valid_it) == (True, "stdnum")
+    invalid_it = next(v for v in (_gen_eu_vat(r) for _ in range(5000)) if v[:2] == "IT" and not std_vat.is_valid(v))
+    ok &= expected("eu-vat", invalid_it)[1].startswith("known-defect eu-vat-shape-only-IT")
     # the generator must produce both verdicts for every identifier.
     r = random.Random(2)
     for identifier, gen in GENERATORS.items():

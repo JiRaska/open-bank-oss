@@ -47,16 +47,27 @@ internal object RodneCisloReference {
 
     private val ENCODED_MONTHS = (1..12).flatMap { listOf(it, it + 20, it + 50, it + 70) }.toSet()
 
-    /** The documented narrowings; [n] is already known to be stdnum-valid digits. */
+    /**
+     * The documented narrowings; [n] is already known to be stdnum-valid digits. Sources, per rule:
+     * statute is zákon č. 133/2000 Sb. § 13 (https://www.zakonyprolidi.cz/cs/2000-133); structure and
+     * history are described by MV ČR (https://www.mvcr.cz/clanek/rodne-cislo.aspx). Rules marked
+     * "practice" are established issuing practice, for which no paragraph is claimed.
+     * This model shares its author with the Kotlin parser, so the citations are what make it checkable.
+     */
     private fun stricterRuleRejects(n: String): Boolean {
         val yy = n.substring(0, 2).toInt()
         val mm = n.substring(2, 4).toInt()
         val overflow = mm in 21..32 || mm in 71..82
         return when {
+            // practice: the 9-digit form was issued only up to 1953 (MV ČR)
             n.length == 9 && yy > 53 -> true
+            // month field is M, M+20, M+50 or M+70 (§ 13; MV ČR)
             mm !in ENCODED_MONTHS -> true
+            // practice: the overflow encodings belong to the 10-digit form from 2004 (MV ČR)
             n.length == 9 && overflow -> true
+            // practice: +20/+70 exist only from 2004 (MV ČR)
             overflow && yy < 4 -> true
+            // practice: remainder 10 / check digit 0 was issued only up to 1985 (MV ČR)
             n.length == 10 && n.substring(0, 9).toLong() % 11 == 10L -> {
                 val year = if (overflow || yy <= 53) 2000 + yy else 1900 + yy
                 year > 1985

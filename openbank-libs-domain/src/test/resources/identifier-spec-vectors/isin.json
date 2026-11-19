@@ -9,19 +9,27 @@
       "value": "US0378331005",
       "valid": true,
       "rule": "Apple ISIN",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/78502.html",
+      "policy": "spec"
     },
     {
       "value": "CZ0008019106",
       "valid": true,
       "rule": "Czech ISIN",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/78502.html",
+      "policy": "spec"
     },
     {
       "value": "US0378331006",
       "valid": false,
       "rule": "Luhn check mismatch (a [A-Z]{2}[A-Z0-9]{9}[0-9] regex accepts it)",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "XX0378331005",
@@ -32,13 +40,17 @@
         "current": true,
         "why": "Isin checks format and Luhn only"
       },
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "US037833100",
       "valid": false,
       "rule": "11 characters",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [

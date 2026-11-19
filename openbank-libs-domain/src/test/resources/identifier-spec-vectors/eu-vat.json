@@ -2,26 +2,33 @@
   "identifier": "eu-vat",
   "reference": "stdnum.eu.vat",
   "sources": [
-    "https://ec.europa.eu/taxation_customs/vies/"
+    "https://ec.europa.eu/taxation_customs/vies/",
+    "https://www.zakonyprolidi.cz/cs/2004-235"
   ],
   "cases": [
     {
-      "value": "CZ25596641",
+      "value": "CZ48215732",
       "valid": true,
       "rule": "CZ VAT = CZ + IČO",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "DE136695976",
+      "value": "DE482157397",
       "valid": true,
-      "rule": "real DE VAT",
-      "stdnum": true
+      "rule": "synthetic DE VAT (ISO 7064 mod 11,10)",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "CZ25596642",
+      "value": "CZ48215733",
       "valid": false,
       "rule": "CZ VAT with wrong IČO check digit",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "IT010000000",
@@ -32,19 +39,42 @@
         "current": true,
         "why": "EuVatChecksums.valid returns true for every other prefix"
       },
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "C225596641",
+      "value": "CZ7605060001",
+      "valid": true,
+      "rule": "CZ DIČ of a natural person is a birth number (valid, synthetic)",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "CZ0321010008",
+      "valid": false,
+      "rule": "CZ DIČ built on a never-issued birth number (+20 month in 2003)",
+      "stdnum_divergence": "stdnum accepts the +20 month before 2004; see #16748",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "C248215732",
       "valid": false,
       "rule": "digit in country prefix",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "CZ1",
       "valid": false,
       "rule": "too short",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [

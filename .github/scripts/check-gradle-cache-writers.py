@@ -158,6 +158,10 @@ DECLARED: dict[str, tuple[str, str]] = {
         "here shows up.",
     ),
     "api-fuzz.yml::fuzz": ("read-only", "Consumer; restores fleet-lint's home."),
+    "identifier-differential.yml::differential": (
+        "read-only",
+        "Restores the shared Gradle cache for the four conformance-test modules and never writes it (#16748).",
+    ),
     "libs-quality.yml::compatibility": (
         "read-only",
         "Library ABI, coverage and recovery proofs consume fleet-lint's Gradle home. "

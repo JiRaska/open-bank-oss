@@ -7,58 +7,76 @@
   ],
   "cases": [
     {
-      "value": "25596641",
+      "value": "48215732",
       "valid": true,
-      "rule": "real IČO (registry example)",
-      "stdnum": true
+      "rule": "synthetic IČO, check digit by the mod-11 rule",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "25596642",
+      "value": "48215733",
       "valid": false,
       "rule": "checksum mismatch",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "2559664",
+      "value": "4821573",
       "valid": false,
-      "rule": "7 digits whose zero-padded form 02559664 fails the check",
-      "stdnum": false
+      "rule": "7 digits whose zero-padded form 04821573 fails the check",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "2559664A",
+      "value": "4821573A",
       "valid": false,
       "rule": "non-digit",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "00000019",
       "valid": true,
       "rule": "generated valid, remainder case 0000001",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "00000108",
       "valid": true,
       "rule": "generated valid, remainder case 0000010",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "00001007",
       "valid": true,
       "rule": "generated valid, remainder case 0000100",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "90000005",
       "valid": true,
       "rule": "valid IČO with leading digit 9",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "00000019",
       "valid": true,
       "rule": "valid IČO with leading digit 0",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [

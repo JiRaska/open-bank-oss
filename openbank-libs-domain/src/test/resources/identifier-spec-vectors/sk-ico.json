@@ -7,28 +7,36 @@
   ],
   "cases": [
     {
-      "value": "31333532",
+      "value": "73051829",
       "valid": true,
-      "rule": "real Slovak IČO",
-      "stdnum": true
+      "rule": "synthetic Slovak IČO (same mod-11 rule)",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "31333532",
       "valid": true,
       "rule": "generated valid",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "31333533",
+      "value": "73051820",
       "valid": false,
       "rule": "checksum mismatch",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "3133353X",
       "valid": false,
       "rule": "non-digit",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [

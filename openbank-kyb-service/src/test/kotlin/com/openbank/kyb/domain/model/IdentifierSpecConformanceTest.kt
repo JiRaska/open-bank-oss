@@ -69,25 +69,24 @@ class IdentifierSpecConformanceTest {
         val path = System.getenv("IDENTIFIER_ORACLE") ?: return
         val rows = File(path).readLines().map { it.split('\t') }.filter { it.size >= 3 && it[0] in validators }
         assertTrue(rows.size > MIN_ROWS * validators.size, "only ${rows.size} oracle rows for ${validators.keys}")
-        val disagree = rows.filter { validators.getValue(it[0])(it[1]) != it[2].toBoolean() }
-        val (tolerated, bad) = disagree.partition { it.getOrElse(REASON) { "" }.startsWith("known-defect") }
-        val markedIds = rows.filter { it.getOrElse(REASON) { "" }.startsWith("known-defect") }.map { it[0] }.toSet()
-        markedIds.forEach { id ->
-            assertTrue(
-                tolerated.any { it[0] == id },
-                "$id: no known-defect row disagrees any more: the defect looks fixed, remove its KNOWN_DEFECTS marker",
-            )
-        }
-        assertTrue(
-            bad.isEmpty(),
-            "${bad.size} of ${rows.size} rows disagree; first 40:\n" +
-                bad.take(SHOWN).joinToString("\n") {
-                    "${it[0]} '${it[1]}' oracle=${it[2]} (${it.getOrElse(REASON) { "" }})"
-                },
+        val problems = judgeDifferential(rows) { id, value -> validators.getValue(id)(value) }
+        assertTrue(problems.isEmpty(), "${problems.size} problem(s); first $SHOWN:\n" + problems.take(SHOWN).joinToString("\n"))
+        val tagged = rows.count { it.getOrElse(REASON) { "" }.startsWith("known-defect") }
+        println("IDENTIFIER_DIFFERENTIAL module=$MODULE rows=${rows.size} disagreements=0 known_defect_rows=$tagged")
+    }
+
+    @Test
+    fun `the differential judge fails a regression and a fixed defect, and tolerates only a live one`() {
+        val rows = listOf(
+            listOf("x", "a", "true", "stdnum"),
+            listOf("x", "b", "false", "known-defect d1 #1"),
+            listOf("x", "c", "false", "known-defect d1 #1"),
         )
-        println(
-            "IDENTIFIER_DIFFERENTIAL module=$MODULE rows=${rows.size} disagreements=0 known_defect_rows=${tolerated.size}",
-        )
+        fun judge(accepts: Set<String>) = judgeDifferential(rows) { _, v -> v in accepts }
+        assertTrue(judge(setOf("a", "b")).isEmpty(), "a live defect (accepts b) must be tolerated")
+        assertTrue(judge(setOf("a")).any { "fixed" in it }, "every tagged row agreeing means the defect is fixed")
+        assertTrue(judge(setOf("b")).any { "'a'" in it }, "a regression rejecting a valid value must fail")
+        assertTrue(judge(setOf("a", "b", "c")).isEmpty(), "still-live defect on all tagged rows is tolerated")
     }
 
     private companion object {
@@ -95,5 +94,27 @@ class IdentifierSpecConformanceTest {
         const val MIN_ROWS = 1000
         const val SHOWN = 40
         const val REASON = 3
+
+        /** Disagreements are tolerated ONLY on rows tagged with a defect, and a defect whose tagged rows all agree must go. */
+        fun judgeDifferential(rows: List<List<String>>, ours: (String, String) -> Boolean): List<String> {
+            val problems = mutableListOf<String>()
+            val liveByDefect = mutableMapOf<String, Int>()
+            val taggedByDefect = mutableMapOf<String, Int>()
+            for (r in rows) {
+                val reason = r.getOrElse(REASON) { "" }
+                val defect = if (reason.startsWith("known-defect ")) reason.split(' ')[1] else null
+                if (defect != null) taggedByDefect.merge(defect, 1, Int::plus)
+                if (ours(r[0], r[1]) == r[2].toBoolean()) continue
+                if (defect != null && !r[2].toBoolean()) {
+                    liveByDefect.merge(defect, 1, Int::plus)
+                } else {
+                    problems += "${r[0]} '${r[1]}' oracle=${r[2]} ($reason)"
+                }
+            }
+            taggedByDefect.keys.filter { it !in liveByDefect }.forEach {
+                problems += "$it: all ${taggedByDefect.getValue(it)} tagged rows agree: the defect is fixed, remove it from KNOWN_DEFECTS"
+            }
+            return problems
+        }
     }
 }

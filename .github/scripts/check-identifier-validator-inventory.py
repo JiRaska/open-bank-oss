@@ -36,6 +36,7 @@ import tempfile
 
 CANDIDATE = re.compile(
     r"(?<![0-9])97\s*\.toBigInteger|BigInteger\.valueOf\(\s*97\s*\)|%\s*97(?![0-9])|\.mod\(\s*97(?![0-9])|"
+    r"%\s*\(?[A-Za-z_]*97\b|\b(?:MOD|MODULUS)_?97\b|"
     r"%\s*11(?![0-9])|\.mod\(\s*11(?![0-9])|(?i:luhn)|mod97|mod11|"
     r"\[A-Z\]\{2\}(?:\[0-9\]|\\\\d)\{2\}|\[A-Z\]\{2\}\[A-Z0-9\]\{9\}|\[A-Z\]\{3\}|"
     r"Currency\.getInstance|getAvailableCurrencies"
@@ -86,7 +87,9 @@ def fuzz_oracles(root: pathlib.Path):
         return labels
     for f in base.rglob("*Fuzzer.kt"):
         text = f.read_text(encoding="utf-8")
-        semantic = re.search(r"\b\w+Reference\.\w+\(", text) is not None
+        # the reference must be CALLED inside an assertion: a file that merely mentions it, or
+        # computes it and never compares, is consistency-only
+        semantic = re.search(r"\b(?:check|require|assert\w*)\s*\([^\n]*\b\w+Reference\.\w+\(", text) is not None
         for imp in re.findall(r"^import com\.openbank\.[\w.]+\.(\w+)$", text, re.M):
             labels[imp] = {"fuzzer": f.stem, "label": "semantic" if semantic else "robustness-only"}
     return labels
@@ -112,6 +115,16 @@ def build(root: pathlib.Path):
     fuzz = fuzz_oracles(root)
     claimed = {}
     for v in vectors:
+        # every value is synthetic or published-with-a-source: the gitleaks allowlist covers test files,
+        # so this is the check that a vector file cannot quietly carry a real person's or firm's number
+        for c in v["cases"]:
+            where = f"{v['identifier']} {c.get('value')!r}"
+            if c.get("origin") not in ("synthetic", "published"):
+                problems.append(f"{where}: origin must be 'synthetic' or 'published'")
+            elif c["origin"] == "published" and not str(c.get("cite", "")).startswith("https://"):
+                problems.append(f"{where}: a published value needs an https `cite`")
+            if c.get("policy") not in ("spec", "local") or (c.get("policy") == "local" and not c.get("policy_reason")):
+                problems.append(f"{where}: policy must be 'spec', or 'local' with a policy_reason")
         if not v.get("implementations"):
             problems.append(f"vector file {v['identifier']} names no implementation")
         for impl in v.get("implementations", []):
@@ -122,6 +135,25 @@ def build(root: pathlib.Path):
             test = list((root / impl["module"]).rglob("src/test/**/IdentifierSpecConformanceTest.kt"))
             if not test:
                 problems.append(f"{v['identifier']}: {impl['module']} has no IdentifierSpecConformanceTest")
+            else:
+                # the vector's declared implementation must be what the test's validator map invokes:
+                # EVERY identifier-like token of the symbol must appear in that entry (or in the
+                # helper it points at with `::name`), so a SK vector cannot ride on a CZ lambda
+                src = test[0].read_text(encoding="utf-8")
+                line = re.search(r'"' + re.escape(v["identifier"]) + r'"\s+to\s+([^\n]*)', src)
+                if not line:
+                    problems.append(f"{v['identifier']}: {test[0].name} has no validator entry for it")
+                else:
+                    body = line.group(1)
+                    helper = re.search(r"::(\w+)", body)
+                    if helper:
+                        hm = re.search(r"fun " + helper.group(1) + r"\b.*?\n        }\n", src, re.S)
+                        body += hm.group(0) if hm else ""
+                    key = [t for t in re.findall(r"[A-Za-z0-9_]+", impl["symbol"]) if t[:1].isupper()]
+                    missing = [k for k in key if k not in body]
+                    if missing:
+                        problems.append(f"{v['identifier']}: vector names {impl['symbol']!r} but the test's lambda "
+                                        f"{line.group(1).strip()!r} does not invoke {missing}")
             claimed.setdefault(f, []).append(v["identifier"])
             simple = impl["symbol"].split("(")[0].split(".")[-2] if "." in impl["symbol"] else impl["symbol"]
             defects = sorted({c["known_defect"]["issue"] for c in v["cases"] if c.get("known_defect")})
@@ -137,7 +169,7 @@ def build(root: pathlib.Path):
                 "known_defects": defects,
                 "fuzz": fuzz.get(simple, {"fuzzer": None, "label": "none"}),
                 "pitest": pitest_for(root, impl["module"], impl["symbol"]),
-                "status": "conformance-tested" if not defects else "known-defect",
+                "status": "declared" if not defects else "known-defect",
             })
     cands = candidates(root)
     for f in cands:
@@ -161,27 +193,62 @@ def build(root: pathlib.Path):
     return problems, rows, len(cands)
 
 
+def _junit(path: pathlib.Path):
+    """(tests, skipped, failures+errors, text) of one JUnit XML, or None."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r'tests="(\d+)" skipped="(\d+)" failures="(\d+)" errors="(\d+)"', text)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)) + int(m.group(4)), text) if m else None
+
+
+def _verdict(parsed) -> str:
+    """pass only for a run that executed tests, skipped none and failed none; anything else is not a pass."""
+    if parsed is None:
+        return "not-run"
+    tests, skipped, failed, _ = parsed
+    if failed:
+        return "fail"
+    return "pass" if tests > 0 and skipped == 0 else "invalid"
+
+
 def attach_results(root: pathlib.Path, rows: list, run_url: str | None) -> None:
-    """Fold the conformance tests' JUnit results in: per module, did the vectors pass and did the
-    differential run (its IDENTIFIER_DIFFERENTIAL line) with zero disagreements. Absence of a
-    result is `not-run`, never `pass`."""
+    """Fold the conformance tests' MEASURED results in. Absence of a result is `not-run`, never
+    `pass`; a run with zero tests or any skipped test is `invalid`, never `pass`. The status,
+    pitest and fuzz columns are derived from results here, not from configuration: a validator
+    is `conformance-tested` only when its vectors (and its differential, where a reference
+    exists) passed in this run (ADR-0273: missing evidence never reads green)."""
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    fuzz_xml = list((root / FUZZ.parent.parent / "build/test-results/test").glob("TEST-*Reference*Test.xml"))
+    fuzz_verdict = _verdict(_junit(fuzz_xml[0])) if fuzz_xml else "not-run"
     for r in rows:
-        r.setdefault("result", {"vectors": "not-run", "differential": "not-run", "run": run_url, "at": None})
-        xml = list((root / r["module"]).glob("build/test-results/test/TEST-*IdentifierSpecConformanceTest.xml"))
-        if not xml or r["status"] == "unverified-ad-hoc-copy":
+        r["result"] = {"vectors": "not-run", "differential": "not-run", "run": run_url, "at": None,
+                       "fuzz": "not-run", "pitest": "not-run"}
+        if r["status"] == "unverified-ad-hoc-copy":
             continue
-        text = xml[0].read_text(encoding="utf-8", errors="replace")
-        m = re.search(r'tests="(\d+)" skipped="(\d+)" failures="(\d+)" errors="(\d+)"', text)
-        failed = not m or int(m.group(3)) + int(m.group(4)) > 0
-        r["result"]["vectors"] = "fail" if failed else "pass"
+        xml = list((root / r["module"]).glob("build/test-results/test/TEST-*IdentifierSpecConformanceTest.xml"))
+        parsed = _junit(xml[0]) if xml else None
+        r["result"]["vectors"] = _verdict(parsed)
         if r["differential"]:
-            ran = re.search(r"IDENTIFIER_DIFFERENTIAL module=\S+ rows=(\d+) disagreements=0", text)
-            r["result"]["differential"] = "fail" if failed else ("pass" if ran else "not-run")
+            ran = re.search(r"IDENTIFIER_DIFFERENTIAL module=\S+ rows=(\d+) disagreements=0", parsed[3]) if parsed else None
+            r["result"]["differential"] = ("fail" if r["result"]["vectors"] == "fail"
+                                           else "pass" if ran and r["result"]["vectors"] == "pass" else "not-run")
             if ran:
                 r["result"]["rows"] = int(ran.group(1))
-        r["result"]["at"] = now
+        if r["fuzz"]["label"] == "semantic":
+            r["result"]["fuzz"] = fuzz_verdict
+        mut = root / r["module"] / "build/reports/pitest/mutations.xml"
+        if mut.is_file():
+            cls = (r["symbol"] or "").split("(")[0].rsplit(".", 1)[0]
+            tags = re.findall(r"<mutation [^>]*status='(\w+)'[^>]*>(?:(?!</mutation>).)*?<mutatedClass>" + re.escape(cls) +
+                              r"</mutatedClass>", mut.read_text(encoding="utf-8", errors="replace"), re.S)
+            r["result"]["pitest"] = (f"{sum(t == 'KILLED' for t in tags)}/{len(tags)} killed" if tags else "not-run")
+        done = r["result"]["vectors"] == "pass" and r["result"]["differential"] in ("pass", "not-run") \
+            and (not r["differential"] or r["result"]["differential"] == "pass")
+        if parsed is not None:
+            r["result"]["at"] = now
+        if r["status"] == "declared":
+            r["status"] = ("conformance-tested" if done else
+                           "failed" if "fail" in (r["result"]["vectors"], r["result"]["differential"]) else "not-measured")
 
 
 def run(root: pathlib.Path, matrix: pathlib.Path | None, results: bool = False, run_url: str | None = None) -> int:
@@ -195,8 +262,9 @@ def run(root: pathlib.Path, matrix: pathlib.Path | None, results: bool = False, 
         print(f"::error::{p}")
     if matrix:
         matrix.write_text(json.dumps({"schema": "identifier-conformance/v1", "validators": rows}, indent=2) + "\n")
-    tested = sum(r["status"] == "conformance-tested" for r in rows)
-    print(f"identifier inventory: {n} candidate file(s); {tested} conformance-tested validator(s), "
+    tested = sum(r["status"] in ("conformance-tested", "declared") for r in rows)
+    print(f"identifier inventory: {n} candidate file(s); {tested} vectored validator(s)"
+          f"{'' if results else ' (declared, not measured)'}, "
           f"{sum(r['status'] == 'known-defect' for r in rows)} with known defects, "
           f"{sum(r['status'] == 'unverified-ad-hoc-copy' for r in rows)} unverified ad-hoc copies; {len(problems)} problem(s)")
     print(f"SUBJECTS={n}  # candidate validator sources derived from code")
@@ -212,9 +280,9 @@ def self_test() -> int:
         impl.write_text("fun ok(s: String) = s.toBigInteger().mod(97.toBigInteger())\n")
         test = root / "openbank-x/src/test/kotlin/IdentifierSpecConformanceTest.kt"
         test.parent.mkdir(parents=True)
-        test.write_text("class IdentifierSpecConformanceTest\n")
+        test.write_text('class IdentifierSpecConformanceTest {\n    private val validators = mapOf(\n        "x" to V::ok,\n    )\n}\n')
         (root / VECTORS).mkdir(parents=True)
-        (root / VECTORS / "x.json").write_text(json.dumps({"identifier": "x", "cases": [{"value": "1", "valid": True}],
+        (root / VECTORS / "x.json").write_text(json.dumps({"identifier": "x", "cases": [{"value": "1", "valid": True, "origin": "synthetic", "policy": "spec"}],
             "implementations": [{"module": "openbank-x", "symbol": "a.V.ok", "file": "openbank-x/src/main/kotlin/V.kt"}]}))
         (root / BASELINE).parent.mkdir(parents=True)
         (root / BASELINE).write_text("{}")
@@ -231,6 +299,31 @@ def self_test() -> int:
         (root / CLASSIFIED).write_text("validators: []\n")
         test.unlink()
         ok &= run(root, None) == 1                      # implementation module lost its test
+        # 4. the vector's implementation must be what the test's lambda invokes
+        test.write_text('class IdentifierSpecConformanceTest {\n    private val validators = mapOf(\n        "x" to Other::ok,\n    )\n}\n')
+        ok &= run(root, None) == 1
+        test.write_text('class IdentifierSpecConformanceTest {\n    private val validators = mapOf(\n        "x" to V::ok,\n    )\n}\n')
+        ok &= run(root, None) == 0
+        # 17. a vector with no origin, or a published one with no source, is refused
+        good = (root / VECTORS / "x.json").read_text()
+        (root / VECTORS / "x.json").write_text(good.replace('"origin": "synthetic", ', ""))
+        ok &= run(root, None) == 1
+        (root / VECTORS / "x.json").write_text(good.replace('"synthetic"', '"published"'))
+        ok &= run(root, None) == 1
+        (root / VECTORS / "x.json").write_text(good)
+        # 3. a fuzzer is `semantic` only when the reference is called inside an assertion
+        fz = root / FUZZ
+        fz.mkdir(parents=True)
+        (fz / "AFuzzer.kt").write_text("import com.openbank.x.V\nobject AFuzzer { fun f(s: String) { val r = VReference.ok(s); println(r) } }\n")
+        (fz / "BFuzzer.kt").write_text("import com.openbank.x.W\nobject BFuzzer { fun f(s: String) { check(W.ok(s) == WReference.ok(s)) { s } } }\n")
+        labels = fuzz_oracles(root)
+        ok &= labels.get("V", {}).get("label") == "robustness-only" and labels.get("W", {}).get("label") == "semantic"
+        # 6. a run that executed no test, or skipped one, is never a pass
+        def x(t, s, f):
+            q = root / "r.xml"
+            q.write_text(f'<testsuite tests="{t}" skipped="{s}" failures="{f}" errors="0">')
+            return _verdict(_junit(q))
+        ok &= (x(5, 0, 0), x(0, 0, 0), x(5, 1, 0), x(5, 0, 1)) == ("pass", "invalid", "invalid", "fail")
     print("self-test", "ok" if ok else "FAILED")
     return 0 if ok else 2
 

@@ -7,28 +7,36 @@
   ],
   "cases": [
     {
-      "value": "5493001KJTIIGC8Y1R12",
+      "value": "SYNTH00LEI0000004233",
       "valid": true,
-      "rule": "GLEIF example LEI",
-      "stdnum": true
+      "rule": "synthetic LEI, ISO 7064 mod 97-10",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "5493001KJTIIGC8Y1R13",
+      "value": "SYNTH00LEI0000004234",
       "valid": false,
       "rule": "mod-97 mismatch",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "5493001KJTIIGC8Y1R1",
+      "value": "SYNTH00LEI000000423",
       "valid": false,
       "rule": "19 characters",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "5493001KJTIIGC8Y1RA2",
+      "value": "SYNTH00LEI00000042A2",
       "valid": false,
       "rule": "letter in check digits",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [

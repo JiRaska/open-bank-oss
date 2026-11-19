@@ -48,13 +48,17 @@ jobs:
   differential:
     name: Identifier validators vs python-stdnum
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # measured 2026-11-19 over six runs of this job: 7 to 12 minutes (four modules compile, no cache write); 25 = ~2x the slowest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           java-version: "25"
           distribution: temurin
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
       - name: Install python-stdnum (hash-pinned)
         run: python3 -m pip install --user --quiet --require-hashes -r .github/workflows/requirements/stdnum.txt
       - name: Oracle self-test (a never-issued number stdnum accepts must come out invalid)

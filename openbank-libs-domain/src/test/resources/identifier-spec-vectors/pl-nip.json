@@ -7,40 +7,52 @@
   ],
   "cases": [
     {
-      "value": "5260250995",
+      "value": "4821573928",
       "valid": true,
-      "rule": "real NIP",
-      "stdnum": true
+      "rule": "synthetic NIP, weights 6 5 7 2 3 4 5 6 7",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
-      "value": "5260250996",
+      "value": "4821573929",
       "valid": false,
       "rule": "checksum mismatch",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "0000000017",
       "valid": true,
       "rule": "generated valid from 000000001",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "9999999999",
       "valid": true,
       "rule": "generated valid from 999999999",
-      "stdnum": true
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "1000000160",
       "valid": false,
       "rule": "weighted sum mod 11 is 10: no check digit exists",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     },
     {
       "value": "526025099",
       "valid": false,
       "rule": "9 digits",
-      "stdnum": false
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
     }
   ],
   "implementations": [
