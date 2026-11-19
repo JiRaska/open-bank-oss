@@ -35,11 +35,6 @@
       "value": "IT010000000",
       "valid": false,
       "rule": "IT VAT with a wrong check digit: member states outside CZ/SK/PL/DE/FR/AT are shape-checked only",
-      "known_defect": {
-        "issue": "#16774",
-        "current": true,
-        "why": "EuVatChecksums.valid returns true for every other prefix"
-      },
       "stdnum": false,
       "origin": "synthetic",
       "policy": "spec"
@@ -74,11 +69,6 @@
       "valid": false,
       "rule": "BG natural-person VAT: birthdate the day after as_of (tomorrow) [as_of]",
       "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
-      "known_defect": {
-        "issue": "#16897",
-        "current": true,
-        "why": "kyb's check has no upper bound on the encoded birthdate"
-      },
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"
@@ -104,11 +94,6 @@
       "valid": false,
       "rule": "LV natural-person VAT: birthdate the day after as_of (tomorrow) [as_of]",
       "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
-      "known_defect": {
-        "issue": "#16897",
-        "current": true,
-        "why": "kyb's check has no upper bound on the encoded birthdate"
-      },
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"
@@ -134,11 +119,6 @@
       "valid": false,
       "rule": "RO natural-person VAT: birthdate the day after as_of (tomorrow) [as_of]",
       "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
-      "known_defect": {
-        "issue": "#16897",
-        "current": true,
-        "why": "kyb's check has no upper bound on the encoded birthdate"
-      },
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"
@@ -164,11 +144,6 @@
       "valid": false,
       "rule": "SK natural person: a never-issued birth number (+20 month in 2003) is rejected",
       "stdnum_divergence": "stdnum accepts the +20 month before 2004; see #16748",
-      "known_defect": {
-        "issue": "#16897",
-        "current": true,
-        "why": "kyb's SK check is mod 11 only; the RČ branch is not judged by the RČ rules yet"
-      },
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"

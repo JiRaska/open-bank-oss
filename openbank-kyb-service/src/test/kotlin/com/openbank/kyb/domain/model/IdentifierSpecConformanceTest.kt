@@ -11,6 +11,9 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.io.File
+import java.time.Clock
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 /**
  * Spec conformance of this module's identifier validators (#16748).
@@ -28,13 +31,13 @@ import java.io.File
 class IdentifierSpecConformanceTest {
 
     private val validators: Map<String, (String) -> Boolean> = mapOf(
-        "cz-ico" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.CZ_ICO, raw).isSuccess },
-        "sk-ico" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.SK_ICO, raw).isSuccess },
-        "pl-nip" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.PL_NIP, raw).isSuccess },
-        "fr-siren" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, raw).isSuccess },
-        "lei" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.LEI, raw).isSuccess },
-        "at-fn" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.AT_FN, raw).isSuccess },
-        "eu-vat" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw).isSuccess },
+        "cz-ico" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.CZ_ICO, raw, CLOCK).isSuccess },
+        "sk-ico" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.SK_ICO, raw, CLOCK).isSuccess },
+        "pl-nip" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.PL_NIP, raw, CLOCK).isSuccess },
+        "fr-siren" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, raw, CLOCK).isSuccess },
+        "lei" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.LEI, raw, CLOCK).isSuccess },
+        "at-fn" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.AT_FN, raw, CLOCK).isSuccess },
+        "eu-vat" to { raw -> LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw, CLOCK).isSuccess },
     )
 
     private val vectorDir = File("../openbank-libs-domain/src/test/resources/identifier-spec-vectors")
@@ -100,6 +103,16 @@ class IdentifierSpecConformanceTest {
 
     private companion object {
         const val MODULE = "openbank-kyb-service"
+
+        /** The caller-supplied "today" for the birthdate rules: the as_of of the shared vectors, at noon UTC. */
+        val CLOCK: Clock = Clock.fixed(asOf().atTime(NOON, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        private const val NOON = 12
+
+        private fun asOf(): LocalDate = LocalDate.parse(
+            ObjectMapper().readTree(
+                File("../openbank-libs-domain/src/test/resources/identifier-spec-vectors/cz-rc.json"),
+            )["as_of"].asText(),
+        )
         const val MIN_ROWS = 1000
         const val SHOWN = 40
         const val REASON = 3

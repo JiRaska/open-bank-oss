@@ -288,16 +288,13 @@ _ISO3166 = frozenset(c.alpha_2 for c in pycountry.countries) | {"XS", "EU", "XA"
 # rejects). Only rows whose expected verdict is False can carry it, so a regression that rejects a
 # valid value is never tagged and always fails. The Kotlin judge fails a defect whose tagged rows
 # all agree (fixed -> the marker must go) and any disagreement that is not tagged.
-_EU_VAT_SHAPE_ONLY = ("ES", "IT", "NL", "BE", "PT", "IE", "DK", "FI", "SE", "LU", "SI", "HR", "HU", "RO", "BG",
-                      "EE", "LV", "LT", "EL", "CY", "MT")
+_EU_VAT_SHAPE_ONLY = ()  # kyb implements a check for every state (#16887); a state left shape-only must be named here with a reason
 KNOWN_DEFECTS = {
-    "eu-vat-sk-third-digit": ("#16774", "eu-vat", lambda v: v[:2] == "SK" and (v[2] == "0" or v[4] not in "234789")),
-    "fr-siren-all-zero": ("#16880", "fr-siren", lambda v: v == "000000000"),
     "currency-cuc": ("#16821", "currency", lambda v: v == "CUC"),
     "currency-bgn": ("#16821", "currency", lambda v: v == "BGN"),
     "isin-prefix-not-iso3166": ("#16773", "isin", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
 }
-for _cc, _issue in (("CZ", "#16896"), ("SK", "#16897"), ("BG", "#16897"), ("LV", "#16897"), ("RO", "#16897")):
+for _cc, _issue in (("CZ", "#16896"), ("SK", "#16897")):
     KNOWN_DEFECTS[f"eu-vat-future-birthdate-{_cc}"] = (
         _issue, "eu-vat", (lambda cc: lambda v: v[:2] == cc and (_vat_birthdate(v) or AS_OF) > AS_OF)(_cc))
 for _cc in _EU_VAT_SHAPE_ONLY:
@@ -538,7 +535,7 @@ ZERO_POLICY = {
 }
 # States whose kyb check accepts an all-zero payload today (review of #16887); each is its own defect id,
 # so a fix in one state removes one marker. A state not listed must already reject it.
-_ZERO_VAT_DEFECT_STATES = ("LU", "ES", "FI", "SE", "HU", "EE", "BG", "EL", "CY", "XI", "FR", "PL", "HR", "IE")
+_ZERO_VAT_DEFECT_STATES = ()
 ZERO_ISSUE = "#16890"
 
 
@@ -554,7 +551,7 @@ def zero_rows() -> list:
                 defect = None
                 if identifier == "eu-vat" and v[:2] in _ZERO_VAT_DEFECT_STATES:
                     defect = f"all-zero-eu-vat-{v[:2]}"
-                elif identifier in ("pl-nip", "at-fn"):
+                elif identifier in ("at-fn",):
                     defect = f"all-zero-{identifier}"
                 reason = f"known-defect {defect} {ZERO_ISSUE}" if defect else "all-zero payload is never issued (local policy)"
             rows.append((identifier, v, "false", reason))
@@ -646,8 +643,10 @@ def self_test() -> int:
     r = random.Random(3)
     valid_it = next(v for v in (_gen_eu_vat(r) for _ in range(5000)) if v[:2] == "IT" and std_vat.is_valid(v))
     ok &= expected("eu-vat", valid_it) == (True, "stdnum")
-    invalid_it = next(v for v in (_gen_eu_vat(r) for _ in range(5000)) if v[:2] == "IT" and not std_vat.is_valid(v))
-    ok &= expected("eu-vat", invalid_it)[1].startswith("known-defect eu-vat-shape-only-IT")
+    r = random.Random(5)
+    future_cz = next(v for v in (_gen_person_vat(r) for _ in range(5000))
+                     if v[:2] == "CZ" and (_vat_birthdate(v) or AS_OF) > AS_OF and std_vat.is_valid(v))
+    ok &= expected("eu-vat", future_cz) == (False, "known-defect eu-vat-future-birthdate-CZ #16896")
     # the future-date property is not vacuous: each natural-person form yields rows the reference ACCEPTS (so the
     # expectation really narrows it) and rows after as_of
     r = random.Random(4)

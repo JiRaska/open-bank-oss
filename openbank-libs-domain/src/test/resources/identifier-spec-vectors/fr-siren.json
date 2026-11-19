@@ -34,11 +34,6 @@
       "valid": false,
       "rule": "all-zero SIREN satisfies Luhn but is not assignable",
       "stdnum_divergence": "stdnum.fr.siren accepts it",
-      "known_defect": {
-        "issue": "#16880",
-        "current": true,
-        "why": "kyb checks length and Luhn only"
-      },
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"
