@@ -172,7 +172,7 @@ class TreasuryDealFundingTest {
         }
 
     @Test
-    fun `a nearer-dated booking counts a farther-dated committed outflow - A 800k at D+5 then B 800k at D+1 is refused`(): Unit =
+    fun `a farther-dated outflow counts - A 800k at D+5 then B 800k at D+1 is refused`(): Unit =
         runBlocking {
             // A books 800k valued D+5; B (800k, valued D+1, BEFORE A) must still see A: both would
             // settle from the same 1M, leaving the contra account 600k short.
