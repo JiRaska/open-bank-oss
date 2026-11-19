@@ -19,11 +19,13 @@ class RodneCisloReferenceTest {
     @Test
     fun `reference agrees with every committed spec vector`() {
         val text = Files.readString(vectors)
-        val cases = Regex(""""value":\s*"([^"]*)",\s*"valid":\s*(true|false)""").findAll(text).toList()
+        val cases = Regex(""""value":\s*"([^"]*)",\s*"valid":\s*(true|false),\s*"rule":\s*"([^"]*)"""").findAll(text).toList()
         assertTrue(cases.size > 20, "parsed ${cases.size} vectors")
-        cases.forEach { m ->
-            val (value, valid) = m.destructured
-            assertEquals(valid.toBoolean(), RodneCisloReference.isValid(value), "vector $value")
+        // the reference is structure only (like the one-argument parse the fuzzer drives): the future-date rule
+        // needs a caller-supplied today and is judged by RodneCislo.parse(raw, today) in the conformance test
+        cases.filterNot { "[as_of]" in it.groupValues[3] }.forEach { m ->
+            val value = m.groupValues[1]
+            assertEquals(m.groupValues[2].toBoolean(), RodneCisloReference.isValid(value), "vector $value")
         }
     }
 

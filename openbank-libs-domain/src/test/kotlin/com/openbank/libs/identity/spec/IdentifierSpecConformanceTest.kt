@@ -15,6 +15,7 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import java.io.File
+import java.time.LocalDate
 
 /**
  * Spec conformance of this module's identifier validators (#16748).
@@ -32,7 +33,7 @@ import java.io.File
 class IdentifierSpecConformanceTest {
 
     private val validators: Map<String, (String) -> Boolean> = mapOf(
-        "cz-rc" to RodneCislo::isValid,
+        "cz-rc" to { raw -> RodneCislo.isValid(raw, AS_OF) },
         "iban" to Iban.Companion::isValid,
         "cz-account" to ::czechAccount,
         "currency" to { raw -> runCatching { CurrencyCode.of(raw) }.isSuccess },
@@ -101,6 +102,15 @@ class IdentifierSpecConformanceTest {
 
     private companion object {
         const val MODULE = "openbank-libs-domain"
+
+        /** The caller-supplied "today" the RČ vectors and the oracle are judged against (cz-rc.json `as_of`). */
+        val AS_OF: LocalDate = LocalDate.parse(asOfFromVectors())
+
+        private fun asOfFromVectors(): String {
+            val stream = IdentifierSpecConformanceTest::class.java
+                .getResourceAsStream("/identifier-spec-vectors/cz-rc.json")
+            return ObjectMapper().readTree(requireNotNull(stream))["as_of"].asText()
+        }
         const val MIN_ROWS = 1000
         const val SHOWN = 40
         const val REASON = 3

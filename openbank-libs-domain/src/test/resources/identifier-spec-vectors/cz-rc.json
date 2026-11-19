@@ -1,6 +1,7 @@
 {
   "identifier": "cz-rc",
   "reference": "stdnum.cz.rc",
+  "as_of": "2026-06-15",
   "sources": [
     "https://www.zakonyprolidi.cz/cs/2000-133#p13",
     "https://www.mvcr.cz/clanek/rodne-cislo.aspx"
@@ -120,6 +121,41 @@
       "valid": false,
       "rule": "full-width (non-ASCII) digits",
       "stdnum_divergence": "stdnum accepts any Unicode decimal digit",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "2606150008",
+      "valid": true,
+      "rule": "birthdate equals as_of (today): not in the future [as_of]",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "2606160007",
+      "valid": false,
+      "rule": "birthdate is the day after as_of (tomorrow) [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "3001010001",
+      "valid": false,
+      "rule": "10-digit number for 2030, after as_of [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "5301010000",
+      "valid": false,
+      "rule": "10-digit number for 2053, the furthest the century rule reaches [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
       "stdnum": true,
       "origin": "synthetic",
       "policy": "spec"

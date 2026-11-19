@@ -26,6 +26,7 @@
 #       python3 identifier-differential.py self-test
 
 import argparse
+import datetime
 import itertools
 import json
 import pathlib
@@ -45,6 +46,27 @@ from stdnum.cz import rc as std_rc
 from stdnum.eu import vat as std_vat
 from stdnum.fr import siren as std_siren
 from stdnum.pl import nip as std_nip
+
+
+# The caller-supplied "today" for the birth-number future rule. RodneCislo.parse(raw, today) is clock-free, so the
+# oracle, the vectors (cz-rc.json `as_of`) and the Kotlin test all use this fixed date, never a clock.
+AS_OF = datetime.date(2026, 6, 15)
+
+
+def _rc_birthdate(v: str):
+    """The date a structurally valid birth number encodes, or None."""
+    yy, mm, dd = int(v[0:2]), int(v[2:4]), int(v[4:6])
+    month = mm - 70 if mm > 70 else mm - 50 if mm > 50 else mm - 20 if mm > 20 else mm
+    if len(v) == 9:
+        year = 1900 + yy
+    elif 21 <= mm <= 32 or 71 <= mm <= 82:
+        year = 2000 + yy
+    else:
+        year = 1900 + yy if yy >= 54 else 2000 + yy
+    try:
+        return datetime.date(year, month, dd)
+    except ValueError:
+        return None
 
 
 # Sources for the birth-number rules below (RČ). Each rule carries its own citation; where the rule
@@ -81,6 +103,10 @@ def _rc_divergence(v: str):
         if year > 1985:
             # remainder 10 (check digit 0) was issued only until 1985 [_RC_MVCR; practice, no paragraph claimed]
             return "remainder-10 check quirk valid only for birth years up to 1985"
+    born = _rc_birthdate(v)
+    if born is not None and born > AS_OF:
+        # a person cannot have been born after today; the caller supplies today [_RC_LAW; common sense, no paragraph claimed]
+        return "birthdate is in the future relative to the caller-supplied today (as_of)"
     return None
 
 
@@ -156,11 +182,19 @@ def _sk_official(n: str) -> bool:
     return n[0] != "0" and n[2] in "234789" and int(n) % 11 == 0
 
 
+def _be_official(n: str) -> bool:
+    """Belgian VAT: first digit 0 or 1, check digits = 97 - (first eight digits mod 97)."""
+    return n[0] in "01" and int(n[8:]) == 97 - int(n[:8]) % 97
+
+
 def _eu_vat_divergence(v: str):
     """Where kyb's EuVatChecksums is deliberately stricter than stdnum.eu.vat."""
     cc, national = v[:2], v[2:]
     if cc == "CZ" and national.isdigit() and len(national) in (9, 10) and not (len(national) == 9 and national[0] == "6"):
         return _rc_divergence(national)          # a CZ DIČ of a natural person is a birth number
+    if cc == "BE" and national.isdigit() and len(national) == 10 and not _be_official(national):
+        return ("Belgian check digits are 97 - (first eight digits mod 97); stdnum accepts any congruent pair, "
+                "including 98 and 99")
     if cc == "SK" and national.isdigit() and len(national) == 10 and not _sk_official(national):
         # stdnum.sk.dph accepts a birth number before it applies the official rule, and its own
         # source says it is unclear whether that is allowed. The official rule is the oracle.
@@ -211,6 +245,8 @@ _EU_VAT_SHAPE_ONLY = ("ES", "IT", "NL", "BE", "PT", "IE", "DK", "FI", "SE", "LU"
 KNOWN_DEFECTS = {
     "eu-vat-sk-third-digit": ("#16774", "eu-vat", lambda v: v[:2] == "SK" and (v[2] == "0" or v[4] not in "234789")),
     "fr-siren-all-zero": ("#16880", "fr-siren", lambda v: v == "000000000"),
+    "eu-vat-cz-future-birthdate": ("#16896", "eu-vat", lambda v: v[:2] == "CZ" and v[2:].isdigit() and len(v) in (11, 12)
+                                    and (_rc_birthdate(v[2:]) or AS_OF) > AS_OF),
     "currency-cuc": ("#16821", "currency", lambda v: v == "CUC"),
     "currency-bgn": ("#16821", "currency", lambda v: v == "BGN"),
     "isin-prefix-not-iso3166": ("#16773", "isin", lambda v: len(v) == 12 and v[:2] not in _ISO3166),
@@ -472,6 +508,9 @@ def vectors(directory: pathlib.Path) -> int:
     for f in sorted(directory.glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
         ref = refs.get(d["identifier"])
+        if d["identifier"] == "cz-rc" and d.get("as_of") != AS_OF.isoformat():
+            print(f"::error::{f.name}: as_of {d.get('as_of')!r} must equal the oracle's AS_OF {AS_OF.isoformat()}")
+            bad += 1
         if bool(d.get("differential")) != (ref is not None):
             print(f"::error::{f.name}: declares differential={d.get('differential')} but the oracle "
                   f"{'has' if ref else 'has no'} reference for {d['identifier']!r}")
