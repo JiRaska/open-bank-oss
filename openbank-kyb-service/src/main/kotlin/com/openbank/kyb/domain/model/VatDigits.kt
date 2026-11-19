@@ -9,7 +9,10 @@ import java.time.LocalDate
 
 // Small pure helpers shared by the EU VAT national rules (EuVatNationalRules.kt).
 
-internal fun vatDigits(s: String) = s.isNotEmpty() && s.all { it in '0'..'9' }
+/** An ASCII decimal digit. `Char.isDigit` accepts every Unicode digit (Arabic-Indic, ...), which `toLong()` then reads as ASCII. */
+internal fun Char.isAsciiDigit() = this in '0'..'9'
+
+internal fun vatDigits(s: String) = s.isNotEmpty() && s.all(Char::isAsciiDigit)
 
 internal fun vatDigit(s: String, i: Int) = s[i] - '0'
 
@@ -27,15 +30,16 @@ internal fun vatLuhnDigit(payload: String) = (0..9).first { vatLuhnOk(payload + 
 internal fun vatMod97(v: String): Boolean {
     var rem = 0
     for (ch in v) {
-        val expanded = if (ch.isDigit()) (ch - '0').toString() else (ch - 'A' + 10).toString()
+        val expanded = if (ch.isAsciiDigit()) (ch - '0').toString() else (ch - 'A' + 10).toString()
         for (c in expanded) rem = (rem * 10 + (c - '0')) % 97
     }
     return rem == 1
 }
 
-internal fun vatValidDate(year: Int, month: Int, day: Int) = try {
+internal fun vatDate(year: Int, month: Int, day: Int): LocalDate? = try {
     LocalDate.of(year, month, day)
-    true
 } catch (_: DateTimeException) {
-    false
+    null
 }
+
+internal fun vatValidDate(year: Int, month: Int, day: Int) = vatDate(year, month, day) != null

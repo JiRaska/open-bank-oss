@@ -58,6 +58,7 @@ class LegalEntityIdentifierTest {
         assertThat(IdentifierChecksums.siren("000000000")).isFalse()
         assertThat(LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, "000 000 000").isFailure).isTrue()
         assertThat(LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, "000000018").isSuccess).isTrue()
+        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, "552081317").isSuccess).isTrue()
     }
 
     @Test

@@ -31,7 +31,7 @@ class EuVatChecksumTest {
             "DE123456788", // DE: ISO 7064 MOD 11,10
             "FR11123456782", // FR: numeric key = (12 + 3 * (SIREN mod 97)) mod 97
             "FR90000012345", // FR Monaco: SIREN 000..., no Luhn digit
-            "FRAB123456782", // FR alphanumeric key: format only
+            "FRCJ603436635", // FR alphanumeric key, stdnum fr/tva derivation (synthetic)
             "ATU12345675", // AT: U + 8 digits
         ],
     )
@@ -57,6 +57,7 @@ class EuVatChecksumTest {
             "FR12123456782", // numeric key wrong
             "FR11123456783", // SIREN fails Luhn
             "FRAB123456783", // alphanumeric key still needs a Luhn-valid SIREN
+            "FRWX671433739", // alphanumeric key with a wrong derived check
             "ATU12345676",
         ],
     )

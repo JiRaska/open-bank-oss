@@ -4,6 +4,9 @@
 
 package com.openbank.kyb.domain.model
 
+import java.time.Clock
+import java.time.LocalDate
+
 /**
  * The national part of a VAT number (the text after the two-letter prefix) checked against each
  * member state's published check-digit rule (#16774). Every function is pure, takes the already
@@ -29,18 +32,21 @@ internal object EuVatNationalRules {
     private const val ES_CIF_KINDS = "ABCDEFGHJNPQRSUVW"
 
     /**
-     * ES NIF/NIE/CIF (stdnum `es.nif`, `es.cif`, `es.dni`, `es.nie`), 9 characters. A DNI, `K`/`L`/`M`
+     * ES NIF/NIE/CIF, 9 characters (stdnum/es/nif.py `validate`, es/cif.py `calc_check_digits` and
+     * `validate`, es/dni.py `calc_check_digit`, es/nie.py `calc_check_digit`). A DNI, `K`/`L`/`M`
      * number or NIE (`X`/`Y`/`Z` read as 0/1/2) ends in the letter `DNI_LETTERS[number mod 23]`;
-     * a company CIF starts with an organisation letter and ends in the Luhn digit of its 7 digits
-     * OR the matching letter of `JABCDEFGHI` — sources disagree on which organisation types use
-     * which, so both are accepted, as stdnum does.
+     * a company CIF starts with one of `ABCDEFGHJNPQRSUVW` and ends in the Luhn digit of its 7
+     * digits OR the matching letter of `JABCDEFGHI`. stdnum's own comment says sources conflict on
+     * which organisation types take which kind (commonly P, Q, R, S, N, W a letter and A, B, E, H a
+     * digit), so it accepts either for every one of them and so does this rule: there is no
+     * "digit only" or "letter only" class here, and the vectors pin that for P, Q, R, S, N, W.
      */
     fun es(n: String): Boolean {
         if (n.length != 9 || !vatDigits(n.substring(1, 8))) return false
         val first = n[0]
         return when {
             first in "KLM" -> n[8] == dniLetter(n.substring(1, 8))
-            first.isDigit() -> vatDigits(n.substring(0, 8)) && n[8] == dniLetter(n.substring(0, 8))
+            first.isAsciiDigit() -> vatDigits(n.substring(0, 8)) && n[8] == dniLetter(n.substring(0, 8))
             first in "XYZ" -> n[8] == dniLetter("XYZ".indexOf(first).toString() + n.substring(1, 8))
             first in ES_CIF_KINDS -> {
                 val check = vatLuhnDigit(n.substring(1, 8))
@@ -55,7 +61,7 @@ internal object EuVatNationalRules {
     // ---- IT -------------------------------------------------------------------------------
 
     /**
-     * IT partita IVA (stdnum `it.iva`): 11 digits, the first seven not all zero, the tax-office
+     * IT partita IVA (stdnum/it/iva.py `validate`): 11 digits, the first seven not all zero, the tax-office
      * code in digits 8-10 in 001..100 or 120, 121, 888, 999, the whole number Luhn-valid.
      */
     fun it(n: String): Boolean {
@@ -67,10 +73,12 @@ internal object EuVatNationalRules {
     // ---- NL -------------------------------------------------------------------------------
 
     /**
-     * NL btw-id (stdnum `nl.btw`, `nl.bsn`): 9 digits, `B`, a 2-digit non-zero suffix. The 9 digits
-     * are either a BSN (elfproef: sum of (9-i)·digit over the first eight minus the ninth, mod 11)
-     * or, for the numbers issued from 2020-01-01 to sole proprietors, `NL`+number is ISO 7064
-     * MOD 97-10 valid. The number must be positive.
+     * NL btw-id (stdnum/nl/btw.py `validate`, stdnum/nl/bsn.py `checksum`): 9 digits, `B`, a 2-digit
+     * non-zero suffix. Valid when the 9 digits are a BSN (elfproef: sum of (9-i)·digit over the first
+     * eight minus the ninth, mod 11) OR `NL`+number is ISO 7064 MOD 97-10 valid. stdnum's doctest
+     * comment dates that second form "valid since 2020-01-01" (numbers for sole proprietors) but
+     * its `validate` applies it to every number, with no scoping to a sole-proprietor shape, and so
+     * does this rule: nothing narrower than that is published in the sources used here. Positive.
      */
     fun nl(n: String): Boolean {
         if (n.length != 12 || n[9] != 'B') return false
@@ -83,13 +91,18 @@ internal object EuVatNationalRules {
     // ---- BE -------------------------------------------------------------------------------
 
     /**
-     * BE ondernemingsnummer (stdnum `be.vat`): 10 digits (the pre-2005 9-digit form is not
-     * accepted — VIES uses 10), first digit 0 or 1, first eight + last two ≡ 0 mod 97.
+     * BE ondernemingsnummer (stdnum/be/vat.py `checksum`/`validate`): 10 digits (the pre-2005 9-digit form is not
+     * accepted — VIES uses 10), first digit 0 or 1, last two digits = 97 − (first eight mod 97).
+     * Stricter than stdnum/be/vat.py `validate` in one case: remainder 0 with check `00` (see body).
      */
     fun be(n: String): Boolean {
         if (n.length != 10 || !vatDigits(n)) return false
-        if (n[0] !in "01" || n.toLong() <= 0) return false
-        return (n.substring(0, 8).toInt() + n.substring(8).toInt()) % 97 == 0
+        if (n[0] !in "01") return false
+        val base = n.substring(0, 8).toInt()
+        if (base == 0) return false
+        // check = 97 - (base mod 97), so a remainder of 0 gives 97. stdnum/be/vat.py `validate` only
+        // tests (base + check) mod 97 == 0 and so also takes check 00 there, which cannot be a check.
+        return n.substring(8).toInt() == 97 - base % 97
     }
 
     // ---- PT -------------------------------------------------------------------------------
@@ -106,17 +119,18 @@ internal object EuVatNationalRules {
     private const val IE_ALPHABET = "WABCDEFGHIJKLMNOPQRSTUV"
 
     /**
-     * IE VAT (stdnum `ie.vat`): 8 or 9 characters. New form: 7 digits + check letter (+ optional
+     * IE VAT (stdnum/ie/vat.py `calc_check_digit`/`validate`): 8 or 9 characters. New form: 7 digits + check letter (+ optional
      * second letter, which weighs 9 in the sum); old form: digit, letter, 5 digits, check letter,
-     * checked as the 7-digit number `0` + digits 3-7 + the first digit.
+     * checked as the 7-digit number `0` + digits 3-7 + the first digit. The old form must be exactly
+     * 8 characters: stdnum ignores a 9th character there, which would let `IE4G94281BW` pass.
      */
     fun ie(n: String): Boolean {
-        if (n.length !in 8..9 || !n[0].isDigit() || !vatDigits(n.substring(2, 7))) return false
+        if (n.length !in 8..9 || !n[0].isAsciiDigit() || !vatDigits(n.substring(2, 7))) return false
         if (!n.substring(7).all { it in IE_ALPHABET }) return false
         val second = if (n.length == 9) IE_ALPHABET.indexOf(n[8]) else 0
         return when {
             vatDigits(n.substring(0, 7)) -> n[7] == IE_ALPHABET[(ieSum(n.substring(0, 7)) + 9 * second) % 23]
-            n[1] in 'A'..'Z' -> n[7] == IE_ALPHABET[ieSum("0" + n.substring(2, 7) + n[0]) % 23]
+            n[1] in 'A'..'Z' && n.length == 8 -> n[7] == IE_ALPHABET[ieSum("0" + n.substring(2, 7) + n[0]) % 23]
             else -> false
         }
     }
@@ -168,7 +182,7 @@ internal object EuVatNordicBaltic {
     private val LV_PERSON_WEIGHTS = intArrayOf(10, 5, 8, 4, 2, 1, 6, 3, 7, 9)
 
     /**
-     * LV PVN (stdnum `lv.pvn`): 11 digits. First digit above 3: a legal entity, Σwᵢdᵢ with weights
+     * LV PVN (stdnum/lv/pvn.py `validate`, `checksum`, `calc_check_digit_pers`): 11 digits. First digit above 3: a legal entity, Σwᵢdᵢ with weights
      * 9,1,4,8,3,10,2,5,7,6,1 ≡ 3 mod 11. Otherwise a personal code (a real birth date unless it
      * starts `32`) with check = (1 + Σwᵢdᵢ) mod 11 mod 10; stdnum notes that personal-code
      * algorithm "has not been confirmed by an independent source".
@@ -206,7 +220,7 @@ internal object EuVatNordicBaltic {
 internal object EuVatCentralSouthEast {
     // ---- SI -------------------------------------------------------------------------------
 
-    /** SI DDV (stdnum `si.ddv`): 8 digits, first not 0, check = 11 − Σ(8−i)·dᵢ mod 11 (10 → 0; 11 is invalid). */
+    /** SI DDV (stdnum/si/ddv.py `calc_check_digit`, `validate`): 8 digits, first not 0, check = 11 − Σ(8−i)·dᵢ mod 11 (10 → 0; 11 is invalid). */
     fun si(n: String): Boolean {
         if (n.length != 8 || !vatDigits(n) || n[0] == '0') return false
         val check = 11 - (0 until 7).sumOf { (8 - it) * vatDigit(n, it) } % 11
@@ -243,10 +257,10 @@ internal object EuVatCentralSouthEast {
      * date, a known county code, mod 11 check digit with weights 2,7,9,1,4,6,3,5,8,2,7,9). stdnum
      * notes the CNP check "has not been confirmed by an independent source".
      */
-    fun ro(n: String): Boolean {
+    fun ro(n: String, clock: Clock = Clock.systemUTC()): Boolean {
         if (!vatDigits(n)) return false
         return when (n.length) {
-            13 -> roCnp(n)
+            13 -> roCnp(n, clock)
             in 2..10 -> n[0] != '0' && roCui(n)
             else -> false
         }
@@ -257,16 +271,17 @@ internal object EuVatCentralSouthEast {
         return 10 * vatWeighted(payload, RO_WEIGHTS) % 11 % 10 == vatDigit(n, n.length - 1)
     }
 
-    private fun roCnp(n: String): Boolean {
+    private fun roCnp(n: String, clock: Clock): Boolean {
         if (n[0] == '0') return false
         val century = when (n[0]) {
             '3', '4' -> 1800
             '5', '6' -> 2000
             else -> 1900
         }
-        if (!vatValidDate(century + n.substring(1, 3).toInt(), n.substring(3, 5).toInt(), n.substring(5, 7).toInt())) {
-            return false
-        }
+        val born = vatDate(century + n.substring(1, 3).toInt(), n.substring(3, 5).toInt(), n.substring(5, 7).toInt())
+            ?: return false
+        // A birth date after today cannot exist (stdnum/ro/cnp.py has a TODO for exactly this check).
+        if (born.isAfter(LocalDate.now(clock))) return false
         if (n.substring(7, 9).toInt() !in RO_COUNTIES) return false
         val sum = vatWeighted(n, RO_CNP_WEIGHTS) % 11
         return (if (sum == 10) 1 else sum) == vatDigit(n, 12)
@@ -350,9 +365,11 @@ internal object EuVatMediterranean {
     private val GB_WEIGHTS = intArrayOf(8, 7, 6, 5, 4, 3, 2, 10, 1)
 
     /**
-     * XI (Northern Ireland, stdnum `gb.vat`): 9 digits (or 12 with a 3-digit branch suffix),
+     * XI (Northern Ireland; stdnum/eu/vat.py maps `xi` to stdnum/gb/vat.py `validate`, `checksum`): 9 digits (or 12 with a 3-digit branch suffix),
      * Σwᵢdᵢ over the first nine with weights 8,7,6,5,4,3,2,10,1 ≡ 0 mod 97 (also 42 or 55 when the
-     * first three digits are 100 or more); or a 5-character `GD`/`HA` government/health-authority code.
+     * first three digits are 100 or more); or a 5-character `GD` (000-499) / `HA` (500-999) government or
+     * health-authority code. `GD000` is rejected by the all-zero guard in [EuVatChecksums.valid]
+     * (stdnum accepts it; local policy, see [IdentifierChecksums.allZeroPayload]); `GD001` is not.
      */
     fun xi(n: String): Boolean = when {
         n.length == 5 -> vatDigits(n.substring(2)) && govOrHealth(n.substring(0, 2), n.substring(2).toInt())

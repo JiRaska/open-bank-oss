@@ -5,6 +5,7 @@
 package com.openbank.kyb.domain.model
 
 import com.openbank.libs.identity.RodneCislo
+import java.time.Clock
 
 /**
  * The closed vocabulary of business identifiers the platform accepts as an onboarding ENTRY POINT
@@ -38,7 +39,7 @@ enum class IdentifierScheme(val country: String?, val displayName: String, val p
         // part of the number. Only stripped when what remains is purely numeric.
         val compact = if (stripsCountryPrefix(typed)) typed.removePrefix(country!!) else typed
         return when (this) {
-            CZ_ICO, SK_ICO, NL_KVK -> if (compact.all(Char::isDigit) &&
+            CZ_ICO, SK_ICO, NL_KVK -> if (compact.all(Char::isAsciiDigit) &&
                 compact.length < ICO_LENGTH
             ) {
                 compact.padStart(ICO_LENGTH, '0')
@@ -53,7 +54,7 @@ enum class IdentifierScheme(val country: String?, val displayName: String, val p
     private fun stripsCountryPrefix(value: String): Boolean {
         val cc = country ?: return false
         if (this == EU_VAT) return false
-        return value.startsWith(cc) && value.removePrefix(cc).all(Char::isDigit)
+        return value.startsWith(cc) && value.removePrefix(cc).all(Char::isAsciiDigit)
     }
 
     companion object {
@@ -81,14 +82,18 @@ data class LegalEntityIdentifier private constructor(val scheme: IdentifierSchem
     override fun toString(): String = "${scheme.name}:$value"
 
     companion object {
-        fun parse(scheme: IdentifierScheme, raw: String): Result<LegalEntityIdentifier> {
+        fun parse(
+            scheme: IdentifierScheme,
+            raw: String,
+            clock: Clock = Clock.systemUTC(),
+        ): Result<LegalEntityIdentifier> {
             val value = scheme.normalise(raw)
             if (!scheme.pattern.matches(value)) {
                 return Result.failure(
                     InvalidIdentifierException(scheme, "does not match the ${scheme.displayName} format"),
                 )
             }
-            if (scheme.checksum && !IdentifierChecksums.valid(scheme, value)) {
+            if (scheme.checksum && !IdentifierChecksums.valid(scheme, value, clock)) {
                 return Result.failure(InvalidIdentifierException(scheme, "checksum failed — a digit is wrong"))
             }
             return Result.success(LegalEntityIdentifier(scheme, value))
@@ -117,18 +122,42 @@ class InvalidIdentifierException(val scheme: IdentifierScheme, reason: String) :
  */
 object IdentifierChecksums {
 
-    fun valid(scheme: IdentifierScheme, value: String): Boolean = when (scheme) {
+    fun valid(scheme: IdentifierScheme, value: String, clock: Clock = Clock.systemUTC()): Boolean = when (scheme) {
         IdentifierScheme.CZ_ICO, IdentifierScheme.SK_ICO -> ico(value)
         IdentifierScheme.PL_NIP -> nip(value)
         IdentifierScheme.FR_SIREN -> siren(value)
         IdentifierScheme.LEI -> mod97(value)
-        IdentifierScheme.EU_VAT -> EuVatChecksums.valid(value)
+        IdentifierScheme.EU_VAT -> EuVatChecksums.valid(value, clock)
         else -> true
     }
 
-    /** IČO: weights 8..2 over the first seven digits, check digit = (11 - sum mod 11) mod 10. */
+    /**
+     * True when [payload] holds digits and every one of them is `0`. [payload] is a number WITHOUT its
+     * check character(s): no register issues a number whose payload is all zero, yet several
+     * check-digit schemes complete one (sum 0 passes `% 11`, `% 89`, `% 10`, ...) and a few even
+     * demand a non-zero check for it (IČO `00000001`). LOCAL POLICY of this module, not a cited spec:
+     * python-stdnum accepts some of them (LU, FI, HU, EE, BG, EL, CY, XI, ES, SE, PL NIP, FR Monaco).
+     * One definition, applied by the VAT dispatch to every state ([EuVatChecksums.valid]) and by
+     * [ico], [nip] and [siren], so a state cannot forget it. Letters in [payload] are ignored.
+     */
+    fun allZeroPayload(payload: String): Boolean {
+        val digits = payload.filter(Char::isAsciiDigit)
+        return digits.isNotEmpty() && digits.all { it == '0' }
+    }
+
+    /**
+     * IČO: weights 8..2 over the first seven digits, check digit = (11 - sum mod 11) mod 10. Only the
+     * whole-value all-zero `00000000` is refused here (it fails the check anyway); `00000001`, whose
+     * payload is zero but which is the platform's synthetic demo entity, stays valid for the IČO
+     * scheme. The CZ VAT form `CZ` + IČO does go through the payload guard in [EuVatChecksums.valid].
+     */
     fun ico(value: String): Boolean {
-        if (value.length != ICO_LENGTH || !value.all(Char::isDigit)) return false
+        if (value.length != ICO_LENGTH ||
+            !value.all(Char::isAsciiDigit) ||
+            allZeroPayload(value)
+        ) {
+            return false
+        }
         val sum = (0 until ICO_LENGTH - 1).sumOf { (value[it] - '0') * (ICO_LENGTH - it) }
         val expected = (MOD_11 - sum % MOD_11) % MOD_10
         return expected == value.last() - '0'
@@ -136,7 +165,12 @@ object IdentifierChecksums {
 
     /** Polish NIP: weights 6,5,7,2,3,4,5,6,7; sum mod 11 must equal the tenth digit (and never be 10). */
     fun nip(value: String): Boolean {
-        if (value.length != NIP_LENGTH || !value.all(Char::isDigit)) return false
+        if (value.length != NIP_LENGTH ||
+            !value.all(Char::isAsciiDigit) ||
+            allZeroPayload(value.dropLast(1))
+        ) {
+            return false
+        }
         val sum = NIP_WEIGHTS.indices.sumOf { (value[it] - '0') * NIP_WEIGHTS[it] }
         val check = sum % MOD_11
         return check != MOD_10 && check == value.last() - '0'
@@ -149,11 +183,11 @@ object IdentifierChecksums {
      * Monaco-registered entities inside a French VAT number are a different path
      * ([EuVatChecksums]) and are unaffected.
      */
-    fun siren(value: String): Boolean = value != SIREN_UNASSIGNED && luhn(value)
+    fun siren(value: String): Boolean = !allZeroPayload(value.dropLast(1)) && luhn(value)
 
     /** Luhn (ISO/IEC 7812-1), used by the French SIREN. */
     fun luhn(value: String): Boolean {
-        if (value.isEmpty() || !value.all(Char::isDigit)) return false
+        if (value.isEmpty() || !value.all(Char::isAsciiDigit)) return false
         var sum = 0
         var double = false
         for (i in value.indices.reversed()) {
@@ -174,7 +208,7 @@ object IdentifierChecksums {
         var remainder = 0
         for (ch in value) {
             val digits = when {
-                ch.isDigit() -> (ch - '0').toString()
+                ch.isAsciiDigit() -> (ch - '0').toString()
                 ch in 'A'..'Z' -> (ch - 'A' + LETTER_BASE).toString()
                 else -> return false
             }
@@ -186,7 +220,6 @@ object IdentifierChecksums {
     private const val ICO_LENGTH = 8
     private const val NIP_LENGTH = 10
     private const val LEI_LENGTH = 20
-    private const val SIREN_UNASSIGNED = "000000000"
     private const val MOD_10 = 10
     private const val MOD_11 = 11
     private const val MOD_97 = 97
@@ -211,36 +244,57 @@ object EuVatChecksums {
     /** States accepted on shape alone, each with the cited reason. Empty: every VIES prefix has a rule. */
     val SHAPE_ONLY_STATES: Map<String, String> = emptyMap()
 
-    private val RULES: Map<String, (String) -> Boolean> = mapOf(
-        "AT" to this::at, "BE" to EuVatNationalRules::be, "BG" to EuVatCentralSouthEast::bg,
-        "CY" to EuVatMediterranean::cy, "CZ" to this::czDic, "DE" to this::de, "DK" to EuVatNordicBaltic::dk,
-        "EE" to EuVatNordicBaltic::ee, "EL" to EuVatMediterranean::el, "ES" to EuVatNationalRules::es,
-        "FI" to EuVatNordicBaltic::fi, "FR" to this::fr, "HR" to EuVatCentralSouthEast::hr,
-        "HU" to EuVatCentralSouthEast::hu, "IE" to EuVatNationalRules::ie, "IT" to EuVatNationalRules::it,
-        "LT" to EuVatNordicBaltic::lt, "LU" to EuVatNationalRules::lu, "LV" to EuVatNordicBaltic::lv,
-        "MT" to EuVatMediterranean::mt, "NL" to EuVatNationalRules::nl, "PL" to IdentifierChecksums::nip,
-        "PT" to EuVatNationalRules::pt, "RO" to EuVatCentralSouthEast::ro, "SE" to EuVatNordicBaltic::se,
-        "SI" to EuVatCentralSouthEast::si, "SK" to this::sk, "XI" to EuVatMediterranean::xi,
+    private val RULES: Map<String, (String, Clock) -> Boolean> = mapOf(
+        "AT" to plain(this::at), "BE" to plain(EuVatNationalRules::be), "BG" to plain(EuVatCentralSouthEast::bg),
+        "CY" to plain(EuVatMediterranean::cy), "CZ" to plain(this::czDic), "DE" to plain(this::de),
+        "DK" to plain(EuVatNordicBaltic::dk),
+        "EE" to plain(EuVatNordicBaltic::ee), "EL" to plain(EuVatMediterranean::el),
+        "ES" to plain(EuVatNationalRules::es),
+        "FI" to plain(EuVatNordicBaltic::fi), "FR" to plain(this::fr), "HR" to plain(EuVatCentralSouthEast::hr),
+        "HU" to plain(EuVatCentralSouthEast::hu), "IE" to plain(EuVatNationalRules::ie),
+        "IT" to plain(EuVatNationalRules::it),
+        "LT" to plain(EuVatNordicBaltic::lt), "LU" to plain(EuVatNationalRules::lu),
+        "LV" to plain(EuVatNordicBaltic::lv),
+        "MT" to plain(EuVatMediterranean::mt), "NL" to plain(EuVatNationalRules::nl),
+        "PL" to plain(IdentifierChecksums::nip),
+        "PT" to plain(EuVatNationalRules::pt), "RO" to EuVatCentralSouthEast::ro, "SE" to plain(EuVatNordicBaltic::se),
+        "SI" to plain(EuVatCentralSouthEast::si), "SK" to plain(this::sk), "XI" to plain(EuVatMediterranean::xi),
     )
 
-    fun valid(vat: String): Boolean {
+    private fun plain(rule: (String) -> Boolean): (String, Clock) -> Boolean = { n, _ -> rule(n) }
+
+    /** The national part without its check character(s), per state; the default is "all but the last". */
+    private fun payload(country: String, n: String): String = when {
+        country == "LU" -> n.take(LU_PAYLOAD)
+        country == "BE" -> n.take(BE_PAYLOAD)
+        country == "NL" -> n.take(NL_PAYLOAD)
+        country == "SE" -> n.take(SE_PAYLOAD)
+        country == "FR" -> n.drop(FR_KEY_LENGTH)
+        country == "XI" && n.length == XI_GOVERNMENT_LENGTH -> n // GD001..GD499 / HA500..HA999: every digit identifies
+        else -> n.dropLast(1)
+    }
+
+    fun valid(vat: String, clock: Clock = Clock.systemUTC()): Boolean {
         val country = vat.take(2)
         val national = vat.drop(2)
+        // The whole number is ASCII upper-case letters and digits; nothing else is a VAT number.
+        if (!vat.all { it.isAsciiDigit() || it in 'A'..'Z' }) return false
+        if (IdentifierChecksums.allZeroPayload(payload(country, national))) return false
         if (country in SHAPE_ONLY_STATES) return true
-        return RULES[country]?.invoke(national) ?: false
+        return RULES[country]?.invoke(national, clock) ?: false
     }
 
     /**
      * SK IČ DPH: 10 digits, first digit not 0, third digit one of 2, 3, 4, 7, 8, 9, number divisible
      * by 11. The Slovak tax authority's published material gives the 10-digit shape only
      * (https://www.financnasprava.sk/_img/pfsedit/Dokumenty_PFS/Infoservis/Aktualne_informacie/dph/2016/2016.03.21_IC_DPH_EU.pdf);
-     * the third-digit and mod 11 arithmetic is per python-stdnum `sk.dph`
+     * the third-digit and mod 11 arithmetic is per python-stdnum (stdnum/sk/dph.py `validate`, `checksum`)
      * (https://arthurdejong.org/python-stdnum/doc/2.2/stdnum.sk.dph.html). stdnum additionally lets
      * a Slovak rodné číslo through before applying the rule and its own source calls that unclear;
      * this validator applies the rule to every number, which is the stricter reading.
      */
     fun sk(n: String): Boolean = n.length == SK_LENGTH &&
-        n.all(Char::isDigit) &&
+        n.all(Char::isAsciiDigit) &&
         n[0] != '0' &&
         n[2] in SK_THIRD_DIGITS &&
         n.toLong() % MOD_11 == 0L
@@ -251,7 +305,7 @@ object EuVatChecksums {
      * a person without one gets a "special" 9-digit number starting with 6 and its own check digit.
      */
     fun czDic(n: String): Boolean {
-        if (!n.all(Char::isDigit)) return false
+        if (!n.all(Char::isAsciiDigit)) return false
         return when (n.length) {
             ICO_LENGTH -> n[0] != '9' && IdentifierChecksums.ico(n)
             RC_LENGTH_SHORT -> RodneCislo.isValid(n) || czSpecial(n)
@@ -269,7 +323,7 @@ object EuVatChecksums {
 
     /** DE USt-IdNr: 9 digits, ISO 7064 MOD 11,10 over the first eight. */
     internal fun de(n: String): Boolean {
-        if (n.length != DE_LENGTH || !n.all(Char::isDigit) || n[0] == '0') return false
+        if (n.length != DE_LENGTH || !n.all(Char::isAsciiDigit) || n[0] == '0') return false
         var product = MOD_10
         for (i in 0 until DE_LENGTH - 1) {
             val sum = ((n[i] - '0') + product) % MOD_10
@@ -279,24 +333,39 @@ object EuVatChecksums {
     }
 
     /**
-     * FR TVA: 2-character key + 9-digit SIREN. A numeric key must equal
-     * (12 + 3 × (SIREN mod 97)) mod 97; the SIREN must be Luhn-valid except for Monaco entities
-     * (SIREN prefix `000`), which carry no Luhn digit. An alphanumeric key (the newer allocation
-     * scheme) has a different, unpublished derivation, so it passes on format alone.
+     * FR TVA: 2-character key + 9-digit SIREN (stdnum/fr/tva.py `validate`). The SIREN must be
+     * Luhn-valid except for Monaco entities (SIREN prefix `000`), which carry no Luhn digit, and an
+     * all-zero SIREN is rejected like [IdentifierChecksums.siren] does (local policy; stdnum accepts
+     * `FR12000000000`). A numeric key must equal (SIREN × 100 + 12) mod 97, written here as
+     * (12 + 3 × (SIREN mod 97)) mod 97. An alphanumeric key (new-style numbers) uses stdnum's
+     * published-by-stdnum derivation: the key characters index `0-9A-Z` without `I` and `O`; with
+     * `check` = 24·i(k0) + i(k1) − 10 when the first character is a digit, else 34·i(k0) + i(k1) − 100,
+     * the number is valid when (SIREN + 1 + check / 11) mod 11 == check mod 11. Neither alphabetic
+     * branch could be cross-checked against a primary INSEE text here.
      */
     internal fun fr(n: String): Boolean {
         if (n.length != FR_LENGTH) return false
         val key = n.take(2)
         val siren = n.drop(2)
-        if (!siren.all(Char::isDigit) || !key.all { it.isDigit() || it in 'A'..'Z' }) return false
+        if (!siren.all(Char::isAsciiDigit) || !key.all { it in FR_KEY_ALPHABET }) return false
+        if (IdentifierChecksums.allZeroPayload(siren.dropLast(1))) return false
         if (!siren.startsWith(MONACO_PREFIX) && !IdentifierChecksums.luhn(siren)) return false
-        if (!key.all(Char::isDigit)) return true
-        return key.toLong() == (FR_KEY_BASE + FR_KEY_FACTOR * (siren.toLong() % MOD_97)) % MOD_97
+        if (key.all(Char::isAsciiDigit)) {
+            return key.toLong() == (FR_KEY_BASE + FR_KEY_FACTOR * (siren.toLong() % MOD_97)) % MOD_97
+        }
+        val i0 = FR_KEY_ALPHABET.indexOf(key[0])
+        val i1 = FR_KEY_ALPHABET.indexOf(key[1])
+        val check = if (key[0].isAsciiDigit()) {
+            i0 * FR_DIGIT_WEIGHT + i1 - FR_DIGIT_OFFSET
+        } else {
+            i0 * FR_LETTER_WEIGHT + i1 - FR_LETTER_OFFSET
+        }
+        return (siren.toLong() + 1 + check / MOD_11) % MOD_11 == (check % MOD_11).toLong()
     }
 
     /** AT UID: `U` + 8 digits; odd positions doubled with digit sum, check = (10 − (sum + 4) mod 10) mod 10. */
     internal fun at(n: String): Boolean {
-        if (n.length != AT_LENGTH || n[0] != 'U' || !n.drop(1).all(Char::isDigit)) return false
+        if (n.length != AT_LENGTH || n[0] != 'U' || !n.drop(1).all(Char::isAsciiDigit)) return false
         val d = n.drop(1).map { it - '0' }
         val sum = (0 until AT_LENGTH - 2).sumOf { i ->
             if (i % 2 == 1) (d[i] * 2).let { it / MOD_10 + it % MOD_10 } else d[i]
@@ -314,6 +383,19 @@ object EuVatChecksums {
     private const val AT_LENGTH = 9
     private const val AT_OFFSET = 4
     private const val FR_KEY_BASE = 12
+    private const val FR_KEY_LENGTH = 2
+    private const val LU_PAYLOAD = 6
+    private const val BE_PAYLOAD = 8
+    private const val NL_PAYLOAD = 8
+    private const val SE_PAYLOAD = 9
+    private const val XI_GOVERNMENT_LENGTH = 5
+
+    // 0-9 and A-Z without I and O (stdnum/fr/tva.py `_alphabet`), built rather than spelled out
+    private val FR_KEY_ALPHABET: String = ('0'..'9').plus('A'..'Z').filter { it != 'I' && it != 'O' }.joinToString("")
+    private const val FR_DIGIT_WEIGHT = 24
+    private const val FR_DIGIT_OFFSET = 10
+    private const val FR_LETTER_WEIGHT = 34
+    private const val FR_LETTER_OFFSET = 100
     private const val MONACO_PREFIX = "000"
     private const val FR_KEY_FACTOR = 3
     private const val MOD_10 = 10
