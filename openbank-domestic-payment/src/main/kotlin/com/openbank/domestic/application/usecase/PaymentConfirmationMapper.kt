@@ -22,11 +22,6 @@ object PaymentConfirmationMapper {
     const val TEMPLATE_CODE_EN = "POTVRZENI_O_PLATBE_EN"
 
     private const val EN_LANG = "en"
-    private const val IBAN_BANK_DIGITS = 4
-    private const val IBAN_ACCOUNT_DIGITS = 16
-    private const val MOD_97 = 97
-    private const val MOD_97_COMPLEMENT = 98
-    private const val RADIX_10 = 10
 
     /** `lang` query param -> template code. Anything other than `en` (case-insensitive) is CS. */
     fun templateCodeFor(lang: String?): String =
@@ -68,21 +63,10 @@ object PaymentConfirmationMapper {
     }
 
     /**
-     * Build a Czech IBAN (`CZkk BBBB` + 16-digit account part, ISO 13616 mod-97 check digits) from
-     * an account number + bank code, for DISPLAY on the confirmation only — this is a presentation
-     * transform, not part of the settlement/clearing path (mirrors, but does not share code with,
-     * [com.openbank.domestic.infrastructure.client.SettlementAdapter]'s identical private helper,
-     * which stays untouched).
+     * The IBAN shown on the confirmation, from the service's one builder ([CzechDomesticIban],
+     * #16772) so the document names exactly the account the rail used. Coordinates that denote
+     * no issuable account are shown as entered (`number/bankCode`), never as a fabricated IBAN.
      */
-    private fun toCzIban(accountNumber: String, bankCode: String): String {
-        val raw = accountNumber.replace(" ", "").uppercase()
-        if (raw.startsWith("CZ")) return raw
-        val acct = raw.filter { it.isDigit() }.padStart(IBAN_ACCOUNT_DIGITS, '0')
-        val bank = bankCode.filter { it.isDigit() }.padStart(IBAN_BANK_DIGITS, '0')
-        val bban = bank + acct
-        var mod = 0
-        for (ch in bban + "123500") mod = (mod * RADIX_10 + (ch - '0')) % MOD_97
-        val check = (MOD_97_COMPLEMENT - mod).toString().padStart(2, '0')
-        return "CZ$check$bban"
-    }
+    private fun toCzIban(accountNumber: String, bankCode: String): String =
+        CzechDomesticIban.canonical(accountNumber, bankCode) ?: "$accountNumber/$bankCode"
 }

@@ -15,6 +15,7 @@ import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.PaymentStatusReport
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -66,20 +67,69 @@ class SchemeGatewayAdapterTest {
     fun `bbanToIban embeds bank codes in pacs008 CZ IBANs`(): Unit = runBlocking {
         every { client.submitCreditTransfer(any()) } answers { call ->
             val xml = call.invocation.args[0] as String
-            assertThat(xml).containsPattern("CZ[0-9]{2}20000000001234567890") // debtor bankCode=2000
-            assertThat(xml).containsPattern("CZ[0-9]{2}08000000009876543210") // creditor bankCode=0800
+            assertThat(xml).contains("CZ5220000000002000145399") // debtor bankCode=2000
+            assertThat(xml).contains("CZ8208000000009876543211") // creditor bankCode=0800
             Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
         }
 
         adapter.submit(payment())
     }
 
+    @Test
+    fun `bbanToIban keeps the account prefix in the BBAN`(): Unit = runBlocking {
+        // #16748: the old builder padded the whole "19-2000145399" into the base slot and lost the
+        // prefix position, producing an IBAN for a different (non-existent) account.
+        every { client.submitCreditTransfer(any()) } answers { call ->
+            val xml = call.invocation.args[0] as String
+            assertThat(xml).contains("CZ3820000000192000145399")
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        }
+
+        adapter.submit(payment().copy(debtorAccountNumber = "19-2000145399"))
+    }
+
+    @Test
+    fun `a stored account already in valid CZ IBAN form is transmitted unchanged`(): Unit = runBlocking {
+        // #16772 review: the scheme path must normalise exactly like settlement and confirmations.
+        every { client.submitCreditTransfer(any()) } answers { call ->
+            assertThat(call.invocation.args[0] as String).contains("CZ1908000000190000000019")
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        }
+
+        val outcome = adapter.submit(payment().copy(creditorAccountNumber = "CZ1908000000190000000019"))
+
+        assertThat(outcome.accepted).isTrue()
+        verify(exactly = 1) { client.submitCreditTransfer(any()) }
+    }
+
+    @Test
+    fun `bbanToIban refuses an account that fails the national mod-11 checksum`(): Unit = runBlocking {
+        // #16772 review: terminal AC01, never a re-drivable "unavailable" and never transmitted.
+        val outcome = adapter.submit(payment().copy(creditorAccountNumber = "1234567890"))
+
+        assertThat(outcome.accepted).isFalse()
+        assertThat(outcome.reasonCode).isEqualTo("AC01")
+        assertThat(outcome.transmitted).isFalse()
+        verify(exactly = 0) { client.submitCreditTransfer(any()) }
+    }
+
+    @Test
+    fun `bbanToIban refuses a base longer than ten digits`(): Unit = runBlocking {
+        // #16772 review: terminal AC01, never a re-drivable "unavailable" and never transmitted.
+        val outcome = adapter.submit(payment().copy(creditorAccountNumber = "12000145399"))
+
+        assertThat(outcome.accepted).isFalse()
+        assertThat(outcome.reasonCode).isEqualTo("AC01")
+        assertThat(outcome.transmitted).isFalse()
+        verify(exactly = 0) { client.submitCreditTransfer(any()) }
+    }
+
     private fun payment() = DomesticPayment(
         id = UUID.fromString("33333333-3333-3333-3333-333333333333"),
         idempotencyKey = "test", status = DomesticPaymentStatus.VALIDATED,
         debtorAccountId = UUID.fromString("44444444-4444-4444-4444-444444444444"),
-        debtorAccountNumber = "1234567890", debtorBankCode = "2000",
-        debtorName = "Alice", creditorAccountNumber = "9876543210",
+        debtorAccountNumber = "2000145399", debtorBankCode = "2000",
+        debtorName = "Alice", creditorAccountNumber = "9876543211",
         creditorBankCode = "0800", creditorName = "Bob",
         amount = Money.of(BigDecimal("100.00"), "CZK"),
         variableSymbol = "123", specificSymbol = null, constantSymbol = null,
