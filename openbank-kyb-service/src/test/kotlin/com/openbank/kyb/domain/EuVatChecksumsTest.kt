@@ -416,6 +416,32 @@ class EuVatChecksumsTest {
         assertThat(EuVatChecksums.valid("SK2626504705")).isTrue()
     }
 
+    /**
+     * The shape pattern of `EU_VAT` is applied BEFORE any rule, so a rule is unreachable through
+     * `parse` if the longest national form of its state does not fit. RO natural persons (CNP, 13 digits)
+     * were: the pattern capped the national part at 12 characters.
+     */
+    @Test
+    fun `every valid vector reaches its rule through parse, whatever the length of its national form`() {
+        val unreachable = valid.filter { LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, it).isFailure }
+        assertThat(unreachable).isEmpty()
+        val longest = valid.groupBy { it.take(2) }.mapValues { (_, v) -> v.maxOf { it.length - 2 } }
+        assertThat(longest["RO"]).describedAs("a RO CNP of 13 digits is among the vectors").isEqualTo(13)
+        assertThat(longest.values.max()).isLessThanOrEqualTo(13)
+    }
+
+    @Test
+    fun `a RO CNP is accepted by parse on the Bucharest civil date and rejected for tomorrow`() {
+        val vectors = V
+        fun at(instant: String) = Clock.fixed(Instant.parse(instant), ZoneOffset.UTC)
+        fun ok(raw: String, clock: Clock) = LegalEntityIdentifier.parse(IdentifierScheme.EU_VAT, raw, clock).isSuccess
+        val today = vectors.getValue("RO CNP born 2026-07-15")
+        val tomorrow = vectors.getValue("RO CNP born 2026-07-16")
+        assertThat(ok(today, at("2026-07-14T22:30:00Z"))).describedAs("born the Bucharest day, summer").isTrue()
+        assertThat(ok(tomorrow, at("2026-07-14T22:30:00Z"))).describedAs("born the day after").isFalse()
+        assertThat(ok(valid.first { it.startsWith("RO") && it.length == 15 }, at("2026-07-14T22:30:00Z"))).isTrue()
+    }
+
     @Test
     fun `a RO CNP is rejected for a birth date after today and accepted for today, with an injected clock`() {
         val noon = Instant.parse("2026-11-19T12:00:00Z")
