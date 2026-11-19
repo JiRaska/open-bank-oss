@@ -59,9 +59,18 @@ val iban = Iban.of("CZ65 0800 0000 1920 0014 5399")
 iban.value          // "CZ6508000000192000145399" (no spaces)
 iban.formatted()    // "CZ65 0800 0000 1920 0014 5399"
 iban.countryCode    // "CZ"
-iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
+
+`Iban.isValid` follows ISO 13616: a country in the SWIFT IBAN registry, that country's exact
+length, check digits 02..98, an `[A-Z0-9]` BBAN and mod-97 == 1. It returns `false` for
+malformed input and never throws.
+
+## identity — RodneCislo
+
+`RodneCislo.parse` returns `Parsed` (canonical form, birthdate, gender) or `Invalid`. It
+rejects numbers that were never issued: the 9-digit form after 1953, the remainder-10 → 0
+checksum quirk after 1985, and the +20/+70 month overflow before 2004.
 
 ## domain/identifiers — typesafe IDs
 
