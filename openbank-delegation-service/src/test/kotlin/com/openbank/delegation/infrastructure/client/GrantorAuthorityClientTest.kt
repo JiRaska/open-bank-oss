@@ -18,6 +18,7 @@ class GrantorAuthorityClientTest {
     private val client = RestGrantorAuthorityClient(rest)
     private val principal = UUID.randomUUID()
     private val actor = UUID.randomUUID()
+    private val mandateId = UUID.randomUUID()
 
     @Test
     fun `individual may act only as self`(): Unit = runBlocking {
@@ -36,7 +37,7 @@ class GrantorAuthorityClientTest {
         coEvery { rest.getParty(principal) } returns
             AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
         coEvery { rest.actingFor(actor) } returns listOf(
-            ActingForResponse(principal, MandateResponse(actor, "SOLE", 1, "ACTIVE")),
+            ActingForResponse(principal, MandateResponse(actor, "SOLE", 1, "ACTIVE", id = mandateId)),
         )
 
         val result = client.authorityFor(principal, actor)
@@ -44,18 +45,20 @@ class GrantorAuthorityClientTest {
         assertThat(result.verdict).isEqualTo(GrantorAuthorityVerdict.AUTHORIZED)
         assertThat(result.displayName).isEqualTo("Acme s.r.o.")
         assertThat(result.partyType).isEqualTo("COMPANY")
+        assertThat(result.soleMandateId).isEqualTo(mandateId)
         coVerify(exactly = 1) { rest.getParty(principal) }
     }
 
     @Test
     fun `joint incomplete and conflicting mandates do not establish sole authority`(): Unit = runBlocking {
         coEvery { rest.getParty(principal) } returns AuthorityPartyResponse(principal, "COMPANY", "ACTIVE")
-        val sole = MandateResponse(actor, "SOLE", 1, "ACTIVE")
+        val sole = MandateResponse(actor, "SOLE", 1, "ACTIVE", id = mandateId)
         val joint = MandateResponse(actor, "JOINT", 2, "ACTIVE")
         val authoritySets = listOf(
             listOf(null),
             listOf(joint),
             listOf(sole.copy(requiredSignatures = null)),
+            listOf(sole.copy(id = null)),
             listOf(sole.copy(agentPartyId = UUID.randomUUID())),
             listOf(sole, joint),
         )

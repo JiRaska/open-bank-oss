@@ -20,6 +20,13 @@ of one. A joint mandate or incomplete representation evidence needs a separate
 statutory signing workflow. Employee approval groups retain their own
 management and operation rules.
 
+At offer creation the grant stores the signing human and, for an organization,
+the verified sole mandate ID. Acceptance rechecks the issuing organization's
+mandate and confirms that the accepting human can sign for the grantee. The
+grantee's SCA challenge belongs to that human. Organization offers created
+without verified issuance evidence require a new offer. Existing individual
+offers remain eligible after party-service verifies the grantor.
+
 ## Resource-ownership reads, per resource type (ADR-0375 D5)
 
 A grant is authority in itself once a product service projects it, so before an offer is minted this

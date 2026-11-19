@@ -224,3 +224,9 @@ account, supply the original CZK `amount` when several grants cover the account.
 `FOUND` contains the durable `paymentId` and current `status`. `UNKNOWN` means the
 edge could not establish the original instruction. Keep the pending warning and never start a
 new payment from this result. This lookup consumes no SCA and sends no payment.
+
+## Delegation acceptance for an organization
+
+The edge forwards the active profile as the grantee and the authenticated
+human as the accepting actor. For an organization, delegation-service verifies
+the human's sole mandate before consuming their acceptance challenge.

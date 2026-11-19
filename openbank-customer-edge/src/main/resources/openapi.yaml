@@ -65,7 +65,8 @@ info:
   # 1.94.0 -> 1.95.0 (#16000): additive — documents the 409 PAYMENT_NOT_ACCEPTED and the 503
   # PAYMENT_TEMPORARILY_UNAVAILABLE / PAYMENT_STATUS_UNKNOWN that POST /domestic-payments answers for a DELEGATED payment
   # once the reservation-bound create is switched on. Request shape unchanged.
-  version: 1.96.0
+  # 1.96.0 -> 1.97.0 (#15681): document the accepting human for organization delegation acceptance
+  # (1.95.0 was claimed by #16000; 1.96.0 is main's current).
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -6641,9 +6642,9 @@ paths:
       tags: [Delegation]
       summary: Accept an offered grant (grantee's own SCA)
       description: >-
-        granteePartyId is the authenticated party, so a caller can only accept an offer addressed to
-        themselves. scaSessionId is the grantee's OWN challenge (purpose DELEGATION_ACCEPT) — the
-        grantor's ceremony does not carry over.
+        The offer must be addressed to the active profile. An organization requires a verified sole
+        signatory. The edge supplies that human's identity from the customer session, and
+        scaSessionId must name the human's DELEGATION_ACCEPT challenge.
       operationId: acceptDelegation
       security:
         - customerOidc: [delegations:write]
@@ -6653,7 +6654,8 @@ paths:
       responses:
         '200': {description: Grant accepted and now ACTIVE}
         '400': {description: scaSessionId missing}
-        '403': {description: Offer is not addressed to the caller, or SCA invalid}
+        '403': {description: Offer is not addressed to the active profile or signing authority is missing}
+        '503': {description: Signing authority could not be verified}
 
   /delegations/{id}/decline:
     post:

@@ -118,6 +118,7 @@ data class GrantorAuthority(
     val verdict: GrantorAuthorityVerdict,
     val displayName: String? = null,
     val partyType: String? = null,
+    val soleMandateId: UUID? = null,
 )
 
 /** ADR-0232 D5 / ADR-0284: may this authenticated human create authority for this principal? */

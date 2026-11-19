@@ -6,10 +6,12 @@ package com.openbank.delegation.integration
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.domain.event.DelegationActivated
+import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.GrantorSigningEvidence
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -113,6 +115,50 @@ class DelegationLifecycleRevisionIT {
 
         assertThat(outboxCount(reservationId)).isEqualTo(1)
         assertThat(outboxHasRevision(reservationId, "DelegationSpendReserved")).isFalse()
+    }
+
+    @Test
+    fun `organization issuer evidence survives storage and lifecycle transition`() {
+        val evidence = GrantorSigningEvidence(UUID.randomUUID(), UUID.randomUUID())
+        val at = OffsetDateTime.parse("2026-09-01T11:00:00Z")
+        val offered = DelegationGrant(
+            grantorPartyId = UUID.randomUUID(),
+            granteePartyId = UUID.randomUUID(),
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.randomUUID(),
+            capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            validFrom = at,
+            validTo = null,
+            grantorSigningEvidence = evidence,
+            createdAt = at,
+            updatedAt = at,
+        )
+        onVertxContext {
+            repository.save(
+                offered,
+                DelegationOffered(
+                    aggregateId = offered.id,
+                    lifecycleRevision = offered.lifecycleRevision,
+                    grantorPartyId = offered.grantorPartyId,
+                    granteePartyId = offered.granteePartyId,
+                    resourceType = offered.resourceType,
+                    resourceId = offered.resourceId,
+                    capabilities = offered.capabilities,
+                    validFrom = offered.validFrom,
+                    validTo = offered.validTo,
+                    occurredAt = offered.createdAt.toInstant(),
+                ),
+            )
+        }
+
+        val loaded = onVertxContext { requireNotNull(repository.findById(offered.id)) }
+        assertThat(loaded.grantorSigningEvidence).isEqualTo(evidence)
+        val acceptedAt = loaded.createdAt.plusMinutes(1)
+        val accepted = loaded.accept(UUID.randomUUID(), acceptedAt)
+        onVertxContext { repository.save(accepted, activatedEvent(accepted, acceptedAt)) }
+        val activated = onVertxContext { requireNotNull(repository.findById(offered.id)) }
+        assertThat(activated.grantorSigningEvidence).isEqualTo(evidence)
+        assertThat(outboxRevision(offered.id, "DelegationActivated")).isEqualTo(1)
     }
 
     @Test
