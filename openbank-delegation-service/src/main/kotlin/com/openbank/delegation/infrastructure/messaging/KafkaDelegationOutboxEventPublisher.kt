@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.delegation.domain.event.APPROVAL_EVENT_TYPES
 import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
-import com.openbank.delegation.domain.event.PaymentProposalLifecycleEvent
+import com.openbank.delegation.domain.event.PaymentProposalEvents
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -56,7 +56,7 @@ class KafkaDelegationOutboxEventPublisher(
         // ADR-0312 business-signing lifecycle: its own topic, consumed by notification-service.
         in APPROVAL_EVENT_TYPES -> approvalEventsEmitter
         in APPROVAL_GROUP_EVENT_TYPES -> approvalGroupRevisionEmitter
-        in PaymentProposalLifecycleEvent.EVENT_TYPES -> paymentProposalEventsEmitter
+        in PaymentProposalEvents.EVENT_TYPES -> paymentProposalEventsEmitter
         else -> delegationEventsEmitter
     }
 

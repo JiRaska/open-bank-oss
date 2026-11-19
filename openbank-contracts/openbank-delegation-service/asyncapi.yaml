@@ -294,7 +294,6 @@ components:
         expiresAt: { type: string, format: date-time }
         executedPaymentId: { type: [string, 'null'], format: uuid }
         occurredAt: { type: string, format: date-time }
-        sourceService: { type: string, const: delegation-service }
     # ADR-0312. Every approval event type carries this ONE shape (schema version 1), mirroring
     # the data classes in ApprovalEvents.kt; check-event-contract-code-agreement.py compares both
     # directions. A breaking change ships as version 2, never an in-place edit.

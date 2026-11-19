@@ -56,6 +56,26 @@ class PaymentProposalApiIT {
     @TestSecurity(user = MCP, roles = ["ROLE_API"])
     @OidcSecurity(
         claims = [
+            Claim(key = "sub", value = SUB),
+            Claim(key = "azp", value = "openbank-mcp"),
+            Claim(key = "preferred_username", value = MCP),
+        ],
+    )
+    fun `create requires an Idempotency-Key and replays the first answer for it`() {
+        seedGrant()
+        given().contentType(ContentType.JSON).body(mapOf("partyId" to party.toString()))
+            .post("/api/v1/payment-proposals").then().statusCode(400)
+        val key = UUID.randomUUID().toString()
+        val first = create(key = key).statusCode(201).extract().path<String>("proposalId")
+        create(key = key).statusCode(201).header("X-Idempotency-Replayed", equalTo("true"))
+            .body("proposalId", equalTo(first))
+        create(key = key, name = "Someone Else").statusCode(409)
+    }
+
+    @Test
+    @TestSecurity(user = MCP, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
             Claim(
                 key = "sub",
                 value = SUB,
@@ -297,16 +317,19 @@ class PaymentProposalApiIT {
         jkt: String = JKT,
         debtor: UUID = account,
         name: String = "Elektrárna Praha a.s.",
+        key: String = UUID.randomUUID().toString(),
     ) = given().contentType(ContentType.JSON).body(
         mapOf(
             "partyId" to party.toString(), "mcpClientId" to client, "keyThumbprint" to jkt,
             "operationType" to "DOMESTIC_PAYMENT", "debtorAccountId" to debtor.toString(),
             "creditorIban" to IBAN, "creditorName" to name, "amount" to "1250.50", "currency" to "CZK",
         ),
-    ).post("/api/v1/payment-proposals").then()
+    ).header("Idempotency-Key", key).post("/api/v1/payment-proposals").then()
 
     private fun decide(id: UUID, verb: String, hash: String, asParty: UUID, paymentId: UUID? = null) =
-        given().contentType(ContentType.JSON).header(HDR, asParty)
+        given().contentType(
+            ContentType.JSON,
+        ).header(HDR, asParty).header("Idempotency-Key", UUID.randomUUID().toString())
             .body(
                 mapOf("partyId" to asParty.toString(), "payloadSha256" to hash) +
                     (paymentId?.let { mapOf("paymentId" to it.toString()) } ?: emptyMap()),

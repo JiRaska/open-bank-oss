@@ -70,6 +70,8 @@ paths:
         ADR-0383 D6. Creates an immutable PENDING proposal under the ACTIVE MCP_CLIENT grant found
         from (partyId, mcpClientId, keyThumbprint). Moves no money. An identical open proposal is
         returned instead (200, deduplicated). Callable only by mcp-service's own service account.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
       requestBody:
         required: true
         content:
@@ -88,6 +90,7 @@ paths:
               schema: { $ref: '#/components/schemas/McpProposalReceipt' }
         '400': { description: Invalid instruction }
         '403': { description: Caller is not mcp-service, or no active grant permits it }
+        '409': { description: Idempotency-Key reused for a different request, or in progress }
         '429': { description: Per-customer proposal limit reached }
     get:
       tags: [Payment proposals]
@@ -127,6 +130,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PaymentProposalId'
         - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
       requestBody:
         required: true
         content:
@@ -148,6 +152,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PaymentProposalId'
         - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
       requestBody:
         required: true
         content:
@@ -169,6 +174,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PaymentProposalId'
         - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
       requestBody:
         required: true
         content:

@@ -10,7 +10,7 @@ import com.openbank.delegation.application.port.out.PaymentProposalRepository
 import com.openbank.delegation.application.port.out.ProposalCreateOutcome
 import com.openbank.delegation.application.port.out.ProposalLimits
 import com.openbank.delegation.application.port.out.openDuplicateOf
-import com.openbank.delegation.domain.event.PaymentProposalLifecycleEvent
+import com.openbank.delegation.domain.event.PaymentProposalEvents
 import com.openbank.delegation.domain.model.PaymentProposal
 import com.openbank.delegation.domain.model.PaymentProposalOperationType
 import com.openbank.delegation.domain.model.PaymentProposalStatus
@@ -151,7 +151,7 @@ class PaymentProposalRepositoryImpl(
         }
 
     private fun rejectedOutbox(row: Array<Any?>, now: OffsetDateTime): OutboxMessage {
-        val event = PaymentProposalLifecycleEvent(
+        val event = PaymentProposalEvents.forStatus(
             aggregateId = row[COL_ID] as UUID,
             partyId = row[COL_PARTY] as UUID,
             grantId = row[COL_GRANT] as UUID,
@@ -163,6 +163,7 @@ class PaymentProposalRepositoryImpl(
             currency = row[COL_CURRENCY].toString(),
             payloadSha256 = row[COL_HASH].toString(),
             expiresAt = toOffset(row[COL_EXPIRES]),
+            executedPaymentId = null,
             occurredAt = now.toInstant(),
         )
         return OutboxMessage(
@@ -218,7 +219,7 @@ class PaymentProposalRepositoryImpl(
             .map { rows -> rows.map { it.toDomain() } }
 
     private fun outbox(proposal: PaymentProposal, now: OffsetDateTime): OutboxMessage {
-        val event = PaymentProposalLifecycleEvent.of(proposal, now.toInstant())
+        val event = PaymentProposalEvents.of(proposal, now.toInstant())
         return OutboxMessage(
             aggregateId = event.aggregateId,
             eventType = event.eventType,

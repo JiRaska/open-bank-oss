@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.usecase.CreatePaymentProposalCommand
 import com.openbank.delegation.application.usecase.PaymentProposalService
 import com.openbank.delegation.domain.model.PaymentProposal
@@ -16,6 +17,8 @@ import com.openbank.delegation.domain.model.PaymentProposalPayload
 import com.openbank.delegation.domain.model.PaymentProposalStateException
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -33,6 +36,7 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import java.math.BigDecimal
+import java.security.MessageDigest
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -53,16 +57,76 @@ import java.util.UUID
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API")
-class PaymentProposalResource(private val proposals: PaymentProposalService) {
+@Suppress("TooManyFunctions") // five routes, each a thin public handler over a private body
+class PaymentProposalResource(
+    private val proposals: PaymentProposalService,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper,
+) {
 
     @Inject
     lateinit var identity: SecurityIdentity
 
+    /**
+     * Every POST here requires an `Idempotency-Key` (money-path rule, #8351). The state machine is
+     * already replay-safe (dedupe on create, revision CAS on every transition); the key adds an
+     * exact replay of the first answer, and a key reused for a DIFFERENT request is refused (409).
+     * The key is scoped by operation and proposal, so it can never replay another proposal's answer.
+     */
+    private suspend fun idempotent(
+        operation: String,
+        scope: String,
+        key: String?,
+        request: Any,
+        block: suspend () -> Response,
+    ): Response {
+        require(!key.isNullOrBlank() && key.length <= IDEMPOTENCY_KEY_MAX) { "Idempotency-Key header is required" }
+        val storeKey = "payment-proposal:$operation:$scope:$key"
+        val hash = sha256(objectMapper.writeValueAsString(request))
+        when (val reserved = idempotencyStore.reserve(storeKey, hash)) {
+            is ReserveResult.Replay -> return Response.status(reserved.record.statusCode)
+                .entity(reserved.record.responseBody).type(MediaType.APPLICATION_JSON)
+                .header("X-Idempotency-Replayed", "true").build()
+            ReserveResult.Mismatch -> return proposalError(
+                Response.Status.CONFLICT,
+                "IDEMPOTENCY_KEY_REUSED",
+                "Idempotency-Key was used for a different request",
+            )
+            ReserveResult.InFlight -> return proposalError(
+                Response.Status.CONFLICT,
+                "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+                "a request with this Idempotency-Key is in progress",
+            )
+            ReserveResult.Reserved -> Unit
+        }
+        val response = try {
+            block()
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException, // release on ANY failure, then rethrow
+        ) {
+            idempotencyStore.release(storeKey, hash)
+            throw e
+        }
+        idempotencyStore.save(storeKey, hash, response.status, objectMapper.writeValueAsString(response.entity))
+        return response
+    }
+
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
     @POST
     @Authorize(action = "delegation.proposal.create", resource = "#request.partyId")
-    suspend fun create(request: CreatePaymentProposalRequest?): Response {
+    suspend fun create(
+        request: CreatePaymentProposalRequest?,
+        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+    ): Response {
         requireCaller(MCP_PRINCIPAL)
         val body = requireNotNull(request) { "request body is required" }
+        val party = requireNotNull(body.partyId) { "partyId is required" }
+        return idempotent("create", party.toString(), idempotencyKey, body) { createNow(body) }
+    }
+
+    private suspend fun createNow(body: CreatePaymentProposalRequest): Response {
         val created = proposals.create(
             CreatePaymentProposalCommand(
                 partyId = requireNotNull(body.partyId) { "partyId is required" },
@@ -116,9 +180,16 @@ class PaymentProposalResource(private val proposals: PaymentProposalService) {
         @PathParam("id") id: UUID,
         request: ProposalDecisionRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-    ): PaymentProposalView {
+        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+    ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val party = requireCustomer(body.partyId, customerPartyId)
+        return idempotent("approve", "$id:$party", idempotencyKey, body) {
+            Response.ok(approveNow(id, party, body)).build()
+        }
+    }
+
+    private suspend fun approveNow(id: UUID, party: UUID, body: ProposalDecisionRequest): PaymentProposalView {
         val hash = requireText(body.payloadSha256, "payloadSha256", SHA256_LEN)
         return PaymentProposalView.of(proposals.approve(id, party, hash), OffsetDateTime.now())
     }
@@ -130,11 +201,15 @@ class PaymentProposalResource(private val proposals: PaymentProposalService) {
         @PathParam("id") id: UUID,
         request: ProposalDecisionRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-    ): PaymentProposalView {
+        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+    ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val party = requireCustomer(body.partyId, customerPartyId)
-        return PaymentProposalView.of(proposals.reject(id, party), OffsetDateTime.now())
+        return idempotent("reject", "$id:$party", idempotencyKey, body) { Response.ok(rejectNow(id, party)).build() }
     }
+
+    private suspend fun rejectNow(id: UUID, party: UUID): PaymentProposalView =
+        PaymentProposalView.of(proposals.reject(id, party), OffsetDateTime.now())
 
     @POST
     @Path("/{id}/execution")
@@ -143,9 +218,16 @@ class PaymentProposalResource(private val proposals: PaymentProposalService) {
         @PathParam("id") id: UUID,
         request: ProposalExecutionRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-    ): PaymentProposalView {
+        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+    ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val party = requireCustomer(body.partyId, customerPartyId)
+        return idempotent("execution", "$id:$party", idempotencyKey, body) {
+            Response.ok(recordExecutionNow(id, party, body)).build()
+        }
+    }
+
+    private suspend fun recordExecutionNow(id: UUID, party: UUID, body: ProposalExecutionRequest): PaymentProposalView {
         val hash = requireText(body.payloadSha256, "payloadSha256", SHA256_LEN)
         return PaymentProposalView.of(
             proposals.recordExecution(id, party, hash, body.paymentId),
@@ -176,6 +258,8 @@ class PaymentProposalResource(private val proposals: PaymentProposalService) {
 
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        const val IDEMPOTENCY_HEADER = "Idempotency-Key"
+        private const val IDEMPOTENCY_KEY_MAX = 255
         const val MCP_PRINCIPAL = "service-account-openbank-mcp"
         const val EDGE_PRINCIPAL = "service-account-openbank-edge"
         private const val CLIENT_ID_MAX = 255
