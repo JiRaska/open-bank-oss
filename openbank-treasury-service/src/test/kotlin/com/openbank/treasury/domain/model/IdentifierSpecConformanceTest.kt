@@ -84,6 +84,12 @@ class IdentifierSpecConformanceTest {
         assertTrue(judge(setOf("a")).any { "fixed" in it }, "every tagged row agreeing means the defect is fixed")
         assertTrue(judge(setOf("b")).any { "'a'" in it }, "a regression rejecting a valid value must fail")
         assertTrue(judge(setOf("a", "b", "c")).isEmpty(), "still-live defect on all tagged rows is tolerated")
+        // a tag never excuses a row whose expected verdict is valid: rejecting it is a regression
+        val validTagged = listOf(listOf("x", "d", "true", "known-defect d1 #1"))
+        assertTrue(
+            judgeDifferential(validTagged) { _, _ -> false }.any { "'d'" in it },
+            "a tagged row that the oracle expects valid must fail when rejected",
+        )
     }
 
     private companion object {
