@@ -54,6 +54,13 @@ jobs:
       - name: Check every PAT/token secret is covered (offline)
         run: python3 .github/scripts/check-credential-expiry.py --coverage .github/workflows/date-driven-expiry-watch.yml
 
+      # The probe defers UNSET secrets that config-inventory.yaml acknowledges under
+      # github.unprovisioned (#16786), which needs PyYAML to parse. The PR lane never
+      # reaches the probe (self-test + offline coverage only), so install it here.
+      - name: Install PyYAML
+        if: ${{ github.event_name != 'pull_request' }}
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+
       - name: Probe each credential
         id: probe
         if: ${{ github.event_name != 'pull_request' }}
