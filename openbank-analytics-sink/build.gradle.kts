@@ -115,6 +115,8 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.pact.provider)
+    // consumer: AccountRegistryPactConsumerTest publishes the analytics→account consumer contract
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
