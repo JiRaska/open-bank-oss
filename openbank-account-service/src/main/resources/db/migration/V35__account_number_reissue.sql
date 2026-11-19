@@ -6,6 +6,7 @@
 -- number, the new one, and when. The UNIQUE on old_account_number makes a second re-issue of the
 -- same number fail inside the transaction that would have written it, so a canary overlap of two
 -- pods cannot re-issue one account twice.
+-- Rollback: DROP TABLE account_number_reissue; (schema only; restore the numbers first, see below)
 --
 -- The schema change itself is additive. The DATA change it records is not undone by a rollback of
 -- the binary: an earlier binary reads accounts.account_number as before and simply sees the new
