@@ -8,10 +8,10 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.AfterEach
-import io.restassured.RestAssured.given
 import org.junit.jupiter.api.Test
 
 /** Default config: the customer channel is OFF and advertises nothing (ADR-0383 exposure order). */

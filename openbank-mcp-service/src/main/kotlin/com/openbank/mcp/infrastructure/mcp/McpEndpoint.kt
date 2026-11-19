@@ -162,21 +162,13 @@ class McpEndpoint(
             method,
             id,
             params,
-        ) ?: customerChannelOff(method, params)
+        )
+            // ADR-0383 D1: with the channel OFF no branch admits a customers-realm token, and it must
+            // never fall through to the anonymous path either: refused 401 invalid_token.
+            ?: audienceRefusal.takeIf { customerBranch == null && callerResolver.presentsCustomerRealmToken() }
+                ?.respond(method, params, McpAudienceRefusal.Reason.CUSTOMER_CHANNEL_OFF)
             ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
     }
-
-    /**
-     * ADR-0383 D1: with the customer channel OFF there is no branch to admit a customers-realm token,
-     * and it must never fall through to the anonymous path either. Refused 401 `invalid_token`, the
-     * same answer the audience refusal gives, metered and audited through it.
-     */
-    private fun customerChannelOff(method: String, params: JsonNode): Response? =
-        if (customerBranch == null && callerResolver.presentsCustomerRealmToken()) {
-            audienceRefusal.respond(method, params, McpAudienceRefusal.Reason.CUSTOMER_CHANNEL_OFF)
-        } else {
-            null
-        }
 
     @POST
     @Suppress("ReturnCount")
