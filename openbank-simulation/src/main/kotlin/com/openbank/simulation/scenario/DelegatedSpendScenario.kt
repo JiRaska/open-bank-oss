@@ -75,13 +75,16 @@ object DelegatedSpendScenario {
         val now = OffsetDateTime.ofInstant(nowInstant, ZONE)
 
         // 1. Pick the grant to spend against: reuse an ACTIVE one, or offer + accept a new one
-        //    through the real lifecycle (accept is the only OFFERED → ACTIVE path).
+        //    through the real lifecycle (accept is the only OFFERED → ACTIVE path). Only grants
+        //    active at THIS instant are candidates — an expired grant answers GRANT_NOT_ACTIVE,
+        //    a refusal the ceiling-replay invariant cannot reconstruct (expiry is not a ceiling).
+        val candidates = world.delegationGrants.filter { it.isActiveOn(now) }
         val grant = when {
-            world.delegationGrants.isEmpty() ||
+            candidates.isEmpty() ||
                 random.nextInt(NEW_GRANT_FRACTION) < NEW_GRANT_THRESHOLD -> createGrant(world, now)
                 .also { world.delegationGrants.add(it) }
 
-            else -> world.delegationGrants[random.nextInt(world.delegationGrants.size)]
+            else -> candidates[random.nextInt(candidates.size)]
         }
 
         // 2. The real counted spend: every reservation on this grant that still consumes
