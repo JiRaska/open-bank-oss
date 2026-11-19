@@ -34,15 +34,3 @@ Configured values:
 - `max-size: 20`
 
 
-## Test JVM heap budget
-
-The trace-contract IT boots its own Quarkus application under a distinct test
-profile, so the module's test fork hosts two augmentations and boots where the
-rest of the suite hosts one. Measured on this branch (CI run 44293183518): at
-Gradle's default 512 MiB test heap the fork died with
-`OutOfMemoryError: Java heap space` mid-suite and the test executor aborted.
-
-`tasks.test { maxHeapSize = "2g" }` (the statement-service convention) leaves
-measured headroom. Re-measure with `./gradlew :openbank-copilot-service:test`
-after adding any further profile-booting IT; a green single-class run is not
-evidence, the OOM only surfaced with the full suite resident.
