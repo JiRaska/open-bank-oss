@@ -84,3 +84,7 @@ Indexy: `idx_swift_outbox_status_created_at(status, created_at ASC)` (pořadí d
 ## Payloady událostí
 
 Události jsou drénovány z `swift_outbox` do Kafka topicu `openbank.payments.swift.event` (kanál `swift-events-out`, String klíč + String hodnota). Sloupec `payload` drží serializovanou událost; `event_type` nese typový štítek. Každý přechod stavu zapisuje svůj outbox řádek ve STEJNÉ transakci jako změnu stavu (`SwiftRepository.saveWithOutbox`): verdikt schématu a settlement a — od #8718 — také operátorské potvrzení a zamítnutí, která dříve stav změnila a nepublikovala nic. `event_type` je vždy `swift.message.status-changed`, přechod se tedy čte z klíče `status` v payloadu; tvar payloadu je deklarován jako `SwiftMessageEventPayload` v [`docs/asyncapi/openbank-events.yaml`](../../../../../docs/asyncapi/openbank-events.yaml). Schémata událostí musí být verzována zpětně kompatibilně.
+
+## Validace účtu při uvolnění treasury platby (#16748)
+
+Účet ve tvaru IBAN v uvolněné platbě ověřuje sdílený `Iban.isValid` z libs-domain (délka podle registru SWIFT, kontrolní číslice 02..98, mod-97). Hodnota, která projde mod-97, ale pro svou zemi nemůže existovat, je odmítnuta na vstupu.

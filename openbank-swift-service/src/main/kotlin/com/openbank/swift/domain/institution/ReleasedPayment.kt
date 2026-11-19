@@ -4,6 +4,7 @@
 
 package com.openbank.swift.domain.institution
 
+import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.InvalidMoneyException
 import com.openbank.libs.domain.money.InvalidMoneyReason
 import com.openbank.libs.domain.money.Money
@@ -209,23 +210,16 @@ object ReleasedPaymentValidator {
         )
     }
 
-    /** IBAN with a valid ISO 7064 mod-97 check, or a plain (domestic) account number. */
+    /**
+     * An IBAN (by shape) must pass the platform's single ISO 13616 validator [Iban.isValid] —
+     * registry length per country, check digits 02..98 and mod-97 — so a spec fix there reaches
+     * this rail. Anything not IBAN-shaped is judged as a plain (domestic) account number.
+     */
     fun isAccount(account: String): Boolean = if (IBAN.matches(account)) {
-        ibanChecksumValid(account)
+        Iban.isValid(account)
     } else {
         account.length <= MAX_ACCOUNT &&
             PLAIN_ACCOUNT.matches(account)
-    }
-
-    @Suppress("MagicNumber")
-    private fun ibanChecksumValid(iban: String): Boolean {
-        val rearranged = iban.substring(4) + iban.substring(0, 4)
-        var remainder = 0
-        for (c in rearranged) {
-            val digits = if (c.isDigit()) c.toString() else (c - 'A' + 10).toString()
-            for (d in digits) remainder = (remainder * 10 + (d - '0')) % 97
-        }
-        return remainder == 1
     }
 
     private fun uuid(raw: String?): UUID? = raw?.let {
