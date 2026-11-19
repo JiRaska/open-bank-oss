@@ -48,6 +48,7 @@ CLASSES = {"generator", "masking", "consumer", "harness", "not-identifier"}
 FUZZ = pathlib.Path("fuzz/ossfuzz/src/main/kotlin")
 PITEST_LIBS = pathlib.Path(".github/scripts/pitest-libs-advisory.init.gradle")
 PITEST_WF = pathlib.Path(".github/workflows/pitest.yml")
+ORACLE = pathlib.Path(".github/scripts/identifier-differential.py")
 
 
 def _classified(path: pathlib.Path) -> dict:
@@ -109,6 +110,16 @@ def pitest_for(root: pathlib.Path, module: str, symbol: str) -> str:
 def build(root: pathlib.Path):
     problems, rows = [], []
     vectors = load_vectors(root)
+    # the all-zero property: every identifier the oracle judges must state whether an all-zero payload is
+    # rejected or exempt (with a reason); the policy is parsed from the oracle script, not re-listed here
+    oracle_text = (root / ORACLE).read_text(encoding="utf-8") if (root / ORACLE).is_file() else None
+    if oracle_text is not None:
+        block = re.search(r"^ZERO_POLICY = \{(.*?)^\}", oracle_text, re.S | re.M)
+        policy = dict(re.findall(r'^\s+"([a-z0-9-]+)":\s*\("(reject|exempt)"', block.group(1), re.M)) if block else {}
+        for v in vectors:
+            if v.get("differential") and v["identifier"] not in policy:
+                problems.append(f"{v['identifier']}: no ZERO_POLICY entry in {ORACLE} (all-zero payload: reject, or "
+                                f"exempt with a reason): the all-zero property must cover every identifier")
     baseline = json.loads((root / BASELINE).read_text()) if (root / BASELINE).is_file() else {}
     adhoc = {f for cat in baseline.values() for f in cat}
     classified = _classified(root / CLASSIFIED) if (root / CLASSIFIED).is_file() else {}
@@ -304,6 +315,17 @@ def self_test() -> int:
         ok &= run(root, None) == 1
         test.write_text('class IdentifierSpecConformanceTest {\n    private val validators = mapOf(\n        "x" to V::ok,\n    )\n}\n')
         ok &= run(root, None) == 0
+        # the all-zero property: a differential identifier with no ZERO_POLICY entry is refused
+        (root / ORACLE).parent.mkdir(parents=True, exist_ok=True)
+        (root / ORACLE).write_text('ZERO_POLICY = {\n    "x": ("exempt", "r"),\n}\n')
+        (root / VECTORS / "x.json").write_text(
+            (root / VECTORS / "x.json").read_text().replace('"cases"', '"differential": true, "cases"', 1))
+        ok &= run(root, None) == 0
+        (root / ORACLE).write_text('ZERO_POLICY = {\n    "y": ("exempt", "r"),\n}\n')
+        ok &= run(root, None) == 1
+        (root / ORACLE).unlink()
+        (root / VECTORS / "x.json").write_text(
+            (root / VECTORS / "x.json").read_text().replace('"differential": true, ', "", 1))
         # 17. a vector with no origin, or a published one with no source, is refused
         good = (root / VECTORS / "x.json").read_text()
         (root / VECTORS / "x.json").write_text(good.replace('"origin": "synthetic", ', ""))

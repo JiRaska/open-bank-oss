@@ -378,6 +378,76 @@ EXHAUSTIVE = {
 }
 
 
+# ONE property for every identifier: an ALL-ZERO payload with a correct-looking check is never issued,
+# so it must be rejected, unless the identifier is exempt with a stated reason. The inventory gate
+# requires every identifier with a reference to appear here, so the next validator cannot skip it.
+#   identifier -> ("reject", builder) | ("exempt", reason)
+_EU_VAT_STATES = ("AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES", "FI", "FR", "HR", "HU", "IE", "IT",
+                  "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK", "XI")
+_COMPLETIONS = string.digits + string.ascii_uppercase
+
+
+def _zero_vat() -> list:
+    """All-zero national part with every completion of the check position(s). CZ and SK are skipped: their
+    8-digit form is an IČO, and leading-zero IČOs exist (see the cz-ico exemption). ES also gets the
+    type-letter forms (CIF: letter + zeros + control, DNI: zeros + letter)."""
+    out = []
+    for cc in _EU_VAT_STATES:
+        if cc in ("CZ", "SK"):
+            continue
+        for n in range(7, 13):
+            zeros = "0" * n
+            out.append(cc + zeros)
+            out.extend(cc + zeros + c for c in _COMPLETIONS)
+        if cc == "ES":
+            out.extend(f"ES{lt}{'0' * 7}{c}" for lt in string.ascii_uppercase for c in _COMPLETIONS)
+    return [v for v in out if std_vat.is_valid(v)]
+
+
+def _zero_with_digit(length: int, ok):
+    return lambda: [("0" * (length - 1)) + d for d in string.digits if ok(("0" * (length - 1)) + d)]
+
+
+ZERO_POLICY = {
+    "cz-rc": ("reject", lambda: ["0" * 9, "0" * 10]),
+    "cz-account": ("reject", lambda: ["0000000000/0800", "0-0000000000/0800"]),
+    "cz-ico": ("exempt", "leading-zero IČOs exist; no primary source shows an all-zero payload is unissued"),
+    "sk-ico": ("exempt", "same IČO numbering as CZ; no primary source for an all-zero exclusion"),
+    "pl-nip": ("reject", _zero_with_digit(10, std_nip.is_valid)),
+    "fr-siren": ("reject", _zero_with_digit(9, std_siren.is_valid)),
+    "eu-vat": ("reject", _zero_vat),
+    "at-fn": ("reject", lambda: ["FN0" + c for c in string.ascii_lowercase] + ["FN0000" + c for c in string.ascii_lowercase]),
+    "lei": ("exempt", "ISO 17442 allocates LOU prefixes; an all-zero head is not shown unissued by a source we hold"),
+    "isin": ("exempt", "ISO 6166 allows numeric NSINs (all-zero test instruments appear in published examples)"),
+    "iban": ("exempt", "ISO 13616 defines no all-zero exclusion; issuance is the bank's decision, not the standard's"),
+    "pan-luhn": ("exempt", "isLuhnValid is a checksum primitive; issuer ranges are not its concern"),
+    "currency": ("exempt", "a currency code has no numeric payload"),
+}
+# States whose kyb check accepts an all-zero payload today (review of #16887); each is its own defect id,
+# so a fix in one state removes one marker. A state not listed must already reject it.
+_ZERO_VAT_DEFECT_STATES = ("LU", "ES", "FI", "SE", "HU", "EE", "BG", "EL", "CY", "XI", "FR", "PL", "HR", "IE")
+ZERO_ISSUE = "#16890"
+
+
+def zero_rows() -> list:
+    """(identifier, value, expected, reason) for every reject-policy identifier. Expected is always False."""
+    rows = []
+    for identifier, (kind, how) in ZERO_POLICY.items():
+        if kind != "reject":
+            continue
+        for v in how():
+            reason = expected(identifier, v)[1]
+            if not reason.startswith("known-defect"):
+                defect = None
+                if identifier == "eu-vat" and v[:2] in _ZERO_VAT_DEFECT_STATES:
+                    defect = f"all-zero-eu-vat-{v[:2]}"
+                elif identifier in ("pl-nip", "at-fn"):
+                    defect = f"all-zero-{identifier}"
+                reason = f"known-defect {defect} {ZERO_ISSUE}" if defect else "all-zero payload is never issued (local policy)"
+            rows.append((identifier, v, "false", reason))
+    return rows
+
+
 def generate(out: pathlib.Path, seed: int, count: int) -> int:
     r = random.Random(seed)
     rows = 0
@@ -388,6 +458,10 @@ def generate(out: pathlib.Path, seed: int, count: int) -> int:
                 verdict, reason = expected(identifier, value)
                 fh.write(f"{identifier}\t{value}\t{str(verdict).lower()}\t{reason}\n")
                 rows += 1
+        zr = zero_rows()
+        for identifier, value, verdict, reason in zr:
+            fh.write(f"{identifier}\t{value}\t{verdict}\t{reason}\n")
+        rows += len(zr)
     print(f"wrote {rows} oracle rows (seed {seed}) to {out}")
     return 0
 
@@ -457,6 +531,14 @@ def self_test() -> int:
     ok &= expected("eu-vat", valid_it) == (True, "stdnum")
     invalid_it = next(v for v in (_gen_eu_vat(r) for _ in range(5000)) if v[:2] == "IT" and not std_vat.is_valid(v))
     ok &= expected("eu-vat", invalid_it)[1].startswith("known-defect eu-vat-shape-only-IT")
+    # the all-zero property is not vacuous: every reject-policy identifier yields rows, and where the reference
+    # has a check, at least one row the reference ACCEPTS (a correct-looking check), so rejecting it is real work
+    for identifier, (kind, how) in ZERO_POLICY.items():
+        if kind == "reject":
+            cands = how()
+            ok &= bool(cands) and (identifier in ("cz-rc",) or any(ORACLES[identifier][0](v) for v in cands))
+        else:
+            ok &= bool(how.strip())
     # the generator must produce both verdicts for every identifier.
     r = random.Random(2)
     for identifier, gen in GENERATORS.items():
