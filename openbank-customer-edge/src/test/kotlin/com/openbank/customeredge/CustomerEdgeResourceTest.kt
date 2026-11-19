@@ -906,7 +906,7 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
-    fun `buildDomesticRequest refuses a malformed payment symbol and keeps a ten-digit one`() {
+    fun `buildDomesticRequest refuses a malformed payment symbol and keeps one at its maximum length`() {
         fun build(field: String, value: String) = CustomerEdgeResource.buildDomesticRequest(
             mapper,
             """{"amount":"10.00","creditorName":"A","$field":"$value"}""",
@@ -917,10 +917,11 @@ class CustomerEdgeResourceTest {
             "ca",
             "cb",
         )
-        listOf("variableSymbol", "specificSymbol", "constantSymbol").forEach { field ->
-            // Boundary: ten digits pass, eleven or any non-digit is refused (-> 400 at the caller).
-            assertThat(build(field, "1234567890")).describedAs(field).isNotNull()
-            assertThat(build(field, "12345678901")).describedAs(field).isNull()
+        listOf("variableSymbol" to 10, "specificSymbol" to 10, "constantSymbol" to 4).forEach { (field, max) ->
+            // Boundary: max digits pass, max + 1 or any non-digit is refused (-> 400 at the caller).
+            // KS stops at 4: the domestic-payment column is VARCHAR(4) CHECK ^[0-9]{1,4}$.
+            assertThat(build(field, "1".repeat(max))).describedAs(field).isNotNull()
+            assertThat(build(field, "1".repeat(max + 1))).describedAs(field).isNull()
             assertThat(build(field, "12A4")).describedAs(field).isNull()
             assertThat(build(field, "12 34")).describedAs(field).isNull()
         }

@@ -227,4 +227,4 @@ new payment from this result. This lookup consumes no SCA and sends no payment.
 
 ## Payment symbols (#16748)
 
-`variableSymbol`, `specificSymbol` and `constantSymbol` must each be 1-10 ASCII digits (libs-domain `CzechPaymentSymbol`). Anything else is refused with 400 before the request goes further.
+`variableSymbol` and `specificSymbol` must be 1-10 ASCII digits and `constantSymbol` 1-4 (libs-domain `CzechPaymentSymbol`; KS matches the domestic-payment column); a blank value counts as absent. Anything else is refused with 400 before the request goes further.

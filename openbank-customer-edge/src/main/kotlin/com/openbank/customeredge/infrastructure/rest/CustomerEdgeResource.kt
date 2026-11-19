@@ -6421,10 +6421,10 @@ class CustomerEdgeResource(
             out.put("creditorName", creditorName)
             out.put("amount", amount)
             out.put("currency", currency)
-            // VS/SS/KS: 1-10 ASCII digits (libs-domain CzechPaymentSymbol). A malformed one throws
+            // VS/SS 1-10 digits, KS 1-4 (libs-domain CzechPaymentSymbol). A malformed one throws
             // inside runCatching, so the body reads as malformed (400) instead of being forwarded.
-            for (field in listOf("variableSymbol", "specificSymbol", "constantSymbol")) {
-                CzechPaymentSymbol.requireValid(field, txt(field))?.let { out.put(field, it) }
+            for (kind in CzechPaymentSymbol.entries) {
+                kind.normalise(txt(kind.fieldName))?.let { out.put(kind.fieldName, it) }
             }
             txt("reference")?.let { out.put("messageForPayee", it) }
             out.put("priority", normalizeDomesticPriority(txt("priority")))

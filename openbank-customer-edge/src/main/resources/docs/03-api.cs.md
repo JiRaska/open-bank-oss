@@ -221,4 +221,4 @@ a nevytváří platební příkaz.
 
 ## Platební symboly (#16748)
 
-`variableSymbol`, `specificSymbol` a `constantSymbol` musí mít každý 1-10 číslic ASCII (`CzechPaymentSymbol` z libs-domain). Cokoli jiného je odmítnuto s 400 dřív, než požadavek pokračuje.
+`variableSymbol` a `specificSymbol` musí mít 1-10 číslic ASCII a `constantSymbol` 1-4 (`CzechPaymentSymbol` z libs-domain; KS odpovídá sloupci v domestic-payment); prázdná hodnota znamená, že symbol chybí. Cokoli jiného je odmítnuto s 400 dřív, než požadavek pokračuje.
