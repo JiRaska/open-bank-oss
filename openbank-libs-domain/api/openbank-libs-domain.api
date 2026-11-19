@@ -1035,11 +1035,17 @@ public final class com/openbank/libs/domain/account/CzechAccountNumber {
 	public final fun isValidPrefix (Ljava/lang/String;)Z
 }
 
-public final class com/openbank/libs/domain/account/CzechPaymentSymbol {
-	public static final field INSTANCE Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
-	public static final field MAX_LENGTH I
+public final class com/openbank/libs/domain/account/CzechPaymentSymbol : java/lang/Enum {
+	public static final field CONSTANT Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
+	public static final field SPECIFIC Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
+	public static final field VARIABLE Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getFieldName ()Ljava/lang/String;
+	public final fun getMaxLength ()I
 	public final fun isValid (Ljava/lang/String;)Z
-	public final fun requireValid (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+	public final fun normalise (Ljava/lang/String;)Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
+	public static fun values ()[Lcom/openbank/libs/domain/account/CzechPaymentSymbol;
 }
 
 public final class com/openbank/libs/domain/account/Iban {
