@@ -4,10 +4,13 @@
   },
   "interactions": [
     {
-      "description": "GET the first page of ACTIVE accounts for the analytics initial load",
+      "description": "GET a nonterminal ACTIVE accounts page for the analytics initial load",
       "providerStates": [
         {
           "name": "an account owned by a known party exists"
+        },
+        {
+          "name": "an ACTIVE CZK account exists for tax-profile resolution"
         }
       ],
       "request": {
@@ -15,7 +18,7 @@
         "path": "/api/v1/accounts/active",
         "query": {
           "limit": [
-            "100"
+            "1"
           ]
         }
       },
@@ -33,8 +36,137 @@
             }
           ],
           "pagination": {
-            "hasNextPage": false,
+            "hasNextPage": true,
             "nextCursor": "AAAAAAAAAAAAAAAAAAAAAQ"
+          }
+        },
+        "generators": {
+          "body": {
+            "$.data[*].id": {
+              "type": "Uuid"
+            },
+            "$.data[*].partyId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.data": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.data[*].accountNumber": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].accountType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].currencyCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.data[*].openedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.data[*].productId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.pagination.nextCursor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the first page of ACTIVE accounts for the analytics initial load",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/active",
+        "query": {
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "accountNumber": "0001-0000000001/0100",
+              "accountType": "CURRENT",
+              "currencyCode": "CZK",
+              "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "openedAt": "2026-01-15T00:00:00Z",
+              "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "productId": "current-czk"
+            }
+          ],
+          "pagination": {
+            "hasNextPage": false
           }
         },
         "generators": {
@@ -126,14 +258,6 @@
                   "match": "type"
                 }
               ]
-            },
-            "$.pagination.nextCursor": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
             }
           }
         },
@@ -152,7 +276,7 @@
         "path": "/api/v1/accounts/active",
         "query": {
           "limit": [
-            "100"
+            "200"
           ]
         }
       },

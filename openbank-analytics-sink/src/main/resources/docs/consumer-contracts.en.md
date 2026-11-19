@@ -12,13 +12,17 @@ initial-load page of `GET /api/v1/accounts/active`:
 
 - the row fields the reconcile projection binds (`id`, `accountNumber`,
   `accountType`, `partyId`, `productId`, `currencyCode`, `openedAt`),
-- the `pagination.nextCursor` the page loop follows — a renamed cursor would
-  silently truncate the fleet snapshot after the first page,
+- the default 200-row request and its optional terminal cursor, plus a one-row
+  nonterminal page seeded with two existing ACTIVE-account provider states;
+  this page requires a non-empty `pagination.nextCursor` and `hasNextPage=true`,
+  so a renamed cursor cannot silently truncate the snapshot,
 - the unauthenticated refusal (401, ADR-0279 #3).
 
 The provider replays the contract in account-service's
 `AccountPactFolderProviderVerificationTest` (positive states) and its
 NegativeAuth verification class (refusal state).
+The initial-load paging test also verifies the actual 200-row requests and
+that the next request echoes the returned opaque cursor.
 
 ## Running
 
