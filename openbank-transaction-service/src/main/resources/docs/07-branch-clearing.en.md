@@ -24,3 +24,5 @@ Deploy Ledger V48/readers and Account context readers before new Transaction V24
 Synthetic branch requests use `/api/v1/journals/branch-payments/synthetic`, which requires authenticated synthetic origin. Either trusted request carrier preserves that origin; an absent/refused decision fails before a real journal can be recorded. Receipt replay cannot cross synthetic and real origins.
 
 Branch admission and Ledger share `openbank-libs-market.BranchPaymentCurrency`: only the currently GL-backed CZK, EUR, USD and GBP routes are admitted. A different valid ISO denomination is refused before a transaction, outbox event, workflow or cover hold is created. Adding a country or product currency does not enable a posting route; the shared capability, exhaustive Ledger mapping and actual GL accounts must be deployed together, readers before writers. Regular unattributed payment behavior is unchanged.
+
+A confirmed insufficient-funds refusal while reserving cover ends the branch payment in FAILED. Technical failures and uncertain outcomes still retry under the original operation key.

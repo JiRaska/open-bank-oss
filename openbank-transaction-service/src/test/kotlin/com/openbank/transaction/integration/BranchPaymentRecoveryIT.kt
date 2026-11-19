@@ -7,8 +7,11 @@ package com.openbank.transaction.integration
 import com.github.tomakehurst.wiremock.client.WireMock.absent
 import com.github.tomakehurst.wiremock.client.WireMock.equalTo
 import com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath
+import com.github.tomakehurst.wiremock.client.WireMock.okJson
+import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
+import com.github.tomakehurst.wiremock.stubbing.Scenario
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.market.BookingContext
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -356,6 +359,55 @@ class BranchPaymentRecoveryIT {
         LedgerWireMockResource.server.verify(
             1,
             postRequestedFor(urlEqualTo("/api/v1/journals/branch-payments"))
+                .withRequestBody(matchingJsonPath("$.transactionId", equalTo(seeded.id.toString()))),
+        )
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [true, false])
+    @org.junit.jupiter.api.Timeout(30)
+    fun `branch retries a cover outage and terminates on insufficient funds`(insufficient: Boolean) {
+        val seeded = seedPendingTransfer(false)
+        val holdPath = "/api/v1/balances/${seeded.sourceAccountId}/holds"
+        val journalPath = "/api/v1/journals/branch-payments"
+        val server = LedgerWireMockResource.server
+        val firstResponse = if (insufficient) {
+            okJson("""{"error":"INSUFFICIENT_FUNDS"}""").withStatus(422)
+        } else {
+            okJson("{}").withStatus(503)
+        }
+        server.stubFor(
+            post(urlEqualTo(holdPath))
+                .inScenario(holdPath)
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willSetStateTo("funded")
+                .willReturn(firstResponse),
+        )
+        server.stubFor(
+            post(urlEqualTo(holdPath))
+                .inScenario(holdPath)
+                .whenScenarioStateIs("funded")
+                .willReturn(
+                    okJson("""{"id":"${UUID.randomUUID()}"}"""),
+                ),
+        )
+        val bank = checkNotNull(seeded.sourceBookingContext).bankId
+        val receipt = """{"transactionId":"${seeded.id}","bankId":"$bank",""" +
+            """"journalIds":["${UUID.randomUUID()}","${UUID.randomUUID()}"]}"""
+        server.stubFor(
+            post(urlEqualTo(journalPath))
+                .withRequestBody(matchingJsonPath("$.transactionId", equalTo(seeded.id.toString())))
+                .willReturn(okJson(receipt)),
+        )
+
+        assertThat(newWorkflow(seeded.id).execute(seeded.id))
+            .isEqualTo(if (insufficient) SagaState.COMPENSATED else SagaState.COMPLETED)
+        assertThat(onVertxContext { transactionRepository.findById(seeded.id) }!!.status)
+            .isEqualTo(if (insufficient) TransactionStatus.FAILED else TransactionStatus.COMPLETED)
+        server.verify(if (insufficient) 1 else 2, postRequestedFor(urlEqualTo(holdPath)))
+        server.verify(
+            if (insufficient) 0 else 5,
+            postRequestedFor(urlEqualTo(journalPath))
                 .withRequestBody(matchingJsonPath("$.transactionId", equalTo(seeded.id.toString()))),
         )
     }

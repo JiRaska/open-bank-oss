@@ -6,9 +6,12 @@ package com.openbank.transaction.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.transaction.application.port.out.BalanceCoverPort
+import com.openbank.transaction.application.port.out.InsufficientPaymentCover
 import io.quarkus.oidc.client.filter.OidcClientFilter
+import io.smallrye.common.annotation.Blocking
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.json.JsonObject
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
@@ -17,7 +20,9 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
+import org.eclipse.microprofile.rest.client.ext.ResponseExceptionMapper
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.math.BigDecimal
@@ -33,6 +38,7 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "balance-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
+@RegisterProvider(InsufficientPaymentCoverMapper::class)
 // #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
 // `openbank-transaction` (ROLE_API only) - never the shared `openbank-services` default client.
 @OidcClientFilter("m2m")
@@ -59,6 +65,24 @@ data class PlaceHoldBody(
 )
 
 data class HoldResponse(val id: UUID)
+
+@Blocking
+class InsufficientPaymentCoverMapper : ResponseExceptionMapper<InsufficientPaymentCover> {
+    override fun handles(status: Int, headers: jakarta.ws.rs.core.MultivaluedMap<String, Any>): Boolean =
+        status == UNPROCESSABLE_ENTITY
+
+    override fun toThrowable(response: Response): InsufficientPaymentCover? {
+        val code = runCatching {
+            response.bufferEntity()
+            JsonObject(response.readEntity(String::class.java)).getString("error")
+        }.getOrNull()
+        return if (code == "INSUFFICIENT_FUNDS") InsufficientPaymentCover() else null
+    }
+
+    private companion object {
+        const val UNPROCESSABLE_ENTITY = 422
+    }
+}
 
 @ApplicationScoped
 class BalanceCoverClient(@RestClient private val client: BalanceCoverRestClient) : BalanceCoverPort {

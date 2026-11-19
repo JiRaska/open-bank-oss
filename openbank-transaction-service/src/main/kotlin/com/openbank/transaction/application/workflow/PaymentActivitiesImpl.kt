@@ -6,6 +6,7 @@ package com.openbank.transaction.application.workflow
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.out.BalanceCoverPort
+import com.openbank.transaction.application.port.out.InsufficientPaymentCover
 import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.usecase.PaymentJournalFactory
@@ -18,6 +19,7 @@ import com.openbank.transaction.infrastructure.client.ReverseJournalRequest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.temporal.failure.ApplicationFailure
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,14 +71,23 @@ open class PaymentActivitiesImpl(
             return@runOnVertxContext PaymentActivities.SENTINEL_HOLD
         }
         val cover = transaction.baseAmount
-        balanceCoverPort.placeHold(
-            accountId = coverAccount,
-            amount = cover.amount,
-            currency = cover.currency.code,
-            reason = "payment ${transaction.id}",
-            referenceId = transaction.id.toString(),
-            ttlSeconds = if (transaction.sourceBookingContext?.mode == "BRANCH") null else HOLD_TTL_SECONDS,
-        )
+        val branch = transaction.sourceBookingContext?.mode == "BRANCH"
+        try {
+            balanceCoverPort.placeHold(
+                accountId = coverAccount,
+                amount = cover.amount,
+                currency = cover.currency.code,
+                reason = "payment ${transaction.id}",
+                referenceId = transaction.id.toString(),
+                ttlSeconds = if (branch) null else HOLD_TTL_SECONDS,
+            )
+        } catch (ex: InsufficientPaymentCover) {
+            if (!branch) throw ex
+            throw ApplicationFailure.newNonRetryableFailure(
+                "Insufficient funds for payment cover",
+                InsufficientPaymentCover::class.java.simpleName,
+            )
+        }
     }
 
     override fun postJournal(transactionId: UUID): UUID = runOnVertxContext {

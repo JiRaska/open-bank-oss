@@ -136,7 +136,8 @@ class PaymentWorkflowImpl(private val durableBranch: Boolean = false) : PaymentW
         if (state == SagaState.COMPLETED) {
             if (durableBranch) durable.markCompleted(transactionId) else finalisation.markCompleted(transactionId)
         } else {
-            finalisation.markFailed(transactionId, "Payment workflow did not complete (state=$state)")
+            val writer = if (durableBranch) durable else finalisation
+            writer.markFailed(transactionId, "Payment workflow did not complete (state=$state)")
         }
         return state
     }
