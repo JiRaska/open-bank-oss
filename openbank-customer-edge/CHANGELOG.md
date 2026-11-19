@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.2...customer-edge-v1.13.0) (2026-11-19)
+
+
+### Features
+
+* **customer-edge:** enable OpenTelemetry tracing + WebAuthn challenge trace contract ([#16751](https://github.com/JiRaska/open-bank-oss/issues/16751)) ([abaa92c](https://github.com/JiRaska/open-bank-oss/commit/abaa92c7a779beda55ead57bd14106a741b0f132))
+
 ## [1.12.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.1...customer-edge-v1.12.2) (2026-11-18)
 
 
