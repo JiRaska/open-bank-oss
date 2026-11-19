@@ -22,8 +22,12 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * Regression coverage for #1201: two dispatcher instances racing [AmlOutboxRepositoryImpl]'s
@@ -37,6 +41,9 @@ class AmlOutboxClaimIT {
 
     @Inject
     lateinit var repository: AmlOutboxRepositoryImpl
+
+    @Inject
+    lateinit var clock: Clock
 
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -53,13 +60,68 @@ class AmlOutboxClaimIT {
                 aggregateId = Ids.newId(),
                 eventType = "test.event.claim",
                 payload = """{"seq":$it}""",
-                createdAt = Instant.now(),
+                createdAt = Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                synthetic = true,
             )
         }
         messages.forEach { msg ->
             onEventLoop { Panache.withTransaction { repository.persistInTransaction(msg) }.awaitSuspending() }
         }
         return messages
+    }
+
+    @ParameterizedTest(name = "additive schema: {0}")
+    @ValueSource(strings = ["peek", "claim"])
+    fun `kernel reads preserve entity mapping after an additive schema change`(operation: String) {
+        clearOutbox()
+        changeTestSchema("ADD COLUMN future_attempt_at TIMESTAMPTZ, ADD COLUMN future_claim_token UUID")
+        try {
+            val seeded = seedPending(2)
+            val before = clock.instant()
+            val rows = onEventLoop {
+                if (operation == "claim") repository.claimProcessable(2) else repository.listProcessable(2)
+            }
+            val after = clock.instant()
+            assertThat(rows.map { it.eventId }).containsExactlyInAnyOrderElementsOf(seeded.map { it.eventId })
+            assertThat(rows).allSatisfy { row ->
+                val source = seeded.single { it.eventId == row.eventId }
+                assertThat(row.aggregateId).isEqualTo(source.aggregateId)
+                assertThat(row.eventType).isEqualTo(source.eventType)
+                assertThat(row.payload).isEqualTo(source.payload)
+                assertThat(row.synthetic).isEqualTo(source.synthetic)
+                assertThat(row.createdAt).isEqualTo(source.createdAt)
+                assertThat(row.attemptCount).isZero()
+                assertThat(row.sentAt).isNull()
+                assertThat(row.lastError).isNull()
+                assertThat(row.nextAttemptAt).isNull()
+                if (operation == "claim") {
+                    assertThat(row.claimedAt).isBetween(before, after)
+                    assertThat(row.updatedAt).isBetween(before, after)
+                } else {
+                    assertThat(row.claimedAt).isNull()
+                    assertThat(row.updatedAt).isEqualTo(source.createdAt)
+                }
+                assertThat(row.status).isEqualTo(
+                    if (operation == "claim") OutboxStatus.DISPATCHING else OutboxStatus.PENDING,
+                )
+            }
+        } finally {
+            try {
+                clearOutbox()
+            } finally {
+                changeTestSchema("DROP COLUMN future_attempt_at, DROP COLUMN future_claim_token")
+            }
+        }
+    }
+
+    private fun changeTestSchema(clauses: String) {
+        onEventLoop {
+            Panache.withTransaction {
+                Panache.getSession().chain { session ->
+                    session.createNativeQuery<Int>("ALTER TABLE aml_outbox $clauses").executeUpdate()
+                }
+            }.awaitSuspending()
+        }
     }
 
     @Test
