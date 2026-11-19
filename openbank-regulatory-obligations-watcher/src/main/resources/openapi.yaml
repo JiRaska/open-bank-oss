@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+# See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
+
+openapi: 3.1.0
+info:
+  title: Regulatory Obligations Watcher API
+  version: 1.0.0
+  description: >-
+    Internal control-plane agent API (ADR-0367 decision 6, ADR-0387). One operator trigger for a
+    watcher run; the run is bound by the same charter limits as the weekly schedule. The agent's
+    only write is a governance issue.
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+servers:
+  - url: http://localhost:8173
+    description: Local development
+tags:
+  - name: Watcher runs
+paths:
+  /api/v1/regulatory-watcher/run:
+    post:
+      tags: [Watcher runs]
+      operationId: triggerWatcherRun
+      summary: Run the watcher once
+      description: >-
+        Runs one watch over every source the register cites, subject to runs_per_day, the kill
+        switch and tokens_per_run. A run refused by a limit answers 200 with `skippedReason` set.
+      security: [{ bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN] }]
+      responses:
+        '200':
+          description: The run's summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchRunResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  responses:
+    Unauthorized: { description: Authentication is required }
+    Forbidden: { description: The authenticated role is not permitted }
+  schemas:
+    WatchRunResult:
+      type: object
+      required: [sourcesAttempted, fetched, unverified, changed, issuesFiled, deferred, tokensUsed, livenessEarned]
+      properties:
+        sourcesAttempted: { type: integer, minimum: 0 }
+        fetched: { type: integer, minimum: 0 }
+        unverified: { type: integer, minimum: 0, description: Sources that answered DENIED or NOT_RENDERABLE }
+        changed: { type: integer, minimum: 0 }
+        issuesFiled: { type: integer, minimum: 0 }
+        deferred: { type: integer, minimum: 0 }
+        tokensUsed: { type: integer, minimum: 0 }
+        skippedReason: { type: [string, 'null'] }
+        livenessEarned: { type: boolean }

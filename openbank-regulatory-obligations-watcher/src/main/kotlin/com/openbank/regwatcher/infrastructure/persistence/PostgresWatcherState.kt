@@ -5,6 +5,7 @@
 
 package com.openbank.regwatcher.infrastructure.persistence
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.regwatcher.application.port.WatcherStatePort
 import com.openbank.regwatcher.domain.FindingDisposition
 import com.openbank.regwatcher.domain.SourceBaseline
@@ -16,7 +17,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.future.await
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Instant
-import java.util.UUID
 
 /**
  * Reactive Hibernate state store. The baseline's id is the URL (application-assigned), so it is
@@ -61,7 +61,7 @@ class PostgresWatcherState(private val sf: Mutiny.SessionFactory) : WatcherState
         audit: WatchAudit,
     ) {
         val e = WatchFindingEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             fingerprint = finding.fingerprint
             kind = finding.kind.name
             verdict = finding.verdict
@@ -88,7 +88,7 @@ class PostgresWatcherState(private val sf: Mutiny.SessionFactory) : WatcherState
 
     override suspend fun recordRunStart(at: Instant) {
         val e = WatchRunEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             startedAt = at
         }
         sf.withTransaction { s -> s.persist(e) }.coAwait()

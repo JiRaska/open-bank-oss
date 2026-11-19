@@ -791,6 +791,10 @@ change_requirements:
       That is what produced this issue's own 'finds nothing, can graduate free' premise."
     ci_producer: ".github/scripts/check-governance-lineage.py"
     allowlist:
+      - edge: "openbank-fetch-broker->openbank-regulatory-obligations-watcher:api"
+        reason: "MCP JSON-RPC over plain java.net.http (BrokerWebFetchAdapter, POST /mcp), not a per-target @RegisterRestClient; the gitops env FETCH_BROKER_MCP_URL is the witness (ADR-0387 S4)."
+      - edge: "openbank-regulatory-obligations-watcher->github:api"
+        reason: "Issue creation through SafeHttpClient (GitHubIssueAdapter, ADR-0320), not a @RegisterRestClient; draft.ticket is the charter's only write (ADR-0387 S4)."
       - edge: "openbank-copilot-service->openbank-balance-service:api"
         reason: "Reached only through CustomerEdgeRestClient (configKey=customer-edge), a shared BFF client with no per-target configKey — GET /customer/v1/balances/{accountId}."
       - edge: "openbank-copilot-service->openbank-fx-service:api"

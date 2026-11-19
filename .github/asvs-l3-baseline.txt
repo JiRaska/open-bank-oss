@@ -351,3 +351,6 @@ V9.1 openbank-infra/gitops/components/tax-reporting/tax-reporting-service.yaml:1
 # The hops carry no credential and the relay can only GET one fixed read-only URL.
 V9.1 openbank-infra/gitops/components/observability/alertmanager-read-proxy.yaml:165: plaintext http:// env value http://kube-prometheus-stack-alertmanager.observability.svc:
 V9.1 openbank-infra/gitops/components/alert-digest/standing-critical-digest.yaml:119: plaintext http:// env value http://alertmanager-read-proxy.observability.svc:8080
+V9.1 openbank-infra/gitops/components/regulatory-obligations-watcher/regulatory-obligations-watcher.yaml:84: plaintext http:// env value http://openbank-fetch-broker.fetch-broker.svc:8172/mcp
+V9.1 openbank-infra/gitops/components/regulatory-obligations-watcher/regulatory-obligations-watcher.yaml:99: plaintext http:// env value http://litellm.ai-platform.svc:4000
+V9.1 openbank-infra/gitops/components/regulatory-obligations-watcher/regulatory-obligations-watcher.yaml:117: plaintext http:// env value http://tempo.observability.svc:4317

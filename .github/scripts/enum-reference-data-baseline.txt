@@ -24,6 +24,7 @@ duplicate openbank-docs-truth-agent FindingStatus  # #13441
 duplicate openbank-document-service CeremonyStatus  # #13441
 duplicate openbank-engagement-service EngagementEventType  # #13441
 duplicate openbank-engagement-service SurfaceSlot  # #13441
+duplicate openbank-fetch-broker FetchOutcome  # #16754
 duplicate openbank-finops-agent RunTrigger  # #13441
 duplicate openbank-flaky-test-hunter FindingStatus  # #13441
 duplicate openbank-governance-auditor FindingStatus  # #13441
@@ -46,6 +47,7 @@ duplicate openbank-onboarding-service PartyStage  # #13441
 duplicate openbank-party-service PartyStatus  # #13441
 duplicate openbank-party-service PartyType  # #13441
 duplicate openbank-product-catalog CardNetwork  # #13438
+duplicate openbank-regulatory-obligations-watcher SourceOutcome  # #16754
 duplicate openbank-release-steward FindingStatus  # #13441
 duplicate openbank-risk-engine CurveIndex  # #13434
 duplicate openbank-treasury-service LedgerRole  # #13441

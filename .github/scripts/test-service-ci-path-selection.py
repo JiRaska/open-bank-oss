@@ -19,7 +19,7 @@ cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),
  ('recipe-helper',['.github/scripts/service-ci-steps/build-test.sh'],'canary'),
  ('root-security-md',['SECURITY.md'],'empty'),
  ('root-readme',['README.md'],'readers:openbank-docs-truth-agent'),
- ('governance-rules',['openbank-libs/governance/rules.yaml'],'readers:openbank-authz-policy-auditor,openbank-docs-truth-agent,openbank-domestic-payment,openbank-fetch-broker,openbank-flaky-test-hunter,openbank-libs-runtime,openbank-sca-service,openbank-sdd-service'),
+ ('governance-rules',['openbank-libs/governance/rules.yaml'],'readers:openbank-authz-policy-auditor,openbank-docs-truth-agent,openbank-domestic-payment,openbank-fetch-broker,openbank-flaky-test-hunter,openbank-libs-runtime,openbank-regulatory-obligations-watcher,openbank-sca-service,openbank-sdd-service'),
  ('gitops-payments',['openbank-infra/gitops/components/payments/payments-services.yaml'],'readers:openbank-domestic-payment,openbank-mcp-service,openbank-sepa-instant,openbank-settlement-service'),
  ('gitops-no-reader',['openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml'],'empty'),
  ('detekt-config',['config/detekt/detekt.yml'],'full')]

@@ -48,6 +48,7 @@ on:
       - "openbank-libs/governance/domain-taxonomy.json"
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/prompts/**"
+      - "openbank-libs/governance/regulatory-obligations.yaml"
       # The fast-jar build copies this canonical recipe for every Gradle service,
       # including services with no per-module Dockerfile.
       - ".github/workflows/Dockerfile.deploy"

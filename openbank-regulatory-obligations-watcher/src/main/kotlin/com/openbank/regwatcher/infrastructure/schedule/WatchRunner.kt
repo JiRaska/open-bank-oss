@@ -26,7 +26,7 @@ import java.time.Duration
  * gitops Deployment and held equal to the charter by `check-agent-schedule-matches-charter.py`).
  *
  * `suspend fun` on purpose: a plain `@Scheduled` method carries no Vert.x context, and the reactive
- * state store would abort the job silently (rules.yaml: scheduled_methods). `@Startup` so the
+ * state store would abort the job silently (the scheduled_methods governance rule). `@Startup` so the
  * liveness gauge exists from boot rather than from the first (weekly) run.
  *
  * Liveness (ADR-0237) is recorded ONLY when the run read at least one source. A run in which every

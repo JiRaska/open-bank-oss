@@ -14,6 +14,8 @@ quarkus:
     # Reactive client for the app; JDBC URL is for Flyway migrations only.
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_regwatcher}
+      idle-timeout: 5M
+      max-lifetime: 30M
       max-size: 5
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_regwatcher}
@@ -68,6 +70,9 @@ quarkus:
         token: test-only-not-a-secret
 
 openbank:
+  api:
+    # Major matches the served /api/v1 path and openapi.yaml (ADR-0048).
+    version: 1
   regulatory-watcher:
     agent-id: regulatory-obligations-watcher
     # Kill switch (charter limits.kill_switch): set OPENBANK_REGULATORY_WATCHER_ENABLED=false.

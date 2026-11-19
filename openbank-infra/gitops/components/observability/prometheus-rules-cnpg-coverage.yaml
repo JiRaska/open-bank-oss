@@ -415,6 +415,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: regulatory-obligations-watcher
+            cluster: regwatcher-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: release-steward
             cluster: releasesteward-db
             origin: manifest
@@ -802,6 +808,11 @@ spec:
           labels:
             namespace: referral
             cluster: referral-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: regulatory-obligations-watcher
+            cluster: regwatcher-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
