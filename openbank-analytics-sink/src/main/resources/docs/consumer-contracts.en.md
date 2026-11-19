@@ -12,8 +12,10 @@ initial-load page of `GET /api/v1/accounts/active`:
 
 - the row fields the reconcile projection binds (`id`, `accountNumber`,
   `accountType`, `partyId`, `productId`, `currencyCode`, `openedAt`),
-- the `pagination.nextCursor` the page loop follows — a renamed cursor would
-  silently truncate the fleet snapshot after the first page,
+- the `pagination` object of a terminal page (`hasNextPage: false`, no
+  `nextCursor` — the provider omits the cursor on the last page, so this
+  single-row state cannot pin it; a cursor-bearing interaction needs a provider
+  state with more rows than the page limit),
 - the unauthenticated refusal (401, ADR-0279 #3).
 
 The provider replays the contract in account-service's

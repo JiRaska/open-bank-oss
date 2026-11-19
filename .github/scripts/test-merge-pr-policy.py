@@ -399,6 +399,8 @@ class PolicyEvidenceTests(unittest.TestCase):
 
     def test_reviewed_15c3e151_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('15c3e1510c102bdd91e8006e1a04207b1abb83ef')
+    def test_reviewed_0c35ce96_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('0c35ce9601da83a44dd580d42b451e95a6bd1f6a')
 
     def test_branch_spoofing_rejected(self):
         github = PolicyGitHub()
