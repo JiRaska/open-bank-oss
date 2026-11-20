@@ -129,3 +129,5 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 The Treasury cash-flow consumer preserves distinct accepted schedule and fixing revisions in Risk Engine. Existing latest-state reads keep their current behavior. The archive starts with the state captured at migration time.
 
 Planning input captures bind a tied-out Risk Engine snapshot to a curve set from the same date and provenance and to explicitly selected Treasury cash-flow revisions. A later fixing remains available as a separate revision.
+
+Authorized risk staff can record a draft input capture through `POST /api/v1/risk/planning/input-captures` by submitting snapshot, curve set and Treasury revision IDs.
