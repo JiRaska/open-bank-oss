@@ -79,6 +79,21 @@ class ReferencePayloadsTest {
     }
 
     @Test
+    fun `a security takes a valid ISIN and rejects a wrong check digit, case, length and empty`() {
+        val bond = SecurityPayload(
+            "XS0000000017", "Example bond", "ISSUER-1", SecurityType.BOND, "USD",
+            LocalDate.parse("2020-01-01"), LocalDate.parse("2030-01-01"), BigDecimal("1000"),
+            BigDecimal("2.5"), "ANNUAL", "30/360", "FOLLOWING", "TARGET2",
+        )
+        // published example ISINs, expectations written out (not derived from Isin.isValid)
+        bond.copy(isin = "US0378331005").validate()
+        bond.copy(isin = "XS0000000017").validate()
+        listOf("US0378331006", "xs0000000017", "XS000000001", "XS00000000170", "").forEach {
+            invalid { bond.copy(isin = it).validate() }
+        }
+    }
+
+    @Test
     fun `a trading book is FVTPL and cannot be its own parent`() {
         invalid { BookPayload("TB", null, "t", BookPurpose.TRADING_BOOK, Ifrs9Category.AMORTISED_COST).validate() }
         invalid { BookPayload("BB", "BB", "b", BookPurpose.BANKING_BOOK, Ifrs9Category.AMORTISED_COST).validate() }

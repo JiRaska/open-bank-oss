@@ -32,10 +32,15 @@ import org.junit.jupiter.api.extension.ExtendWith
  * Why it matters: [AccountRegistryPage.data] defaults to an empty list and
  * [com.openbank.analytics.infrastructure.reconcile.AccountRegistryPagination] defaults
  * `nextCursor` to null, so a renamed `data` does not fail loudly — the initial load simply
- * projects zero accounts and every downstream reconcile row is missing, quietly. A renamed
- * `nextCursor` stops the page loop after the first page. Both fields are pinned non-trivially
- * here: the row binds `id`, `accountNumber`, `accountType`, `partyId`, `productId`,
- * `currencyCode` and `openedAt`, and the pagination object carries a followable cursor.
+ * projects zero accounts and every downstream reconcile row is missing, quietly. The row is
+ * pinned non-trivially: it binds `id`, `accountNumber`, `accountType`, `partyId`, `productId`,
+ * `currencyCode` and `openedAt`, and the pagination object must be present.
+ *
+ * `nextCursor` is deliberately NOT pinned here. The provider state seeds a single account, so the
+ * page is the last one and account-service omits the cursor (`nextCursor` is null when
+ * `hasNextPage` is false, and the DTO is `NON_NULL`). Requiring it made the provider replay fail
+ * on every run and reddened main. Pinning the cursor needs a provider state with more rows than
+ * the page limit — a separate interaction, not this one.
  *
  * Reuses account-service's existing provider state ("an account owned by a known party exists")
  * so AccountPactFolderProviderVerificationTest serves the 200 leg without provider-side changes;
@@ -74,7 +79,6 @@ class AccountRegistryPactConsumerTest {
                 }
                 o.`object`("pagination") { p ->
                     p.booleanType("hasNextPage", false)
-                    p.stringType("nextCursor", "AAAAAAAAAAAAAAAAAAAAAQ")
                 }
             }.build(),
         )
@@ -110,7 +114,7 @@ class AccountRegistryPactConsumerTest {
 
     @Test
     @PactTestFor(pactMethod = "activeRegistryPagePact")
-    fun `a registry page binds with rows and a cursor the initial load can follow`(mockServer: MockServer) {
+    fun `a registry page binds with rows and a terminal pagination block`(mockServer: MockServer) {
         assertThat(clientDerivedActivePath())
             .describedAs(
                 "AccountRegistryClient's @Path no longer produces the path this pact pins — fix " +
@@ -133,9 +137,10 @@ class AccountRegistryPactConsumerTest {
         val row = page.data.first()
         assertThat(row.accountNumber).isNotBlank()
         assertThat(row.currencyCode).isEqualTo("CZK")
-        // The page loop terminates without a cursor; a renamed `nextCursor` would leave it null
-        // after page one and silently truncate the fleet snapshot.
-        assertThat(page.pagination?.nextCursor).isNotBlank()
+        // A single-row provider state is the last page: hasNextPage=false and no cursor, which is
+        // exactly what the real provider answers (see the class KDoc).
+        assertThat(page.pagination).isNotNull()
+        assertThat(page.pagination?.nextCursor).isNull()
     }
 
     private companion object {

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.11](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.10...mcp-service-v0.17.11) (2026-11-20)
+
+
+### Security
+
+* **mcp-service:** admit customer-realm tokens on a DPoP-bound channel ([#16721](https://github.com/JiRaska/open-bank-oss/issues/16721)) ([1223f79](https://github.com/JiRaska/open-bank-oss/commit/1223f7981e477f48e1c57c911a597c4645009c37))
+
 ## [0.17.10](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.9...mcp-service-v0.17.10) (2026-11-18)
 
 

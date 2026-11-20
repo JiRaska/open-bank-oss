@@ -28,7 +28,9 @@ import com.openbank.mcp.application.protocol.ServerInfo
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
+import com.openbank.mcp.infrastructure.customer.CustomerChannel
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -111,11 +113,43 @@ class McpEndpoint(
     @Inject
     lateinit var toolsCatalog: PolicyFilteredToolCatalog
 
+    /**
+     * Field-injected for the same reason as [metrics]. The customer MCP channel (ADR-0383/0385);
+     * off unless `mcp.customer.enabled`. Plain unit tests that construct this class leave it unset,
+     * which reads as "off".
+     */
+    @Inject
+    lateinit var customerChannel: CustomerChannel
+
+    /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
+    @Inject
+    lateinit var httpRequest: HttpServerRequest
+
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
     private val throttle by lazy { McpThrottleSupport(auditor, metrics, rateLimiter) }
 
     private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
+
+    private val customerBranch by lazy {
+        if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
+        customerChannel.admission?.let { McpCustomerBranch(it, auditor, metrics, rateLimiter) }
+    }
+
+    /**
+     * Refusals decided before any method runs, in order: the customer-channel branch (ADR-0383 D1 /
+     * ADR-0385 D1), then the RFC 8707 audience refusal (#16622). Null means dispatch normally.
+     */
+    private val preDispatch: (String, JsonNode, JsonNode) -> Response? = { method, id, params ->
+        customerBranch?.handle(
+            callerResolver.token,
+            httpRequest.getHeader(AUTHORIZATION_HEADER),
+            httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
+            method,
+            id,
+            params,
+        ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+    }
 
     @POST
     @Suppress("ReturnCount")
@@ -128,13 +162,7 @@ class McpEndpoint(
         // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
         metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
 
-        // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
-        // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
-        // this, because /api/v1/mcp/sessions is called with the operator's own token, whose
-        // audience is not this server.
-        if (callerResolver.presentsForeignAudience()) return audienceRefusal.respond(method, params)
-
-        // Fleet NUL rule (#5913, #16628): refused after the audience check and before dispatch, so
+        // Fleet NUL rule (#5913, #16628): refused before the audience check and the customer branch, so
         // no tool, consent call or audit write ever sees the raw value. The id is echoed only if it
         // is NUL-free.
         if (McpInputBounds.containsNul(body)) {
@@ -150,6 +178,17 @@ class McpEndpoint(
                 )
                 .build()
         }
+
+        // ADR-0383 D1 / ADR-0385 D1: while the customer channel is on, a call with no token gets the
+        // RFC 9728 401 and a customers-realm token is admitted (or refused) on its own branch — it
+        // never reaches the staff audience check, the agent/OBO resolver, or a staff tool.
+        // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
+        // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
+        // this, because /api/v1/mcp/sessions is called with the operator's own token, whose
+        // audience is not this server.
+        // The fleet NUL guard above runs FIRST, for both paths: no branch, refusal or audit sees a
+        // raw U+0000, and no response echoes one (review of #16721).
+        preDispatch(method, id, params)?.let { return it }
 
         val result: Any = when (method) {
             "initialize" -> InitializeResult(
@@ -452,6 +491,9 @@ class McpEndpoint(
     private companion object {
         /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
         const val RATE_LIMITED = -32029
+
+        const val DPOP_HEADER = "DPoP"
+        const val AUTHORIZATION_HEADER = "Authorization"
 
         const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 
