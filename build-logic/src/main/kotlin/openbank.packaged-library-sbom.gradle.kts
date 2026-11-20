@@ -2,25 +2,34 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import groovy.json.JsonOutput
+import org.cyclonedx.Version
+import org.cyclonedx.gradle.CyclonedxAggregateTask
+import org.cyclonedx.gradle.CyclonedxDirectTask
+import org.cyclonedx.model.Component
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
-// CycloneDX 2.x declares its destination as one @OutputDirectory. Give it its own
-// directory so it cannot claim Kover's verify.err or other report producers.
-val cyclonedxBomTask = tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
-    setIncludeConfigs(listOf("runtimeClasspath"))
-    setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
-    setProjectType("application")
-    setSchemaVersion("1.5")
-    setDestination(layout.buildDirectory.dir("reports/cyclonedx").get().asFile)
+// CycloneDX 3.x splits resolution (cyclonedxDirectBom, per project) from the published
+// SBOM (cyclonedxBom, aggregating this project and its subprojects). Both declare
+// per-file outputs; keep them under their own directory and export the exact files.
+tasks.named<CyclonedxDirectTask>("cyclonedxDirectBom") {
+    includeConfigs.set(listOf("runtimeClasspath"))
+    skipConfigs.set(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
+    projectType.set(Component.Type.APPLICATION)
+    schemaVersion.set(Version.VERSION_15)
+}
+val cyclonedxBomTask = tasks.named<CyclonedxAggregateTask>("cyclonedxBom") {
+    projectType.set(Component.Type.APPLICATION)
+    schemaVersion.set(Version.VERSION_15)
+    jsonOutput.set(layout.buildDirectory.file("reports/cyclonedx/bom.json"))
+    xmlOutput.set(layout.buildDirectory.file("reports/cyclonedx/bom.xml"))
 }
 
 // Existing image/release consumers use reports/bom.{json,xml}. Export only those
 // exact files; a Copy task targeting reports/ would reintroduce directory ownership.
 val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     dependsOn(cyclonedxBomTask)
-    inputs.dir(cyclonedxBomTask.flatMap { it.destination }).withPropertyName("sbomDirectory")
-    inputs.property("outputFormat", cyclonedxBomTask.flatMap { it.outputFormat })
-    inputs.property("outputName", cyclonedxBomTask.flatMap { it.outputName })
+    inputs.files(cyclonedxBomTask.map { listOfNotNull(it.jsonOutput.orNull, it.xmlOutput.orNull) })
+        .withPropertyName("sbomFiles")
     outputs.files(layout.buildDirectory.file("reports/bom.json"), layout.buildDirectory.file("reports/bom.xml"))
     onlyIf {
         val producer = cyclonedxBomTask.get()
@@ -29,17 +38,14 @@ val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     }
     doLast {
         val producer = cyclonedxBomTask.get()
-        val formats = when (producer.outputFormat.get()) {
-            "all" -> setOf("json", "xml")
-            else -> setOf(producer.outputFormat.get())
-        }
-        for (format in listOf("json", "xml")) {
+        val sources = mapOf("json" to producer.jsonOutput.orNull, "xml" to producer.xmlOutput.orNull)
+        for ((format, source) in sources) {
             val target = layout.buildDirectory.file("reports/bom.$format").get().asFile
-            if (format in formats) {
-                val source = producer.destination.get().resolve("${producer.outputName.get()}.$format")
-                check(source.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
+            if (source != null) {
+                val file = source.asFile
+                check(file.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
                 target.parentFile.mkdirs()
-                source.copyTo(target, overwrite = true)
+                file.copyTo(target, overwrite = true)
             } else {
                 target.delete()
             }

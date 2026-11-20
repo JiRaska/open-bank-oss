@@ -1,0 +1,68 @@
+{
+  "consumer": {
+    "name": "openbank-context-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the AML case status an assignment is about to anchor to",
+      "providerStates": [
+        {
+          "name": "an AML case exists for the pact party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/aml/cases/2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a"
+      },
+      "response": {
+        "body": {
+          "id": "2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a",
+          "status": "OPEN"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the AML case status with no identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/aml/cases/2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.7"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-aml-service"
+  }
+}

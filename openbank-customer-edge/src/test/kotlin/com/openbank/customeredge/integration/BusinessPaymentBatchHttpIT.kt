@@ -175,7 +175,7 @@ class BusinessPaymentBatchHttpIT {
     private fun batchBody(count: Int): String {
         val items = (1..count).joinToString(",") { index ->
             val itemId = java.util.UUID.nameUUIDFromBytes("batch-$index".toByteArray())
-            """{"itemId":"$itemId","creditorAccountNumber":"123456789","creditorBankCode":"0800","creditorName":"Supplier","amountMinor":125,"currency":"CZK"}"""
+            """{"itemId":"$itemId","creditorAccountNumber":"123456788","creditorBankCode":"0800","creditorName":"Supplier","amountMinor":125,"currency":"CZK"}"""
         }
         return """{"debtorAccountId":"$BATCH_DEBTOR","items":[$items]}"""
     }
