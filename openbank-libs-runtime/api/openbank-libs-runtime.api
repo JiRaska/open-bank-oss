@@ -1903,6 +1903,7 @@ public final class com/openbank/libs/security/InMemoryDpopReplayStore : com/open
 	public fun <init> (II)V
 	public synthetic fun <init> (IIILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public fun firstUse (Ljava/lang/String;Ljava/lang/String;Ljava/time/Duration;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun isUsed (Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	public final fun size ()I
 }
 

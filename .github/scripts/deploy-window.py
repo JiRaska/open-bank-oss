@@ -438,7 +438,35 @@ PRUNE_MARKER = "<!-- deploy-prune -->"
 PRUNE_DATA_RE = re.compile(r"<!-- deploy-prune-data (\[.*?\]) -->", re.S)
 # The only identities whose prune comment is trusted: anyone can comment on a public PR, and a
 # forged marker comment must neither crash the deploy nor reach the PR body or an issue.
-BOT_LOGINS = frozenset({"openbank-gitops-bot[bot]", "openbank-gitops-bot", "app/openbank-gitops-bot"})
+# Only the `[bot]` form: GitHub forbids brackets in user logins, so no human account can carry it.
+# A bare `openbank-gitops-bot` is a registrable USER name and must never be trusted. The author's
+# account type must ALSO be "Bot" (is_trusted_author).
+BOT_LOGINS = frozenset({"openbank-gitops-bot[bot]"})
+BOT_TYPE = "Bot"
+
+
+def is_trusted_author(c: dict) -> bool:
+    """A comment dict carrying `login` and `type` (from .user) written by the deploy App."""
+    return c.get("login") in BOT_LOGINS and c.get("type") == BOT_TYPE
+
+
+def warn_if_untrusted_writer(write_stdout: str, number: int) -> bool:
+    """True when the comment just written was authored by someone the trust filter ignores.
+
+    The default GITHUB_TOKEN authors as github-actions[bot], not the App, so the prune comment
+    would be ignored by drops_from_comments and the dropped-pin watch would see nothing. Reading
+    the author off the write's own response checks the effect rather than guessing the token."""
+    try:
+        user = (json.loads(write_stdout or "{}") or {}).get("user") or {}
+    except ValueError:
+        return False  # unreadable response: say nothing rather than guess
+    if not user or is_trusted_author({"login": user.get("login"), "type": user.get("type")}):
+        return False
+    print(f"::warning::the prune comment on #{number} was authored by {user.get('login')!r}, not the "
+          "deploy App: the GITHUB_TOKEN fallback is in use. Prune comments by github-actions[bot] are "
+          "ignored by the trust filter, so the dropped-pin watch will see nothing for this PR. "
+          "Configure the App token (steps.app_token) for the announce step.", file=sys.stderr)
+    return True
 SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
 SAFE_PATH_RE = re.compile(r"[A-Za-z0-9._/-]+")
 BODY_BEGIN, BODY_END = "<!-- deploy-prune-body:begin -->", "<!-- deploy-prune-body:end -->"
@@ -527,13 +555,13 @@ def announce_prune(repo: str, number: int, stale: list[tuple], fresh: list[tuple
     landed, and a comment that failed must not turn a safe prune into a failed deploy."""
     try:
         got = gh("api", f"repos/{repo}/issues/{number}/comments", "--paginate",
-                 "--jq", ".[] | {id, body, login: .user.login} | tojson")
+                 "--jq", ".[] | {id, body, login: .user.login, type: .user.type} | tojson")
         if got.returncode != 0:
             raise RuntimeError(f"comments unreadable (gh rc {got.returncode})")
         mine = None
         for line in got.stdout.splitlines():
             c = json.loads(line)
-            if PRUNE_MARKER in (c.get("body") or "") and c.get("login") in BOT_LOGINS:
+            if PRUNE_MARKER in (c.get("body") or "") and is_trusted_author(c):
                 mine = c
                 break
         records = merge_records(parse_drop_records(mine["body"]) if mine else [],
@@ -546,6 +574,7 @@ def announce_prune(repo: str, number: int, stale: list[tuple], fresh: list[tuple
                          stdin=text))
         if write.returncode != 0:
             raise RuntimeError(f"comment write refused: {write.stderr.strip()[:200]}")
+        warn_if_untrusted_writer(write.stdout, number)
         view = gh("pr", "view", str(number), "--repo", repo, "--json", "body", "--jq", ".body")
         if view.returncode != 0:
             raise RuntimeError(f"body unreadable (gh rc {view.returncode})")
@@ -1027,22 +1056,23 @@ def self_test() -> int:
         pv = classify_pins(mixed, only_kyc_stale, True)
         BOT = "openbank-gitops-bot[bot]"
         store = {"comments": [], "body": "Built and scanned in this run: kyc, treasury, sepa-instant",
-                 "posts": 0, "patches": 0, "fail": False}
+                 "posts": 0, "patches": 0, "fail": False,
+                 "writer": {"login": "openbank-gitops-bot[bot]", "type": "Bot"}}
 
         def store_gh(*args, stdin=None):
             a_ = list(args)
             if store["fail"]:
                 return subprocess.CompletedProcess(args, 1, "", "boom")
             if a_[:2] == ["api", "-X"] and a_[2] == "POST":
-                store["comments"].append({"id": len(store["comments"]) + 1, "login": BOT,
+                store["comments"].append({"id": len(store["comments"]) + 1, "login": BOT, "type": "Bot",
                                           "body": json.loads(stdin)["body"]})
                 store["posts"] += 1
-                return subprocess.CompletedProcess(args, 0, "", "")
+                return subprocess.CompletedProcess(args, 0, json.dumps({"user": store["writer"]}), "")
             if a_[:2] == ["api", "-X"] and a_[2] == "PATCH" and "/issues/comments/" in a_[3]:
                 cid = int(a_[3].rsplit("/", 1)[-1])
                 store["comments"][cid - 1]["body"] = json.loads(stdin)["body"]
                 store["patches"] += 1
-                return subprocess.CompletedProcess(args, 0, "", "")
+                return subprocess.CompletedProcess(args, 0, json.dumps({"user": store["writer"]}), "")
             if a_[:2] == ["api", "-X"] and a_[2] == "PATCH" and "/pulls/" in a_[3]:
                 store["body"] = json.loads(stdin)["body"]
                 return subprocess.CompletedProcess(args, 0, "", "")
@@ -1107,8 +1137,39 @@ def self_test() -> int:
               announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5000, store_gh)
               and store["posts"] == 1 and store["patches"] == 0 and store["comments"][0]["body"] == forged
               and "openbank-x" not in store["body"] and "@" not in store["body"])
+        # Review nit 1: a USER named like the bot is not the bot; only the Bot-typed [bot] login is.
+        for who, kind, why in (("openbank-gitops-bot", "User", "user-type account with the bare name"),
+                               ("app/openbank-gitops-bot", "User", "user-type app/ spelling"),
+                               ("openbank-gitops-bot", "Bot", "bare name even if typed Bot"),
+                               ("openbank-gitops-bot[bot]", "User", "[bot] login that is not Bot-typed"),
+                               ("openbank-gitops-bot[bot]", None, "[bot] login with no type")):
+            store.update(comments=[{"id": 1, "login": who, "type": kind, "body": forged}], posts=0, patches=0,
+                         body="Built and scanned in this run: kyc")
+            announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5000, store_gh)
+            check(f"trust: {why} is ignored (bot posts its own, never edits it)",
+                  store["posts"] == 1 and store["patches"] == 0 and store["comments"][0]["body"] == forged)
+        store.update(comments=[{"id": 1, "login": BOT, "type": "Bot", "body": forged}], posts=0, patches=0)
+        announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5000, store_gh)
+        check("trust: the Bot-typed [bot] login IS trusted (its comment is edited in place)",
+              store["posts"] == 0 and store["patches"] == 1)
+        # Review nit 2: GITHUB_TOKEN fallback authors as github-actions[bot] -> loud warning.
+        import contextlib
+        import io
+        store.update(comments=[], posts=0, patches=0, writer={"login": "github-actions[bot]", "type": "Bot"})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ok = announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5100, store_gh)
+        check("token fallback: a comment authored by github-actions[bot] warns that the watch will see nothing",
+              ok and "::warning::" in err.getvalue() and "github-actions[bot]" in err.getvalue()
+              and "dropped-pin watch will see nothing" in err.getvalue())
+        store.update(comments=[], posts=0, patches=0, writer={"login": "openbank-gitops-bot[bot]", "type": "Bot"})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5200, store_gh)
+        check("token fallback: the App-authored comment emits no warning", "::warning::" not in err.getvalue())
+        store.update(writer={"login": "openbank-gitops-bot[bot]", "type": "Bot"})
         hostile = PRUNE_MARKER + "<!-- deploy-prune-data [{\"service\": {\"a\": 1}, \"kept\": 1, \"dropped\": 2, \"at\": []}] -->"
-        store.update(comments=[{"id": 1, "login": BOT, "body": hostile}], posts=0, patches=0)
+        store.update(comments=[{"id": 1, "login": BOT, "type": "Bot", "body": hostile}], posts=0, patches=0)
         check("malformed bot-authored data never raises out of announce_prune",
               announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 6000, store_gh) is True)
 
