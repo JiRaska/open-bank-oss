@@ -85,4 +85,55 @@ class RodneCisloTest {
     fun `rejects empty input`() {
         assertThat(RodneCislo.parse("   ")).isInstanceOf(RodneCislo.Invalid::class.java)
     }
+
+    // Never-issued numbers: structurally plausible, but no authority ever assigned them.
+
+    @Test
+    fun `rejects a nine-digit number for a birth year after 1953`() {
+        val r = RodneCislo.parse("600101123")
+        assertThat(r).isInstanceOf(RodneCislo.Invalid::class.java)
+        assertThat((r as RodneCislo.Invalid).reason).contains("before 1954")
+    }
+
+    @Test
+    fun `accepts a nine-digit number for 1953, the last year it was issued`() {
+        assertThat(RodneCislo.isValid("530101123")).isTrue()
+    }
+
+    @Test
+    fun `rejects the remainder-10 quirk for a birth year from 1986`() {
+        val r = RodneCislo.parse("8601010100")
+        assertThat(r).isInstanceOf(RodneCislo.Invalid::class.java)
+        assertThat((r as RodneCislo.Invalid).reason).contains("1985")
+    }
+
+    @Test
+    fun `accepts the remainder-10 quirk for 1985, the last year it was issued`() {
+        assertThat(RodneCislo.isValid("8501010090")).isTrue()
+    }
+
+    @Test
+    fun `rejects the plus-20 month overflow before 2004`() {
+        val r = RodneCislo.parse("0121010010")
+        assertThat(r).isInstanceOf(RodneCislo.Invalid::class.java)
+        assertThat((r as RodneCislo.Invalid).reason).contains("2004")
+    }
+
+    @Test
+    fun `accepts the plus-20 month overflow from 2004`() {
+        val r = RodneCislo.parse("0421010007") as RodneCislo.Parsed
+        assertThat(r.birthdate).isEqualTo(LocalDate.of(2004, 1, 1))
+    }
+
+    @Test
+    fun `rejects a nine-digit number carrying the plus-20 overflow`() {
+        assertThat(RodneCislo.parse("042101000")).isInstanceOf(RodneCislo.Invalid::class.java)
+    }
+
+    @Test
+    fun `rejects non-ASCII digits so the blind index cannot fork`() {
+        // Arabic-Indic digits for 7605060342: Char.isDigit() is true for them
+        val arabic = "7605060342".map { (it - '0' + 0x0660).toChar() }.joinToString("")
+        assertThat(RodneCislo.parse(arabic)).isInstanceOf(RodneCislo.Invalid::class.java)
+    }
 }

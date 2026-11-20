@@ -6,6 +6,7 @@ package com.openbank.account.application.usecase
 
 import com.openbank.libs.domain.account.CzechAccountNumber
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.account.IbanCheckDigits
 import com.openbank.libs.domain.money.CurrencyCode
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -18,7 +19,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
  * mod-97-10 IBAN check digits. The previous implementation emitted a padded `System.nanoTime()`
  * tail with a hard-coded `0000` bank code: it passed the generic IBAN mod-97 test but produced a
  * BBAN that no Czech bank could issue (no mod-11) — i.e. an account that does not exist in the
- * national scheme. Both checks now hold; see [CzechAccountNumber] for the weighting.
+ * national scheme. Both checks now hold; see [CzechAccountNumber] for the weighting. The mod-97
+ * check digits come from the shared [IbanCheckDigits], and [IbanCheckDigits.build] re-validates the
+ * result through [Iban], so a spec fix in libs-domain reaches every generated IBAN.
  *
  * [bankCode] is the 4-digit ČNB-assigned bank identifier (config `openbank.account.bank-code`).
  * The sandbox default is the reserved placeholder `0000`, which is **not** assigned to any real
@@ -37,18 +40,6 @@ class IbanGenerator(
     fun generate(currency: CurrencyCode): Iban {
         val base = CzechAccountNumber.generateBase()
         val bban = CzechAccountNumber.composeBban(bankCode = bankCode, base = base)
-        val checkDigits = calculateCheckDigits(countryCode, bban)
-        return Iban.of("$countryCode$checkDigits$bban")
-    }
-
-    /** ISO 13616 / ISO 7064 mod-97-10: rearrange `bban + country + "00"`, then 98 − (n mod 97). */
-    private fun calculateCheckDigits(countryCode: String, bban: String): String {
-        val rearranged = bban + countryCode + "00"
-        val numeric = rearranged.map { c ->
-            if (c.isDigit()) c.toString() else (c.code - 'A'.code + 10).toString()
-        }.joinToString("")
-        val remainder = numeric.toBigInteger().mod(97.toBigInteger()).toInt()
-        val checkDigits = 98 - remainder
-        return checkDigits.toString().padStart(2, '0')
+        return IbanCheckDigits.build(countryCode, bban)
     }
 }
