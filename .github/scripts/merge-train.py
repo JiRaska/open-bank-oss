@@ -6261,7 +6261,7 @@ def pin_changes(diff: str | None) -> tuple[list[tuple[str, str, str]], str | Non
     def close() -> str | None:
         if len(rem) != len(add):
             return "a hunk does not replace image pins one for one"
-        for r, a in zip(rem, add):
+        for r, a in zip(rem, add, strict=True):
             if (r.group(1), r.group(2)) != (a.group(1), a.group(2)):
                 return f"a pin changes its registry or repository ({r.group(2)} -> {a.group(2)})"
             out.append((a.group(3), a.group(4), a.group(2)))
