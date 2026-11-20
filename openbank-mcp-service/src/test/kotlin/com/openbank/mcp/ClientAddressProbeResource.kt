@@ -24,4 +24,10 @@ class ClientAddressProbeResource {
     @GET
     @Produces(MediaType.TEXT_PLAIN)
     fun key(@Context request: HttpServerRequest): String = resolver.key(request)
+
+    /** What Quarkus' own forwarding made of the peer — proves the XFF assertions are not vacuous. */
+    @GET
+    @Path("/forwarded-remote")
+    @Produces(MediaType.TEXT_PLAIN)
+    fun forwardedRemote(@Context request: HttpServerRequest): String = request.remoteAddress()?.hostAddress().orEmpty()
 }

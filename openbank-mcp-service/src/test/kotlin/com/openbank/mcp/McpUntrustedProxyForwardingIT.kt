@@ -28,14 +28,22 @@ class McpUntrustedProxyForwardingIT {
 
     @Test
     fun `forwarded scheme and host from an untrusted peer are ignored, so the DPoP htu does not match`() {
-        ProxyForwardingSupport.forwardedToolsList("c0ffee00-0000-0000-0000-000000000012").statusCode(401)
+        // Refused by quarkus-oidc's BearerAuthenticationMechanism (measured log: "DPoP proof HTTP request
+        // uri claim https://mcp.test.example/mcp does not match the request HTTP uri http://localhost:…"):
+        // a bare `DPoP` challenge. The customer branch's own refusals always carry resource_metadata,
+        // so this pins WHERE it was refused, not just that it was.
+        val challenge = ProxyForwardingSupport.forwardedToolsList("c0ffee00-0000-0000-0000-000000000012")
+            .statusCode(401).extract().header("WWW-Authenticate")
+        assertThat(challenge).isEqualTo("DPoP")
+        // And the peer was really ignored, not just the host header.
+        assertThat(ProxyForwardingSupport.forwardedRemote("203.0.113.66")).isNotEqualTo("203.0.113.66")
     }
 
     @Test
     fun `a spoofed X-Forwarded-For or edge header from an untrusted peer does not change the audit key`() {
         val direct = ProxyForwardingSupport.addressKey()
         assertThat(ProxyForwardingSupport.addressKey("203.0.113.7")).isEqualTo(direct)
-        assertThat(ProxyForwardingSupport.addressKey(edge = "2001:db8:1:2::a")).isEqualTo(direct)
-        assertThat(ProxyForwardingSupport.addressKey(edge = "198.51.100.9")).isEqualTo(direct)
+        assertThat(ProxyForwardingSupport.addressKey(edge = listOf("2001:db8:1:2::a"))).isEqualTo(direct)
+        assertThat(ProxyForwardingSupport.addressKey(edge = listOf("198.51.100.9"))).isEqualTo(direct)
     }
 }

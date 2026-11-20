@@ -4,54 +4,43 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.mcp
 
-import java.net.Inet6Address
-import java.net.InetAddress
-import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.HexFormat
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
- * The audit-window key for a caller with no token subject (#16847): a hash of the client's
+ * The audit-window key for a caller with no token subject (#16847): a keyed hash of the client's
  * NETWORK, not of its exact address.
  *
- * - IPv4 is keyed by the full address (/32).
+ * - IPv4 is keyed by the full address (/32); IPv4-mapped IPv6 is IPv4 ([IpLiteral]).
  * - IPv6 is keyed by its /64 prefix: one client controls a whole /64, so keying by the full
  *   address would let it rotate addresses and earn one audit row per address.
- * - An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is the IPv4 address it maps.
+ * - HMAC-SHA256 under a key drawn at boot, so the in-memory key is not a dictionary-reversible
+ *   address hash. Keys are only compared within one process lifetime, so a per-boot key suffices.
  *
- * The input is chosen by [ClientAddressResolver] (raw peer, or one edge-set header from a trusted
- * proxy) — never Quarkus' leftmost `X-Forwarded-For`. This function never reads a header.
- *
- * Only an IP literal is accepted — a hostname is never resolved (no DNS on the request path) and
- * keys as [UNKNOWN], as does a null or unparseable address.
+ * The input is chosen by [ClientAddressResolver] — never Quarkus' leftmost `X-Forwarded-For`.
+ * Anything that is not a strict IP literal keys as [UNKNOWN]; nothing here can reach DNS.
  */
 object ClientAddressKey {
     const val UNKNOWN = "ip:unknown"
     private const val IPV6_PREFIX_BYTES = 8
-    private const val OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
-    private val IPV4 = Regex("^($OCTET\\.){3}$OCTET$")
-    private val IPV6 = Regex("^[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*$")
-
-    fun of(address: String?): String {
-        val inet = literal(address) ?: return UNKNOWN
-        val network = if (inet is Inet6Address) {
-            byteArrayOf(V6) + inet.address.copyOf(IPV6_PREFIX_BYTES)
-        } else {
-            byteArrayOf(V4) + inet.address
-        }
-        return "ip:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(network))
-    }
-
-    /**
-     * The address if [address] is an IP literal (brackets and a zone id tolerated), else null. A
-     * string with ':' is parsed by the JDK as an IPv6 literal and never looked up; IPv4 is matched
-     * exactly first, so nothing reaching getByName can trigger DNS.
-     */
-    fun literal(address: String?): InetAddress? {
-        val bare = address?.trim()?.removePrefix("[")?.removeSuffix("]")?.substringBefore('%')
-        if (bare.isNullOrEmpty() || !(IPV4.matches(bare) || IPV6.matches(bare))) return null
-        return runCatching { InetAddress.getByName(bare) }.getOrNull()
-    }
-
+    private const val KEY_BYTES = 32
+    private const val ALGORITHM = "HmacSHA256"
     private const val V4: Byte = 4
     private const val V6: Byte = 6
+    private val bootKey = SecretKeySpec(ByteArray(KEY_BYTES).also(SecureRandom()::nextBytes), ALGORITHM)
+
+    fun of(address: String?): String {
+        val bytes = IpLiteral.parse(address) ?: return UNKNOWN
+        val network = if (bytes.size >
+            V4
+        ) {
+            byteArrayOf(V6) + bytes.copyOf(IPV6_PREFIX_BYTES)
+        } else {
+            byteArrayOf(V4) + bytes
+        }
+        val mac = Mac.getInstance(ALGORITHM).apply { init(bootKey) }
+        return "ip:" + HexFormat.of().formatHex(mac.doFinal(network))
+    }
 }

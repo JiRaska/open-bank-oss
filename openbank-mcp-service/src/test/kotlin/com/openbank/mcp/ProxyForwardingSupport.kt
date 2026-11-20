@@ -59,10 +59,17 @@ object ProxyForwardingSupport {
             .post("/mcp").then()
     }
 
-    fun addressKey(forwardedFor: String? = null, edge: String? = null): String {
+    fun addressKey(forwardedFor: String? = null, edge: List<String> = emptyList()): String =
+        probe("/test-probe/client-address-key", forwardedFor, edge)
+
+    /** `HttpServerRequest.remoteAddress()` after Quarkus' forwarding. */
+    fun forwardedRemote(forwardedFor: String? = null): String =
+        probe("/test-probe/client-address-key/forwarded-remote", forwardedFor, emptyList())
+
+    private fun probe(path: String, forwardedFor: String?, edge: List<String>): String {
         val req = given()
         forwardedFor?.let { req.header("X-Forwarded-For", it) }
-        edge?.let { req.header(EDGE_HEADER, it) }
-        return req.get("/test-probe/client-address-key").then().statusCode(200).extract().asString()
+        edge.forEach { req.header(EDGE_HEADER, it) }
+        return req.get(path).then().statusCode(200).extract().asString()
     }
 }

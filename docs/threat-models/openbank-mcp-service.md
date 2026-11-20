@@ -439,7 +439,9 @@ a stub (T-T2/T-D2).
 
 - **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
   - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
-    edge so the customers tenant's DPoP `htu` check sees the published URL, but with
+    edge because quarkus-oidc's `BearerAuthenticationMechanism` (customers tenant,
+    `authorization-scheme: DPoP`) compares `htu` with `absoluteURI()` — measured; this service's own
+    admission compares with the static published resource, but with
     `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
     then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
     forwarding on and no list (or a trust-all one). Proven by `McpUntrustedProxyForwardingIT`: from
@@ -447,7 +449,8 @@ a stub (T-T2/T-D2).
     mismatch), and a spoofed `X-Forwarded-For` does not change the audit key.
   - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
     value, so one caller's flood could spend every subject-less caller's audit window. It is now
-    keyed by `ClientAddressKey` (IPv4 /32, IPv6 /64 so rotation inside one /64 shares a window) over
+    keyed by `ClientAddressKey` (HMAC under a per-boot key; IPv4 /32, IPv6 /64 so rotation inside one
+    /64 shares a window; strict literal parse; distinct keys capped per minute) over
     the address `ClientAddressResolver` picks: the raw TCP peer, or one edge-set header from a
     trusted peer — never Quarkus' leftmost `X-Forwarded-For`, which an appending edge leaves under
     the client's control (IT: an appended forged entry does not become the key).

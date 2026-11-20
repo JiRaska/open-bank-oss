@@ -7,12 +7,14 @@ quarkus:
       # ADR-0383 D5: bound a request body before it is parsed. Global to this service, which only
       # serves small JSON-RPC and session-control bodies; oversize requests get HTTP 413.
       max-body-size: ${MCP_MAX_BODY_SIZE:64K}
-    # ADR-0383 D5 / #16847: behind the edge, the customers tenant's DPoP check compares the proof
-    # `htu` with the request URL, and the tokenless audit window keys by client address — both need
-    # the EXTERNAL scheme, host and client. Off by default. Quarkus applies these headers ONLY from
-    # `quarkus.http.proxy.trusted-proxies` (deliberately not defined here: set it in the deployment,
-    # QUARKUS_HTTP_PROXY_TRUSTED_PROXIES); ProxyForwardingGuard refuses to boot with forwarding on
-    # and no list, because an unset list makes Quarkus trust forwarded headers from ANY peer.
+    # ADR-0383 D5 / #16847: behind the edge, quarkus-oidc's own DPoP check (enabled for the
+    # customers tenant by `token.authorization-scheme: DPoP`, BearerAuthenticationMechanism) compares
+    # the proof `htu` with HttpServerRequest.absoluteURI() — measured: "DPoP proof HTTP request uri
+    # claim https://… does not match the request HTTP uri http://localhost:…". This service's own
+    # admission checks `htu` against the static published resource; it is the TENANT that needs the
+    # external scheme/host. Off by default. Quarkus applies these headers ONLY from
+    # `quarkus.http.proxy.trusted-proxies` (deliberately not defined here: set it in the deployment);
+    # ProxyForwardingGuard refuses to boot with any forwarding switch on and no narrow literal list.
     proxy:
       proxy-address-forwarding: ${MCP_PROXY_FORWARDING:false}
       allow-x-forwarded: ${MCP_PROXY_FORWARDING:false}
