@@ -185,7 +185,7 @@ labels:
 
   - name: "merge-priority:deploy-fix"
     color: "5319e7"
-    description: "Owner-applied only, 1/day: an auto-deploy gitops PR with green can-i-deploy may claim a main-red contract fix."
+    description: "Owner-only, 1/day: lets a can-i-deploy-green gitops PR fix a main-red contract."
 
   - name: "merge-priority:repair"
     color: "d93f0b"
