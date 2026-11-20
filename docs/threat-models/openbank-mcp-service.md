@@ -484,6 +484,19 @@ a stub (T-T2/T-D2).
   - **Residual:** the value is still in the Kubernetes Secret and in the tmpfs file inside the pod;
     anyone who can read that Secret or exec into the pod can read it (and could read process
     memory anyway).
+  - *Exporter hardening (#16791 security review).* The `redis_exporter` sidecar never holds the
+    store password. It logs in as a dedicated `metrics` ACL user with its own generated password
+    (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT LIST|SETNAME`, `SLOWLOG
+    GET|LEN` and `LATENCY LATEST|HISTOGRAM`, with no key or channel access. Its multi-target
+    `/scrape?target=` endpoint is disabled (`--disable-scrape-endpoint`), so reaching :9121 cannot point
+    the exporter and its credential at another host. `CONFIG GET` is deliberately NOT granted, and the
+    exporter runs `--config-command=-`: measured on 9.1.3, `CONFIG GET requirepass` returns the
+    default user's password in clear to any user allowed `config|get`. Measured as `metrics`: `GET`,
+    `SET`, `DEL`, `FLUSHALL`, `KEYS`, `EVAL`, `CONFIG GET|SET` and `ACL LIST` all answer `NOPERM`,
+    while `redis_up 1` and `redis_memory_max_bytes` are still exported and `/scrape` answers 404.
+    Port 9121 admits only the observability Prometheus pods (`open-bank.tech/metrics-ingress-prometheus-only`,
+    derived by `gen-network-policies.py`), not admin-ui. The same exporter pattern on `copilot-redis`
+    is a fleet follow-up.
   - *Detection.* `MCPValkeyMemoryNearMax` / `MCPValkeyMemoryFull` (redis_exporter sidecar,
     promtool-tested including the cold value) warn before `noeviction` turns a full store into a
     channel-wide 503.

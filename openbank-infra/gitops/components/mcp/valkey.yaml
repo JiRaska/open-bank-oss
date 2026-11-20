@@ -31,6 +31,9 @@ metadata:
     app.kubernetes.io/part-of: mcp-service
   annotations:
     open-bank.tech/same-namespace-ingress-from: mcp-service
+    # The exporter port is reachable only by the Prometheus pods (not admin-ui, not all of
+    # observability) — read by gen-network-policies.py (#16791 security review).
+    open-bank.tech/metrics-ingress-prometheus-only: "true"
 spec:
   replicas: 1
   # Terminate-first, deliberately (#3545). This is a single-writer cache on an emptyDir
@@ -72,6 +75,7 @@ spec:
             - |
               set -eu
               [ -n "${VALKEY_PASSWORD:-}" ] || { echo "VALKEY_PASSWORD empty: refusing to start unauthenticated" >&2; exit 1; }
+              [ -n "${METRICS_PASSWORD:-}" ] || { echo "METRICS_PASSWORD empty: refusing to start" >&2; exit 1; }
               umask 077
               {
                 echo 'save ""'
@@ -80,8 +84,12 @@ spec:
                 echo 'maxmemory 128mb'
                 echo 'maxmemory-policy noeviction'
                 printf 'requirepass "%s"\n' "$VALKEY_PASSWORD"
+                # The exporter's OWN user: read-only server introspection, no key or channel access,
+                # no data or admin commands, and NO `CONFIG GET` (measured: it returns `requirepass` in clear). It
+                # never holds the requirepass/default credential.
+                printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|list +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram\n' "$METRICS_PASSWORD"
               } > /conf/valkey.conf
-              unset VALKEY_PASSWORD
+              unset VALKEY_PASSWORD METRICS_PASSWORD
               exec valkey-server /conf/valkey.conf
           env:
             - name: VALKEY_PASSWORD
@@ -89,6 +97,11 @@ spec:
                 secretKeyRef:
                   name: mcp-customer-store-valkey
                   key: valkey_password
+            - name: METRICS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-customer-store-metrics
+                  key: metrics_password
           ports:
             - name: redis
               containerPort: 6379
@@ -121,17 +134,23 @@ spec:
               cpu: 500m
               memory: 192Mi
         # Memory ratio for MCPValkeyMemoryNearMax (prometheus-rules-mcp-valkey.yaml): the fleet's
-        # redis_exporter sidecar (copilot-redis pattern). Non-alpine tag: multi-arch. The password
-        # comes from env (REDIS_PASSWORD), never argv.
+        # redis_exporter sidecar (copilot-redis pattern). Non-alpine tag: multi-arch. It logs in as the
+        # least-privilege `metrics` ACL user with its own generated password (env, never argv), and its
+        # multi-target endpoint is disabled.
         - name: exporter
           image: docker.io/oliver006/redis_exporter:v1.92.1
-          args: ["--redis.addr=redis://localhost:6379"]
+          # --disable-scrape-endpoint: no multi-target `/scrape?target=` — it would let anything that
+          # reaches :9121 point the exporter, with its credential, at an arbitrary host.
+          # --config-command=-: no CONFIG GET (the metrics user may not run it; maxmemory comes from INFO).
+          args: ["--redis.addr=redis://localhost:6379", "--disable-scrape-endpoint", "--config-command=-"]
           env:
+            - name: REDIS_USER
+              value: metrics
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mcp-customer-store-valkey
-                  key: valkey_password
+                  name: mcp-customer-store-metrics
+                  key: metrics_password
           ports:
             - name: redis-metrics
               containerPort: 9121

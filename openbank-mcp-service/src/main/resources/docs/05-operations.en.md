@@ -99,20 +99,26 @@ ephemeral, so:
 - **Full store:** `--maxmemory 128mb` with `noeviction` makes writes fail rather than evict; the channel
   then answers 503 `replay_store_unavailable`. Never change the policy to an evicting one — eviction
   silently reopens replay.
-- **Secrets:** generated in-cluster, nothing to provision. Two ESO `Password` generators
-  (`refreshPolicy: CreatedOnce`, 48 letters/digits each) feed two Secrets: `mcp-customer-store-valkey`
-  (`valkey_password`) and `mcp-customer-store-hmac` (`key_hmac_secret`). No copy exists outside the
+- **Secrets:** generated in-cluster, nothing to provision. Three ESO `Password` generators
+  (`refreshPolicy: CreatedOnce`, 48 letters/digits each) feed three Secrets: `mcp-customer-store-valkey`
+  (`valkey_password`), `mcp-customer-store-hmac` (`key_hmac_secret`) and `mcp-customer-store-metrics`
+  (`metrics_password`, the exporter's ACL user). No copy exists outside the
   cluster. Until ESO creates them the Valkey pod waits in `CreateContainerConfigError` (by design: it
   never starts unauthenticated) and mcp-service runs with the customer channel off; enabling the
   channel without them refuses to boot.
 - **Auth:** the password is rendered by a shell wrapper into a tmpfs config file (`/conf`, memory
   medium) and removed from the environment before `exec valkey-server`, so it is in neither the
   process arguments (`/proc/1/cmdline`, `crictl inspect`) nor the node's disk.
+- **Exporter:** the `redis_exporter` sidecar uses the `metrics` ACL user (own generated password in
+  `mcp-customer-store-metrics`, introspection commands only, no `CONFIG GET`), its `/scrape`
+  multi-target endpoint is disabled, and port 9121 admits only the Prometheus pods.
 - **Alerts:** `MCPValkeyMemoryNearMax` (> 80% of maxmemory for 5m, warning) and
   `MCPValkeyMemoryFull` (> 95% for 2m, critical) from the redis_exporter sidecar.
 - **Rotation** (customer channel drained):
   - Valkey password: delete Secret `platform/mcp-customer-store-valkey` (ESO regenerates it), then
     restart `mcp-valkey` and every mcp-service pod. The Valkey restart empties the store: live replay
     entries and budgets reset.
+  - Metrics password: delete Secret `platform/mcp-customer-store-metrics`, then restart `mcp-valkey`
+    (same store-emptying effect).
   - Key HMAC secret: delete Secret `platform/mcp-customer-store-hmac`, then restart every mcp-service
     pod. Keys hashed with the old secret are orphaned until they expire (at most a day).
