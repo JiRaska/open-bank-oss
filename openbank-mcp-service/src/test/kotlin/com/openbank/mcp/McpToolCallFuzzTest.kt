@@ -125,6 +125,7 @@ class McpToolCallFuzzTest {
                         "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11",
                     ),
                 ),
+                customerIssuer = java.util.Optional.empty(),
             ),
             mapper = mapper,
             serverName = "openbank-mcp",

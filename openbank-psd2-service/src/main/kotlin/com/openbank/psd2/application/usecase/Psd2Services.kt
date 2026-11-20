@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.application.usecase
 
+import com.openbank.libs.domain.account.CzechPaymentSymbol
 import com.openbank.psd2.application.port.`in`.AccountInformationUseCase
 import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
@@ -47,7 +48,7 @@ class InvalidPaymentProductException(msg: String) : RuntimeException(msg)
 // but the response BODY shapes differ (this service's Berlin Group NextGenPSD2 `tppMessages`
 // array vs libs' generic ApiError envelope), so a TPP client could non-deterministically get
 // either shape depending on which provider JAX-RS happened to pick.
-class Psd2RequestFormatException(msg: String) : RuntimeException(msg)
+class Psd2RequestFormatException(msg: String, cause: Throwable? = null) : RuntimeException(msg, cause)
 
 @ApplicationScoped
 class AccountInformationService(
@@ -202,11 +203,13 @@ class PaymentInitiationService(
 
     override suspend fun initiatePayment(command: InitiatePaymentCommand): PaymentInitiationResponse {
         // Non-HTTP callers must meet the same scheme rule before consent-dependent work.
-        val payment = if (command.product == PaymentProduct.DOMESTIC_CZ) {
+        val schemeChecked: Any = if (command.product == PaymentProduct.DOMESTIC_CZ) {
             DomesticCzCurrency.normalize(command.payment as DomesticCzPayment)
         } else {
             command.payment
         }
+        // The normalised copy is what consent and the transaction call see (validate once, use that).
+        val payment = withNormalisedPaymentSymbols(schemeChecked)
         val valid = consentClient.validateConsent(
             command.consentId,
             command.tppId,
@@ -291,4 +294,25 @@ class PaymentInitiationService(
         is SipoPayment -> payment.debtorAccount.iban
         else -> null
     }
+}
+
+/**
+ * VS/SS are 1-10 ASCII digits and KS 1-4 (libs-domain [CzechPaymentSymbol]; KS matches the
+ * domestic-payment column). Validated and normalised ONCE, and the normalised copy is what the
+ * rest of initiation uses, so the value that passed the check is the value that is forwarded.
+ * Blank is "no symbol": TPPs send "" for an unused field, and that was accepted before this check
+ * existed. Runs before consent, like the CZK rule, so a malformed symbol is a 400.
+ */
+internal fun withNormalisedPaymentSymbols(payment: Any): Any = try {
+    when (payment) {
+        is DomesticCzPayment -> payment.copy(
+            variableSymbol = CzechPaymentSymbol.VARIABLE.normalise(payment.variableSymbol),
+            specificSymbol = CzechPaymentSymbol.SPECIFIC.normalise(payment.specificSymbol),
+            constantSymbol = CzechPaymentSymbol.CONSTANT.normalise(payment.constantSymbol),
+        )
+        is SipoPayment -> payment.copy(variableSymbol = CzechPaymentSymbol.VARIABLE.normalise(payment.variableSymbol))
+        else -> payment
+    }
+} catch (e: IllegalArgumentException) {
+    throw Psd2RequestFormatException(e.message ?: "invalid payment symbol", e)
 }
