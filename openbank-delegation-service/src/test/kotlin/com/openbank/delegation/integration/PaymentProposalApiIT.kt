@@ -272,7 +272,11 @@ class PaymentProposalApiIT {
     fun `a retry is refused once the grant is no longer active`() {
         val id = seedProposal()
         decide(id, "approve", hashOf(id), party).statusCode(200)
-        jdbc().use { it.createStatement().executeUpdate("update delegation_grants set status = 'REVOKED' where grantor_party_id = '$party'") }
+        jdbc().use {
+            it.createStatement().executeUpdate(
+                "update delegation_grants set status = 'REVOKED' where grantor_party_id = '$party'",
+            )
+        }
         decide(id, "approve", hashOf(id), party).statusCode(409)
     }
 
