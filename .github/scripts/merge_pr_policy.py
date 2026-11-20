@@ -109,6 +109,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '1a4024d26828985dd9a620c49b7deac393bc70ed',
     # Independently reviewed canonical first-parent source: #16947.
     'eef9500b378c7630aff90490b68686b4f0f02cf8',
+    # merge-train.py of #16932's fix (a natively merged carrier member at the verified head continues), reviewed with that PR.
+    '0706fa384166e6be506fa7dc5393a3d69906b6ea',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
