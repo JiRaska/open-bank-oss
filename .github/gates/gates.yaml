@@ -764,7 +764,7 @@ gates:
     review_after: "2027-04-30"
     selftest: python3 .github/scripts/check-deploy-pin-branch.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-deploy-pin-branch.py", "openbank-infra/gitops/components/admin-ui/", ".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts/check-deploy-pin-branch.py", "openbank-infra/gitops/components/admin-ui/", "openbank-infra/gitops/components/aml/", "openbank-infra/gitops/components/ledger/", "openbank-infra/gitops/components/pension-fund/", ".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
     run: bash .github/scripts/check-deploy-pin-branch-live.sh
 
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
@@ -1388,7 +1388,7 @@ gates:
       a money-path service.
     review_after: 2027-04-17
     min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
-    budget_seconds: 29
+    budget_seconds: 31   # 31 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
     selftest_expect: pass
     selftest: |
@@ -1586,7 +1586,7 @@ gates:
   - id: alert-rule-hygiene
     name: "new alert rules carry for:, runbook and (statistical) a backtest (enforced)"
     group: gitops
-    budget_seconds: 20
+    budget_seconds: 24   # 24 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     mode: enforced
     rationale: >-
       TrafficDropAnomaly, SpanLatencyTrendAnomaly and NodeDiskWillFillIn4h fired 16, 18 and 66
@@ -2339,7 +2339,7 @@ gates:
     mode: enforced
     rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
     review_after: "2027-05-03"
-    budget_seconds: 380
+    budget_seconds: 439   # 439 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: |
       set -e
       python3 .github/scripts/test-sbom-effective-model-guard.py
@@ -2394,7 +2394,7 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
-    budget_seconds: 180   # a real test suite
+    budget_seconds: 187   # a real test suite; 187 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
@@ -3536,7 +3536,7 @@ gates:
     selftest: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml", ".github/scripts/watch_outcome.py"]
+    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml", ".github/scripts/watch_outcome.py", ".github/scripts/deploy-window.py"]
     run: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --check-declaration
 
@@ -3715,7 +3715,7 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 302   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07; 302 = ceil(1.5 x p95 200.83 s over 30 main runs, gate-runtime-measurements.json)
+    budget_seconds: 495   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 2026-11-07 CI read 199.6 s; 30 main push runs 2026-11-18 04:26Z-13:54Z ranged 182.6-335.9 s on largely the same code (runner variance, no step at #16675), 495 = ceil(1.5 x p95 329.76 s over 30 main runs, gate-runtime-measurements.json)
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
@@ -5594,7 +5594,7 @@ gates:
     selftest_exempt: "is-a-test-suite"
     rationale: "The detect step's logic moved out of services-ci.yml to get headroom under workflow-run-step-size; the self-test keeps the extracted selector falsifiable."
     review_after: "2027-04-23"
-    budget_seconds: 20
+    budget_seconds: 25   # 25 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     min_subjects: 4
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
@@ -6003,7 +6003,28 @@ gates:
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-event-contract-code-agreement.py", ".github/scripts/check-asyncapi-doc-discriminator.py"]
+    # The self-test mutates COPIES of these services' sources and contracts (build() in the script):
+    # a change there can move the fixture anchors, so the self-test must run on that PR, not first on
+    # main (#16599 left this gate UNFALSIFIED on main for 6 h; the reads were baselined, not declared).
+    selftest_inputs:
+      - .github/scripts/check-event-contract-code-agreement.py
+      - .github/scripts/check-asyncapi-doc-discriminator.py
+      - openbank-aml-service/src/main/
+      - openbank-contracts/openbank-aml-service/
+      - openbank-delegation-service/src/main/
+      - openbank-contracts/openbank-delegation-service/
+      - openbank-engagement-service/src/main/
+      - openbank-contracts/openbank-engagement-service/
+      - openbank-fraud-service/src/main/
+      - openbank-contracts/openbank-fraud-service/
+      - openbank-notification-service/src/main/
+      - openbank-contracts/openbank-notification-service/
+      - openbank-product-catalog/src/main/
+      - openbank-contracts/openbank-product-catalog/
+      - openbank-sanctions-service/src/main/
+      - openbank-contracts/openbank-sanctions-service/
+      - openbank-sca-service/src/main/
+      - openbank-contracts/openbank-sca-service/
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
 
@@ -8009,7 +8030,7 @@ gates:
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
-    budget_seconds: 21
+    budget_seconds: 31   # 31 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
     selftest_expect: pass
     selftest_inputs:
@@ -8435,7 +8456,7 @@ gates:
     name: "test cache excludes only source SHA while artifact provenance remains exact"
     group: supplychain
     mode: enforced
-    budget_seconds: 120
+    budget_seconds: 141   # 141 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: python3 .github/scripts/check-test-provenance-cache.py
     selftest: |
       python3 .github/scripts/check-test-provenance-cache.py --self-test

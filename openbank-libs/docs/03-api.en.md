@@ -63,6 +63,21 @@ iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
 
+`Iban.isValid` follows ISO 13616: a country in the SWIFT IBAN registry, that country's exact
+length, check digits 02..98, an `[A-Z0-9]` BBAN and mod-97 == 1. It returns `false` for
+malformed input and never throws.
+
+## identity — RodneCislo
+
+`RodneCislo.parse` returns `Parsed` (canonical form, birthdate, gender) or `Invalid`. It
+rejects numbers that were never issued: the 9-digit form after 1953, the remainder-10 → 0
+checksum quirk after 1985, and the +20/+70 month overflow before 2004.
+
+`parse(raw)` is structure only: it does not reject a birthdate in the future. Callers that accept a
+person use `parse(raw, clock)` (and `isValid(raw, clock)`), passing their injected `Clock`: libs computes
+"today" in `Europe/Prague` itself, because a birth number is a Czech civil date, and returns
+`Invalid("birthdate is in the future")` for a later birthdate.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin
@@ -340,3 +355,9 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 `openbank-build-info.properties` is stamped by `openbank-libs-domain` (next to `BuildInfo`, its reader) from the version catalog. It used to live in the umbrella `openbank-libs` JAR, which services depending directly on domain/runtime do not have, so `/api/v1/info` reported Quarkus/Gradle/libs as `unknown`. No git commit or build time is stamped into `libs-domain` (the JAR stays identical across commits); `buildTime` is therefore `unknown` and the running service's commit comes from `openbank-service-build.properties`. `BuildInfoTest` asserts the values against the catalog, so a missing resource fails the build.
 
 `ServiceInfoResource` automatically returns `toStack()` in the `/api/v1/info` response.
+
+## Identifier primitives (#16748)
+
+- `CurrencyCode.of` rejects ISO 4217 codes withdrawn from circulation (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...) even though `java.util.Currency` still resolves them. `CurrencyCode.isCanonical(code)` answers "is this exact string an active, upper-case code" for validators that store the string.
+- `IbanCheckDigits.compute/build` is the single ISO 7064 MOD 97-10 generator; validation stays in `Iban.isValid`.
+- `CzechPaymentSymbol.VARIABLE|SPECIFIC|CONSTANT` with `isValid` / `normalise`: VS and SS are 1-10 ASCII digits, KS 1-4 (the domestic-payment column limit); blank counts as absent.
