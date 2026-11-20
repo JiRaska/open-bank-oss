@@ -162,9 +162,9 @@ class IdentityRegistrationService(
             )
             return null
         }
-        val parsed = RodneCislo.parse(raw)
+        val parsed = RodneCislo.parse(raw, clock)
         if (parsed !is RodneCislo.Parsed) {
-            Log.warn("IdentityRegistrationService: RČ unparseable — registering without the RČ blind index")
+            Log.warn("IdentityRegistrationService: RČ invalid or future-dated — registering without the RČ blind index")
             return null
         }
         return BlindIndex.compute(pepper.decodeHex(), parsed.canonical)
