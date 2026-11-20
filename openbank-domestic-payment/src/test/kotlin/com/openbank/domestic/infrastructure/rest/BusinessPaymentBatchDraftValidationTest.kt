@@ -19,7 +19,7 @@ class BusinessPaymentBatchDraftValidationTest {
     )
     private val first = BusinessPaymentBatchDraftResource.Item(
         UUID.randomUUID(),
-        "123456789",
+        "123456788",
         "0800",
         "Supplier",
         125,
@@ -74,6 +74,9 @@ class BusinessPaymentBatchDraftValidationTest {
             listOf(first.copy(creditorBankCode = "abcd")),
             listOf(first.copy(creditorAccountNumber = " ".repeat(100) + "123456789")),
             listOf(first.copy(messageForPayee = "x".repeat(141))),
+            // #16748: present and short enough, but no Czech bank can issue it (mod-11 fails).
+            listOf(first.copy(creditorAccountNumber = "1234567890")),
+            listOf(first.copy(creditorAccountNumber = "18-2000145399")),
             listOf(first, first.copy(itemId = UUID.randomUUID(), amountMinor = Long.MAX_VALUE)),
             List(101) { first.copy(itemId = UUID.randomUUID()) },
         )

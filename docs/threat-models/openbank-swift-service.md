@@ -386,3 +386,13 @@ the same rule sepa-payment, domestic-payment and fx-service use.
 **Residual:** MT202 institution transfers (treasury release, BICs only) are not name-screened here.
 Held messages need an operator to act. Rollback: revert the commit. MT103 then releases unscreened
 again, so roll back only together with a compensating hold.
+
+## 2026-11-18 - Released-payment IBANs validated by the shared Iban validator (#16748)
+
+`ReleasedPaymentValidator.isAccount` carried its own mod-97 copy. It now calls
+`com.openbank.libs.domain.account.Iban.isValid`, which also checks the SWIFT registry length per
+country and the 02..98 check-digit range. **Tampering:** a treasury release naming an IBAN that
+passes a bare mod-97 but cannot exist (wrong length for its country, unknown country) is now refused at
+intake instead of reaching an MT202. No new caller, grant or data class. Test:
+`ReleasedPaymentValidatorTest` (impossible-for-country IBAN refused, registry-length boundary
+accepted; red on the old copy). Rollback: revert; the rail returns to the weaker local check.
