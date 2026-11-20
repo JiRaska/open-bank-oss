@@ -22,6 +22,7 @@ import com.openbank.pid.domain.model.VerificationTrigger
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.time.Clock
 import java.util.Optional
 import java.util.UUID
 
@@ -54,6 +55,7 @@ class IdentityResolutionService(
     private val adjudication: IdentityAdjudicationUseCase,
     @ConfigProperty(name = "openbank.pid.birth-number-pepper")
     private val pepperHex: Optional<String>,
+    private val clock: Clock,
 ) : ResolveIdentityUseCase,
     ResolveByIndexUseCase {
 
@@ -111,9 +113,9 @@ class IdentityResolutionService(
      */
     fun computeBlindIndex(birthNumberRaw: String): String? {
         val pepper = pepperHex.orElse("").takeIf { it.isNotBlank() } ?: return null
-        val rc = RodneCislo.parse(birthNumberRaw)
-        if (rc is RodneCislo.Invalid) return null
-        return BlindIndex.compute(pepper.decodeHex(), (rc as RodneCislo.Parsed).canonical)
+        val rc = RodneCislo.parse(birthNumberRaw, clock)
+        if (rc !is RodneCislo.Parsed) return null
+        return BlindIndex.compute(pepper.decodeHex(), rc.canonical)
     }
 
     // ── internal ─────────────────────────────────────────────────────────────────
@@ -140,7 +142,7 @@ class IdentityResolutionService(
             return null
         }
 
-        val rcResult = RodneCislo.parse(raw)
+        val rcResult = RodneCislo.parse(raw, clock)
         if (rcResult is RodneCislo.Invalid) {
             Log.warn(
                 "IdentityResolutionService: RČ parse failed (${rcResult.reason}) — " +
