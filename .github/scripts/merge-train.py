@@ -122,6 +122,29 @@ URGENT_PREEMPT_CONTEXT = "merge-train/urgent-preempted"   # App marker: this hea
 URGENT_DAILY_CAP_DEFAULT = 2       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
 URGENT_CLOCK_CONTEXT = "merge-train/urgent-since"     # App marker: first tick this head outranked the other lanes
 URGENT_DROPPED_CONTEXT = "merge-train/urgent-dropped"  # App marker: this head's urgent priority was dropped
+# Deploy fix claim (#16943). A main red on a provider CONTRACT job can be fixed only by deploying the
+# consumer pair whose pact it verifies: the auto-deploy gitops PR changes image pins under
+# openbank-infra/gitops/, so path-scoped CI never re-runs the contract job on its head and
+# fix_job_evidence reads it `(absent)` forever — the train deadlocks (2026-11-20, #16940). Such a PR may
+# claim the fix slot only when ALL hold, each read from git or the Actions API, never from the PR body:
+# authored by the App; its head branch is auto-deploy's `chore/gitops-auto-deploy-<sha>-run<id>`; every
+# changed line is an image pin under gitops/components whose new tag is built from that <sha>; the run
+# <id> is auto-deploy.yml over main at <sha>, an ancestor of main, and its `can-i-deploy` job (red if
+# ANY service is blocked) succeeded; every job red on main for the context, besides the aggregate
+# itself, is a `(contract)` job; and the OWNER applied DEPLOY_FIX_LABEL today, within a daily cap.
+# The label is the human step, not decoration: a provider job names the provider, not the consumers it
+# verifies, so "these pins fix that job" is not derivable from names, and a push to the bot branch that
+# swaps a digest under the same tag is not visible to these checks. Everything unknown refuses.
+DEPLOY_FIX_LABEL = "merge-priority:deploy-fix"
+DEPLOY_FIX_DAILY_CAP = 1
+AUTO_DEPLOY_WORKFLOW = ".github/workflows/auto-deploy.yml"
+DEPLOY_BRANCH_RE = re.compile(r"chore/gitops-auto-deploy-([0-9a-f]{40})-run([1-9][0-9]{0,19})")
+GITOPS_PIN_PREFIX = "openbank-infra/gitops/components/"
+CONTRACT_JOB_RE = re.compile(r".*\(contract\)")
+# One image pin, sign stripped: (indent, registry/repository, service, tag).
+PIN_LINE_RE = re.compile(r"([ \t]*)image:[ \t]*([A-Za-z0-9.:_-]+/openbank-([a-z0-9-]+)):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}[ \t]*")
+ISO_Z_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+DEPLOY_REQUIRED_JOBS = ("can-i-deploy", "Gitops PR")
 # A picked urgent PR leaves that state within one or two ticks (update-branch, or merge). 60 min is two
 # TRAIN_TURN_S (each two */10 ticks at the measured p90 gap) and covers one carrier in flight finishing; past
 # it the PR is not progressing, and it must not hold the train's and the fast lane's turns any longer.
@@ -1299,7 +1322,7 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     return out
 
 
-def urgent_grant(events, owner: str) -> tuple[str | None, str]:
+def urgent_grant(events, owner: str, label: str = URGENT_LABEL) -> tuple[str | None, str]:
     """(labelled_at, why). The LATEST `labeled` event for URGENT_LABEL decides: only the repo owner may have
     applied it (anyone else re-applying it after the owner takes the grant away). Fail closed: unreadable
     events, no such event, or an event without a timestamp grant nothing."""
@@ -1307,20 +1330,20 @@ def urgent_grant(events, owner: str) -> tuple[str | None, str]:
         return None, "label events unreadable"
     last = None
     for e in events:
-        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL:
+        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label:
             last = e
     if last is None:
-        return None, f"no readable {URGENT_LABEL} label event"
+        return None, f"no readable {label} label event"
     actor = (last.get("actor") or {}).get("login") or ""
     if actor != owner:
-        return None, f"{URGENT_LABEL} applied by {actor or 'unknown'}, not the repo owner {owner}"
+        return None, f"{label} applied by {actor or 'unknown'}, not the repo owner {owner}"
     at = last.get("created_at") or ""
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T.*", at):
         return None, "label event carries no timestamp"
     return at, ""
 
 
-def urgent_grants(events, owner: str, day: str) -> dict[int, str]:
+def urgent_grants(events, owner: str, day: str, label: str = URGENT_LABEL) -> dict[int, str]:
     """{PR: its FIRST owner `labeled merge-priority:urgent` event on UTC `day`} from repository issue events.
     An event is never deleted, so removing the label afterwards does not uncount a grant, and re-applying it
     to the same PR counts once."""
@@ -1328,29 +1351,30 @@ def urgent_grants(events, owner: str, day: str) -> dict[int, str]:
     for e in events or []:
         at = e.get("created_at") or ""
         n = (e.get("issue") or {}).get("number")
-        if (e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL
+        if (e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label
                 and (e.get("actor") or {}).get("login") == owner and at[:10] == day and isinstance(n, int)):
             out[n] = min(out.get(n, at), at)
     return out
 
 
-def urgent_refusal(n: int, events, owner: str, grants: dict | None, cap: int, day: str) -> str | None:
+def urgent_refusal(n: int, events, owner: str, grants: dict | None, cap: int, day: str,
+                   label: str = URGENT_LABEL) -> str | None:
     """Why #n's urgent label grants nothing; None = admitted. The latest label event must be the owner's
     (urgent_grant) and fall on UTC `day`: a grant lasts the day it was made, so yesterday's grants never
     carry over uncounted. `grants` = every PR the owner granted on `day` (urgent_grants over a COMPLETE
     enumeration; None = incomplete -> refused); #n must be among its first `cap` by grant time."""
-    at, why = urgent_grant(events, owner)
+    at, why = urgent_grant(events, owner, label)
     if at is None:
         return why
     if at[:10] != day:
         return f"granted on {at[:10]}, not today ({day}): a grant lasts its UTC day — re-apply to use today's cap"
     if grants is None:
-        return "today's urgent grants could not be enumerated completely"
+        return f"today's {label} grants could not be enumerated completely"
     if n not in grants:
         return "today's grant enumeration does not contain this PR's own grant (incomplete)"
     rank = sorted(grants, key=lambda k: (grants[k], k)).index(n)
     if rank >= cap:
-        return f"daily cap reached ({rank + 1} urgent PRs granted on {day}, cap {cap})"
+        return f"daily cap reached ({rank + 1} PRs granted {label} on {day}, cap {cap})"
     return None
 
 
@@ -2954,6 +2978,38 @@ class GitHub:
             out[name] = v if out.get(name, v) == v else None   # two jobs, one name, disagreeing: not green
         return out or None
 
+    def workflow_run(self, run_id: int) -> dict | None:
+        """The Actions run object (path, head_sha, head_branch), or None when unreadable (callers fail closed)."""
+        code, data = api("GET", f"/repos/{self.repo}/actions/runs/{int(run_id)}")
+        return data if code == 200 and isinstance(data, dict) else None
+
+    def compare_commits(self, base: str, head: str) -> list[dict] | None:
+        """The commits of base...head as {sha, author, committer, verified, date, parents}; None when
+        unreadable or truncated (the compare API lists at most 250)."""
+        code, data = api("GET", f"/repos/{self.repo}/compare/{base}...{head}")
+        if code != 200 or not isinstance(data, dict) or not isinstance(data.get("commits"), list):
+            return None
+        cs = data["commits"]
+        if data.get("total_commits") != len(cs):
+            return None
+        return [{"sha": c.get("sha"), "author": (c.get("author") or {}).get("login"),
+                 "committer": (c.get("committer") or {}).get("login"),
+                 "verified": ((c.get("commit") or {}).get("verification") or {}).get("verified"),
+                 "date": ((c.get("commit") or {}).get("committer") or {}).get("date"),
+                 "parents": len(c.get("parents") or [])} for c in cs if isinstance(c, dict)]
+
+    def run_jobs(self, run_id: int) -> dict[str, str | None] | None:
+        """Latest-attempt job name -> conclusion (None while running) of run `run_id`; None when unreadable
+        or two jobs of one name disagree being indistinguishable is folded to None like ctx_jobs."""
+        out: dict[str, str | None] = {}
+        for j in paginate(f"/repos/{self.repo}/actions/runs/{int(run_id)}/jobs?filter=latest", "jobs"):
+            name = j.get("name") if isinstance(j, dict) else None
+            if not isinstance(name, str):
+                return None
+            v = j.get("conclusion") if j.get("status") == "completed" else None
+            out[name] = v if out.get(name, v) == v else None
+        return out or None
+
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
         """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
         NOT EVALUATED), from the gate runner's own --json artifacts — never from the log. Any read that
@@ -3131,7 +3187,7 @@ class GitHub:
                 return out
         return None   # more than 1000 events: cannot be read whole, so it is not read at all
 
-    def urgent_grants_today(self, day: str, owner: str) -> dict[int, str] | None:
+    def urgent_grants_today(self, day: str, owner: str, label: str = URGENT_LABEL) -> dict[int, str] | None:
         """urgent_grants over the repository's issue events for UTC `day`, newest first. Authoritative: an
         event exists the moment the label is applied (no search index), and a removed label leaves its
         `labeled` event in place. Complete once a page reaches before `day` or the stream ends; None when a
@@ -3144,7 +3200,7 @@ class GitHub:
                 return None
             seen += data
             if len(data) < 100 or any((e.get("created_at") or "9")[:10] < day for e in data):
-                return urgent_grants(seen, owner, day)
+                return urgent_grants(seen, owner, day, label)
         log(f"::warning::{URGENT_EVENT_PAGES} event pages do not reach back to {day} — no PR admitted as urgent")
         return None
 
@@ -3247,7 +3303,7 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
     return {"number": p["number"], "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
             "same_repo": (p["head"].get("repo") or {}).get("full_name") == repo, "head_ref": p["head"]["ref"],
             "head_sha": p["head"]["sha"], "created_at": p.get("created_at", ""), "title": p.get("title", ""),
-            "body": p.get("body") or "", "files": files,
+            "body": p.get("body") or "", "files": files, "author": (p.get("user") or {}).get("login"),
             "labels": [lb.get("name") if isinstance(lb, dict) else lb for lb in p.get("labels") or []]}
 
 
@@ -4490,6 +4546,164 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     unreadable age holds (today's behaviour); a carrier past the bound releases the strict lane."""
     age = carrier_age_s(p, now)
     return age is None or age <= CARRIER_PRIORITY_S
+
+
+def selftest_deploy_fix(check) -> None:
+    """#16943: an App-authored auto-deploy PR may claim a main-red CONTRACT context only on the full
+    evidence of deploy_fix_refusal. Built on the real #16940 shape (two image pins, run 44740185064, one
+    App commit committed by web-flow, main red on a libs-runtime contract job), then every must-FAIL
+    case, then the live path (claim_evidence -> deploy_fix_claim) over a stubbed GitHub and git."""
+    AG, CJ = "all-green", "build (openbank-libs-runtime) / openbank-libs-runtime (contract)"
+    src, run_id, day = "730965564a4ff9706b4817238ded37e367281c25", 44740185064, "2026-11-20"
+    reg = "registry.example"
+    pin = lambda sign, svc, tag, c, r=reg: f"{sign}          image: {r}/openbank-{svc}:{tag}@sha256:{c * 64}"
+    files = ["openbank-infra/gitops/components/customer-edge/customer-edge.yaml",
+             "openbank-infra/gitops/components/payments/payments-services.yaml"]
+    entries = [("M", "100644", "100644", f) for f in files]
+    def block(f, hunks):
+        out = [f"diff --git a/{f} b/{f}", "index 1111111..2222222 100644", f"--- a/{f}", f"+++ b/{f}"]
+        for h in hunks:
+            out += ["@@ -1 +1 @@"] + h
+        return out
+    ce = [pin("-", "customer-edge", "sandbox-abaa92c7", "3"), pin("+", "customer-edge", "sandbox-73096556", "0")]
+    dp = [pin("-", "domestic-payment", "sandbox-7e9d36e9", "7"), pin("+", "domestic-payment", "sandbox-73096556", "1")]
+    mk = lambda ce_h=ce, dp_h=dp, extra=(): "\n".join(block(files[0], [ce_h]) + block(files[1], [dp_h]) + list(extra))
+    diff = mk()
+    head = "5a25b16b195fa1f74c5720b597437e392ccd71f7"
+    view = {"number": 16940, "author": BOT_LOGIN, "head_sha": head,
+            "head_ref": f"chore/gitops-auto-deploy-{src}-run{run_id}", "labels": ["chore", "gitops", DEPLOY_FIX_LABEL]}
+    main_jobs = {CJ: "failure", AG: "failure", "build (openbank-x)": "success"}
+    run = {"id": run_id, "path": AUTO_DEPLOY_WORKFLOW, "head_sha": src, "head_branch": "main"}
+    run_jobs = {"Detect changed services": "success", "Build + push": "success", "can-i-deploy": "success",
+                "Gitops PR": "success", "Push failures": "skipped"}
+    bot_commit = {"sha": head, "author": BOT_LOGIN, "committer": "web-flow", "verified": True,
+                  "date": f"{day}T13:07:43Z", "parents": 1}
+    label_at = f"{day}T13:30:00Z"
+    base = dict(view=view, ctx=AG, main_jobs=main_jobs, entries=entries, diff=diff, run=run, run_jobs=run_jobs,
+                src_on_main=True, label_why=None, commits=[bot_commit], label_at=label_at)
+    got = deploy_fix_refusal(**base)
+    check("deploy fix: the real #16940 shape is admitted", got is None, str(got))
+    update_merge = {**bot_commit, "sha": "c" * 40, "date": f"{day}T14:00:00Z", "parents": 2}
+    got = deploy_fix_refusal(**{**base, "commits": [bot_commit, update_merge]})
+    check("deploy fix: the train's own update-branch merge after the label still admits", got is None, str(got))
+    human = {**bot_commit, "sha": "d" * 40, "author": "JiRaska", "committer": "JiRaska", "date": f"{day}T14:00:00Z"}
+    for label, change, want in [
+        ("a non-bot author", {"view": {**view, "author": "JiRaska"}}, "is not"),
+        ("an unknown author", {"view": {k: v for k, v in view.items() if k != "author"}}, "is not"),
+        ("a branch that is not auto-deploy's", {"view": {**view, "head_ref": "agent/pins"}}, "not an auto-deploy"),
+        ("an extra file outside gitops", {"entries": entries + [("M", "100644", "100644", ".github/scripts/merge-train.py")]},
+         "not a gitops image-pin file"),
+        ("an extra non-yaml gitops file", {"entries": entries + [("M", "100644", "100644", "openbank-infra/gitops/components/x/run.sh")]},
+         "not a gitops"),
+        ("a new file", {"entries": entries + [("A", "000000", "100644", "openbank-infra/gitops/components/x/new.yaml")]}, "plain modification"),
+        ("a deleted file", {"entries": [("D", "100644", "000000", files[0]), entries[1]]}, "plain modification"),
+        ("a renamed file", {"entries": [("R100", "100644", "100644", files[0]), entries[1]]}, "plain modification"),
+        ("a mode change", {"entries": [("M", "100644", "100755", files[0]), entries[1]]}, "plain modification"),
+        ("a new-file header in the diff", {"diff": mk(extra=block("openbank-infra/gitops/components/x/n.yaml", [])[:1]
+                                                        + ["new file mode 100644"])}, "plain modification"),
+        ("an extra non-pin line in a gitops file", {"diff": mk(ce_h=ce + ["+          replicas: 3"])}, "not an image pin"),
+        ("an added `++evil: true` line", {"diff": mk(ce_h=[ce[0], "+++evil: true", ce[1]])}, "not an image pin"),
+        ("a removed `---` YAML separator", {"diff": mk(ce_h=[ce[0], "----", ce[1]])}, "not an image pin"),
+        ("a pin moved to a foreign registry host",
+         {"diff": mk(ce_h=[ce[0], pin("+", "customer-edge", "sandbox-73096556", "0", "evil.example")])}, "registry or repository"),
+        ("an unreadable diff", {"diff": None}, "unreadable"),
+        ("unreadable files", {"entries": None}, "unreadable"),
+        ("a pin not built from the run's source (carried)",
+         {"diff": mk(dp_h=[dp[0], pin("+", "domestic-payment", "sandbox-deadbeef", "1")])}, "not built from"),
+        ("a pin added for a service it did not remove",
+         {"diff": mk(dp_h=[dp[0], pin("+", "ledger", "sandbox-73096556", "1")])}, "registry or repository"),
+        ("a human commit pushed after the label", {"commits": [bot_commit, human]}, "not the App's verified commit"),
+        ("an unverified App-authored commit", {"commits": [{**bot_commit, "verified": False}]}, "not the App's verified"),
+        ("an App-authored commit committed by a human", {"commits": [{**bot_commit, "committer": "JiRaska"}]}, "not the App's"),
+        ("unreadable commits", {"commits": None}, "unreadable"),
+        ("a label applied before the last push", {"label_at": f"{day}T13:00:00Z"}, "before the last commit"),
+        ("an unreadable label time", {"label_at": None}, "unreadable"),
+        ("a missing can-i-deploy job", {"run_jobs": {k: v for k, v in run_jobs.items() if k != "can-i-deploy"}}, "can-i-deploy"),
+        ("a failed can-i-deploy job", {"run_jobs": {**run_jobs, "can-i-deploy": "failure"}}, "can-i-deploy"),
+        ("a can-i-deploy still running", {"run_jobs": {**run_jobs, "can-i-deploy": None}}, "can-i-deploy"),
+        ("unreadable run jobs", {"run_jobs": None}, "can-i-deploy"),
+        ("an unreadable run", {"run": None}, "unreadable"),
+        ("a run of another workflow", {"run": {**run, "path": ".github/workflows/ci.yml"}}, "is not"),
+        ("a run over another commit", {"run": {**run, "head_sha": "f" * 40}}, "is not"),
+        ("a run over another branch", {"run": {**run, "head_branch": "agent/x"}}, "is not"),
+        ("a run id that does not match the branch", {"run": {**run, "id": run_id + 1}}, "is not"),
+        ("a source not on main", {"src_on_main": False}, "not on main"),
+        ("main red on an unrelated, non-contract job (unrelated service)",
+         {"main_jobs": {**main_jobs, "build (openbank-ledger-service)": "failure"}}, "not a contract job"),
+        ("main red only on the aggregate", {"main_jobs": {AG: "failure", CJ: "success"}}, "no failed job"),
+        ("no job record for main", {"main_jobs": None}, "no job record"),
+        ("a missing or refused owner label", {"label_why": f"no readable {DEPLOY_FIX_LABEL} label event"}, "label"),
+    ]:
+        got = deploy_fix_refusal(**{**base, **change})
+        check(f"deploy fix must FAIL: {label}", got is not None and want in got, str(got))
+
+    # Live path: claim_evidence over a stub GitHub/git. The job rule refuses (the contract job is absent
+    # on the head), the deploy path admits — and refuses again without the label or without its grant.
+    class G:
+        repo = "JiRaska/open-bank-oss"
+        def __init__(self, events, grants, cid="success", commits=(bot_commit,)):
+            self.events, self.grants, self.cid, self.commits = events, grants, cid, list(commits)
+        def ctx_jobs(self, sha, ctx):
+            return main_jobs if sha == "m" * 40 else {AG: "success"}
+        def workflow_run(self, rid):
+            return run if rid == run_id else None
+        def run_jobs(self, rid):
+            return {**run_jobs, "can-i-deploy": self.cid} if rid == run_id else None
+        def compare_commits(self, mb, h):
+            return self.commits if (mb, h) == (src, head) else None
+        def issue_events(self, n):
+            return self.events
+        def urgent_grants_today(self, d, owner, label=URGENT_LABEL):
+            return self.grants if label == DEPLOY_FIX_LABEL else {}
+
+    class R:
+        def __init__(self, out="", rc=0):
+            self.stdout, self.returncode = out, rc
+    raw = "".join(f":100644 100644 {'a' * 7} {'b' * 7} M\0{f}\0" for f in files)
+    def git(*args, check=True):
+        if args[0] == "diff" and "--raw" in args:
+            return R(raw)
+        if args[0] == "diff":
+            return R(diff)
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            return R("", 0 if args[2] == src else 1)
+        if args[0] == "merge-base":
+            return R(src + "\n")
+        return R("", 1)
+    owner_ev = [{"event": "labeled", "label": {"name": DEPLOY_FIX_LABEL}, "actor": {"login": "JiRaska"},
+                 "created_at": label_at}]
+    grant = {16940: label_at}
+    now = datetime.datetime(2026, 11, 20, 15, tzinfo=datetime.timezone.utc).timestamp()
+    def live(gh, v=view):
+        cache: dict = {}
+        why = fix_evidence(gh, git, "b" * 40, AG, "m" * 40, v["head_sha"], cache)
+        d = deploy_fix_claim(gh, git, "b" * 40, AG, "m" * 40, v, cache, now=now)
+        return why, d
+    why, d = live(G(owner_ev, grant))
+    check("deploy fix live: the job rule alone refuses #16940 (the deadlock)", why is not None and "absent" in why, str(why))
+    check("deploy fix live: the owner-labelled #16940 shape is admitted", d is None, str(d))
+    _w, d = live(G([{**owner_ev[0], "actor": {"login": "some-agent"}}], {}))
+    check("deploy fix live must FAIL: label applied by someone other than the owner", d is not None and "not the repo owner" in d, str(d))
+    _w, d = live(G(owner_ev, {1: f"{day}T09:00:00Z", **grant}))
+    check("deploy fix live must FAIL: over the daily cap", d is not None and "daily cap" in d, str(d))
+    _w, d = live(G(owner_ev, None))
+    check("deploy fix live must FAIL: grants not enumerable", d is not None and "enumerated" in d, str(d))
+    _w, d = live(G(owner_ev, grant, cid="failure"))
+    check("deploy fix live must FAIL: can-i-deploy failed in the run", d is not None and "can-i-deploy" in d, str(d))
+    _w, d = live(G(owner_ev, grant, commits=[bot_commit, human]))
+    check("deploy fix live must FAIL: a human commit pushed after the label", d is not None and "verified commit" in d, str(d))
+    _w, d = live(G(owner_ev, grant, commits=[{**bot_commit, "date": f"{day}T14:00:00Z"}]))
+    check("deploy fix live must FAIL: the label predates the last push", d is not None and "before the last commit" in d, str(d))
+    d = deploy_fix_claim(G(owner_ev, grant), git, "b" * 40, AG, "m" * 40, {**view, "labels": ["chore", "gitops"]}, {}, now=now)
+    check("deploy fix live must FAIL: no label", d is not None and DEPLOY_FIX_LABEL in d, str(d))
+    gh = G(owner_ev, grant)
+    cache: dict = {}
+    check("deploy fix live: claim_evidence admits and records a job-level strength",
+          claim_evidence(gh, git, "b" * 40, AG, "m" * 40, view, cache) is None
+          and cache.get((FIX_STRENGTH_KEY, view["head_sha"], AG), (0,))[0] == FIX_JOB_LEVEL)
+    w = claim_evidence(gh, git, "b" * 40, AG, "m" * 40, {**view, "author": "JiRaska"}, {})
+    check("deploy fix live must FAIL: claim_evidence keeps the job-rule refusal for a non-bot author",
+          w is not None and "deploy fix" not in w, str(w))
 
 
 def selftest_skip_fix_self_test(check) -> None:
@@ -6031,6 +6245,189 @@ def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[st
     return f"did not run green on the head: {', '.join(missing)}" if missing else None
 
 
+def pin_changes(diff: str | None) -> tuple[list[tuple[str, str, str]], str | None]:
+    """([(service, new tag, new ref)], why-not) of a `git diff -U0` text. Parsed by structure, never by
+    line prefix: a file block's header runs from `diff --git` to its first `@@`, and only `index`,
+    `--- a/` and `+++ b/` may appear there (a new, deleted, renamed, copied, mode-changed or binary file
+    refuses). Inside a hunk every `-`/`+` line is CONTENT — an added `++x` or a removed `---` YAML
+    separator is a changed line like any other, and must be an image pin. Each hunk must replace pins
+    one for one, and a new pin must keep the replaced line's indentation and exact registry/repository:
+    only the tag and digest may change."""
+    if diff is None:
+        return [], "diff unreadable"
+    out: list[tuple[str, str, str]] = []
+    state, rem, add = "none", [], []
+
+    def close() -> str | None:
+        if len(rem) != len(add):
+            return "a hunk does not replace image pins one for one"
+        for r, a in zip(rem, add, strict=True):
+            if (r.group(1), r.group(2)) != (a.group(1), a.group(2)):
+                return f"a pin changes its registry or repository ({r.group(2)} -> {a.group(2)})"
+            out.append((a.group(3), a.group(4), a.group(2)))
+        rem.clear()
+        add.clear()
+        return None
+
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            why = close()
+            if why:
+                return [], why
+            state = "header"
+            continue
+        if state == "header":
+            if line.startswith("@@ "):
+                state = "hunk"
+            elif not (line.startswith("index ") or line.startswith("--- a/") or line.startswith("+++ b/")):
+                return [], f"not a plain modification of an existing file: {line[:60]!r}"
+            continue
+        if state != "hunk":
+            return [], f"unparseable diff line: {line[:60]!r}"
+        if line.startswith("@@ "):
+            why = close()
+            if why:
+                return [], why
+            continue
+        if line.startswith("\\"):
+            continue   # "\ No newline at end of file"
+        if not line.startswith(("+", "-")):
+            return [], f"unexpected diff line: {line[:60]!r}"
+        m = PIN_LINE_RE.fullmatch(line[1:])
+        if not m:
+            return [], f"changes a line that is not an image pin: {line[:60]!r}"
+        (add if line[0] == "+" else rem).append(m)
+    why = close()
+    if why:
+        return [], why
+    if not out:
+        return [], "changes no image pin"
+    return out, None
+
+
+def deploy_fix_refusal(view: dict, ctx: str, main_jobs: dict[str, str | None] | None,
+                       entries: list[tuple[str, str, str, str]] | None, diff: str | None, run: dict | None,
+                       run_jobs: dict[str, str | None] | None, src_on_main: bool, label_why: str | None,
+                       commits: list[dict] | None = None, label_at: str | None = None) -> str | None:
+    """Why `view` may NOT claim the fix slot for `ctx` as an auto-deploy gitops PR (see DEPLOY_FIX_LABEL),
+    or None when it may. Pure: every input was read by deploy_fix_claim from git or the API. `entries` are
+    (status, old mode, new mode, path) of base...head; `commits` the head's commits since the merge-base
+    (GitHub.compare_commits); `label_at` the owner's latest label event time.
+
+    Trust anchor: the run publishes its built digests nowhere this script can read, so the pins are not
+    cross-checked against the build. What ties the pins to the run is that every commit is the App's —
+    authored by it and committed by it or by GitHub on its behalf (`web-flow`, which is how the API
+    commits of auto-deploy and the train's own update-branch merges are committed), with a signature
+    GitHub verified — and that the owner's label is newer than every non-merge commit, so a push after
+    the label withdraws the grant."""
+    if view.get("author") != BOT_LOGIN:
+        return f"author {view.get('author') or 'unknown'} is not {BOT_LOGIN}"
+    m = DEPLOY_BRANCH_RE.fullmatch(view.get("head_ref") or "")
+    if not m:
+        return "head branch is not an auto-deploy gitops branch"
+    src, run_id = m.group(1), int(m.group(2))
+    if not entries:
+        return "changed files unreadable"
+    for status, old_mode, new_mode, path in entries:
+        if status != "M" or old_mode != "100644" or new_mode != "100644":
+            return f"{path}: {status} {old_mode}->{new_mode} is not a plain modification of a regular file"
+        if unsafe_path(path) or not path.startswith(GITOPS_PIN_PREFIX) or not path.endswith(".yaml"):
+            return f"changes {path}, not a gitops image-pin file"
+    pins, why = pin_changes(diff)
+    if why:
+        return why
+    stale = [f"{s}:{t}" for s, t, _r in pins if not t.endswith(f"-{src[:8]}")]
+    if stale:
+        return f"pin {stale[0]} was not built from the run's source {src[:12]} (a carried or foreign pin)"
+    if not commits:
+        return "the head's commits are unreadable"
+    for c in commits:
+        if not (c.get("author") == BOT_LOGIN and c.get("committer") in (BOT_LOGIN, "web-flow") and c.get("verified") is True):
+            return (f"commit {str(c.get('sha'))[:12]} is not the App's verified commit "
+                    f"(author {c.get('author')}, committer {c.get('committer')}, verified {c.get('verified')})")
+    if not isinstance(run, dict):
+        return f"auto-deploy run {run_id} unreadable"
+    if (run.get("id") != run_id or run.get("path") != AUTO_DEPLOY_WORKFLOW or run.get("head_sha") != src
+            or run.get("head_branch") != "main"):
+        return f"run {run_id} is not {AUTO_DEPLOY_WORKFLOW} over main at {src[:12]}"
+    if not src_on_main:
+        return f"the run's source {src[:12]} is not on main"
+    missing = [j for j in DEPLOY_REQUIRED_JOBS if (run_jobs or {}).get(j) != "success"]
+    if missing:
+        return f"run {run_id} job `{missing[0]}` did not succeed ({(run_jobs or {}).get(missing[0]) or 'absent'})"
+    if not main_jobs:
+        return "no job record for main's red run"
+    failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK and n != ctx)
+    if not failed:
+        return "main's red run names no failed job besides the aggregate"
+    other = [n for n in failed if not CONTRACT_JOB_RE.fullmatch(n)]
+    if other:
+        return f"main is red on `{other[0]}`, not a contract job: a deploy cannot fix it"
+    if label_why:
+        return label_why
+    pushed = [str(c.get("date") or "") for c in commits if c.get("parents") != 2]
+    if not label_at or not pushed or any(not ISO_Z_RE.fullmatch(d) for d in pushed + [label_at]):
+        return "label or commit times unreadable"
+    if label_at <= max(pushed):
+        return f"{DEPLOY_FIX_LABEL} was applied ({label_at}) before the last commit ({max(pushed)}): re-apply it"
+    return None
+
+
+def deploy_fix_claim(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None,
+                     now: float | None = None) -> str | None:
+    """None = `view`'s head claims `ctx` as an auto-deploy fix (deploy_fix_refusal). The cheap refusals
+    (author, label, branch) cost no API read; the rest is read once per head and context per tick."""
+    if view.get("author") != BOT_LOGIN:
+        return deploy_fix_refusal(view, ctx, None, None, None, None, None, False, None)
+    if DEPLOY_FIX_LABEL not in (view.get("labels") or []):
+        return f"no {DEPLOY_FIX_LABEL} label"
+    m = DEPLOY_BRANCH_RE.fullmatch(view.get("head_ref") or "")
+    head = view.get("head_sha") or ""
+    if not m or not SHA_RE.fullmatch(head):
+        return deploy_fix_refusal({**view, "head_ref": ""}, ctx, None, None, None, None, None, False, None)
+    key = ("deploy_fix", view.get("number"), head, ctx, main_commit)
+    if cache is not None and key in cache:
+        return cache[key]
+    src, run_id = m.group(1), int(m.group(2))
+    r = git("diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--no-textconv", f"{base}...{head}", check=False)
+    diff = r.stdout if r.returncode == 0 else None
+    entries = [(c.status, c.old_mode, c.new_mode, p) for c in changed_entries(git, f"{base}...{head}") for p in c.paths]
+    src_on_main = git("merge-base", "--is-ancestor", src, base, check=False).returncode == 0
+    mb = git("merge-base", base, head, check=False).stdout.strip()
+    commits = gh.compare_commits(mb, head) if SHA_RE.fullmatch(mb) else None
+    owner = (getattr(gh, "repo", "") or "").split("/", 1)[0]
+    day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if now is None else now))
+    n = view.get("number")
+    label_why, label_at = "repository owner or PR number unknown", None
+    if owner and isinstance(n, int):
+        events = gh.issue_events(n)
+        label_at, _ = urgent_grant(events, owner, DEPLOY_FIX_LABEL)
+        label_why = urgent_refusal(n, events, owner, gh.urgent_grants_today(day, owner, DEPLOY_FIX_LABEL),
+                                   DEPLOY_FIX_DAILY_CAP, day, label=DEPLOY_FIX_LABEL)
+    why = deploy_fix_refusal(view, ctx, cached_ctx_jobs(gh, main_commit, ctx, cache), entries, diff,
+                             gh.workflow_run(run_id), gh.run_jobs(run_id), src_on_main, label_why, commits, label_at)
+    if cache is not None:
+        cache[key] = why
+    return why
+
+
+def claim_evidence(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None) -> str | None:
+    """fix_evidence, or — for an App-authored auto-deploy PR only — the deploy fix claim (#16943). The
+    deploy path is consulted only after the job rule refused, and its refusal is appended to that reason
+    when the PR carries the label, so a refused deploy fix says why."""
+    head = view["head_sha"]
+    why = fix_evidence(gh, git, base, ctx, main_commit, head, cache)
+    if not why or view.get("author") != BOT_LOGIN or DEPLOY_FIX_LABEL not in (view.get("labels") or []):
+        return why
+    dwhy = deploy_fix_claim(gh, git, base, ctx, main_commit, view, cache)
+    if dwhy:
+        return f"{why}; deploy fix refused: {dwhy}"
+    if cache is not None:
+        cache[(FIX_STRENGTH_KEY, head, ctx)] = (FIX_JOB_LEVEL, "deploy fix (can-i-deploy passed, owner-labelled)")
+    log(f"#{view.get('number', 0):>6} deploy fix for {ctx}: auto-deploy pins, can-i-deploy green, {DEPLOY_FIX_LABEL}")
+    return None
+
+
 def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
     """Record why a green strict PR was refused as a main-red fix: settle copies the slot into
     summary["not_fix"], so a real fix refused (a renamed or restructured job) is visible to a human."""
@@ -6201,7 +6598,7 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
-        why = fix_evidence(gh, git, base, ctx, at_base[0], view["head_sha"], cache)
+        why = claim_evidence(gh, git, base, ctx, at_base[0], view, cache)
         if why:
             note_not_fix(cache if record else None, view, f"{ctx} {why}")
             continue
@@ -6261,7 +6658,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
         mb = git("merge-base", claim_from, base, check=False).stdout.strip()
         for c in claimed:
             at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
-            why = (fix_evidence(gh, git, base, c, at_base[0], head, cache)
+            why = (claim_evidence(gh, git, base, c, at_base[0], {**view, "head_sha": head}, cache)
                    if at_base else "no main verdict at the claim's base")
             if why:
                 note_not_fix(cache, view, f"combined head: {c} {why}")
@@ -8191,6 +8588,7 @@ def self_test() -> int:
     fix_preempts_strict_self_test(check)
     urgent_strict_self_test(check)
     selftest_skip_fix_self_test(check)
+    selftest_deploy_fix(check)
     gate_level_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
