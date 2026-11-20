@@ -44,37 +44,138 @@ CREDENTIAL_VALUES = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-[A-Za-z
 
 
 # ------------------------------------------------------------------------------- registry parse
+def kotlin_tokens(text: str) -> list[str]:
+    """Shield strings/comments before examining delimiters; never evaluate Kotlin."""
+    tokens = []
+    i = 0
+    while i < len(text):
+        if text[i].isspace():
+            i += 1
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end + 1
+        elif text.startswith("/*", i):
+            depth, i = 1, i + 2
+            while depth and i < len(text):
+                if text.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif text.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+            if depth:
+                raise ValueError("unterminated Kotlin comment")
+        elif text[i] in ('"', "'"):
+            start = i
+            quote = '"""' if text.startswith('"""', i) else text[i]
+            i += len(quote)
+            while i < len(text) and not text.startswith(quote, i):
+                i += 2 if len(quote) == 1 and text[i] == "\\" else 1
+            if i >= len(text):
+                raise ValueError("unterminated Kotlin string")
+            i += len(quote)
+            tokens.append(text[start:i])
+        else:
+            match = re.match(r"[A-Za-z_][A-Za-z_0-9]*", text[i:])
+            token = match.group() if match else text[i]
+            tokens.append(token)
+            i += len(token)
+    return tokens
+
+
+def split_arguments(tokens: list[str]) -> list[list[str]]:
+    """Split only at the current level, rejecting broken or empty arguments."""
+    parts, current, stack = [], [], []
+    for token in tokens:
+        if token == "<" and current and current[-1] == "mapOf":
+            stack.append(">")
+        elif token == ">" and stack and stack[-1] == ">":
+            stack.pop()
+        elif token in ("(", "[", "{"):
+            stack.append({"(": ")", "[": "]", "{": "}"}[token])
+        elif token in (")", "]", "}"):
+            if not stack or stack.pop() != token:
+                raise ValueError("unbalanced registry delimiters")
+        if token == "," and not stack:
+            if not current:
+                raise ValueError("empty registry argument")
+            parts.append(current)
+            current = []
+        else:
+            current.append(token)
+    if stack:
+        raise ValueError("unbalanced registry delimiters")
+    if current:
+        parts.append(current)
+    return parts
+
+
+def literal_string(tokens: list[str]) -> str:
+    if len(tokens) != 1 or not re.fullmatch(r'"(?:[^"\\$]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"', tokens[0]):
+        raise ValueError("expected a literal registry string")
+    return json.loads(tokens[0])
+
+
+def literal_call(tokens: list[str], name: str) -> list[list[str]]:
+    # The registry's only explicit type arguments belong to its empty property maps.
+    if name == "mapOf" and tokens[:6] == ["mapOf", "<", "String", ",", "Any", ">"]:
+        tokens = ["mapOf"] + tokens[6:]
+        if tokens != ["mapOf", "(", ")"]:
+            raise ValueError("only empty typed registry maps are supported")
+    if len(tokens) < 3 or tokens[:2] != [name, "("] or tokens[-1] != ")":
+        raise ValueError(f"expected literal {name}(...) in registry")
+    return split_arguments(tokens[2:-1])
+
+
 def parse_registry(text: str) -> dict[str, dict]:
-    """Tool name -> {capability, properties, required} from McpToolRegistry.kt source."""
+    """Read the registry's literal obj(mapOf(...), required=listOf(...)) shape."""
+    tokens = kotlin_tokens(text)
+    tools: dict[str, dict] = {}
+    # Locate calls in token space so strings/comments cannot impersonate definitions.
+    for i in range(len(tokens) - 1):
+        if tokens[i:i + 2] != ["ToolDefinition", "("]:
+            continue
+        depth, end = 1, i + 2
+        while depth and end < len(tokens):
+            depth += {"(": 1, ")": -1}.get(tokens[end], 0)
+            end += 1
+        if depth:
+            raise ValueError("unterminated ToolDefinition")
+        fields = {}
+        for arg in literal_call(tokens[i:end], "ToolDefinition"):
+            if len(arg) < 3 or arg[1] != "=" or arg[0] in fields:
+                raise ValueError("expected unique named ToolDefinition arguments")
+            fields[arg[0]] = arg[2:]
+        name = literal_string(fields.get("name", []))
+        if name in tools:
+            raise ValueError(f"duplicate tool {name}")
+        args = literal_call(fields.get("inputSchema", []), "obj")
+        if len(args) != 2:
+            raise ValueError(f"expected properties and required arguments for {name}")
+        props_arg, req_arg = args
+        if props_arg[:2] == ["properties", "="]:
+            props_arg = props_arg[2:]
+        if req_arg[:2] == ["required", "="]:
+            req_arg = req_arg[2:]
+        props = []
+        for pair in literal_call(props_arg, "mapOf"):
+            if len(pair) < 3 or pair[1] != "to":
+                raise ValueError(f"expected literal property pair for {name}")
+            prop = literal_string(pair[:1])
+            if prop in props or pair[2] in ("+", "*", "="):
+                raise ValueError(f"ambiguous property pair for {name}")
+            props.append(prop)
+        if req_arg == ["emptyList", "(", ")"]:
+            required = []
+        else:
+            required = [literal_string(arg) for arg in literal_call(req_arg, "listOf")]
+        if len(set(required)) != len(required):
+            raise ValueError(f"duplicate required argument for {name}")
+        tools[name] = {"properties": sorted(props), "required": sorted(required)}
     caps_block = re.search(r"val capabilities: Map<String, String> = mapOf\((.*?)\n    \)", text, re.DOTALL)
     if not caps_block:
         raise ValueError("capabilities map not found in registry source")
     caps = dict(re.findall(r'"([a-z_]+)"\s+to\s+"([^"]+)"', caps_block.group(1)))
-    tools: dict[str, dict] = {}
-    chunks = text.split("ToolDefinition(")[1:]
-    for chunk in chunks:
-        m = re.search(r'name\s*=\s*"([a-z_]+)"', chunk)
-        if not m:
-            continue
-        start = re.search(r"inputSchema\s*=\s*obj\(", chunk)
-        if not start:
-            raise ValueError(f"inputSchema not parsable for tool {m.group(1)}")
-        depth, i = 1, start.end()
-        while depth and i < len(chunk):  # balanced parens: the body may hold nested mapOf(...)
-            depth += {"(": 1, ")": -1}.get(chunk[i], 0)
-            i += 1
-        if depth:
-            raise ValueError(f"inputSchema not parsable for tool {m.group(1)}")
-        body = chunk[start.end():i - 1]
-        # JSON-schema keywords of a nested property map (`mapOf("type" to ..., "description" to ...)`)
-        # are not property names; a real property literally called `type` would be missed - none exists.
-        props = [p for p in re.findall(r'^\s*(?:mapOf\()?"([A-Za-z]+)"\s+to\b', body, re.MULTILINE)
-                 if p not in ("type", "description")]
-        req_m = re.search(r"(?:required\s*=\s*)?(emptyList\(\)|listOf\(([^)]*)\))\s*,?\s*$", body.strip(), re.DOTALL)
-        required = re.findall(r'"([A-Za-z]+)"', req_m.group(2) or "") if req_m else None
-        if required is None:
-            raise ValueError(f"required list not parsable for tool {m.group(1)}")
-        tools[m.group(1)] = {"properties": sorted(props), "required": sorted(required)}
     for name, cap in caps.items():
         tools.setdefault(name, {"properties": None, "required": None})["capability"] = cap
     return tools
@@ -388,6 +489,11 @@ def on_disk_drift(rendered: dict) -> list[str]:
 # ------------------------------------------------------------------------------- selftest
 def selftest(listing: dict, registry_text: str) -> int:
     """Each case removes a protection or feeds the thing it must reject; each must FAIL."""
+    import unittest
+    import test_check_registry
+    suite = unittest.defaultTestLoader.loadTestsFromModule(test_check_registry)
+    if not unittest.TextTestRunner().run(suite).wasSuccessful():
+        return 1
     base_rendered = generate.render(listing)
     if run_checks(listing, registry_text, base_rendered):
         print("selftest: the unmodified tree must pass first")

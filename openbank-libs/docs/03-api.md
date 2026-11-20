@@ -50,6 +50,7 @@ val iban = Iban.of("CZ65 0800 0000 1920 0014 5399")
 iban.value          // "CZ6508000000192000145399" (no spaces)
 iban.formatted()    // "CZ65 0800 0000 1920 0014 5399"
 iban.countryCode    // "CZ"
+iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
 
@@ -62,6 +63,11 @@ nikdy nevyhodí výjimku.
 `RodneCislo.parse` vrací `Parsed` (kanonický tvar, datum narození, pohlaví) nebo `Invalid`.
 Odmítá čísla, která nikdy nebyla vydána: 9místný tvar po roce 1953, výjimku „zbytek 10 → 0“
 po roce 1985 a měsíc +20/+70 před rokem 2004.
+
+`parse(raw)` kontroluje jen strukturu: neodmítá datum narození v budoucnosti. Kdo přijímá osobu,
+volá `parse(raw, clock)` (a `isValid(raw, clock)`) s vlastními hodinami `Clock`: „dnešek“ si libs počítá
+v `Europe/Prague`, protože rodné číslo je české občanské datum, a pro pozdější datum narození vrací
+`Invalid("birthdate is in the future")`.
 
 ## domain/identifiers — typesafe IDs
 
@@ -340,4 +346,4 @@ přenosu. Chování transportu při `close` a `abort` je nutné posuzovat samost
 
 - `CurrencyCode.of` rejects ISO 4217 codes withdrawn from circulation (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...) even though `java.util.Currency` still resolves them. `CurrencyCode.isCanonical(code)` answers "is this exact string an active, upper-case code" for validators that store the string.
 - `IbanCheckDigits.compute/build` is the single ISO 7064 MOD 97-10 generator; validation stays in `Iban.isValid`.
-- `CzechPaymentSymbol.isValid` / `requireValid`: variable, specific and constant symbols are 1-10 ASCII digits.
+- `CzechPaymentSymbol.VARIABLE|SPECIFIC|CONSTANT` with `isValid` / `normalise`: VS and SS are 1-10 ASCII digits, KS 1-4 (the domestic-payment column limit); blank counts as absent.
