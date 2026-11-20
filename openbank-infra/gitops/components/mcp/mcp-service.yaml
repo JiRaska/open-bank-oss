@@ -58,6 +58,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # ADR-0383 D5 / #16847: apply the edge's X-Forwarded-Proto/Host/For (the customers
+            # tenant's DPoP htu check and the tokenless audit key need the external view) ONLY from
+            # the cluster's pod network (VPC CIDR, VPC CNI pod IPs). Every other peer's forwarded
+            # headers are ignored. Which pods can reach :8150 at all is the NetworkPolicy's job
+            # (network-policies.yaml here). ProxyForwardingGuard refuses to boot without this list.
+            - name: MCP_PROXY_FORWARDING
+              value: "true"
+            - name: QUARKUS_HTTP_PROXY_TRUSTED_PROXIES
+              value: 10.80.0.0/16
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0224 D2: the agent-session store — CNPG `mcp-db` cluster (postgres.yaml here),

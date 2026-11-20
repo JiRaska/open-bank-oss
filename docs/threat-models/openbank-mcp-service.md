@@ -437,6 +437,21 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
+  - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
+    edge so the customers tenant's DPoP `htu` check sees the published URL, but with
+    `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
+    then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
+    forwarding on and no list (or a trust-all one). Proven by `McpUntrustedProxyForwardingIT`: from
+    an untrusted peer the same request that `McpTrustedProxyForwardingIT` admits is refused (htu
+    mismatch), and a spoofed `X-Forwarded-For` does not change the audit key.
+  - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
+    value, so one caller's flood could spend every subject-less caller's audit window. It is now
+    keyed by `ClientAddressKey` (IPv4 /32, IPv6 /64 so address rotation inside one /64 shares a
+    window), from the trusted-proxy-resolved address only.
+  - *Residual.* The deployed trust list is the pod CIDR, not the gateway's own addresses: any pod
+    the NetworkPolicy admits to `:8150` could forge forwarded headers. Narrow it before the route opens.
+
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`

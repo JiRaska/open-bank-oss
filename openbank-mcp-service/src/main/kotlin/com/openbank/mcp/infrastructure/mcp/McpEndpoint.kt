@@ -133,7 +133,10 @@ class McpEndpoint(
 
     private val customerBranch by lazy {
         if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
-        customerChannel.admission?.let { McpCustomerBranch(it, auditor, metrics, rateLimiter) }
+        // remoteAddress is the forwarded client only from a trusted proxy (ProxyForwardingGuard).
+        customerChannel.admission?.let { admission ->
+            McpCustomerBranch(admission, auditor, metrics, rateLimiter) { httpRequest.remoteAddress()?.hostAddress() }
+        }
     }
 
     /**

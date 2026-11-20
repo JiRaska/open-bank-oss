@@ -85,3 +85,24 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 `authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
+
+## Forwarded headers behind the edge (#16847)
+
+Behind the edge two things need the external view of a request: the customers OIDC tenant's own
+DPoP check compares the proof's `htu` with the request URL, and the tokenless audit window keys by
+client address. Quarkus applies `X-Forwarded-Proto`/`-Host`/`-For` when `MCP_PROXY_FORWARDING=true`
+(default `false`), and ONLY from peers listed in `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES`.
+
+- **Boot gate.** `ProxyForwardingGuard` is `@Startup`: forwarding on with no trusted-proxy list, or
+  with a trust-all entry (`0.0.0.0/0`, `::/0`), stops the service. An unset list would make Quarkus
+  trust forwarded headers from any peer.
+- **Untrusted peers.** Their forwarded headers are ignored: the request keeps its direct URL (so a
+  proof bound to the published resource fails the tenant's `htu` check with 401) and its direct
+  address (a spoofed `X-Forwarded-For` does not move the audit key).
+- **Deployed value.** The cluster's pod network (`10.80.0.0/16`, VPC CNI pod IPs). That trusts every
+  pod in the VPC as a proxy; which pods can reach `:8150` at all is decided by the NetworkPolicy, and
+  narrowing the list to the gateway's own addresses is a prerequisite of opening the route.
+- **Audit key.** `ClientAddressKey`: SHA-256 of the IPv4 address (/32) or the IPv6 /64 prefix
+  (IPv4-mapped IPv6 keys as IPv4). A hostname is never resolved and keys as `ip:unknown`.
+- **Symptom of a wrong list:** every real customer call refused 401 `invalid_dpop_proof` at the
+  tenant (forwarding not applied), or every tokenless caller sharing one audit key (the gateway's).
