@@ -199,3 +199,7 @@ operátora.
   jeho ukončení zaznamenat nelze a zůstává monitorován (#15992).
 - Případ schválený při vypnuté prověrce není monitorován.
 - V admin UI zatím není obrazovka pro operátora. Rozhraním revizora jsou čtyři cesty výše.
+
+## Kontrolní číslice DIČ v EU (#16748)
+
+Identifikátory `EU_VAT` se před dotazem do registru ověřují národním pravidlem kontrolní číslice pro každý prefix VIES (27 členských států, `EL` pro Řecko a `XI`); prefix bez pravidla je odmítnut a žádný neprojde jen podle formátu (#16774). SK navíc vyžaduje nenulovou první číslici a třetí číslici 2, 3, 4, 7, 8 nebo 9. Číslo složené výhradně z nul a `FR_SIREN` `000000000` se odmítají jako nikdy nepřidělené (lokální pravidlo, ne citovaná specifikace). Francouzský alfanumerický klíč DIČ se ověřuje odvozením podle stdnum a rumunské DIČ z rodného čísla s budoucím datem narození se odmítá. České DIČ je CZ + IČO, CZ + rodné číslo nebo zvláštní tvar 6xxxxxxxx. FR přijímá monacké SIREN (prefix 000) a alfanumerické klíče podle formátu. Uložené identifikátory se obnovují bez nové kontroly, takže zpřísněné pravidlo nikdy neznemožní čtení již přijatého případu.

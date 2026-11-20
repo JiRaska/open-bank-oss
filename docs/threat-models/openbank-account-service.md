@@ -1227,3 +1227,11 @@ The check uses catalogue distribution metadata. The passport grant registry and 
 consumption against revocation are pending. Earlier unscoped catalogue responses and unpinned
 historical pending accounts use the domestic compatibility path. Cross-border activation requires
 the registry, authoritative facts and commitment fence before any FOS or branch launch.
+
+## 2026-11-18 - IBAN check digits from the shared libs-domain generator (#16748)
+
+`IbanGenerator` computed ISO 7064 check digits with its own copy. It now uses
+`IbanCheckDigits.build`, which computes them once for the platform and re-validates the result
+through `Iban`. Generated IBANs are byte-identical (`IbanGeneratorTest` unchanged and green);
+the gain is that a spec fix in libs-domain reaches every account opened. No new caller, grant,
+data class or endpoint. Residual risk: none new. Rollback: revert.

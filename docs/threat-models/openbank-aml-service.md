@@ -67,3 +67,15 @@ like the four existing rails. ROLE_API alone still admits no other account. **El
 is `amlCase.create` only. `AmlCaseCreateCallerGuardTest` and the rego tests pin the set. Rollback:
 revert. swift's cases would then 403, and its verdicts would be unaffected because opening a case
 is best-effort.
+
+## 2026-11-18 - Monitoring currencies validated by CurrencyCode (#16748)
+
+`BookedMovement`, `AmountBand` and `CountFeatureDefinition` accepted any `[A-Z]{3}`. They now
+require `CurrencyCode.isCanonical`: an active ISO 4217 code with a minor unit, already upper-case.
+**Tampering / integrity:** a band or feature definition in a non-currency (`ABC`) or withdrawn one
+(`DEM`) would key a counter no real booking can reach, so a rule could read as configured while
+counting nothing. That is now refused when the definition is built. A ledger event with such a
+currency takes the existing rejected path (`IllegalArgumentException` → `outcome=rejected` → DLQ),
+the same one an empty currency already took. Ledger itself books only `CurrencyCode` values, so no
+real movement is affected. Test: `MonitoringCurrencyValidationTest` (red on the old regex).
+Rollback: revert.

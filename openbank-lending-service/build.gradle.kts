@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -97,4 +98,26 @@ tasks.withType<Test> {
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
+}
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266).
+// Weekly + manual via pitest.yml, advisory — never a per-PR gate. The recorded OVER_THIN_BASELINE
+// exclusion is paid down with this block; see check-pitest-money-path-coverage.py.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.lending.domain.*")
+    // PIT's `*` glob does NOT cross package boundaries; the workflow tests live in
+    // application.workflow — listed explicitly alongside the domain/use-case suites.
+    targetTests = setOf(
+        "com.openbank.lending.domain.*",
+        "com.openbank.lending.application.usecase.*",
+        "com.openbank.lending.application.workflow.*",
+    )
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.lending.domain.*Kt")
 }
