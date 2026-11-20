@@ -44,8 +44,8 @@ internal class McpCustomerBranch(
     private val auditor: McpCallAuditor,
     private val metrics: McpMetricsPort,
     private val limiter: McpRateLimiter,
-    /** The client address as Vert.x reports it (forwarded only from a trusted proxy); null if unreadable. */
-    private val clientAddress: () -> String? = { null },
+    /** The subject-less window key for this request ([ClientAddressResolver]). */
+    private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
 ) {
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
@@ -115,7 +115,7 @@ internal class McpCustomerBranch(
      * flood suppress every other subject-less caller's audit row.
      */
     private fun refusalSource(subject: String?): String =
-        subject?.let { "sub:$it" } ?: ClientAddressKey.of(runCatching(clientAddress).getOrNull())
+        subject?.let { "sub:$it" } ?: runCatching(clientKey).getOrDefault(ClientAddressKey.UNKNOWN)
 
     private fun admitted(outcome: Outcome.Admitted, method: String, id: JsonNode, params: JsonNode): Response? {
         val ctx = outcome.context

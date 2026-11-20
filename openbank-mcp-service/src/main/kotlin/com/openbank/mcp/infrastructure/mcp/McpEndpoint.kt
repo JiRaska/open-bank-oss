@@ -121,6 +121,10 @@ class McpEndpoint(
     @Inject
     lateinit var customerChannel: CustomerChannel
 
+    /** Field-injected for the same reason as [metrics]: the subject-less audit key (#16847). */
+    @Inject
+    lateinit var clientAddress: ClientAddressResolver
+
     /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
     @Inject
     lateinit var httpRequest: HttpServerRequest
@@ -133,9 +137,10 @@ class McpEndpoint(
 
     private val customerBranch by lazy {
         if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
-        // remoteAddress is the forwarded client only from a trusted proxy (ProxyForwardingGuard).
         customerChannel.admission?.let { admission ->
-            McpCustomerBranch(admission, auditor, metrics, rateLimiter) { httpRequest.remoteAddress()?.hostAddress() }
+            McpCustomerBranch(admission, auditor, metrics, rateLimiter) {
+                if (::clientAddress.isInitialized) clientAddress.key(httpRequest) else ClientAddressKey.UNKNOWN
+            }
         }
     }
 

@@ -13,6 +13,7 @@ import org.jose4j.jwt.NumericDate
 /** Shared shape of the trusted / untrusted forwarding ITs: real tenants, only the trust list differs. */
 object ProxyForwardingSupport {
     const val CUSTOMERS = "https://kc.test.example/realms/openbank-customers"
+    const val EDGE_HEADER = "X-Envoy-External-Address"
 
     fun realTenants(trustedProxies: String): Map<String, String> = mapOf(
         "quarkus.oidc.tenant-enabled" to "true",
@@ -27,6 +28,7 @@ object ProxyForwardingSupport {
         // The production switch (application.yaml) and the deployment's trust list.
         "MCP_PROXY_FORWARDING" to "true",
         "quarkus.http.proxy.trusted-proxies" to trustedProxies,
+        "mcp.edge.client-address-header" to EDGE_HEADER,
         "mcp.customer.enabled" to "true",
         "mcp.customer.issuer" to CUSTOMERS,
         "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
@@ -57,9 +59,10 @@ object ProxyForwardingSupport {
             .post("/mcp").then()
     }
 
-    fun addressKey(forwardedFor: String? = null): String {
+    fun addressKey(forwardedFor: String? = null, edge: String? = null): String {
         val req = given()
         forwardedFor?.let { req.header("X-Forwarded-For", it) }
+        edge?.let { req.header(EDGE_HEADER, it) }
         return req.get("/test-probe/client-address-key").then().statusCode(200).extract().asString()
     }
 }

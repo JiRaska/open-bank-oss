@@ -96,13 +96,17 @@ client address. Quarkus applies `X-Forwarded-Proto`/`-Host`/`-For` when `MCP_PRO
 - **Boot gate.** `ProxyForwardingGuard` is `@Startup`: forwarding on with no trusted-proxy list, or
   with a trust-all entry (`0.0.0.0/0`, `::/0`), stops the service. An unset list would make Quarkus
   trust forwarded headers from any peer.
-- **Untrusted peers.** Their forwarded headers are ignored: the request keeps its direct URL (so a
-  proof bound to the published resource fails the tenant's `htu` check with 401) and its direct
-  address (a spoofed `X-Forwarded-For` does not move the audit key).
-- **Deployed value.** The cluster's pod network (`10.80.0.0/16`, VPC CNI pod IPs). That trusts every
-  pod in the VPC as a proxy; which pods can reach `:8150` at all is decided by the NetworkPolicy, and
-  narrowing the list to the gateway's own addresses is a prerequisite of opening the route.
-- **Audit key.** `ClientAddressKey`: SHA-256 of the IPv4 address (/32) or the IPv6 /64 prefix
-  (IPv4-mapped IPv6 keys as IPv4). A hostname is never resolved and keys as `ip:unknown`.
+- **Untrusted peers.** Their forwarded headers are ignored: the request keeps its direct URL, so a
+  proof bound to the published resource fails the tenant's `htu` check with 401.
+- **Audit key.** `ClientAddressResolver` never uses Quarkus' forwarded address: Quarkus takes the
+  LEFTMOST `X-Forwarded-For` entry, which a client controls whenever the edge appends. The key is
+  the raw TCP peer, or the ONE edge-set header named by `MCP_EDGE_CLIENT_ADDRESS_HEADER` (e.g.
+  `X-Envoy-External-Address`) when the peer is in the trusted list and the value is a single IP.
+  `ClientAddressKey` hashes IPv4 /32 or the IPv6 /64 prefix; a hostname keys as `ip:unknown`.
+- **Deployed state: forwarding OFF.** No route to mcp-service exists. The route PR must, together:
+  narrow `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES` to the gateway's source (never the pod CIDR); make the
+  edge authoritative (Envoy `ClientTrafficPolicy` client IP detection, client-supplied
+  `X-Forwarded-*` overwritten); set `MCP_EDGE_CLIENT_ADDRESS_HEADER`; and admit only the gateway and
+  known callers to `:8150` in the NetworkPolicy.
 - **Symptom of a wrong list:** every real customer call refused 401 `invalid_dpop_proof` at the
   tenant (forwarding not applied), or every tokenless caller sharing one audit key (the gateway's).

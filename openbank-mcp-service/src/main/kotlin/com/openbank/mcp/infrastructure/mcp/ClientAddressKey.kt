@@ -18,10 +18,8 @@ import java.util.HexFormat
  *   address would let it rotate addresses and earn one audit row per address.
  * - An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) is the IPv4 address it maps.
  *
- * The input is the address Vert.x reports for the request. With `quarkus.http.proxy.*` forwarding
- * on, that is the forwarded client address ONLY when the hop is in
- * `quarkus.http.proxy.trusted-proxies` ([ProxyForwardingGuard]); from any other peer the headers
- * are ignored and this is the peer itself. So this function never reads a header.
+ * The input is chosen by [ClientAddressResolver] (raw peer, or one edge-set header from a trusted
+ * proxy) — never Quarkus' leftmost `X-Forwarded-For`. This function never reads a header.
  *
  * Only an IP literal is accepted — a hostname is never resolved (no DNS on the request path) and
  * keys as [UNKNOWN], as does a null or unparseable address.
@@ -34,18 +32,24 @@ object ClientAddressKey {
     private val IPV6 = Regex("^[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*$")
 
     fun of(address: String?): String {
-        val literal = address?.trim()?.removePrefix("[")?.removeSuffix("]")
-        val bare = literal?.substringBefore('%')
-        // A string with ':' is parsed by the JDK as an IPv6 literal, never looked up; an IPv4 literal
-        // is matched exactly here first, so nothing that reaches getByName can trigger DNS.
-        if (bare.isNullOrEmpty() || !(IPV4.matches(bare) || IPV6.matches(bare))) return UNKNOWN
-        val inet = runCatching { InetAddress.getByName(bare) }.getOrNull() ?: return UNKNOWN
+        val inet = literal(address) ?: return UNKNOWN
         val network = if (inet is Inet6Address) {
             byteArrayOf(V6) + inet.address.copyOf(IPV6_PREFIX_BYTES)
         } else {
             byteArrayOf(V4) + inet.address
         }
         return "ip:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(network))
+    }
+
+    /**
+     * The address if [address] is an IP literal (brackets and a zone id tolerated), else null. A
+     * string with ':' is parsed by the JDK as an IPv6 literal and never looked up; IPv4 is matched
+     * exactly first, so nothing reaching getByName can trigger DNS.
+     */
+    fun literal(address: String?): InetAddress? {
+        val bare = address?.trim()?.removePrefix("[")?.removeSuffix("]")?.substringBefore('%')
+        if (bare.isNullOrEmpty() || !(IPV4.matches(bare) || IPV6.matches(bare))) return null
+        return runCatching { InetAddress.getByName(bare) }.getOrNull()
     }
 
     private const val V4: Byte = 4

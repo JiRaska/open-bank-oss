@@ -36,17 +36,29 @@ class McpTrustedProxyForwardingIT {
     }
 
     @Test
-    fun `the forwarded client address from a trusted proxy becomes the audit key`() {
+    fun `a client-supplied X-Forwarded-For passed through an APPENDING trusted proxy never becomes the key`() {
         val direct = ProxyForwardingSupport.addressKey()
-        val forwarded = ProxyForwardingSupport.addressKey("203.0.113.7")
-        assertThat(forwarded).isEqualTo(ClientAddressKey.of("203.0.113.7")).isNotEqualTo(direct)
+        // What an appending edge sends: the client's forged entry first, the real client after it.
+        // Quarkus' own forwarding would take the leftmost; the audit key must not.
+        assertThat(ProxyForwardingSupport.addressKey(forwardedFor = "203.0.113.66, 198.51.100.9")).isEqualTo(direct)
+        assertThat(ProxyForwardingSupport.addressKey(forwardedFor = "203.0.113.66")).isEqualTo(direct)
+    }
+
+    @Test
+    fun `the single edge-set client header from a trusted proxy becomes the key`() {
+        assertThat(ProxyForwardingSupport.addressKey(edge = "198.51.100.9"))
+            .isEqualTo(ClientAddressKey.of("198.51.100.9"))
+            .isNotEqualTo(ProxyForwardingSupport.addressKey())
+        // A list in the edge header is not a single edge-set value: ignored.
+        assertThat(ProxyForwardingSupport.addressKey(edge = "203.0.113.66, 198.51.100.9"))
+            .isEqualTo(ProxyForwardingSupport.addressKey())
     }
 
     @Test
     fun `IPv6 clients rotating inside one 64 share one key, another 64 does not`() {
-        val a = ProxyForwardingSupport.addressKey("2001:db8:1:2::a")
-        val b = ProxyForwardingSupport.addressKey("2001:db8:1:2:ffff:eeee:dddd:b")
-        val other = ProxyForwardingSupport.addressKey("2001:db8:1:3::a")
+        val a = ProxyForwardingSupport.addressKey(edge = "2001:db8:1:2::a")
+        val b = ProxyForwardingSupport.addressKey(edge = "2001:db8:1:2:ffff:eeee:dddd:b")
+        val other = ProxyForwardingSupport.addressKey(edge = "2001:db8:1:3::a")
         assertThat(a).isEqualTo(b).isEqualTo(ClientAddressKey.of("2001:db8:1:2::1")).isNotEqualTo(other)
         assertThat(a).isNotEqualTo(ClientAddressKey.UNKNOWN)
     }

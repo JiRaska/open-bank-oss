@@ -155,6 +155,10 @@ mcp:
   # Customer MCP channel (ADR-0383 / ADR-0385, #16590). OFF by default. With it on, the service
   # refuses to boot unless the issuer is set and the client allowlist exists and parses
   # (CustomerChannel is @Startup).
+  # #16847: `mcp.edge.client-address-header` (env MCP_EDGE_CLIENT_ADDRESS_HEADER) names the ONE
+  # edge-set header carrying the client address (e.g. X-Envoy-External-Address), read only from a peer
+  # in quarkus.http.proxy.trusted-proxies. Deliberately not defined here: unset = never read.
+  # ClientAddressResolver never uses Quarkus' leftmost X-Forwarded-For for the audit key.
   customer:
     enabled: ${MCP_CUSTOMER_ENABLED:false}
     issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}

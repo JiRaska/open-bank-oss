@@ -32,9 +32,10 @@ class McpUntrustedProxyForwardingIT {
     }
 
     @Test
-    fun `a spoofed X-Forwarded-For from an untrusted peer does not change the audit key`() {
+    fun `a spoofed X-Forwarded-For or edge header from an untrusted peer does not change the audit key`() {
         val direct = ProxyForwardingSupport.addressKey()
         assertThat(ProxyForwardingSupport.addressKey("203.0.113.7")).isEqualTo(direct)
-        assertThat(ProxyForwardingSupport.addressKey("2001:db8:1:2::a")).isEqualTo(direct)
+        assertThat(ProxyForwardingSupport.addressKey(edge = "2001:db8:1:2::a")).isEqualTo(direct)
+        assertThat(ProxyForwardingSupport.addressKey(edge = "198.51.100.9")).isEqualTo(direct)
     }
 }

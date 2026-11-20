@@ -50,3 +50,31 @@ class ClientAddressKeyTest {
         ProxyForwardingGuard.check(false, "")
     }
 }
+
+class ClientAddressResolverTest {
+    private val resolver = ClientAddressResolver(
+        java.util.Optional.of("X-Envoy-External-Address"),
+        java.util.Optional.of("10.80.4.0/22, 2001:db8:ff::/48"),
+    )
+
+    @Test
+    fun `the edge header is used only from a peer inside a trusted CIDR`() {
+        assertThat(resolver.resolve("10.80.5.7", "198.51.100.9")).isEqualTo("198.51.100.9")
+        assertThat(resolver.resolve("10.80.8.1", "198.51.100.9")).isEqualTo("10.80.8.1")
+        assertThat(resolver.resolve("2001:db8:ff:1::2", "198.51.100.9")).isEqualTo("198.51.100.9")
+        assertThat(resolver.resolve("2001:db8:fe::2", "198.51.100.9")).isEqualTo("2001:db8:fe::2")
+    }
+
+    @Test
+    fun `a list, hostname or garbage in the edge header falls back to the peer`() {
+        assertThat(resolver.resolve("10.80.5.7", "203.0.113.66, 198.51.100.9")).isEqualTo("10.80.5.7")
+        assertThat(resolver.resolve("10.80.5.7", "evil.example")).isEqualTo("10.80.5.7")
+        assertThat(resolver.resolve("10.80.5.7", null)).isEqualTo("10.80.5.7")
+    }
+
+    @Test
+    fun `with no edge header configured no header is ever read`() {
+        val off = ClientAddressResolver(java.util.Optional.empty(), java.util.Optional.of("0.0.0.0/0"))
+        assertThat(off.resolve("10.80.5.7", "198.51.100.9")).isEqualTo("10.80.5.7")
+    }
+}
