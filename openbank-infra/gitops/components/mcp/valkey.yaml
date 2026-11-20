@@ -13,7 +13,7 @@
 # would silently delete live replay entries. A full store answers errors, which mcp-service turns
 # into 503 (fail closed).
 #
-# Auth: requirepass from the mcp-customer-store Secret (generated in-cluster by the ESO Password
+# Auth: requirepass from the mcp-customer-store-valkey Secret (generated in-cluster by the ESO Password
 # generator in customer-store-externalsecret.yaml, no OpenBao copy), rendered into a tmpfs config
 # file, never argv. The Secret ref is REQUIRED here, so until ESO has created the Secret this pod
 # does not start — it never runs unauthenticated. Named mcp-valkey (not the bare per-ns `redis`)
@@ -66,7 +66,7 @@ spec:
           # variable from its environment and execs valkey-server on the file. `$VALKEY_PASSWORD`
           # below is shell syntax, NOT kubelet `$(...)` syntax, so argv carries only this script.
           # An empty password refuses to start rather than run unauthenticated. The generated value
-          # is 64 hex characters, so it can never contain `"` or a newline.
+          # is 48 letters/digits, so it can never contain `"` or a newline.
           command: ["sh", "-c"]
           args:
             - |
@@ -87,7 +87,7 @@ spec:
             - name: VALKEY_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mcp-customer-store
+                  name: mcp-customer-store-valkey
                   key: valkey_password
           ports:
             - name: redis
@@ -130,7 +130,7 @@ spec:
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: mcp-customer-store
+                  name: mcp-customer-store-valkey
                   key: valkey_password
           ports:
             - name: redis-metrics
