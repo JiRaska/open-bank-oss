@@ -99,19 +99,18 @@ ephemeral, so:
 - **Full store:** `--maxmemory 128mb` with `noeviction` makes writes fail rather than evict; the channel
   then answers 503 `replay_store_unavailable`. Never change the policy to an evicting one — eviction
   silently reopens replay.
-- **Provisioning:** write `valkey_password` and `key_hmac_secret` to KV `mcp-service/customer-store`,
-  each a random hex string of at least 32 bytes (`openssl rand -hex 32`; the password goes into a
-  quoted config line, so no `"` or newline). The `mcp-customer-store` ExternalSecret syncs every 5
-  minutes; to sync at once run
-  `kubectl -n platform annotate externalsecret mcp-customer-store force-sync=$(date +%s) --overwrite`.
-  Until it syncs the Valkey pod sits in `CreateContainerConfigError` (by design: it never starts
-  unauthenticated) and mcp-service runs with the customer channel off. Enabling the channel without
-  them refuses to boot. **Provision before the GitOps change that creates `mcp-valkey` is merged.**
+- **Secrets:** generated in-cluster, nothing to provision. The `mcp-customer-store` ExternalSecret
+  draws one random seed from an ESO `Password` generator (`refreshPolicy: CreatedOnce`) and derives
+  `valkey_password` and `key_hmac_secret` from it (domain-separated SHA-256, 64 hex characters each).
+  No copy exists outside the cluster. Until ESO creates the Secret the Valkey pod waits in
+  `CreateContainerConfigError` (by design: it never starts unauthenticated) and mcp-service runs with
+  the customer channel off; enabling the channel without the Secret refuses to boot.
 - **Auth:** the password is rendered by a shell wrapper into a tmpfs config file (`/conf`, memory
   medium) and removed from the environment before `exec valkey-server`, so it is in neither the
   process arguments (`/proc/1/cmdline`, `crictl inspect`) nor the node's disk.
 - **Alerts:** `MCPValkeyMemoryNearMax` (> 80% of maxmemory for 5m, warning) and
   `MCPValkeyMemoryFull` (> 95% for 2m, critical) from the redis_exporter sidecar.
-- **Rotation:** rotate both with the channel drained; a new HMAC secret orphans live entries for one
-  proof window.
-
+- **Rotation:** with the customer channel drained, delete Secret `platform/mcp-customer-store`
+  (ESO regenerates it with a new seed), then restart `mcp-valkey` and every mcp-service pod. The
+  restart empties the store: live replay entries and budgets reset, and keys hashed with the old
+  HMAC secret are orphaned until they expire.

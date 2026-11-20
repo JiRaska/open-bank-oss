@@ -463,9 +463,11 @@ a stub (T-T2/T-D2).
     deployment secret in every key name (required with `valkey`, boot refused otherwise).
   - *Operational requirement.* The replay Valkey MUST run `maxmemory-policy noeviction`: an evicting
     policy silently drops live `jti` entries and reopens their replay window with no error anywhere.
-  - *Store hardening (#16791, GitOps).* `mcp-valkey` (namespace `platform`) runs with `--requirepass`
-    from the `mcp-customer-store` ExternalSecret (required ref: without it the pod does not start, so
-    it never runs unauthenticated), `--maxmemory 128mb` under a 192Mi limit and an explicit
+  - *Store hardening (#16791, GitOps).* `mcp-valkey` (namespace `platform`) runs with `requirepass`
+    from the `mcp-customer-store` Secret, generated in-cluster by an ESO `Password` generator
+    (`CreatedOnce`; the password and the key HMAC secret are derived from one seed by
+    domain-separated SHA-256, so they are never equal; no OpenBao copy, no human holder). The ref is
+    required: without the Secret the pod does not start, so it never runs unauthenticated, `--maxmemory 128mb` under a 192Mi limit and an explicit
     `--maxmemory-policy noeviction`; its ingress admits only `app.kubernetes.io/name: mcp-service`
     (`open-bank.tech/same-namespace-ingress-from`, derived by `gen-network-policies.py`), not every
     co-tenant of the shared namespace. mcp-service refuses to boot with `valkey` and no password.
@@ -485,9 +487,10 @@ a stub (T-T2/T-D2).
   - *Detection.* `MCPValkeyMemoryNearMax` / `MCPValkeyMemoryFull` (redis_exporter sidecar,
     promtool-tested including the cold value) warn before `noeviction` turns a full store into a
     channel-wide 503.
-  - **Residual:** the channel cannot be enabled in a cluster until `mcp-service/customer-store` is
-    written to KV (password + HMAC secret) — the boot gate makes that a refusal rather than a
-    silent per-pod or unauthenticated store. Replication is asynchronous: if the primary
+  - **Residual:** both values derive from one generated seed, so anyone who can read the
+    `mcp-customer-store` Secret (namespace `platform` RBAC) holds both the store password and the
+    key-name HMAC secret; there is no separation of duty between them. Rotation (delete the Secret,
+    restart both workloads) empties the store, so it is done with the channel drained. Replication is asynchronous: if the primary
     acknowledges a `SET NX` and fails over before the replica has it, the promoted replica has no
     entry and that one proof can be accepted once more (a single replayed proof, still within its
     `iat` window and still bound to the token's key). `PX` is relative, so clock OFFSET between pods

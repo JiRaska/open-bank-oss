@@ -13,9 +13,10 @@
 # would silently delete live replay entries. A full store answers errors, which mcp-service turns
 # into 503 (fail closed).
 #
-# Auth: requirepass from the mcp-customer-store Secret (ExternalSecret beside this file, KV
-# mcp-service/customer-store), rendered into a tmpfs config file, never argv. The Secret ref is REQUIRED here, so without the provisioned value this
-# pod does not start — it never runs unauthenticated. Named mcp-valkey (not the bare per-ns `redis`)
+# Auth: requirepass from the mcp-customer-store Secret (generated in-cluster by the ESO Password
+# generator in customer-store-externalsecret.yaml, no OpenBao copy), rendered into a tmpfs config
+# file, never argv. The Secret ref is REQUIRED here, so until ESO has created the Secret this pod
+# does not start — it never runs unauthenticated. Named mcp-valkey (not the bare per-ns `redis`)
 # because `platform` is a shared namespace; ingress admits only mcp-service pods
 # (open-bank.tech/same-namespace-ingress-from, read by gen-network-policies.py).
 # Pinned to the valkey uid 999/gid 1000 for PSS restricted; /data is a writable emptyDir so the root
@@ -64,8 +65,8 @@ spec:
           # requirepass included, into a memory-medium emptyDir (/conf, never on disk), drops the
           # variable from its environment and execs valkey-server on the file. `$VALKEY_PASSWORD`
           # below is shell syntax, NOT kubelet `$(...)` syntax, so argv carries only this script.
-          # An empty password refuses to start rather than run unauthenticated. The KV value must
-          # be a hex/alphanumeric string (no `"` or newline), as 05-operations says.
+          # An empty password refuses to start rather than run unauthenticated. The generated value
+          # is 64 hex characters, so it can never contain `"` or a newline.
           command: ["sh", "-c"]
           args:
             - |
@@ -87,7 +88,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: mcp-customer-store
-                  key: VALKEY_PASSWORD
+                  key: valkey_password
           ports:
             - name: redis
               containerPort: 6379
@@ -130,7 +131,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: mcp-customer-store
-                  key: VALKEY_PASSWORD
+                  key: valkey_password
           ports:
             - name: redis-metrics
               containerPort: 9121
@@ -192,4 +193,3 @@ spec:
     - port: redis-metrics
       path: /metrics
       interval: 30s
-
