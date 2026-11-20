@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.2...kyb-service-v0.11.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **kyb:** validate CZ DIČ and EU VAT check digits ([#16771](https://github.com/JiRaska/open-bank-oss/issues/16771)) ([61a5464](https://github.com/JiRaska/open-bank-oss/commit/61a546479e4d181ba7bb0917cf4af738c1e18b8c))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.1...kyb-service-v0.11.2) (2026-11-16)
 
 

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Test fixture for the customer MCP channel ITs: same shape as src/main's allowlist (ADR-0385 D1),
+# with one ENABLED local client, one ENABLED hosted client and one declared-but-disabled client.
+schema_version: 1
+resource: https://mcp.test.example/mcp
+audience: openbank-mcp-service
+clients:
+  - client_id: mcp-local-test
+    tier: L
+    enabled: true
+  - client_id: mcp-hosted-test
+    tier: H
+    enabled: true
+  - client_id: mcp-disabled-test
+    tier: L
+    enabled: false
