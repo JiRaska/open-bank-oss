@@ -113,7 +113,7 @@ class AccountServiceClientLogPrivacyTest {
     }
 
     private companion object {
-        const val ATTACKER_IBAN = "123456789012345678\r\nFORGED_LOG_ENTRY"
+        const val ATTACKER_IBAN = "123456789912345678\r\nFORGED_LOG_ENTRY"
         const val FORGED_LOG_MARKER = "FORGED_LOG_ENTRY"
         const val PRIVATE_EXCEPTION_MARKER = "PRIVATE_UPSTREAM_REQUEST_DETAILS"
     }

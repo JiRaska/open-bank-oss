@@ -105,7 +105,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          args=(--component admin-ui --run-url "$RUN_URL")
+          args=(--component admin-ui --run-url "$RUN_URL" --writer admin-ui-repin.yml)
           if [ "$MODE" = rollback ]; then
             args+=(--image-source-sha "$ROLLBACK_SOURCE_SHA" --tag "$ROLLBACK_TAG" --digest "$ROLLBACK_DIGEST")
           fi

@@ -84,7 +84,7 @@ class RepresentationAttestationRepositoryImpl :
 
     private fun RepresentationAttestationEntity.toDomain() = RepresentationAttestation(
         id = attestationId,
-        identifier = LegalEntityIdentifier.of(IdentifierScheme.valueOf(identifierScheme), identifierValue),
+        identifier = LegalEntityIdentifier.restore(IdentifierScheme.valueOf(identifierScheme), identifierValue),
         ruleTextHash = ruleTextHash,
         ruleText = ruleText,
         parsedMode = RepresentationMode.valueOf(parsedMode),
