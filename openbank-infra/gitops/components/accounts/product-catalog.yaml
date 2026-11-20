@@ -71,7 +71,7 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "cec091249d592b7b"
+        openbank.tech/policy-checksum: "808e18ce975b5538"
     spec:
       # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
       # workload, not to every pod running as `default` in the namespace.
@@ -85,7 +85,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: product-catalog
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-56c9cbe9@sha256:05367a3f4c6ce80281b48b87c0de1c5ba1f077ff3c027375814fffbf3f873b29
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-744ce085@sha256:16faadd946e45eaa0b84b1b143b4cbd7059c191dec857ea15f956b170216b784
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -95,6 +95,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # glibc sizes its malloc arenas as 8 x ONLINE CPUs read from the host
+            # (/proc/cpuinfo), not from the cgroup quota: on Karpenter's 16-vCPU
+            # 4xlarge nodes that is 128 arenas of native memory against the same
+            # cgroup limit that fit on a 2-4 vCPU node, and the pod OOMKilled in
+            # startup warm-up (exit 137, no Java OOM — #16783, headroom raised in
+            # #16784). Cap the arenas; the JVM's own allocations do not go through
+            # glibc malloc.
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             # Parallel private-CA TLS listener for new east-west clients (first: interest-service's
             # CatalogInterestSnapshotScheduler and lending-service's RestCatalogLoanProfilePort,
             # #10383). HTTP/8104 stays for existing callers and for the KEDA HTTP interceptor, which

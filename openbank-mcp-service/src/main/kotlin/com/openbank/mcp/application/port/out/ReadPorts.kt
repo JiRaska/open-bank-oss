@@ -131,4 +131,11 @@ data class ConsentContext(
      * token positively reads as a person (the OBO staff exchange) sets it `false`.
      */
     val serviceAccount: Boolean = true,
+    /**
+     * The channel this context was admitted on. `null` for the staff agent/OBO paths; `mcp-customer`
+     * for a customers-realm token admitted by the customer channel (ADR-0383 D1). A customer context
+     * is never handed to a staff tool: `McpEndpoint` answers it
+     * on its own branch.
+     */
+    val channel: String? = null,
 )
