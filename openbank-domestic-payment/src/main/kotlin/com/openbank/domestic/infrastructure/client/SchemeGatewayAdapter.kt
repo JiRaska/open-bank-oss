@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.client
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
 import com.openbank.domestic.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.domestic.application.port.out.SchemeSubmissionOutcome
+import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.libs.iso20022.ChargeBearer
 import com.openbank.libs.iso20022.CreditTransferInstruction
@@ -26,7 +27,6 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.math.BigInteger
 import java.net.ConnectException
 import java.net.UnknownHostException
 import java.time.OffsetDateTime
@@ -60,8 +60,16 @@ class SchemeGatewayAdapter(
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun submit(payment: DomesticPayment): SchemeSubmissionOutcome {
-        val debtorIban = bbanToIban(payment.debtorAccountNumber, payment.debtorBankCode)
-        val creditorIban = bbanToIban(payment.creditorAccountNumber, payment.creditorBankCode)
+        // #16772: an account no Czech bank can issue never becomes valid, so re-driving it is an
+        // endless retry. Answer it TERMINALLY, before anything is transmitted, with the ISO 20022
+        // reason the scheme itself would give (AC01 IncorrectAccountNumber); the activity maps that
+        // to REJECTED / INVALID_ACCOUNT_NUMBER, recorded as rejected before transmission.
+        val debtorIban = CzechDomesticIban.canonical(payment.debtorAccountNumber, payment.debtorBankCode)
+        val creditorIban = CzechDomesticIban.canonical(payment.creditorAccountNumber, payment.creditorBankCode)
+        if (debtorIban == null || creditorIban == null) {
+            log.warnf("Payment %s carries a non-issuable Czech account; rejected locally, not transmitted", payment.id)
+            return SchemeSubmissionOutcome(accepted = false, reasonCode = INCORRECT_ACCOUNT_NUMBER, transmitted = false)
+        }
         val creditorAgentBic = bankCodeToBic(payment.creditorBankCode)
 
         val pacs008 = builder.build(instruction(payment, debtorIban, creditorIban, creditorAgentBic))
@@ -182,28 +190,14 @@ class SchemeGatewayAdapter(
         return parts.joinToString(" ").ifBlank { null }?.take(MAX_140)
     }
 
-    /**
-     * Derives a Czech IBAN (CZ + 2 check digits + 4-digit bank code + 6-digit prefix + 10-digit
-     * account number) from a BBAN account number and bank code per ISO 13616 / CNB standard.
-     * The BBAN has no prefix (treated as 000000). Input is right-padded to the standard widths.
-     */
-    @Suppress("MagicNumber")
-    private fun bbanToIban(accountNumber: String, bankCode: String): String {
-        val bban = bankCode.padStart(4, '0') +
-            "000000" + // 6-digit prefix (no prefix ⟹ zeros)
-            accountNumber.padStart(10, '0')
-        val numeric = bban.map { it.digitToIntOrNull() ?: (it.code - 'A'.code + 10) }.joinToString("") +
-            "1235" + "00" // CZ = 12 35; check digits placeholder 00
-        val checkDigits = (98 - (BigInteger(numeric).mod(BigInteger.valueOf(97))).toInt())
-            .toString().padStart(2, '0')
-        return "CZ$checkDigits$bban"
-    }
-
     /** Maps a Czech 4-digit bank code to a BIC (only own bank code is known; others use a synthetic form). */
     private fun bankCodeToBic(bankCode: String): String = if (bankCode == ownBankCode) ownBankBic else "${bankCode}CZPP"
 
     private companion object {
         const val MAX_35 = 35
         const val MAX_140 = 140
+
+        /** ISO 20022 ExternalStatusReason1Code: IncorrectAccountNumber. */
+        const val INCORRECT_ACCOUNT_NUMBER = "AC01"
     }
 }

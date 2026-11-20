@@ -4,6 +4,8 @@
 
 package com.openbank.kyb.domain.model
 
+import com.openbank.libs.identity.RodneCislo
+
 /**
  * The closed vocabulary of business identifiers the platform accepts as an onboarding ENTRY POINT
  * (ADR-0284 D1). A scheme names the ISSUER of the number, not the register it is verified against:
@@ -25,7 +27,7 @@ enum class IdentifierScheme(val country: String?, val displayName: String, val p
     NL_KVK("NL", "KVK-nummer", Regex("^\\d{8}$"), checksum = false),
     LEI(null, "LEI", Regex("^[A-Z0-9]{18}\\d{2}$"), checksum = true),
     EUID(null, "EUID", Regex("^[A-Z]{2}[A-Z0-9]{1,10}\\.[A-Z0-9.\\-]{1,30}$"), checksum = false),
-    EU_VAT(null, "VAT", Regex("^[A-Z]{2}[A-Z0-9]{2,12}$"), checksum = false),
+    EU_VAT(null, "VAT", Regex("^[A-Z]{2}[A-Z0-9]{2,12}$"), checksum = true),
     DUNS(null, "DUNS", Regex("^\\d{9}$"), checksum = false),
     ;
 
@@ -93,6 +95,16 @@ data class LegalEntityIdentifier private constructor(val scheme: IdentifierSchem
         }
 
         fun of(scheme: IdentifierScheme, raw: String): LegalEntityIdentifier = parse(scheme, raw).getOrThrow()
+
+        /**
+         * Rebuilds an identifier that was validated when it was STORED. Reads must not re-run the
+         * checksum: a rule tightened later (EU VAT check digits, #16748) would otherwise make an
+         * already-onboarded case unreadable. Only the shape is re-checked; input paths use [parse].
+         */
+        fun restore(scheme: IdentifierScheme, storedValue: String): LegalEntityIdentifier {
+            require(scheme.pattern.matches(storedValue)) { "stored ${scheme.displayName} is not in normalised form" }
+            return LegalEntityIdentifier(scheme, storedValue)
+        }
     }
 }
 
@@ -110,6 +122,7 @@ object IdentifierChecksums {
         IdentifierScheme.PL_NIP -> nip(value)
         IdentifierScheme.FR_SIREN -> luhn(value)
         IdentifierScheme.LEI -> mod97(value)
+        IdentifierScheme.EU_VAT -> EuVatChecksums.valid(value)
         else -> true
     }
 
@@ -173,4 +186,101 @@ object IdentifierChecksums {
     /** The official NIP weights (Ustawa o NIP). A literal table, not arithmetic. */
     @Suppress("MagicNumber")
     private val NIP_WEIGHTS = intArrayOf(6, 5, 7, 2, 3, 4, 5, 6, 7)
+}
+
+/**
+ * National check digits inside an EU VAT number (`CC` + national part). Countries listed in
+ * [valid] are checked; any other prefix passes on format alone, because an unimplemented
+ * algorithm must not reject a real number. The algorithms follow each tax authority's published
+ * rule (the same ones python-stdnum implements).
+ */
+object EuVatChecksums {
+
+    fun valid(vat: String): Boolean {
+        val country = vat.take(2)
+        val national = vat.drop(2)
+        return when (country) {
+            "CZ" -> czDic(national)
+            "SK" -> national.length == SK_LENGTH && national.all(Char::isDigit) && national.toLong() % MOD_11 == 0L
+            "PL" -> IdentifierChecksums.nip(national)
+            "DE" -> de(national)
+            "FR" -> fr(national)
+            "AT" -> at(national)
+            else -> true
+        }
+    }
+
+    /**
+     * Czech DIČ (zákon 280/2009 Sb. § 130): a legal entity uses its IČO (8 digits, never starting
+     * with 9); a natural person uses the rodné číslo (9 or 10 digits, validated by [RodneCislo]);
+     * a person without one gets a "special" 9-digit number starting with 6 and its own check digit.
+     */
+    fun czDic(n: String): Boolean {
+        if (!n.all(Char::isDigit)) return false
+        return when (n.length) {
+            ICO_LENGTH -> n[0] != '9' && IdentifierChecksums.ico(n)
+            RC_LENGTH_SHORT -> RodneCislo.isValid(n) || czSpecial(n)
+            RC_LENGTH_LONG -> RodneCislo.isValid(n)
+            else -> false
+        }
+    }
+
+    private fun czSpecial(n: String): Boolean {
+        if (n[0] != '6') return false
+        val sum = (1 until RC_LENGTH_SHORT - 1).sumOf { (n[it] - '0') * (ICO_LENGTH + 1 - it) } % MOD_11
+        val expected = Math.floorMod(ICO_LENGTH - (MOD_10 - sum) % MOD_11, MOD_10)
+        return expected == n.last() - '0'
+    }
+
+    /** DE USt-IdNr: 9 digits, ISO 7064 MOD 11,10 over the first eight. */
+    private fun de(n: String): Boolean {
+        if (n.length != DE_LENGTH || !n.all(Char::isDigit) || n[0] == '0') return false
+        var product = MOD_10
+        for (i in 0 until DE_LENGTH - 1) {
+            val sum = ((n[i] - '0') + product) % MOD_10
+            product = (2 * (if (sum == 0) MOD_10 else sum)) % MOD_11
+        }
+        return (MOD_11 - product) % MOD_10 == n.last() - '0'
+    }
+
+    /**
+     * FR TVA: 2-character key + 9-digit SIREN. A numeric key must equal
+     * (12 + 3 × (SIREN mod 97)) mod 97; the SIREN must be Luhn-valid except for Monaco entities
+     * (SIREN prefix `000`), which carry no Luhn digit. An alphanumeric key (the newer allocation
+     * scheme) has a different, unpublished derivation, so it passes on format alone.
+     */
+    private fun fr(n: String): Boolean {
+        if (n.length != FR_LENGTH) return false
+        val key = n.take(2)
+        val siren = n.drop(2)
+        if (!siren.all(Char::isDigit) || !key.all { it.isDigit() || it in 'A'..'Z' }) return false
+        if (!siren.startsWith(MONACO_PREFIX) && !IdentifierChecksums.luhn(siren)) return false
+        if (!key.all(Char::isDigit)) return true
+        return key.toLong() == (FR_KEY_BASE + FR_KEY_FACTOR * (siren.toLong() % MOD_97)) % MOD_97
+    }
+
+    /** AT UID: `U` + 8 digits; odd positions doubled with digit sum, check = (10 − (sum + 4) mod 10) mod 10. */
+    private fun at(n: String): Boolean {
+        if (n.length != AT_LENGTH || n[0] != 'U' || !n.drop(1).all(Char::isDigit)) return false
+        val d = n.drop(1).map { it - '0' }
+        val sum = (0 until AT_LENGTH - 2).sumOf { i ->
+            if (i % 2 == 1) (d[i] * 2).let { it / MOD_10 + it % MOD_10 } else d[i]
+        }
+        return (MOD_10 - (sum + AT_OFFSET) % MOD_10) % MOD_10 == d.last()
+    }
+
+    private const val ICO_LENGTH = 8
+    private const val RC_LENGTH_SHORT = 9
+    private const val RC_LENGTH_LONG = 10
+    private const val SK_LENGTH = 10
+    private const val DE_LENGTH = 9
+    private const val FR_LENGTH = 11
+    private const val AT_LENGTH = 9
+    private const val AT_OFFSET = 4
+    private const val FR_KEY_BASE = 12
+    private const val MONACO_PREFIX = "000"
+    private const val FR_KEY_FACTOR = 3
+    private const val MOD_10 = 10
+    private const val MOD_11 = 11
+    private const val MOD_97 = 97L
 }

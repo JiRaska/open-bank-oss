@@ -8,6 +8,7 @@ import com.openbank.copilot.application.port.out.ActionProposalTool
 import com.openbank.copilot.application.port.out.ProposalResult
 import com.openbank.copilot.domain.ActionKind
 import com.openbank.copilot.domain.ActionProposal
+import com.openbank.libs.domain.money.CurrencyCode
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.util.UUID
@@ -44,9 +45,9 @@ class FxConversionProposalTool : ActionProposalTool {
         val accountId = arguments.text("accountId") ?: return error("Chybí číslo účtu (accountId).")
         if (runCatching { UUID.fromString(accountId) }.getOrNull() == null) return error("Neplatné accountId.")
 
-        val from = arguments.text("fromCurrency")?.uppercase()?.takeIf { CURRENCY.matches(it) }
+        val from = arguments.text("fromCurrency")?.uppercase()?.takeIf { CurrencyCode.isCanonical(it) }
             ?: return error("Chybí nebo neplatná zdrojová měna (fromCurrency).")
-        val to = arguments.text("toCurrency")?.uppercase()?.takeIf { CURRENCY.matches(it) }
+        val to = arguments.text("toCurrency")?.uppercase()?.takeIf { CurrencyCode.isCanonical(it) }
             ?: return error("Chybí nebo neplatná cílová měna (toCurrency).")
         if (from == to) return error("Zdrojová a cílová měna jsou stejné.")
 
@@ -68,8 +69,4 @@ class FxConversionProposalTool : ActionProposalTool {
     private fun JsonNode.text(field: String): String? = get(field)?.asText()?.trim()?.takeIf { it.isNotBlank() }
 
     private fun error(message: String) = ProposalResult(error = message)
-
-    private companion object {
-        val CURRENCY = Regex("[A-Z]{3}")
-    }
 }

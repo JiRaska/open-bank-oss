@@ -143,3 +143,7 @@ sequenceDiagram
 `{iban, partyId}` a odpovídá jen `{owned, active}`, plus `accountId`, když je `owned` pravda.
 Neznámý IBAN i IBAN jiné strany odpovídají `owned=false`, takže endpoint neprozrazuje existenci účtu.
 Deklarovanými volajícími jsou pension-service a sdd-service; ani jeden nemá `account.read`.
+
+## Generování IBAN (#16748)
+
+Generované IBANy berou kontrolní číslice ISO 7064 ze sdíleného `IbanCheckDigits.build` v libs-domain, který výsledek znovu ověří přes `Iban`. Výstup se nemění; oprava specifikace v libs-domain se nyní projeví u každého nového účtu.
