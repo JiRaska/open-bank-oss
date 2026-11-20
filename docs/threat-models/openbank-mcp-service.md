@@ -486,7 +486,7 @@ a stub (T-T2/T-D2).
     memory anyway).
   - *Exporter hardening (#16791 security review).* The `redis_exporter` sidecar never holds the
     store password. It logs in as a dedicated `metrics` ACL user with its own generated password
-    (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT LIST|SETNAME`, `SLOWLOG
+    (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT SETNAME`, `SLOWLOG
     GET|LEN`, `LATENCY LATEST|HISTOGRAM`, `COMMAND INFO` and `COMMANDLOG LEN`, with no key or channel access
     (measured: with exactly that set, `ACL LOG` stays empty across scrapes; without the last two it
     records a denial on every scrape and those metrics silently go missing). Its multi-target
@@ -499,6 +499,14 @@ a stub (T-T2/T-D2).
     Port 9121 admits only the observability Prometheus pods (`open-bank.tech/metrics-ingress-prometheus-only`,
     derived by `gen-network-policies.py`), not admin-ui. The same exporter pattern on `copilot-redis`
     is a fleet follow-up.
+  - **Residual — `SLOWLOG GET`.** The `metrics` user keeps `slowlog|get`: redis_exporter v1.92.1 calls
+    it on every scrape and has no flag to stop (measured: without the grant `ACL LOG` records a
+    `slowlog|get` denial per scrape and the slowlog metrics vanish). A slowlog entry carries the
+    command's arguments, so a slow `SET`/`EVAL` can show a proof's `jti` and HMAC'd key names (never a
+    subject, thumbprint or password in clear) to whoever holds the metrics password — a
+    cluster-generated secret readable only via the `mcp-customer-store-metrics` Secret. `CLIENT LIST`
+    is NOT granted: the exporter only calls it with `--export-client-list`, which stays off. If the
+    slowlog metric is not worth that, set `slowlog-log-slower-than -1` in the wrapper and drop the grant.
   - *Detection.* `MCPValkeyMemoryNearMax` / `MCPValkeyMemoryFull` (redis_exporter sidecar,
     promtool-tested including the cold value) warn before `noeviction` turns a full store into a
     channel-wide 503.
