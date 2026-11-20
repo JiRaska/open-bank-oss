@@ -3348,9 +3348,10 @@ class CustomerEdgeResource(
      *     challenge with dynamic linking over amount + payee PLUS `approvalRequestId`
      *     (`mcp-proposal:<id>`) and `payloadSha256` — so a challenge signed for anything else, or
      *     for another proposal, cannot release it. No SCA exemption applies on this path.
-     *  3. only once SCA was consumed, record APPROVED (hash CAS — a replay or a second approval is
-     *     refused) and then the execution outcome. The idempotency key is the proposal id, so even
-     *     a race between two approvals cannot create two payments.
+     *  3. only once SCA was consumed, record APPROVED (hash CAS) and then the execution outcome. A
+     *     second approval of an APPROVED-but-unexecuted proposal is ACCEPTED by the store (that is
+     *     the retry path), so two concurrent approvals can both reach the payment call; what keeps
+     *     them to one payment is the payment idempotency key, which is the proposal id.
      * mcp-service is not involved in any step; it cannot reach this route (app session only).
      */
     @POST
@@ -3368,6 +3369,8 @@ class CustomerEdgeResource(
         val suppliedHash = body?.let { extractTextField(objectMapper, it, "payloadSha256") }?.lowercase()
             ?.takeIf { SHA256_HEX.matches(it) } ?: return badRequest("payloadSha256 is required")
         val read = upstream.get("$delegationServiceUrl/api/v1/payment-proposals/$id?partyId=$party", party)
+        // Only an upstream 404 means "no such proposal for you"; an outage must not read as absence.
+        if (read.statusInfo.family == Response.Status.Family.SERVER_ERROR) return proposalStoreUnavailable()
         if (read.status != Response.Status.OK.statusCode) return notFound("Proposal not found")
         val proposal = CustomerMcpProposal.parse(objectMapper, (read.entity as? String).orEmpty())
             ?: return notFound("Proposal not found")
@@ -3393,6 +3396,9 @@ class CustomerEdgeResource(
             )
             if (approved.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
                 null
+            } else if (approved.statusInfo.family == Response.Status.Family.SERVER_ERROR) {
+                // A transient store failure is retryable with a fresh SCA, not a conflict.
+                proposalStoreUnavailable()
             } else {
                 proposalRefused(party, id, "PROPOSAL_STORE_REFUSED:${approved.status}")
             }
@@ -3451,6 +3457,10 @@ class CustomerEdgeResource(
         }
         return created
     }
+
+    private fun proposalStoreUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("code" to "PROPOSAL_STORE_UNAVAILABLE", "error" to "Proposal store is temporarily unavailable"))
+        .type(MediaType.APPLICATION_JSON).build()
 
     private fun proposalRefused(party: String, id: UUID, code: String): Response {
         audit.emit(

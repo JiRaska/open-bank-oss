@@ -138,6 +138,23 @@ class McpProposalApprovalTest {
         assertThat(consume.captured).contains("\"approvalRequestId\":\"mcp-proposal:$id\"")
         assertThat(consume.captured).contains("\"payloadSha256\":\"${hash()}\"")
         assertThat(idem.captured).isEqualTo("mcp-proposal-$id")
+        verify { up.get("http://delegation/api/v1/payment-proposals/$id?partyId=$party", party.toString()) }
+    }
+
+    @Test
+    fun `a store outage on the read is 503, not proposal-not-found`() {
+        val up = upstream()
+        every { up.get(match { it.contains("/payment-proposals/$id") }, any()) } returns Response.status(502).build()
+        assertThat(resource(up).approveMcpProposal(id, body(), SCA).status).isEqualTo(503)
+        verify(exactly = 0) { up.post(match { it.contains("/sca/challenges/") }, any(), any()) }
+        paymentPosts(up, 0)
+    }
+
+    @Test
+    fun `a store outage on approve after SCA is 503 and sends no payment`() {
+        val up = upstream(storeApprove = 503)
+        assertThat(resource(up).approveMcpProposal(id, body(), SCA).status).isEqualTo(503)
+        paymentPosts(up, 0)
     }
 
     @Test

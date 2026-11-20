@@ -3729,6 +3729,7 @@ paths:
         '403': { description: SCA required or rejected, or not the app session }
         '404': { description: No such proposal for this customer }
         '409': { description: Proposal not PENDING, hash mismatch, or stored hash invalid }
+        '503': { description: Proposal store temporarily unavailable; retry with a fresh SCA challenge }
   /domestic-payments:
     post:
       tags: [Payments]
