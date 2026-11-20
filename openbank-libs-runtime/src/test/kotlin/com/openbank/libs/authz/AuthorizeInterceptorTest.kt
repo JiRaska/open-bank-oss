@@ -117,6 +117,9 @@ class AuthorizeInterceptorTest {
     @Authorize(action = "catalog.pensionApproval.read", attributes = ["azp", "subject", "preferred_username"])
     fun dummyMethodWithServiceTokenAttrs() = Unit
 
+    @Authorize(action = "customer.mcp-proposals.decide")
+    fun dummyCustomerDecide() = Unit
+
     data class DummyRequest(val granteeId: String, val scopes: List<String>)
 
     data class DummyRequestWithNullableField(val granteeId: String?)
@@ -777,6 +780,63 @@ class AuthorizeInterceptorTest {
         captured.clear()
         every { sc.userPrincipal } returns JavaPrincipal { "human-reviewer" }
         interceptor.authorize(makeCtx(annotatedMethodWithServiceTokenAttrs))
+        assertThat(captured.single().attributes).isEmpty()
+    }
+
+    private fun capturingPdp(captured: MutableList<AuthzQuery>) {
+        val pdp = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                captured += query
+                return AuthzDecision(allow = true)
+            }
+        }
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns pdp
+        }
+    }
+
+    private fun customerJwt(azp: Any?, act: Any?) = mockk<JsonWebToken> {
+        every { getClaim<Any?>("azp") } returns azp
+        every { getClaim<Any?>("act") } returns act
+    }
+
+    @Test
+    fun `a customer action carries the token azp and act presence without opting in (#16848)`() {
+        val method = AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyCustomerDecide")
+        val captured = mutableListOf<AuthzQuery>()
+        capturingPdp(captured)
+
+        every { identity.principal } returns customerJwt("openbank-app", null)
+        interceptor.authorize(makeCtx(method))
+        assertThat(captured.last().attributes)
+            .containsExactlyInAnyOrderEntriesOf(mapOf("token_azp" to "openbank-app", "token_act" to false))
+
+        every { identity.principal } returns customerJwt("some-mcp-client", mapOf("sub" to "x"))
+        interceptor.authorize(makeCtx(method))
+        assertThat(captured.last().attributes)
+            .containsExactlyInAnyOrderEntriesOf(mapOf("token_azp" to "some-mcp-client", "token_act" to true))
+    }
+
+    @Test
+    fun `an unreadable act claim is reported as present, never as not-delegated`() {
+        val method = AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyCustomerDecide")
+        val captured = mutableListOf<AuthzQuery>()
+        capturingPdp(captured)
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { getClaim<Any?>("azp") } returns "openbank-app"
+            every { getClaim<Any?>("act") } throws IllegalStateException("unreadable act")
+        }
+        interceptor.authorize(makeCtx(method))
+        assertThat(captured.single().attributes["token_act"]).isEqualTo(true)
+    }
+
+    @Test
+    fun `a non-customer action gains no token attributes`() {
+        val captured = mutableListOf<AuthzQuery>()
+        capturingPdp(captured)
+        every { identity.principal } returns customerJwt("openbank-app", null)
+        interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(captured.single().attributes).isEmpty()
     }
 
