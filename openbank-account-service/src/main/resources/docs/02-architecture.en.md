@@ -200,3 +200,7 @@ Before the shared decoder, the first nine lines of this consumer were character-
 identical to card-issuance-service's. Both were green and nothing compared them, so a producer-side
 rename would have silently stopped one projection from matching — which leaves a revoked grant
 enforceable.
+
+## IBAN generation (#16748)
+
+Generated IBANs take their ISO 7064 check digits from the shared libs-domain `IbanCheckDigits.build`, which also re-validates the result through `Iban`. Output is unchanged; a spec fix in libs-domain now reaches every account opened.

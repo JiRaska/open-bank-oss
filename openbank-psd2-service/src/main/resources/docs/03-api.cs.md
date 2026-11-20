@@ -155,3 +155,8 @@ Chyby používají Open Banking / Berlin-Group obálku `tppMessages` (nikoli gen
 - **Verze API v cestě** — `/open-banking/v2/...`. OpenAPI `info.version` je `2.0.0`.
 - **Verze události v topicu** — `openbank.psd2.events` (aditivní evoluce; breaking změna ⇒ nový topic).
 - Obě verzovací osy (release `version.txt` vs API `openapi.yaml:info.version`) jsou nezávislé (ADR-0048).
+
+## Platební symboly (#16748)
+
+`variableSymbol` a `specificSymbol` musí mít 1-10 číslic ASCII a `constantSymbol` 1-4 (`CzechPaymentSymbol` z libs-domain; KS odpovídá sloupci v domestic-payment); prázdná hodnota znamená, že symbol chybí. Cokoli jiného je odmítnuto s 400 dřív, než požadavek pokračuje.
+U `DOMESTIC_CZ` a `SIPO` proběhne kontrola před ověřením souhlasu.
