@@ -73,6 +73,11 @@ malformed input and never throws.
 rejects numbers that were never issued: the 9-digit form after 1953, the remainder-10 → 0
 checksum quirk after 1985, and the +20/+70 month overflow before 2004.
 
+`parse(raw)` is structure only: it does not reject a birthdate in the future. Callers that accept a
+person use `parse(raw, clock)` (and `isValid(raw, clock)`), passing their injected `Clock`: libs computes
+"today" in `Europe/Prague` itself, because a birth number is a Czech civil date, and returns
+`Invalid("birthdate is in the future")` for a later birthdate.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin
