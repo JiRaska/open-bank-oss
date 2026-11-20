@@ -60,6 +60,7 @@ jobs:
       contents: read
       actions: read
       issues: write  # github-script opens/refreshes/closes the one red-streak issue
+      pull-requests: read  # the dropped-pin check reads deploy PR comments and open deploy PR diffs
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -172,3 +173,46 @@ jobs:
             }
             const created = await github.rest.issues.create({ ...context.repo, title, body, labels: [LABEL] })
             core.info(`opened #${created.data.number}`)
+
+      # A prune drops a stale pin from a deploy PR and says so in one PR comment. A service
+      # whose pin was dropped and that nothing re-pinned within hours is undeployed with no
+      # other signal (#16701: >12 h). Independent of the lane check above, so it runs even
+      # when that step stood down; its own issue (marker below), closed when clean.
+      - name: Dropped pins nobody re-pinned
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DROPPED_HOURS: ${{ vars.DEPLOY_DROPPED_PIN_HOURS || '6' }}
+        run: |
+          set +e
+          python3 .github/scripts/detect-auto-deploy-stuck.py --dropped-pins \
+            --repo "$GITHUB_REPOSITORY" --hours "$DROPPED_HOURS" --json /tmp/dropped-pins.json
+          code=$?
+          set -e
+          marker='<!-- deploy-prune-dropped -->'
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label fleet-health --state open \
+            --json number,body --jq "[.[] | select(.body | contains(\"$marker\"))][0].number // empty")
+          case "$code" in
+            0) if [ -n "$existing" ]; then
+                 gh issue close "$existing" --repo "$GITHUB_REPOSITORY" \
+                   --comment "every dropped pin has been re-pinned - closing."
+               fi ;;
+            2) {
+                 echo "$marker"
+                 echo "## Services whose stale pin was dropped and never re-pinned"
+                 echo
+                 echo "A deploy PR's stale image pin was pruned (see its \`deploy-prune\` comment) and the"
+                 echo "service shows no newer pin on main or in an open deploy PR after $DROPPED_HOURS h:"
+                 echo
+                 jq -r '.services[] | "- `\(.service)`: dropped `\(.dropped)` in #\(.pr), \(.age_hours) h ago, still on `\(.kept)`"' /tmp/dropped-pins.json
+                 echo
+                 echo "Refreshes in place; closes itself once each is re-pinned."
+               } > /tmp/dropped-body.md
+               if [ -n "$existing" ]; then
+                 gh issue edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file /tmp/dropped-body.md
+               else
+                 gh issue create --repo "$GITHUB_REPOSITORY" --label fleet-health \
+                   --title "Dropped deploy pins not re-pinned" --body-file /tmp/dropped-body.md
+               fi ;;
+            *) echo "::error::the dropped-pin watch could not read its subject - a failure of THIS WATCH."; exit 1 ;;
+          esac

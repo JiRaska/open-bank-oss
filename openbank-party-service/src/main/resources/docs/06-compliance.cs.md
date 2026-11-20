@@ -106,6 +106,7 @@ Každá mutace emituje doménový event na `openbank.party.events`, konzumovaný
 - ✅ Bezpečnostní hlavičky (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer/Permissions-Policy)
 - ✅ Tajemství musí být v prod přepsána (placeholdery `CHANGE_ME_LOCAL_DEV_ONLY` mají fail-fast záměr)
 - ✅ Minimalizace dat: rodné číslo jen jako blind index; identifikátory jen přesnou shodou, fuzzy vyhledávání jen podle jména
+- ✅ Rodné číslo s datem narození po dnešku (Europe/Prague, podle hodin služby) je neplatné: blind index se pro ně nepočítá a vyhledávání nejde cestou blind indexu. Přesná shoda identifikátoru nad uloženým `tax_id` se dál uplatní
 - ✅ Poison-pill-safe Kafka consumer
 - ⚠️ OPA je advisory (zatím nevynucuje) — překlopení je pozdější fáze ADR-0034
 - ⚠️ Contract drift OpenAPI vs implementace — k narovnání (viz `03-api.md`)

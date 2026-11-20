@@ -141,6 +141,43 @@ class DomesticPaymentMoneyBoundaryIT {
         assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
     }
 
+    @ParameterizedTest(name = "{0}={1} -> 400")
+    @CsvSource(
+        // #16748 / #16772: present and short enough, but no Czech bank can issue it (mod-11 fails).
+        "creditorAccountNumber, 1234567890",
+        "creditorAccountNumber, 18-2000145399",
+        "debtorAccountNumber, 1234567890",
+    )
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
+    fun `an account failing the national mod-11 checksum is a 400 naming the field and consumes nothing`(
+        field: String,
+        account: String,
+    ) {
+        val key = "money-boundary-it-account-${UUID.randomUUID()}"
+        val valid = if (field == "debtorAccountNumber") "1234567899" else "9876543211"
+
+        val refused = post(key, body("10.00", "CZK").replace("\"$field\": \"$valid\"", "\"$field\": \"$account\""))
+
+        assertThat(refused.statusCode).isEqualTo(400)
+        assertThat(refused.jsonPath().getString("code")).isEqualTo("VALIDATION_ERROR")
+        assertThat(refused.jsonPath().getList<String>("violations.field")).containsExactly(field)
+        assertThat(refused.body().asString()).doesNotContain(account)
+        assertThat(countPayments(key)).isZero()
+
+        // The key was never bound: a valid request under the same key is a fresh create, not a 409.
+        val retry = post(key, body("10.00", "CZK"))
+        assertThat(retry.statusCode).isEqualTo(201)
+        assertThat(retry.header("X-Idempotency-Replayed")).isNull()
+        assertThat(countPayments(key)).isEqualTo(1)
+    }
+
     private fun expectedProblem(code: String, field: String, amount: String, currency: String): Map<String, Any?> {
         val (type, title, message) = when (code) {
             "AMOUNT_SCALE_EXCEEDED" -> Triple(
@@ -202,10 +239,10 @@ class DomesticPaymentMoneyBoundaryIT {
         """
         {
           "debtorAccountId": "$debtorAccountId",
-          "debtorAccountNumber": "1234567890",
+          "debtorAccountNumber": "1234567899",
           "debtorBankCode": "0800",
           "debtorName": "Alice Example",
-          "creditorAccountNumber": "9876543210",
+          "creditorAccountNumber": "9876543211",
           "creditorBankCode": "0100",
           "creditorName": "Brno Utility",
           ${if (amount == null) "" else "\"amount\": $amount,"}

@@ -4,6 +4,9 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.cardissuance.domain.model.CardClosedReason
+import com.openbank.cardissuance.domain.model.CardStatus
+import com.openbank.cardissuance.domain.model.DelegatedCardGrant
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clearing.domain.model.ClearingStatus
@@ -20,6 +23,9 @@ import com.openbank.libs.domain.money.Money
 import com.openbank.libs.fincrime.ScreeningDecision
 import com.openbank.pension.domain.model.ContractStatus
 import com.openbank.pension.domain.statecontribution.ReturnStatus
+import com.openbank.pensionfund.domain.model.OrderStatus
+import com.openbank.pensionfund.domain.model.OrderType
+import com.openbank.pensionfund.domain.model.UnitTransactionType
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
@@ -27,6 +33,7 @@ import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.ContractFund
 import com.openbank.simulation.model.DelegationSpendBook
 import com.openbank.simulation.model.ScreeningRecord
 import com.openbank.simulation.runner.World
@@ -35,6 +42,7 @@ import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
 import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.transaction.domain.saga.SagaState
+import com.openbank.treasury.domain.model.BreakAlertPolicy
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
@@ -47,6 +55,9 @@ import java.util.UUID
  * reproducible seed.
  */
 object MoneyPathInvariants {
+
+    /** The unit-register scale the pension-fund domain owns (Precision.UNIT_SCALE). */
+    private const val UNIT_SCALE = 6
 
     /** The settlement date every scenario and this invariant read the virtual clock as (Europe/Prague). */
     private val ZONE: ZoneId = ZoneId.of("Europe/Prague")
@@ -312,6 +323,200 @@ object MoneyPathInvariants {
                     return Violation(
                         name,
                         "pension return ${obligation.id} ${obligation.status} past dueBy ${obligation.dueBy}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Test Intelligence simulation gap (money path): every `UnitOrder` the scenario placed against
+     * the REAL pension-fund register must be SETTLED, or PENDING with a forward NAV already
+     * published to settle it at (the register's entire pricing rule — an order queues until the
+     * fund's NEXT published NAV). A pending order with no forward NAV is an order that can never
+     * price — money parked indefinitely. Also: every SETTLED order has the transaction the REAL
+     * `ForwardPricer` produced for it, and every settled SWITCH_OUT spawned its SWITCH_IN leg
+     * (the follow-up the pricer derives), still pending or itself settled.
+     */
+    val pensionFundOrderCompleteness = object : Invariant {
+        override val name = "pension-fund-order-completeness"
+        override fun check(world: World): Violation? {
+            val book = world.pensionFundBook
+            book.orders.forEach { order ->
+                if (order.status == OrderStatus.PENDING) {
+                    if (book.settleableNav(order.fundId, order.placedAt) == null) {
+                        return Violation(name, "pension-fund order ${order.id} pending with no forward NAV")
+                    }
+                } else {
+                    val priced = book.transactions.count { it.orderId == order.id }
+                    if (priced != 1) {
+                        return Violation(name, "pension-fund order ${order.id} settled with $priced transactions")
+                    }
+                }
+            }
+            book.orders.filter { it.status == OrderStatus.SETTLED && it.type == OrderType.SWITCH_OUT }
+                .forEach { switchOut ->
+                    val legs = book.orders.count { it.parentOrderId == switchOut.id }
+                    if (legs != 1) {
+                        return Violation(name, "pension-fund switch ${switchOut.id} spawned $legs switch-in legs")
+                    }
+                }
+            return null
+        }
+    }
+
+    /**
+     * Test Intelligence simulation gap (money path): the holding per (contract, fund) must equal
+     * the fold of EVERY transaction against that pair — subscribes and switch-ins credit units,
+     * redeems, switch-outs and fees debit them — so units that issued without a transaction (or a
+     * transaction that never moved the holding) are caught. The domain's asymmetric rounding
+     * (units issued DOWN, fee units UP) is part of the fold: re-computing it with the REAL
+     * transaction amounts is exactly what makes a naive re-model off by design.
+     */
+    val pensionFundUnitConservation = object : Invariant {
+        override val name = "pension-fund-unit-conservation"
+        override fun check(world: World): Violation? {
+            val book = world.pensionFundBook
+            val expected = mutableMapOf<ContractFund, BigDecimal>()
+            book.transactions.forEach { tx ->
+                val key = ContractFund(tx.contractId, tx.fundId)
+                val signed = when (tx.type) {
+                    UnitTransactionType.SUBSCRIBE, UnitTransactionType.SWITCH_IN -> tx.units
+                    UnitTransactionType.REDEEM, UnitTransactionType.SWITCH_OUT, UnitTransactionType.FEE ->
+                        tx.units.negate()
+                }
+                expected[key] = expected.getOrDefault(key, BigDecimal.ZERO.setScale(UNIT_SCALE)) + signed
+            }
+            val keys = expected.keys + book.holdingKeys()
+            keys.forEach { key ->
+                val want = expected.getOrDefault(key, BigDecimal.ZERO.setScale(UNIT_SCALE))
+                val have = book.holdingOf(key).units
+                if (want.compareTo(have) != 0) {
+                    return Violation(
+                        name,
+                        "pension-fund holding ${key.contractId}/${key.fundId} holds $have, transactions fold to $want",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Test Intelligence simulation gap: every `Card` driven by
+     * [com.openbank.simulation.scenario.CardIssuanceScenario] must be internally consistent once
+     * its step has settled — (1) a BLOCKED card carries its block reason and timestamp (the
+     * blockedReason column is the aggregate's single "why is this card not usable" note: a block
+     * without it is a card a customer cannot get an answer about), (2) EXPIRED and CONSUMED cards
+     * carry their [CardClosedReason] — the difference between "nothing was spent" and "the
+     * promise was kept" is exactly what the customer is told, (3) limits stay non-negative with
+     * daily <= monthly, (4) no card is left transactable past its own
+     * [com.openbank.cardissuance.domain.model.Card.expiresAt] — an ACTIVE card whose validity
+     * window ran out is a live PAN nobody is counting down, the silent fraud-surface defect this
+     * invariant exists to surface.
+     */
+    val cardIssuanceCompleteness = object : Invariant {
+        override val name = "card-issuance-completeness"
+        override fun check(world: World): Violation? {
+            val now = world.context.clock.instant()
+            world.cards.forEach { card ->
+                if (card.status == CardStatus.BLOCKED &&
+                    (card.blockedAt == null || card.blockedReason.isNullOrBlank())
+                ) {
+                    return Violation(name, "card ${card.id} blocked without its reason")
+                }
+                if (card.status in setOf(CardStatus.EXPIRED, CardStatus.CONSUMED) && card.closedReason == null) {
+                    return Violation(name, "card ${card.id} ${card.status} without a closed reason")
+                }
+                if (card.dailyLimitMinorUnits < 0 ||
+                    card.monthlyLimitMinorUnits < 0 ||
+                    card.dailyLimitMinorUnits > card.monthlyLimitMinorUnits
+                ) {
+                    return Violation(name, "card ${card.id} limits are inconsistent")
+                }
+                val expiresAt = card.expiresAt
+                if (expiresAt != null &&
+                    !expiresAt.isAfter(now) &&
+                    card.status in setOf(CardStatus.PENDING, CardStatus.ACTIVE, CardStatus.SUSPENDED)
+                ) {
+                    return Violation(name, "card ${card.id} is ${card.status} past its expiresAt $expiresAt")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Test Intelligence simulation gap: the ADR-0249 D2 authority link — a card issued under a
+     * [DelegatedCardGrant] must not outlive the grant that authorised it. Every card naming a
+     * grant must have that grant row in the book, and when the grant is no longer active the card
+     * must not be ACTIVE or SUSPENDED (it must be BLOCKED or further along) — a card that still
+     * transacts after its authorisation ended is the failure everyone would remember. The
+     * companion guard half — a grant not issued by the card's holder authorises nothing (#3164
+     * C2) — is asserted per-row, because a consumer-side projection that skips it makes any
+     * ACTIVE grant row authority in itself.
+     */
+    val delegatedGrantIntegrity = object : Invariant {
+        override val name = "delegated-grant-integrity"
+        override fun check(world: World): Violation? {
+            val cardsById = world.cards.associateBy { it.id }
+            val grantsById = world.delegatedCardGrants.associateBy { it.id }
+            world.delegatedCardGrants.forEach { grant ->
+                val card = cardsById[grant.cardId]
+                    ?: return Violation(name, "grant ${grant.id} names missing card ${grant.cardId}")
+                if (!grant.issuedBy(card.partyId)) {
+                    return Violation(name, "grant ${grant.id} was not issued by the card holder")
+                }
+            }
+            world.cards.forEach { card ->
+                val grantId = card.delegationGrantId ?: return@forEach
+                val grant = grantsById[grantId]
+                    ?: return Violation(name, "card ${card.id} names missing grant $grantId")
+                if (!grant.active && card.status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED)) {
+                    return Violation(name, "card ${card.id} still ${card.status} though its grant ended")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Test Intelligence simulation gap: the treasury desk hygiene rules over the REAL
+     * `NostroBreak` aggregate (ADR-0315 D7) — (1) no break may carry a resolution proposal once
+     * the step has settled: a proposal awaiting a second person overnight is a four-eyes stall,
+     * the exact defect the two-person rule exists to prevent; (2) a MANUAL resolution names both
+     * pairs of eyes and they differ (the domain enforces it at write time; the invariant re-checks
+     * it against the whole book, because a row edited outside the aggregate would not have met
+     * the domain); (3) an open break the REAL `BreakAlertPolicy` reads as aged (3+ business days)
+     * must carry its `alertedAt` — an aged break nobody was told about is money leaking quietly.
+     */
+    val nostroBreakHygiene = object : Invariant {
+        private val alertPolicy = BreakAlertPolicy(ageDays = 3, minAmount = BigDecimal.ZERO)
+
+        override val name = "nostro-break-hygiene"
+        override fun check(world: World): Violation? {
+            val today = world.context.clock.instant().atZone(ZoneOffset.UTC).toLocalDate()
+            world.nostroBreaks.forEach { breakRow ->
+                if (breakRow.resolutionProposed) {
+                    return Violation(name, "nostro break ${breakRow.id} proposal awaiting approval overnight")
+                }
+                if (breakRow.manuallyResolved) {
+                    val missingEyes = breakRow.proposedBy == null || breakRow.resolvedBy == null
+                    val approvedByProposer = breakRow.proposedBy != null && breakRow.proposedBy == breakRow.resolvedBy
+                    if (missingEyes || approvedByProposer) {
+                        return Violation(name, "nostro break ${breakRow.id} manual resolution lacks four eyes")
+                    }
+                }
+                // Only OPEN breaks owe an alert: a matched or resolved break is off the desk's
+                // radar by definition — the production sweep (NostroBreakScenario.alertSweep)
+                // alerts exactly the same set.
+                if (breakRow.open && alertPolicy.isAged(breakRow, today) && breakRow.alertedAt == null) {
+                    return Violation(
+                        name,
+                        "nostro break ${breakRow.id} aged ${breakRow.ageBusinessDays(
+                            today,
+                        )} business days, never alerted",
                     )
                 }
             }
@@ -1089,6 +1294,11 @@ object MoneyPathInvariants {
         cardClearingConservation,
         pensionContractCompleteness,
         pensionReturnTimeliness,
+        pensionFundOrderCompleteness,
+        pensionFundUnitConservation,
+        cardIssuanceCompleteness,
+        delegatedGrantIntegrity,
+        nostroBreakHygiene,
         fxConversionCompleteness,
         fxMoneyConservation,
         billingFeeConservation,

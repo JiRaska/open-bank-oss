@@ -84,3 +84,7 @@ Indexes: `idx_swift_outbox_status_created_at(status, created_at ASC)` (drain ord
 ## Event payloads
 
 Events are drained from `swift_outbox` to Kafka topic `openbank.payments.swift.event` (channel `swift-events-out`, String key + String value). The `payload` column holds the serialized event; `event_type` carries the type label. Every status transition writes its outbox row in the SAME transaction as the state change (`SwiftRepository.saveWithOutbox`): the scheme verdict and the settlement, and — since #8718 — the operator acknowledgement and rejection, which previously changed the status and published nothing. The `event_type` is always `swift.message.status-changed`, so the transition is read from the payload's `status` key; the payload shape is declared as `SwiftMessageEventPayload` in [`docs/asyncapi/openbank-events.yaml`](../../../../../docs/asyncapi/openbank-events.yaml). Event schemas must be versioned backward-compatibly.
+
+## Account validation on treasury release (#16748)
+
+An IBAN-shaped account in a released payment is validated by the shared libs-domain `Iban.isValid` (SWIFT registry length per country, check digits 02..98, mod-97). A value with a passing mod-97 but impossible for its country is refused at intake.

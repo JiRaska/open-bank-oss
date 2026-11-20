@@ -31,7 +31,7 @@ class DomesticPaymentMapperTest {
         debtorAccountNumber = "19-2000145399",
         debtorBankCode = "0800",
         debtorName = "Jan Novak",
-        creditorAccountNumber = "123456789",
+        creditorAccountNumber = "123456788",
         creditorBankCode = "0100",
         creditorName = "Brno Utility",
         amount = Money.of(BigDecimal("1234.560000"), "CZK"),
