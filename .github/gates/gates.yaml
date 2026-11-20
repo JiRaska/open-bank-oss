@@ -2232,7 +2232,7 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
-    selftest_inputs: [".github/scripts/check-license-headers.py"]
+    selftest_inputs: [".github/scripts/check-license-headers.py", "e2e/mcp-harness/"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -3099,7 +3099,7 @@ gates:
     min_subjects: 7   # 14 per-service CLAUDE.md files with src/main measured 2026-10-17
     selftest: python3 .github/scripts/check-claude-md-identifiers.py --selftest
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-claude-md-identifiers.py"]
+    selftest_inputs: [".github/scripts/check-claude-md-identifiers.py", "e2e/mcp-harness/"]
     run: |
       python3 .github/scripts/check-claude-md-identifiers.py --enforce
 
@@ -3354,7 +3354,7 @@ gates:
     group: registry
     budget_seconds: 41
     mode: enforced
-    selftest_inputs: [".github/scripts/check-gate-script-registration.py"]
+    selftest_inputs: [".github/scripts/check-gate-script-registration.py", "e2e/mcp-harness/"]
     selftest: |
       python3 .github/scripts/check-gate-script-registration.py --self-test
     run: |
