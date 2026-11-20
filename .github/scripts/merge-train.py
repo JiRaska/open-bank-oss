@@ -10535,8 +10535,13 @@ def self_test() -> int:
                             new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
                             gh.g("branch", "-f", p["head"]["ref"], new)
                             p["head"]["sha"] = new
-                        if case in ("same", "moved-merged"):
+                        if case == "parent":   # something else lands first: merged over another main
+                            gh.g("checkout", "-q", "-f", "main")
+                            gh.g("commit", "-q", "--allow-empty", "-m", "foreign first")
+                        if case in ("same", "moved-merged", "parent", "unmerged"):
                             gh.merge(1, p["head"]["sha"])
+                        if case == "unmerged":  # closed, merged=False, though the sha is on main
+                            p["merged"] = False
                         elif case == "closed":
                             p["state"] = "closed"
                         elif case == "off-main":
@@ -10561,6 +10566,12 @@ def self_test() -> int:
             check("#16932 NEGATIVE: closed but not merged -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
             s, m, fired = native_race("moved-open")
             check("#16932 NEGATIVE: head changed but still open -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("parent")
+            check("#16932 NEGATIVE: merged over a main other than the expected one -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("unmerged")
+            check("#16932 NEGATIVE: merged=False at the verified head -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
             s, m, fired = native_race("off-main")
             check("#16932 NEGATIVE: merged commit not on main -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
 
@@ -11669,6 +11680,33 @@ def self_test() -> int:
             check("stacking (S5): holder merges first, then the stacked carrier's member merges on main == tree(h), no rebuild",
                   ok_tree and gh.merged == [35, 1] and len(gh.carriers) == made and not open_carriers() and not s2["rejected"],
                   f"{s} {s2} merged={gh.merged} tree_eq={ok_tree}")
+            gh.head_checks.clear()
+            reset()
+
+            # #16932 NEGATIVE: a stacked member natively merged at the verified head and over the expected main,
+            # but to a tree other than the verified stacked step -> not counted as merged.
+            h, s, st = stacked_setup()
+            gh.head_checks.clear()
+            settle_now()                                       # the holder merges
+            real = globals()["live_source_intent"]
+            fired = []
+
+            def stacked_racing(g, n, head, _real=real):
+                if n == 1 and not fired and gh.prs[1]["state"] == "open":
+                    fired.append(n)
+                    m0 = gh.main_sha()
+                    bad = gh.g("commit-tree", f"{m0}^{{tree}}", "-p", m0, "-m", "#1 wrong tree").stdout.strip()
+                    gh.g("update-ref", "refs/heads/main", bad)
+                    gh.g("checkout", "-q", "-f", "main")
+                    gh.prs[1].update(state="closed", merged=True, merge_commit_sha=bad)
+                return _real(g, n, head)
+            globals()["live_source_intent"] = stacked_racing
+            try:
+                s2 = settle_now()
+            finally:
+                globals()["live_source_intent"] = real
+            check("#16932 NEGATIVE: stacked member natively merged to a tree other than the verified step -> stop",
+                  fired == [1] and not s2.get("native_merged") and 1 not in gh.merged, f"{fired} {s2.get('native_merged')} {gh.merged}")
             gh.head_checks.clear()
             reset()
 
