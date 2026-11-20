@@ -253,3 +253,11 @@ generated:
     generator: Password ci-metrics-ingest-token (refreshPolicy CreatedOnce)
     holders:
       - "GitHub secret CI_METRICS_TOKEN in JiRaska/openbank-app (copied by the owner, #16205)"
+  - secret: platform/copilot-redis-exporter
+    generator: Password copilot-redis-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the copilot-redis Deployment (platform), `metrics` ACL user + redis_exporter sidecar"
+  - secret: ai-platform/langfuse-valkey-exporter
+    generator: Password langfuse-valkey-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the langfuse-valkey Deployment (ai-platform), `metrics` ACL user + redis_exporter sidecar"

@@ -108,14 +108,11 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: admin-ui
-      ports:
-        - protocol: TCP
-          port: 9121
-    - from:
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/instance: kube-prometheus-stack-prometheus
       ports:
         - protocol: TCP
           port: 9121
