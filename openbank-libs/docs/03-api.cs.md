@@ -71,7 +71,7 @@ nikdy nevyhodí výjimku.
 
 `RodneCislo.parse` vrací `Parsed` (kanonický tvar, datum narození, pohlaví) nebo `Invalid`.
 Odmítá čísla, která nikdy nebyla vydána: 9místný tvar po roce 1953, výjimku „zbytek 10 → 0“
-po roce 1985 a měsíc +20/+70 před rokem 2004.
+po roce 1985 a měsíc +20/+70 před rokem 2004. Zdroje: zákon č. 133/2000 Sb. § 13 pro 9/10místný tvar a přičtení měsíce od 2004; praxe MV ČR pro výjimku se zbytkem 10.
 
 `parse(raw)` kontroluje jen strukturu: neodmítá datum narození v budoucnosti. Kdo přijímá osobu,
 volá `parse(raw, clock)` (a `isValid(raw, clock)`) s vlastními hodinami `Clock`: „dnešek“ si libs počítá

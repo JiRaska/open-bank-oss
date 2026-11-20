@@ -121,9 +121,18 @@ object RodneCislo {
     }
 
     private const val NINE_DIGIT_LENGTH = 9
+
+    /** Zákon č. 133/2000 Sb., o evidenci obyvatel, § 13: the 10-digit, divisible-by-11 form is issued from 1954; earlier births keep 9 digits. */
     private const val LAST_NINE_DIGIT_YY = 53
+
+    /** Zákon č. 133/2000 Sb., § 13 as amended with effect from 2004: month +20 (men) / +70 (women) when a day's serial range is exhausted. */
     private const val FIRST_OVERFLOW_YY = 4
     private const val REMAINDER_QUIRK = 10
+
+    /**
+     * Remainder 10 → check digit 0 for numbers issued up to 1985. MV ČR issuing practice for the 1954–1985
+     * cohort; no statutory paragraph is claimed. Later numbers are always divisible by 11.
+     */
     private const val LAST_QUIRK_YEAR = 1985
 
     /**
