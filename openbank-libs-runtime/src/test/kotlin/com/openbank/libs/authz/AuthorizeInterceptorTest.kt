@@ -784,6 +784,7 @@ class AuthorizeInterceptorTest {
     }
 
     private fun capturingPdp(captured: MutableList<AuthzQuery>) {
+        every { identity.roles } returns emptySet()
         val pdp = object : PolicyDecisionPoint {
             override suspend fun allow(query: AuthzQuery): AuthzDecision {
                 captured += query
@@ -796,7 +797,8 @@ class AuthorizeInterceptorTest {
         }
     }
 
-    private fun customerJwt(azp: Any?, act: Any?) = mockk<JsonWebToken> {
+    // relaxed: ServiceAccountIdentity also reads subject / preferred_username off the token.
+    private fun customerJwt(azp: Any?, act: Any?) = mockk<JsonWebToken>(relaxed = true) {
         every { getClaim<Any?>("azp") } returns azp
         every { getClaim<Any?>("act") } returns act
     }
@@ -823,7 +825,7 @@ class AuthorizeInterceptorTest {
         val method = AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyCustomerDecide")
         val captured = mutableListOf<AuthzQuery>()
         capturingPdp(captured)
-        every { identity.principal } returns mockk<JsonWebToken> {
+        every { identity.principal } returns mockk<JsonWebToken>(relaxed = true) {
             every { getClaim<Any?>("azp") } returns "openbank-app"
             every { getClaim<Any?>("act") } throws IllegalStateException("unreadable act")
         }
