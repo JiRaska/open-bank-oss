@@ -90,6 +90,9 @@ REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
 STATUS_CONTEXT = "merge-train"
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
 BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
+# The App merge-train.yml hands update-branch (UPDATE_BRANCH_TOKEN). Measured on #16719's branch
+# (68c7fffab4, c96091eef2): author openbank-branch-updater[bot], committer web-flow, verified (#16947).
+BRANCH_UPDATER_LOGIN = "openbank-branch-updater[bot]"
 BOT_ID = 305_862_397                             # its numeric user id (carrier #13817); merge_train_carrier pins it too
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
@@ -4587,6 +4590,10 @@ def selftest_deploy_fix(check) -> None:
     got = deploy_fix_refusal(**{**base, "commits": [bot_commit, update_merge]})
     check("deploy fix: the train's own update-branch merge after the label still admits", got is None, str(got))
     human = {**bot_commit, "sha": "d" * 40, "author": "JiRaska", "committer": "JiRaska", "date": f"{day}T14:00:00Z"}
+    # The real shape of a train update-branch merge (#16719's 68c7fffab4, #16947).
+    updater_merge = {**update_merge, "author": BRANCH_UPDATER_LOGIN, "committer": "web-flow", "verified": True}
+    got = deploy_fix_refusal(**{**base, "commits": [bot_commit, updater_merge]})
+    check("deploy fix: the branch-updater App's real update-branch merge admits", got is None, str(got))
     for label, change, want in [
         ("a non-bot author", {"view": {**view, "author": "JiRaska"}}, "is not"),
         ("an unknown author", {"view": {k: v for k, v in view.items() if k != "author"}}, "is not"),
@@ -4615,6 +4622,11 @@ def selftest_deploy_fix(check) -> None:
         ("a human commit pushed after the label", {"commits": [bot_commit, human]}, "not the App's verified commit"),
         ("an unverified App-authored commit", {"commits": [{**bot_commit, "verified": False}]}, "not the App's verified"),
         ("an App-authored commit committed by a human", {"commits": [{**bot_commit, "committer": "JiRaska"}]}, "not the App's"),
+        ("a human-authored merge", {"commits": [bot_commit, {**updater_merge, "author": "JiRaska"}]}, "not the App's verified"),
+        ("an unverified branch-updater merge", {"commits": [bot_commit, {**updater_merge, "verified": False}]}, "not the App's verified"),
+        ("a merge by another App", {"commits": [bot_commit, {**updater_merge, "author": "dependabot[bot]"}]}, "not the App's verified"),
+        ("a non-merge commit by the branch-updater App",
+         {"commits": [bot_commit, {**updater_merge, "parents": 1}]}, "not the App's verified"),
         ("unreadable commits", {"commits": None}, "unreadable"),
         ("a label applied before the last push", {"label_at": f"{day}T13:00:00Z"}, "before the last commit"),
         ("an unreadable label time", {"label_at": None}, "unreadable"),
@@ -6342,7 +6354,10 @@ def deploy_fix_refusal(view: dict, ctx: str, main_jobs: dict[str, str | None] | 
     if not commits:
         return "the head's commits are unreadable"
     for c in commits:
-        if not (c.get("author") == BOT_LOGIN and c.get("committer") in (BOT_LOGIN, "web-flow") and c.get("verified") is True):
+        # A merge commit (two parents) may also be the train's own update-branch merge, authored by the
+        # branch-updater App (#16947); its content is still bounded by the pin-only base...head diff above.
+        authors = (BOT_LOGIN, BRANCH_UPDATER_LOGIN) if c.get("parents") == 2 else (BOT_LOGIN,)
+        if not (c.get("author") in authors and c.get("committer") in (BOT_LOGIN, "web-flow") and c.get("verified") is True):
             return (f"commit {str(c.get('sha'))[:12]} is not the App's verified commit "
                     f"(author {c.get('author')}, committer {c.get('committer')}, verified {c.get('verified')})")
     if not isinstance(run, dict):
