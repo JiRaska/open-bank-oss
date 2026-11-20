@@ -68,4 +68,10 @@ class CustomerSafeReasonTest {
     fun `a missing reason still renders`() {
         assertThat(customerSafeReason(null)).isNotBlank()
     }
+
+    @Test
+    fun `an invalid account number does not blame the recipient`() {
+        // #16772 review: INVALID_ACCOUNT_NUMBER now also covers a non-issuable DEBTOR account.
+        assertThat(customerSafeReason(DomesticRejectReason.INVALID_ACCOUNT_NUMBER)).doesNotContain("recipient")
+    }
 }

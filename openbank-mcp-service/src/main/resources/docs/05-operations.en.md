@@ -76,6 +76,16 @@ If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with 
 - **Config keys** (env override in parentheses): `openbank.mcp.rate-limit.enabled` (`MCP_RATE_LIMIT_ENABLED`), `calls-per-minute` (`MCP_RATE_LIMIT_PER_MINUTE`), `calls-per-day` (`MCP_RATE_LIMIT_PER_DAY`), `anonymous-calls-per-minute` (`MCP_RATE_LIMIT_ANON_PER_MINUTE`), `max-in-flight` (`MCP_RATE_LIMIT_MAX_IN_FLIGHT`).
 - **State is in-process** (replicas: 1), so the caps multiply by the replica count and reset on a pod roll until the shared-store slice lands.
 
+## Customer channel admission (ADR-0385)
+
+The customer MCP channel is admitted only when `openbank.mcp.customer.enabled` is on and an
+allowlisted client presents a customer-realm token bound to a DPoP proof. Discovery follows
+RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
+`/.well-known/oauth-protected-resource/mcp` answer the resource metadata (issuer,
+`authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
+issuer only, never from request headers. While the channel is off both endpoints answer 404 —
+nothing advertises a channel that does not admit anyone.
+
 ## Customer channel metrics and alerts (ADR-0384 slice 1)
 
 `McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
