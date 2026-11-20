@@ -33,6 +33,7 @@ data class LedgerPosting(
      * event date here instead of back-dating into closed days.
      */
     val valueDate: java.time.LocalDate? = null,
+    val branchBookId: UUID? = null,
 )
 
 /** Immutable internal command; the outbox retries this exact amount, key and accounting date. */
@@ -100,6 +101,9 @@ enum class PostingKind {
 /** Posts loan cash events to the ledger (via the outbox in the real adapter). */
 interface LedgerPostingPort {
     fun post(posting: LedgerPosting): Uni<Unit>
+
+    fun postConfirmedDisbursement(posting: LedgerPosting): Uni<Unit> =
+        Uni.createFrom().failure(UnsupportedOperationException("Ledger backend cannot confirm disbursements"))
 
     /** Prepare the complete immutable request before the accrual intent is committed. No network I/O. */
     fun prepareAccrual(posting: LedgerPosting): PreparedAccrualPosting =

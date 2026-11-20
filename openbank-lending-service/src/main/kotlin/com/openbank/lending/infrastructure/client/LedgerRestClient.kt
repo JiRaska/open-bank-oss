@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.client
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
@@ -53,6 +54,8 @@ data class PostJournalRequest(
     val description: String?,
     val lines: List<JournalLineRequest>,
     val createdBy: UUID,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val branchBookId: UUID? = null,
 )
 
 data class JournalLineRequest(
@@ -71,4 +74,5 @@ data class JournalResponse(
     val status: String,
     // Already present in the ledger's JournalEntryResponse/OpenAPI; absent older replies are unproven.
     val entryDate: String? = null,
+    val branchBookId: UUID? = null,
 )

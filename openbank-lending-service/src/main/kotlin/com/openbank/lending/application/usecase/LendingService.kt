@@ -14,10 +14,18 @@ import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
 import com.openbank.lending.application.port.out.BorrowerCreditPort
+import com.openbank.lending.application.port.out.CatalogFosLoanPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
+import com.openbank.lending.application.port.out.FosAction
+import com.openbank.lending.application.port.out.FosCash
+import com.openbank.lending.application.port.out.FosCommand
+import com.openbank.lending.application.port.out.FosCommitmentRefused
+import com.openbank.lending.application.port.out.FosLoanOperations
+import com.openbank.lending.application.port.out.FosOperation
+import com.openbank.lending.application.port.out.FosRoutePin
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
@@ -28,9 +36,12 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.SignatureIntent
+import com.openbank.lending.application.port.out.SignatureIntents
 import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
+import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -54,6 +65,7 @@ import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.CollateralId
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -69,6 +81,10 @@ import com.openbank.libs.lending.origination.OriginationState
 import com.openbank.libs.lending.origination.OriginationStateMachine
 import com.openbank.libs.lending.origination.OriginationTransition
 import com.openbank.libs.lending.origination.OriginationTransitionResult
+import com.openbank.libs.market.MarketCountry
+import com.openbank.libs.market.PassportMode
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
+import io.quarkus.runtime.LaunchMode
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -134,6 +150,15 @@ class LendingService @Inject constructor(
 
     @Inject
     lateinit var accrualProgress: com.openbank.lending.application.port.out.AccrualProgressPort
+
+    @Inject
+    lateinit var signatureIntents: SignatureIntents
+
+    @Inject
+    lateinit var fosOperations: FosLoanOperations
+
+    @Inject
+    lateinit var fosCatalogue: CatalogFosLoanPort
 
     private val log = Logger.getLogger(LendingService::class.java)
 
@@ -391,18 +416,62 @@ class LendingService @Inject constructor(
 
     // --- Origination --------------------------------------------------------------------------------
 
-    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
-        request.catalogOfferingId?.let { offeringId ->
+    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+        require(request.passportMode == null || request.passportGrantId != null) { "Passport mode requires a grant" }
+        require(request.passportGrantId == null || request.catalogOfferingId != null) {
+            "Passport origination requires a published catalogue offering"
+        }
+        return request.catalogOfferingId?.let { offeringId ->
             catalogLoanProfiles.resolvePublished(offeringId).flatMap { profile ->
                 applyCatalogProfile(request, proposedBy, profile)
             }
         } ?: applyLegacy(request, proposedBy, null)
+    }
 
     private fun applyCatalogProfile(
         request: LoanApplicationRequest,
         proposedBy: String,
         profile: CatalogLoanProfile,
     ): Uni<LoanApplication> {
+        val priced = priceCatalogRequest(request, profile)
+        val grant = request.passportGrantId
+        if (grant != null) {
+            val mode = request.passportMode ?: PassportMode.FOS
+            requireCommitmentMode(mode)
+            return fosCatalogue.resolve(grant, request.partyId, profile.snapshot, mode).flatMap { route ->
+                check(route.mode == mode) { "Catalogue returned a different passport mode" }
+                val host = MarketCountry(route.hostCountry)
+                require(host != DOMESTIC_MARKET && profile.markets?.includes(host) == true) {
+                    "Catalogue offering does not include the passport host market"
+                }
+                require(request.jurisdiction == null || request.jurisdiction == host.code) {
+                    "Requested jurisdiction does not match the approved passport route"
+                }
+                require(profile.productType == "INSTALLMENT_LOAN" && route.customerSegment == "RETAIL") {
+                    "The passport route requires a retail installment product"
+                }
+                require(request.productType == null || request.productType == "CONSUMER_CREDIT") {
+                    "Requested credit type does not match the passport offering"
+                }
+                val routed = priced.copy(jurisdiction = host.code, productType = "CONSUMER_CREDIT")
+                applyLegacy(routed, proposedBy, profile.snapshot, FosRoutePin(grant, route))
+            }
+        }
+        val markets = profile.markets
+        if (markets != null) {
+            require(markets.includes(DOMESTIC_MARKET)) { "Catalog offering is outside the Czech domestic route" }
+            require(request.jurisdiction == null || request.jurisdiction == DOMESTIC_MARKET.code) {
+                "Catalog offering requires the Czech domestic jurisdiction"
+            }
+        }
+        val domestic = priced.copy(jurisdiction = if (markets == null) request.jurisdiction else DOMESTIC_MARKET.code)
+        return applyLegacy(domestic, proposedBy, profile.snapshot)
+    }
+
+    private fun priceCatalogRequest(
+        request: LoanApplicationRequest,
+        profile: CatalogLoanProfile,
+    ): LoanApplicationRequest {
         require(request.requestedAmount.currency.code == profile.currency) {
             "Requested currency does not match catalog"
         }
@@ -417,13 +486,14 @@ class LendingService @Inject constructor(
         }
         // A catalog profile publishes a single rate and no index terms, so a catalog loan is FIXED.
         require(request.rateTerms.rateType == LoanRateType.FIXED) { "Catalog loans carry a FIXED rate" }
-        return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
+        return request.copy(nominalAnnualRate = profile.nominalAnnualRate)
     }
 
     private fun applyLegacy(
         request: LoanApplicationRequest,
         proposedBy: String,
-        catalogSnapshot: com.openbank.lending.domain.model.CatalogLoanSnapshot?,
+        catalogSnapshot: CatalogLoanSnapshot?,
+        fosRoute: FosRoutePin? = null,
     ): Uni<LoanApplication> {
         complianceGuard.checkOriginationAllowed(request.jurisdiction, request.productType)
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
@@ -441,6 +511,7 @@ class LendingService @Inject constructor(
             }
         val now = OffsetDateTime.now(clock)
         val pack = complianceGuard.resolveOriginationPack(request.jurisdiction, request.productType)
+        requireFosOriginationAllowed(fosRoute, pack != null)
         val application = LoanApplication(
             partyId = request.partyId,
             requestedAmount = request.requestedAmount,
@@ -465,7 +536,7 @@ class LendingService @Inject constructor(
             employmentTenureMonths = request.employmentTenureMonths,
             catalogSnapshot = catalogSnapshot,
         )
-        return applications.save(application).call { saved ->
+        return saveApplication(application, fosRoute).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
             armTimers(saved.id, state, reflectionDaysFor(saved))
         }.map { saved ->
@@ -483,6 +554,28 @@ class LendingService @Inject constructor(
             )
         }
     }
+
+    private fun requireCommitmentMode(mode: PassportMode) {
+        // Until B2 supplies branch books, exercise this path only in the isolated integration runtime.
+        require(mode != PassportMode.BRANCH || LaunchMode.current() == LaunchMode.TEST) {
+            "Branch lending requires branch-aware booking"
+        }
+    }
+
+    private fun requireFosOriginationAllowed(route: FosRoutePin?, hasHostPack: Boolean) {
+        require(route == null || (hasHostPack && !originationConfig.autoApprove)) {
+            "Passport lending requires an active host pack and human approval"
+        }
+    }
+
+    private fun saveApplication(application: LoanApplication, route: FosRoutePin?): Uni<LoanApplication> =
+        if (route == null) {
+            applications.save(application)
+        } else {
+            applications.withLocked(application.id) {
+                applications.save(application).call { saved -> fosOperations.pin(saved.id.value, route) }
+            }
+        }
 
     private data object UnusedCatalogLoanProfilePort : CatalogLoanProfilePort {
         override fun resolvePublished(offeringId: UUID): Uni<CatalogLoanProfile> =
@@ -736,6 +829,9 @@ class LendingService @Inject constructor(
             when {
                 existing == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.requiresFosPermit() -> signFos(existing, request, signedBy)
+                existing.signatureRecordedAt != null && existing.supportsDurableSignature() ->
+                    replaySignature(existing, request, signedBy)
                 existing.status != OriginationState.AWAITING_SIGNATURE ->
                     Uni.createFrom().failure(
                         IllegalStateException("Application is not awaiting signature: ${existing.status}"),
@@ -755,10 +851,97 @@ class LendingService @Inject constructor(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
                     is OriginationTransitionResult.Applied ->
-                        recordSignature(existing, result.newState, request, signedBy)
+                        if (existing.supportsDurableSignature()) {
+                            stageSignature(existing, request, signedBy)
+                        } else {
+                            recordSignature(existing, result.newState, request, signedBy)
+                        }
                 }
             }
         }
+
+    private fun LoanApplication.supportsDurableSignature(): Boolean =
+        jurisdiction == DOMESTIC_MARKET.code && catalogSnapshot != null
+
+    private fun LoanApplication.signatureIntent(request: SignApplicationRequest, actor: String): SignatureIntent {
+        val pin = checkNotNull(catalogSnapshot)
+        return SignatureIntent(
+            Ids.newId(),
+            id,
+            pin.revisionId,
+            pin.contentHash,
+            request.artefactHash,
+            actor,
+            SyntheticTaintKafkaRail.currentlyTainted(),
+        )
+    }
+
+    private fun stageSignature(
+        existing: LoanApplication,
+        request: SignApplicationRequest,
+        actor: String,
+    ): Uni<LoanApplication> = applications.withLocked(existing.id) { locked ->
+        val current = locked ?: throw signatureClaimLost(existing)
+        if (current.status != existing.status && current.signatureRecordedAt == null) {
+            throw signatureClaimLost(existing)
+        }
+        if (lacksDecision(current)) throw decisionMissing(current)
+        val candidate = current.signatureIntent(request, actor)
+        val stored = if (current.signatureRecordedAt == null) {
+            signatureIntents.stage(candidate).map<SignatureIntent?> { it }
+        } else {
+            signatureIntents.find(current.id)
+        }
+        stored.map { intent ->
+            check(intent != null && intent.matches(candidate)) { "A different signature request is already recorded" }
+            intent
+        }
+    }.flatMap(::finishSignatureIntent)
+
+    private fun replaySignature(
+        application: LoanApplication,
+        request: SignApplicationRequest,
+        actor: String,
+    ): Uni<LoanApplication> = signatureIntents.find(application.id).map { stored ->
+        check(
+            stored != null &&
+                application.signatureArtefactHash == stored.artefactHash &&
+                stored.matches(application.signatureIntent(request, actor)),
+        ) {
+            "The signature request does not match the recorded operation"
+        }
+        application
+    }
+
+    fun finishSignatureIntent(intent: SignatureIntent): Uni<LoanApplication> =
+        applications.withLocked(intent.applicationId) { current ->
+            checkNotNull(current) { "Signature application no longer exists" }
+            val pin = current.catalogSnapshot
+            check(
+                current.supportsDurableSignature() &&
+                    pin != null &&
+                    pin.revisionId == intent.revisionId &&
+                    pin.contentHash == intent.revisionContentHash,
+            ) { "Signature product revision changed" }
+            if (current.signatureRecordedAt != null) {
+                check(current.signatureArtefactHash == intent.artefactHash) { "Signature artefact changed" }
+                Uni.createFrom().item(current to false)
+            } else {
+                check(current.status == OriginationState.AWAITING_SIGNATURE) {
+                    "Application is no longer awaiting signature"
+                }
+                if (lacksDecision(current)) throw decisionMissing(current)
+                commitSignature(current, OriginationState.SIGNED, intent.artefactHash, intent.actor)
+                    .call { _ -> signatureIntents.complete(intent.id) }
+                    .map { it to true }
+            }
+        }.call { (application, changed) ->
+            if (changed) {
+                armTimers(application.id, application.status, reflectionDaysFor(application))
+            } else {
+                Uni.createFrom().nullItem<TimerArmingOutcome>()
+            }
+        }.map { it.first }
 
     private fun recordSignature(
         existing: LoanApplication,
@@ -769,21 +952,30 @@ class LendingService @Inject constructor(
         val current = locked ?: throw signatureClaimLost(existing)
         if (current.status != existing.status) throw signatureClaimLost(existing)
         if (lacksDecision(current)) throw decisionMissing(current)
+        commitSignature(current, state, request.artefactHash, signedBy)
+    }.signalWorkflow()
+
+    private fun commitSignature(
+        current: LoanApplication,
+        state: OriginationState,
+        artefactHash: String,
+        signedBy: String,
+    ): Uni<LoanApplication> {
         val signed = current.copy(
             status = state,
-            signatureArtefactHash = request.artefactHash,
+            signatureArtefactHash = artefactHash,
             signatureRecordedAt = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MICROS),
         )
-        applications.compareAndSetSignature(signed, existing.status).map { claimed ->
-            if (claimed == 0) throw signatureClaimLost(existing)
+        return applications.compareAndSetSignature(signed, current.status).map { claimed ->
+            if (claimed == 0) throw signatureClaimLost(current)
             signed
         }.emitEvidence(
-            existing.status.name,
+            current.status.name,
             signedBy,
             OriginationActorKind.HUMAN,
-            "customer signature received (artefact ${request.artefactHash})",
+            "customer signature received (artefact $artefactHash)",
         )
-    }.signalWorkflow()
+    }
 
     private fun signatureClaimLost(existing: LoanApplication) = IllegalStateException(
         "Concurrent modification: application ${existing.id} is no longer in ${existing.status}",
@@ -857,6 +1049,7 @@ class LendingService @Inject constructor(
             when {
                 application == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $applicationId"))
+                application.requiresFosPermit() -> disburseFos(application, disbursedBy)
                 application.status != OriginationState.READY_TO_DISBURSE ->
                     Uni.createFrom().failure(
                         IllegalStateException(
@@ -921,10 +1114,10 @@ class LendingService @Inject constructor(
             }
         }
 
-    @Suppress("LongMethod") // ADR-0100: clock-stamp fields push this 3 lines past threshold
-    private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
+    private fun newLoan(application: LoanApplication, loanId: LoanId = LoanId.random()): Loan {
         val now = OffsetDateTime.now(clock)
-        val loan = Loan(
+        return Loan(
+            id = loanId,
             applicationId = application.id,
             partyId = application.partyId,
             principal = application.requestedAmount,
@@ -937,6 +1130,9 @@ class LendingService @Inject constructor(
             disbursedAt = now,
             createdAt = now,
         )
+    }
+
+    private fun scheduleRows(loan: Loan): List<LoanInstallment> {
         // Generate the contractual schedule from the pure libs primitive.
         val schedule = Amortization.schedule(
             principal = loan.principal,
@@ -946,7 +1142,7 @@ class LendingService @Inject constructor(
             periodsPerYear = loan.periodsPerYear,
             method = loan.method,
         )
-        val rows = schedule.installments.map { i ->
+        return schedule.installments.map { i ->
             LoanInstallment(
                 loanId = loan.id,
                 number = i.number,
@@ -958,6 +1154,12 @@ class LendingService @Inject constructor(
                 closingBalance = i.closingBalance,
             )
         }
+    }
+
+    @Suppress("LongMethod") // Existing local booking and two remote cash calls.
+    private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
+        val loan = newLoan(application)
+        val rows = scheduleRows(loan)
         // One transaction for every LOCAL write of the booking (#11626): the loan row, its
         // schedule, the DISBURSED claim on the application and the transition evidence commit
         // together or not at all. Measured before this: three transaction ids for one request
@@ -1037,6 +1239,196 @@ class LendingService @Inject constructor(
                     }
                     .map { saved }
             }
+    }
+
+    private fun LoanApplication.requiresFosPermit(): Boolean =
+        catalogSnapshot != null && jurisdiction != null && jurisdiction != DOMESTIC_MARKET.code
+
+    private fun signFos(app: LoanApplication, request: SignApplicationRequest, actor: String): Uni<LoanApplication> {
+        val command = FosCommand(actor, SyntheticTaintKafkaRail.currentlyTainted(), artefactHash = request.artefactHash)
+        return stageFos(app.id, FosAction.SIGN, command).flatMap(::finishFosSignature)
+    }
+
+    private fun disburseFos(app: LoanApplication, actor: String): Uni<Loan> {
+        val command = FosCommand(actor, SyntheticTaintKafkaRail.currentlyTainted())
+        return fosOperations.find(app.id.value, FosAction.DISBURSE).flatMap { existing ->
+            if (existing != null) {
+                stageFos(app.id, FosAction.DISBURSE, command.copy(cash = existing.command.cash))
+            } else {
+                validateFosActor(app, FosAction.DISBURSE, actor)
+                borrowerAccounts.findCurrentAccount(app.partyId, app.requestedAmount.currency.code).flatMap { account ->
+                    checkNotNull(account) { "Borrower has no eligible current account" }
+                    val cash = FosCash(account, LocalDate.now(clock))
+                    stageFos(app.id, FosAction.DISBURSE, command.copy(cash = cash))
+                }
+            }
+        }.flatMap(::finishFosDisbursement)
+    }
+
+    private fun validateFosActor(app: LoanApplication, action: FosAction, actor: String) {
+        require(actor.isNotBlank()) { "Passport commitment actor is required" }
+        if (lacksDecision(app)) throw decisionMissing(app)
+        if (action == FosAction.SIGN) {
+            check(app.status == OriginationState.AWAITING_SIGNATURE) { "Application is not awaiting signature" }
+            return
+        }
+        check(app.status == OriginationState.READY_TO_DISBURSE) { "Application is not ready to disburse" }
+        if (actor == app.decidedBy || actor == app.proposedBy) {
+            throw OriginationRefusedException(
+                OriginationRefusedException.SEGREGATION_OF_DUTIES,
+                "Disburser must differ from the proposer and the approver",
+            )
+        }
+    }
+
+    private fun stageFos(id: LoanApplicationId, action: FosAction, command: FosCommand): Uni<FosOperation> =
+        applications.withLocked(id) { current ->
+            val app = checkNotNull(current) { "Passport application no longer exists" }
+            fosOperations.route(id.value).flatMap { route ->
+                check(route != null && route.route.hostCountry == app.jurisdiction) {
+                    "Application has no verified passport route"
+                }
+                requireCommitmentMode(route.route.mode)
+                fosOperations.find(id.value, action).flatMap { existing ->
+                    if (existing != null) {
+                        check(existing.command == command && !existing.refused) {
+                            "Passport operation has a different command or was refused"
+                        }
+                        Uni.createFrom().item(existing)
+                    } else {
+                        validateFosActor(app, action, command.actor)
+                        val operation = FosOperation(Ids.newId(), id.value, action, command)
+                        checkFosPrerequisite(operation).flatMap {
+                            fosOperations.stage(operation)
+                        }.replaceWith(operation)
+                    }
+                }
+            }
+        }
+
+    private fun checkFosPrerequisite(operation: FosOperation): Uni<Unit> = if (operation.action == FosAction.SIGN) {
+        Uni.createFrom().item(Unit)
+    } else {
+        fosOperations.find(operation.applicationId, FosAction.SIGN).invoke { signature ->
+            check(signature?.admitted == true) { "Passport disbursement requires a confirmed signature" }
+        }.replaceWith(Unit)
+    }
+
+    private fun admitFos(operation: FosOperation): Uni<Unit> {
+        val applicationId = LoanApplicationId(operation.applicationId)
+        return applications.findById(applicationId).flatMap { app ->
+            val current = checkNotNull(app) { "Passport application no longer exists" }
+            val revision = checkNotNull(current.catalogSnapshot) { "Missing pinned catalogue revision" }
+            fosOperations.route(operation.applicationId).flatMap { pin ->
+                check(pin != null && pin.route.hostCountry == current.jurisdiction) {
+                    "Verified passport route changed"
+                }
+                requireCommitmentMode(pin.route.mode)
+                if (operation.admitted) {
+                    Uni.createFrom().item(Unit)
+                } else {
+                    fosCatalogue.admit(operation, pin, current.partyId, revision)
+                }
+            }
+        }.onFailure(FosCommitmentRefused::class.java).call { _ ->
+            applications.withLocked(applicationId) { fosOperations.refuse(operation.id) }
+        }
+    }
+
+    private fun finishFosSignature(operation: FosOperation): Uni<LoanApplication> = admitFos(operation).flatMap {
+        applications.withLocked(LoanApplicationId(operation.applicationId)) { row ->
+            val app = checkNotNull(row)
+            if (app.signatureRecordedAt != null) {
+                check(app.signatureArtefactHash == operation.command.artefactHash)
+                Uni.createFrom().item(app)
+            } else {
+                validateFosActor(app, FosAction.SIGN, operation.command.actor)
+                fosOperations.admit(operation.id)
+                    .flatMap {
+                        commitSignature(
+                            app,
+                            OriginationState.SIGNED,
+                            checkNotNull(operation.command.artefactHash),
+                            operation.command.actor,
+                        )
+                    }
+            }
+        }
+    }.call { app ->
+        if (operation.completed) {
+            Uni.createFrom().item(Unit)
+        } else {
+            armTimers(app.id, app.status, reflectionDaysFor(app)).flatMap { fosOperations.complete(operation.id) }
+        }
+    }
+
+    private fun finishFosDisbursement(operation: FosOperation): Uni<Loan> = admitFos(operation).flatMap {
+        applications.withLocked(LoanApplicationId(operation.applicationId)) { row ->
+            val app = checkNotNull(row)
+            val loanId = LoanId(operation.id)
+            if (app.status == OriginationState.DISBURSED) {
+                loans.findById(loanId).map { loan -> checkNotNull(loan) { "Passport booked loan is missing" } }
+            } else {
+                validateFosActor(app, FosAction.DISBURSE, operation.command.actor)
+                val loan = newLoan(app, loanId)
+                fosOperations.admit(operation.id).flatMap {
+                    bookLocally(loan, scheduleRows(loan), app, operation.command.actor)
+                }
+            }
+        }
+    }.flatMap { loan ->
+        if (operation.completed) {
+            Uni.createFrom().item(loan)
+        } else {
+            fosOperations.route(operation.applicationId).flatMap { pin ->
+                val route = checkNotNull(pin).route
+                val branchBookId = route.establishmentId.takeIf { route.mode == PassportMode.BRANCH }
+                finishFosCash(operation, loan, branchBookId)
+            }
+        }
+    }
+
+    private fun finishFosCash(operation: FosOperation, loan: Loan, branchBookId: UUID?): Uni<Loan> {
+        val cash = checkNotNull(operation.command.cash)
+        return ledger.postConfirmedDisbursement(
+            LedgerPosting(
+                "loan:${loan.id.value}:disbursement",
+                loan.partyId,
+                loan.principal,
+                PostingKind.DISBURSEMENT,
+                accountingDate = cash.date,
+                branchBookId = branchBookId,
+            ),
+        ).flatMap {
+            borrowerCredit.creditOn(
+                LoanCashReferences.disbursementCredit(loan.id),
+                cash.accountId,
+                loan.principal,
+                cash.date,
+            )
+        }.flatMap {
+            applications.withLocked(loan.applicationId) {
+                fosOperations.find(operation.applicationId, FosAction.DISBURSE).flatMap { current ->
+                    if (checkNotNull(current).completed) {
+                        Uni.createFrom().item(Unit)
+                    } else {
+                        events.emit(disbursementEvent(loan))
+                            .call { _ ->
+                                events.emitExposureFact(
+                                    loan,
+                                    LoanExposureChange.Disbursed(clock.instant()),
+                                    loan.disbursedAt.toInstant(),
+                                )
+                            }.call { _ -> fosOperations.complete(operation.id) }
+                    }
+                }
+            }
+        }.replaceWith(loan)
+    }
+
+    fun resumeFosOperation(operation: FosOperation): Uni<Unit> = when (operation.action) {
+        FosAction.SIGN -> finishFosSignature(operation).replaceWith(Unit)
+        FosAction.DISBURSE -> finishFosDisbursement(operation).replaceWith(Unit)
     }
 
     private fun disbursementEvent(loan: Loan) = LendingOutboxMessage(
@@ -1887,6 +2279,7 @@ class LendingService @Inject constructor(
     }
 
     private companion object {
+        val DOMESTIC_MARKET = MarketCountry("CZ")
         const val REFUSED_EVENT_TYPE = "credit.application.transition.refused"
         const val FOUR_EYES_ESCALATION_EVENT_TYPE = "credit.application.four_eyes_sla_escalation"
         val REFUSAL_JSON: com.fasterxml.jackson.databind.ObjectMapper = com.fasterxml.jackson.databind.ObjectMapper()
