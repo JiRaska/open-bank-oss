@@ -3430,24 +3430,29 @@ class CustomerEdgeResource(
                 ).statusInfo.family == Response.Status.Family.SUCCESSFUL
             } ?: false
         } finally {
-            audit.emit(
-                // A payment that exists but whose execution the store did not record is its own
-                // outcome: money moved and the proposal still reads APPROVED until reconciled.
-                eventType = when {
-                    paymentId != null && !executed -> "CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED"
-                    else -> "CUSTOMER_MCP_PROPOSAL_APPROVED"
-                },
-                partyId = party,
-                operation = "mcp-proposals.approve",
-                result = if (executed) "SUCCESS" else "FAILURE",
-                resourceId = id.toString(),
-                details = mapOf(
-                    "paymentId" to paymentId,
-                    "payloadSha256" to proposal.payloadSha256,
-                    "mcpClientId" to proposal.mcpClientId,
-                    "executionRecorded" to executed.toString(),
-                ),
-            )
+            // A payment that exists but whose execution the store did not record is its own
+            // outcome: money moved and the proposal still reads APPROVED until reconciled. Each
+            // event type is a literal `eventType = "..."` so the event-contract gate can see it.
+            fun emitApproval(eventType: String) {
+                audit.emit(
+                    eventType = eventType,
+                    partyId = party,
+                    operation = "mcp-proposals.approve",
+                    result = if (executed) "SUCCESS" else "FAILURE",
+                    resourceId = id.toString(),
+                    details = mapOf(
+                        "paymentId" to paymentId,
+                        "payloadSha256" to proposal.payloadSha256,
+                        "mcpClientId" to proposal.mcpClientId,
+                        "executionRecorded" to executed.toString(),
+                    ),
+                )
+            }
+            if (paymentId != null && !executed) {
+                emitApproval(eventType = "CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED")
+            } else {
+                emitApproval(eventType = "CUSTOMER_MCP_PROPOSAL_APPROVED")
+            }
         }
         return created
     }
