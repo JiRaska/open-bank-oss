@@ -476,14 +476,22 @@ a stub (T-T2/T-D2).
     replayed once more, and every D5.3 budget restarts from zero. `noeviction` and the maxmemory
     margin make OOM unlikely but not impossible. Prod needs an operator-managed HA store with
     persistence; until then this is accepted for the sandbox and called out in 05-operations.
-  - *Password handling (#16791 re-review).* The requirepass value never reaches argv: a POSIX-sh
-    wrapper writes it into a memory-medium emptyDir config file, unsets the variable and `exec`s
-    `valkey-server` on the file. Measured on `valkey/valkey:9.1.3-alpine`: `/proc/1/cmdline` reads
-    `valkey-server *:6379`, the variable is absent from `/proc/1/environ`, an unauthenticated `PING`
-    answers `NOAUTH`, and an empty password refuses to start (exit 1).
-  - **Residual:** the value is still in the Kubernetes Secret and in the tmpfs file inside the pod;
-    anyone who can read that Secret or exec into the pod can read it (and could read process
-    memory anyway).
+  - *Password handling (#16791 reviews).* The Valkey container gets its two passwords as FILES from
+    the Secrets (secret volumes are tmpfs, mode 0440 to the pod's fsGroup), never as env vars or argv —
+    both of which land in the OCI runtime spec (`crictl inspect`). A POSIX-sh wrapper reads the files,
+    refuses to start unless each is non-empty and `[A-Za-z0-9]+`, writes the config into a
+    memory-medium emptyDir and `exec`s `valkey-server`. Measured on the digest-pinned 9.1.3 image:
+    `/proc/1/cmdline` = `valkey-server *:6379`; no password in `/proc/1/environ` or the container's
+    configured env; unauthenticated `PING` → `NOAUTH`; a password with `"` or a space → refuses (exit 1).
+  - **Residual:** the exporter's `metrics` password is still an env var in ITS container spec:
+    redis_exporter's `--redis.password-file` only feeds the multi-target `/scrape` map (measured: a
+    plain file is rejected as non-JSON; a JSON map leaves the main target `NOAUTH`), and the URI form
+    would put it in argv. That user can run only introspection commands (no data, no `CONFIG GET`),
+    and the slowlog is off. mcp-service's `QUARKUS_REDIS_PASSWORD` and HMAC secret are env vars in its
+    own pod spec, like the fleet's other Quarkus secrets.
+  - *Images* are pinned by tag and digest (valkey `9.1.3-alpine@sha256:bf09d58e…`, redis_exporter
+    `v1.92.1@sha256:7fbc93d3…`). The Password generators and ExternalSecrets sync at wave `-1`, before
+    the workloads that mount them.
   - *Exporter hardening (#16791 security review).* The `redis_exporter` sidecar never holds the
     store password. It logs in as a dedicated `metrics` ACL user with its own generated password
     (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT SETNAME`, `SLOWLOG
@@ -496,7 +504,7 @@ a stub (T-T2/T-D2).
     default user's password in clear to any user allowed `config|get`. Measured as `metrics`: `GET`,
     `SET`, `DEL`, `FLUSHALL`, `KEYS`, `EVAL`, `CONFIG GET|SET` and `ACL LIST` all answer `NOPERM`,
     while `redis_up 1` and `redis_memory_max_bytes` are still exported and `/scrape` answers 404.
-    Port 9121 admits only the observability Prometheus pods (`open-bank.tech/metrics-ingress-prometheus-only`,
+    Port 6379 admits only mcp-service pods, and only on 6379; port 9121 admits only the observability Prometheus pods (`open-bank.tech/metrics-ingress-prometheus-only`,
     derived by `gen-network-policies.py`), not admin-ui. The same exporter pattern on `copilot-redis`
     is a fleet follow-up.
   - *Slowlog disabled.* The store runs `slowlog-log-slower-than -1`, so no command — and none of its

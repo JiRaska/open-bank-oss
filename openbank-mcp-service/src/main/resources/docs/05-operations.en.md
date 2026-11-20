@@ -106,9 +106,13 @@ ephemeral, so:
   cluster. Until ESO creates them the Valkey pod waits in `CreateContainerConfigError` (by design: it
   never starts unauthenticated) and mcp-service runs with the customer channel off; enabling the
   channel without them refuses to boot.
-- **Auth:** the password is rendered by a shell wrapper into a tmpfs config file (`/conf`, memory
-  medium) and removed from the environment before `exec valkey-server`, so it is in neither the
-  process arguments (`/proc/1/cmdline`, `crictl inspect`) nor the node's disk.
+- **Auth:** the Valkey container reads its passwords from files mounted from the Secrets (tmpfs,
+  mode 0440), validates them (`[A-Za-z0-9]+`, non-empty), renders them into a tmpfs config file and
+  `exec`s `valkey-server`: they are in neither the process arguments, the container environment, nor
+  the node's disk. The exporter's least-privilege `metrics` password is an env var in its own
+  container (redis_exporter has no single-target password file).
+- **Rollout:** merging this restarts the live mcp-service pod once (its env gains the Valkey host,
+  password and HMAC refs; terminate-first, ~160 s unavailable). mcp-valkey is created fresh.
 - **Exporter:** the `redis_exporter` sidecar uses the `metrics` ACL user (own generated password in
   `mcp-customer-store-metrics`, introspection commands only, no `CONFIG GET`), its `/scrape`
   multi-target endpoint is disabled, and port 9121 admits only the Prometheus pods.

@@ -82,6 +82,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: mcp-service
+      ports:
+        - protocol: TCP
+          port: 6379
     - from:
         - namespaceSelector:
             matchLabels:

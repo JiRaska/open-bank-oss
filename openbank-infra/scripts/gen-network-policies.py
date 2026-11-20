@@ -550,14 +550,15 @@ spec:
                 sys.argv = previous_argv
             docs = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
             pol = next(d for d in docs if d["metadata"]["name"] == "fixture-store-ingress-allow-list")
-            return [peer.get("podSelector") for rule in pol["spec"]["ingress"] for peer in rule["from"]
+            return [(peer.get("podSelector"), sorted(p["port"] for p in rule.get("ports", [])))
+                    for rule in pol["spec"]["ingress"] for peer in rule["from"]
                     if "podSelector" in peer and "namespaceSelector" not in peer]
 
-        case("annotated store admits only its named same-namespace client", same_ns_from(),
-             [{"matchLabels": {"app.kubernetes.io/name": "fixture-owner"}}])
+        case("annotated store admits only its named same-namespace client, on its datastore port only",
+             same_ns_from(), [({"matchLabels": {"app.kubernetes.io/name": "fixture-owner"}}, [6379])])
         source.write_text(source.read_text(encoding="utf-8").replace(
             "  annotations: {open-bank.tech/same-namespace-ingress-from: fixture-owner}\n", ""), encoding="utf-8")
-        case("unannotated store keeps the open same-namespace rule", same_ns_from(), [{}])
+        case("unannotated store keeps the open same-namespace rule", same_ns_from(), [({}, [])])
 
     # A workload annotated open-bank.tech/metrics-ingress-prometheus-only exposes its scraped port to
     # the Prometheus pods only: no admin-ui rule, and the observability peer carries a podSelector.
@@ -942,8 +943,14 @@ def main():
         }
 
         if wl.get("same_ns_from"):
-            rules = [{"from": [{"podSelector": {"matchLabels": {
-                "app.kubernetes.io/name": wl["same_ns_from"]}}}]}]  # one named same-namespace client
+            # One named same-namespace client, and only on the store's datastore ports: without a port
+            # list the rule would also open every other port of the pod (e.g. an exporter) to it.
+            client_ports = sorted(internal_only_ports) or sorted(
+                p for p in wl["ports"].values() if p != mgmt_port)
+            rules = [{
+                "from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": wl["same_ns_from"]}}}],
+                "ports": [{"protocol": "TCP", "port": p} for p in client_ports],
+            }]
         else:
             rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:

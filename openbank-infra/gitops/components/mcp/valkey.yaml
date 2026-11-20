@@ -62,20 +62,26 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: docker.io/valkey/valkey:9.1.3-alpine
-          # The password must never reach argv: kubelet-expanded `$(VAR)` args land in
-          # /proc/1/cmdline and `crictl inspect`. So a POSIX-sh wrapper writes every setting,
-          # requirepass included, into a memory-medium emptyDir (/conf, never on disk), drops the
-          # variable from its environment and execs valkey-server on the file. `$VALKEY_PASSWORD`
-          # below is shell syntax, NOT kubelet `$(...)` syntax, so argv carries only this script.
-          # An empty password refuses to start rather than run unauthenticated. The generated value
-          # is 48 letters/digits, so it can never contain `"` or a newline.
+          # Tag AND digest: the tag documents, the digest decides (resolved 2026-11-20, multi-arch index).
+          image: docker.io/valkey/valkey:9.1.3-alpine@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b
+          # The passwords never reach argv or the container's environment (both end up in the OCI
+          # runtime spec, i.e. `crictl inspect`). They are mounted as FILES from the two Secrets
+          # (secret volumes are tmpfs; mode 0440, group = fsGroup 1000, so only this pod's uid/gid
+          # reads them), and a POSIX-sh wrapper writes every setting into a memory-medium emptyDir
+          # (/conf, never on disk) and execs valkey-server on that file. It refuses to start on an
+          # empty password or one that is not purely letters/digits (the generators emit exactly
+          # that; anything else would break the quoted config line).
           command: ["sh", "-c"]
           args:
             - |
               set -eu
-              [ -n "${VALKEY_PASSWORD:-}" ] || { echo "VALKEY_PASSWORD empty: refusing to start unauthenticated" >&2; exit 1; }
-              [ -n "${METRICS_PASSWORD:-}" ] || { echo "METRICS_PASSWORD empty: refusing to start" >&2; exit 1; }
+              pw="$(cat /secrets/valkey/valkey_password)"
+              mpw="$(cat /secrets/metrics/metrics_password)"
+              for v in "$pw" "$mpw"; do
+                case "$v" in
+                  ''|*[!A-Za-z0-9]*) echo "a store password is empty or not [A-Za-z0-9]+: refusing to start" >&2; exit 1 ;;
+                esac
+              done
               umask 077
               {
                 echo 'save ""'
@@ -86,7 +92,7 @@ spec:
                 # No slowlog: a replay/budget store has no use for it, and an entry would carry a slow
                 # command's arguments (jti, hashed key names).
                 echo 'slowlog-log-slower-than -1'
-                printf 'requirepass "%s"\n' "$VALKEY_PASSWORD"
+                printf 'requirepass "%s"\n' "$pw"
                 # The exporter's OWN user: read-only server introspection, no key or channel access,
                 # no data or admin commands, and NO `CONFIG GET` (measured: it returns `requirepass` in
                 # clear). No `CLIENT LIST` either (client addresses/names): the exporter only calls it
@@ -94,21 +100,10 @@ spec:
                 # calls it on every scrape with no flag to stop it (without it ACL LOG fills with a denial
                 # per scrape); with slowlog disabled above it can only ever read an empty log. It never
                 # holds the requirepass/default credential.
-                printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram +command|info +commandlog|len\n' "$METRICS_PASSWORD"
+                printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram +command|info +commandlog|len\n' "$mpw"
               } > /conf/valkey.conf
-              unset VALKEY_PASSWORD METRICS_PASSWORD
+              unset pw mpw v
               exec valkey-server /conf/valkey.conf
-          env:
-            - name: VALKEY_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-customer-store-valkey
-                  key: valkey_password
-            - name: METRICS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-customer-store-metrics
-                  key: metrics_password
           ports:
             - name: redis
               containerPort: 6379
@@ -123,6 +118,12 @@ spec:
               mountPath: /data
             - name: conf
               mountPath: /conf
+            - name: valkey-password
+              mountPath: /secrets/valkey
+              readOnly: true
+            - name: metrics-password
+              mountPath: /secrets/metrics
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: redis
@@ -145,9 +146,13 @@ spec:
         # least-privilege `metrics` ACL user with its own generated password (env, never argv), and its
         # multi-target endpoint is disabled.
         - name: exporter
-          image: docker.io/oliver006/redis_exporter:v1.92.1
+          image: docker.io/oliver006/redis_exporter:v1.92.1@sha256:7fbc93d30f0f91eed1b2fe6968a956259cc5d260a984dd9071f1d1e9c2692ecd
           # --disable-scrape-endpoint: no multi-target `/scrape?target=` — it would let anything that
           # reaches :9121 point the exporter, with its credential, at an arbitrary host.
+          # Its password stays an env var: --redis.password-file only feeds the multi-target /scrape map
+          # (measured: a plain file is rejected as non-JSON, a JSON map leaves the main target NOAUTH),
+          # and the URI form would put it in argv. So the exporter's credential is in its own container
+          # spec — it is the least-privilege `metrics` user, which can read no data.
           # --config-command=-: no CONFIG GET (the metrics user may not run it; maxmemory comes from INFO).
           args: ["--redis.addr=redis://localhost:6379", "--disable-scrape-endpoint", "--config-command=-"]
           env:
@@ -179,6 +184,21 @@ spec:
         - name: data
           emptyDir: {}
         # The rendered config holds requirepass: tmpfs, so it never touches the node's disk.
+        # REQUIRED secrets (no `optional`): without them the pod never starts, so never unauthenticated.
+        - name: valkey-password
+          secret:
+            secretName: mcp-customer-store-valkey
+            defaultMode: 0440
+            items:
+              - key: valkey_password
+                path: valkey_password
+        - name: metrics-password
+          secret:
+            secretName: mcp-customer-store-metrics
+            defaultMode: 0440
+            items:
+              - key: metrics_password
+                path: metrics_password
         - name: conf
           emptyDir:
             medium: Memory
