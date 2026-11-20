@@ -76,7 +76,12 @@ class McpThrottleTest {
             registry = registry,
             pdp = pdp,
             auditor = McpCallAuditor(audit),
-            callerResolver = CallerContextResolver(jwt, false, mockk<AgentSessionRepository>(relaxed = true)),
+            callerResolver = CallerContextResolver(
+                jwt,
+                false,
+                mockk<AgentSessionRepository>(relaxed = true),
+                customerIssuer = java.util.Optional.empty(),
+            ),
             mapper = mapper,
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",

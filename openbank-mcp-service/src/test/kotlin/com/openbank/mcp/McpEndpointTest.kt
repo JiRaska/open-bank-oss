@@ -58,7 +58,8 @@ class McpEndpointTest {
         val stub = StubReads(mapper)
         val toolRegistry =
             McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
-        val caller = CallerContextResolver(jwt, oboEnabled, fakeSessionRepo())
+        val caller =
+            CallerContextResolver(jwt, oboEnabled, fakeSessionRepo(), customerIssuer = java.util.Optional.empty())
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
