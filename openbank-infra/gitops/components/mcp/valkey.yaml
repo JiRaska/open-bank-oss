@@ -87,7 +87,7 @@ spec:
                 # The exporter's OWN user: read-only server introspection, no key or channel access,
                 # no data or admin commands, and NO `CONFIG GET` (measured: it returns `requirepass` in clear). It
                 # never holds the requirepass/default credential.
-                printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|list +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram\n' "$METRICS_PASSWORD"
+                printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|list +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram +command|info +commandlog|len\n' "$METRICS_PASSWORD"
               } > /conf/valkey.conf
               unset VALKEY_PASSWORD METRICS_PASSWORD
               exec valkey-server /conf/valkey.conf

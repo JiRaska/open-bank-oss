@@ -487,7 +487,9 @@ a stub (T-T2/T-D2).
   - *Exporter hardening (#16791 security review).* The `redis_exporter` sidecar never holds the
     store password. It logs in as a dedicated `metrics` ACL user with its own generated password
     (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT LIST|SETNAME`, `SLOWLOG
-    GET|LEN` and `LATENCY LATEST|HISTOGRAM`, with no key or channel access. Its multi-target
+    GET|LEN`, `LATENCY LATEST|HISTOGRAM`, `COMMAND INFO` and `COMMANDLOG LEN`, with no key or channel access
+    (measured: with exactly that set, `ACL LOG` stays empty across scrapes; without the last two it
+    records a denial on every scrape and those metrics silently go missing). Its multi-target
     `/scrape?target=` endpoint is disabled (`--disable-scrape-endpoint`), so reaching :9121 cannot point
     the exporter and its credential at another host. `CONFIG GET` is deliberately NOT granted, and the
     exporter runs `--config-command=-`: measured on 9.1.3, `CONFIG GET requirepass` returns the
