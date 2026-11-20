@@ -106,7 +106,7 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # merge-train.py of #16832 after merging main at 7ac3c508dc (#16856 urgent strict path), reviewed with that PR.
     '0c35ce9601da83a44dd580d42b451e95a6bd1f6a',
     # merge-train.py of #16943's fix (deploy fix claim for auto-deploy gitops PRs), reviewed with that PR.
-    '8f5635b9d34ae5fcdb7c343d4d107e851dd256a2',
+    '707ea2d923ff698144ae60b495ad5c6581c7b599',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
