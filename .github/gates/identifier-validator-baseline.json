@@ -59,8 +59,7 @@
     "openbank-pension-fund-service/src/main/kotlin/com/openbank/pensionfund/domain/model/Fund.kt": 1,
     "openbank-tax-reporting-service/src/main/kotlin/com/openbank/tax/infrastructure/returns/pension/CompanyPortfolio.kt": 1,
     "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/DealHeader.kt": 1,
-    "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Portfolio.kt": 1,
-    "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/reference/ReferencePayloads.kt": 1
+    "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Portfolio.kt": 1
   },
   "mod97": {
     "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/EuVatNationalRules.kt": 3,
