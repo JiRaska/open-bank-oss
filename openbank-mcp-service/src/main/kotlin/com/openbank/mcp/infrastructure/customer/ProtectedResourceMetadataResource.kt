@@ -21,7 +21,9 @@ import jakarta.ws.rs.core.Response
  * Every value comes from the allowlist and the configured issuer — never from the request, so a
  * forged `Host` header cannot redirect a client to another authorization server.
  */
-@Path(CustomerChannelAdmission.WELL_KNOWN)
+// Literal, not CustomerChannelAdmission.WELL_KNOWN: the openapi-route-conformance gate reads
+// @Path arguments as source text and cannot resolve a constant. The IT pins the equality.
+@Path("/.well-known/oauth-protected-resource")
 @Produces(MediaType.APPLICATION_JSON)
 class ProtectedResourceMetadataResource(private val channel: CustomerChannel) {
 

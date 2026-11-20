@@ -85,7 +85,17 @@ If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with 
 
 The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow. The `mcp-client-realm-parity` gate fails CI on any mismatch between the declaration and the realm.
 
-This service does **not** read the file yet. Tier admission keyed by `azp`, and refusing to boot on a mismatch, are later work. Until then, the file affects no runtime behaviour of this service, and every declared client stays `enabled: false` in line with ADR-0383's exposure order.
+While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order.
+
+## Customer channel admission (ADR-0385)
+
+The customer MCP channel is admitted only when `openbank.mcp.customer.enabled` is on and an
+allowlisted client presents a customer-realm token bound to a DPoP proof. Discovery follows
+RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
+`/.well-known/oauth-protected-resource/mcp` answer the resource metadata (issuer,
+`authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
+issuer only, never from request headers. While the channel is off both endpoints answer 404 —
+nothing advertises a channel that does not admit anyone.
 
 ## Customer reads: grant lookup and token exchange (ADR-0383 D3/D4)
 

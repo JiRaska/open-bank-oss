@@ -23,7 +23,7 @@ val versionsMap: Map<String, String> = tomlContent.lineSequence()
     .toMap()
 
 // cyclonedx version is declared inline in the [plugins] section:
-//   cyclonedx = { id = "org.cyclonedx.bom", version = "2.3.0" }
+//   cyclonedx = { id = "org.cyclonedx.bom", version = "3.6.1" }
 // so it is NOT in [versions]. Parse it from the plugins table directly.
 val cyclonedxVersion: String = tomlContent.lineSequence()
     .dropWhile { !it.startsWith("[plugins]") }

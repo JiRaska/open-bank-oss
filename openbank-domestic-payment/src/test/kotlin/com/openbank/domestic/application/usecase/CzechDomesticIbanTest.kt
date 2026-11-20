@@ -19,9 +19,9 @@ class CzechDomesticIbanTest {
 
     @Test
     fun `canonicalizes a base account without a prefix`() {
-        val result = CzechDomesticIban.fromAccountNumber("1234567890", "0800")
+        val result = CzechDomesticIban.fromAccountNumber("2000145399", "0800")
 
-        assertThat(result).isEqualTo("CZ0708000000001234567890")
+        assertThat(result).isEqualTo("CZ7908000000002000145399")
         assertThat(Iban.isValid(result!!)).isTrue()
     }
 
@@ -33,5 +33,29 @@ class CzechDomesticIbanTest {
         assertThat(CzechDomesticIban.fromAccountNumber("19-2000145399", "０800")).isNull()
         assertThat(CzechDomesticIban.fromAccountNumber("", "0800")).isNull()
         assertThat(CzechDomesticIban.fromAccountNumber("12345678901", "0800")).isNull()
+    }
+
+    @Test
+    fun `rejects a base number that fails the national mod-11 checksum`() {
+        // 1234567890: weighted sum 255, 255 mod 11 = 2 - no Czech bank can issue it (#16748).
+        assertThat(CzechDomesticIban.fromAccountNumber("1234567890", "0800")).isNull()
+        // One digit off a valid base on either side of the checksum.
+        assertThat(CzechDomesticIban.fromAccountNumber("2000145398", "0800")).isNull()
+        assertThat(CzechDomesticIban.fromAccountNumber("2000145399", "0800")).isNotNull()
+    }
+
+    @Test
+    fun `rejects a prefix that fails the national mod-11 checksum`() {
+        assertThat(CzechDomesticIban.fromAccountNumber("18-2000145399", "0800")).isNull()
+        assertThat(CzechDomesticIban.fromAccountNumber("19-2000145399", "0800")).isNotNull()
+    }
+
+    @Test
+    fun `an IBAN-form account is held to the same national checksum as the split form`() {
+        // #16772 review: a mod-97-valid CZ IBAN can still carry a BBAN no Czech bank issues.
+        assertThat(CzechDomesticIban.canonical("CZ0708000000001234567890", "0800")).isNull()
+        assertThat(CzechDomesticIban.canonical("CZ1908000000190000000019", "0800"))
+            .isEqualTo("CZ1908000000190000000019")
+        assertThat(CzechDomesticIban.canonical("19-19", "0800")).isEqualTo("CZ1908000000190000000019")
     }
 }
