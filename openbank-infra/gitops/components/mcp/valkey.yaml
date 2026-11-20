@@ -83,14 +83,17 @@ spec:
                 echo 'dir /data'
                 echo 'maxmemory 128mb'
                 echo 'maxmemory-policy noeviction'
+                # No slowlog: a replay/budget store has no use for it, and an entry would carry a slow
+                # command's arguments (jti, hashed key names).
+                echo 'slowlog-log-slower-than -1'
                 printf 'requirepass "%s"\n' "$VALKEY_PASSWORD"
                 # The exporter's OWN user: read-only server introspection, no key or channel access,
                 # no data or admin commands, and NO `CONFIG GET` (measured: it returns `requirepass` in
                 # clear). No `CLIENT LIST` either (client addresses/names): the exporter only calls it
-                # with --export-client-list, which is off. `SLOWLOG GET` stays: v1.92.1 has no flag to
-                # stop calling it, and it can show the arguments of a slow command (jti / hashed key
-                # names) to whoever holds this password — accepted, see the threat model. It never holds
-                # the requirepass/default credential.
+                # with --export-client-list, which is off. `SLOWLOG GET` is granted only because v1.92.1
+                # calls it on every scrape with no flag to stop it (without it ACL LOG fills with a denial
+                # per scrape); with slowlog disabled above it can only ever read an empty log. It never
+                # holds the requirepass/default credential.
                 printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram +command|info +commandlog|len\n' "$METRICS_PASSWORD"
               } > /conf/valkey.conf
               unset VALKEY_PASSWORD METRICS_PASSWORD
