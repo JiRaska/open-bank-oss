@@ -107,6 +107,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '0c35ce9601da83a44dd580d42b451e95a6bd1f6a',
     # merge-train.py of #16943's fix (deploy fix claim for auto-deploy gitops PRs), reviewed with that PR.
     '1a4024d26828985dd9a620c49b7deac393bc70ed',
+    # Independently reviewed canonical first-parent source: #16947.
+    'eef9500b378c7630aff90490b68686b4f0f02cf8',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
