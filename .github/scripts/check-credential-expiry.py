@@ -18,6 +18,13 @@ WHAT IT DOES
     INVALID   401 — expired or revoked; every workflow using it is already failing
     UNSET     a listed secret is not configured — a finding: the workflows that read it are
               skipping or failing, and an unset secret must never read as a clean probe
+    DEFERRED  a listed secret is not configured, but `.github/config-inventory.yaml`
+              already records it under `github.unprovisioned` with a reason, an issue
+              and a `review_by` date that has not passed — the gap is acknowledged and
+              owned, so the watch must not re-file it as a fresh finding every day
+              (#16786). Once `review_by` passes the config-inventory gate fails AND the
+              verdict falls back to UNSET here: deferral cannot outlive its review date.
+              If the inventory cannot be read at all, every UNSET stays a finding.
     UNKNOWN   any other answer (network, 5xx, 403) — never read as OK
 
   Token values are never printed, logged or written anywhere; only names and verdicts.
@@ -87,10 +94,40 @@ def probe(token: str) -> tuple[int, str | None]:
         return e.code, e.headers.get(HEADER) if e.headers else None
 
 
-def run(names: list[str], warn_days: int, probe_fn=None) -> int:
+def known_unprovisioned(inventory: Path, today) -> dict | None:
+    """Secret names acknowledged as unprovisioned in config-inventory, with a live review_by.
+
+    Returns None when the inventory cannot be read or parsed: the caller must then treat
+    every UNSET as a finding (fail safe — a broken acknowledgment mechanism acknowledges
+    nothing). An entry whose review_by is unparseable or past is NOT returned: the
+    config-inventory gate flags it, and this probe treats the gap as unacknowledged.
+    """
+    try:
+        import yaml  # lazy: the PR lane (self-test, --coverage) never touches this
+        doc = yaml.safe_load(inventory.read_text())
+    except Exception as e:
+        print(f"::warning::cannot read {inventory} ({type(e).__name__}: {e}); UNSET secrets stay findings")
+        return None
+    out = {}
+    for entry in ((doc.get("github") or {}).get("unprovisioned") or []):
+        if entry.get("kind") != "secret":
+            continue
+        try:
+            review_by = datetime.strptime(str(entry.get("review_by")), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if review_by < today:
+            continue
+        for name in entry.get("names") or []:
+            out[name] = entry
+    return out
+
+
+def run(names: list[str], warn_days: int, probe_fn=None, inventory: Path | None = None) -> int:
     probe_fn = probe_fn or probe
     now = datetime.now(timezone.utc)
     worst = 0
+    deferred = None
     for name in names:
         token = os.environ.get(name, "")
         if token:
@@ -101,6 +138,15 @@ def run(names: list[str], warn_days: int, probe_fn=None) -> int:
                 verdict, why = "UNKNOWN", f"no answer: {type(e).__name__}"
             else:
                 verdict, why = classify(status, hdr, now, warn_days)
+        elif inventory is not None:
+            if deferred is None:
+                deferred = known_unprovisioned(inventory, now.date())
+            entry = (deferred or {}).get(name)
+            if entry:
+                verdict, why = "DEFERRED", (f"unset, acknowledged in config-inventory "
+                                            f"(issue #{entry.get('issue')}, review_by {entry.get('review_by')})")
+            else:
+                verdict, why = classify(None, None, now, warn_days)
         else:
             verdict, why = classify(None, None, now, warn_days)
         print(f"{verdict:9} {name}: {why}")
@@ -194,9 +240,31 @@ def self_test() -> int:
         if got != want:
             bad.append(f"{name}: exit {got}, want {want}")
 
+    # Inventory: an acknowledged unprovisioned secret defers (exit 0); a past review_by or an
+    # unreadable inventory keeps UNSET a finding (exit 2). PyYAML is guaranteed here: CI
+    # installs it before the self-test, and locally the repo's scripts require it anyway.
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        inv = Path(d) / "config-inventory.yaml"
+        live = ("github:\n  unprovisioned:\n    - kind: secret\n      names: [T_UNSET_ST]\n"
+                "      reason: awaiting owner provisioning\n      issue: 16492\n"
+                "      review_by: 2026-12-16\n")
+        stale = live.replace("2026-12-16", "2026-01-01")
+        for text, want in ((live, 0), (stale, 2)):
+            inv.write_text(text)
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                got = run(["T_UNSET_ST"], 7, ok_probe, inventory=inv)
+            if got != want:
+                bad.append(f"inventory {'live' if want == 0 else 'stale'}: exit {got}, want {want}")
+            if want == 0 and "DEFERRED" not in buf.getvalue():
+                bad.append("live inventory: verdict line lost its DEFERRED marker")
+        with contextlib.redirect_stdout(io.StringIO()):
+            got = run(["T_UNSET_ST"], 7, ok_probe, inventory=Path(d) / "missing.yaml")
+        if got != 2:
+            bad.append(f"unreadable inventory: exit {got}, want 2 (fail safe)")
+
     # Coverage: a credential read by a workflow but missing from CREDENTIALS must be flagged,
     # and a complete declaration must pass.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         (root / ".github/workflows").mkdir(parents=True)
@@ -226,6 +294,9 @@ def main() -> int:
     ap.add_argument("--coverage", metavar="WATCH_WORKFLOW",
                     help="offline: check the CREDENTIALS list in this workflow covers every PAT/token secret")
     ap.add_argument("--warn-days", type=int, default=int(os.environ.get("WARN_DAYS", "7")))
+    ap.add_argument("--inventory", metavar="CONFIG_INVENTORY", default=".github/config-inventory.yaml",
+                    help="acknowledged-unprovisioned secrets read from here (UNSET -> DEFERRED); "
+                         "pass an empty string to disable")
     a = ap.parse_args()
     if a.self_test:
         return self_test()
@@ -235,7 +306,7 @@ def main() -> int:
     if not names:
         print("CREDENTIALS is empty — refusing to report a clean run over nothing", file=sys.stderr)
         return 1
-    return run(names, a.warn_days)
+    return run(names, a.warn_days, inventory=Path(a.inventory) if a.inventory else None)
 
 
 if __name__ == "__main__":

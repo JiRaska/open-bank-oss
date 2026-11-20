@@ -2161,3 +2161,44 @@ test_game_marketing_draft_edit_does_not_grant_publish if {
 		not rest.allow with input as {"principal": denied, "action": "engagement.gameCatalog.writeDraft"}
 	}
 }
+
+# ADR-0383 D6 (#16848): an MCP client's own customers-realm token must never read or decide
+# a payment proposal, nor may an exchanged/delegated token. Only the app session may.
+mcp_proposal_input(action, attrs) := {
+	"principal": {"service_account": false, "id": "party-1", "type": "HUMAN", "roles": []},
+	"action": action,
+	"attributes": attrs,
+}
+
+test_allow_app_session_mcp_proposal_decide_and_read if {
+	every action in {"customer.mcp-proposals.decide", "customer.mcp-proposals.read"} {
+		d := rest.allow with input as mcp_proposal_input(action, {"token_azp": "openbank-app", "token_act": false})
+			with data.openbank.bundle as bundle
+		d.allow == true
+		d.reason == "customer-self-action"
+	}
+}
+
+test_deny_mcp_client_token_mcp_proposal_decide_and_read if {
+	every action in {"customer.mcp-proposals.decide", "customer.mcp-proposals.read"} {
+		not rest.allow with input as mcp_proposal_input(action, {"token_azp": "some-mcp-client", "token_act": false})
+			with data.openbank.bundle as bundle
+	}
+}
+
+test_deny_exchanged_app_token_mcp_proposal_decide if {
+	not rest.allow with input as mcp_proposal_input("customer.mcp-proposals.decide", {"token_azp": "openbank-app", "token_act": true})
+		with data.openbank.bundle as bundle
+}
+
+test_deny_mcp_proposal_decide_without_token_attributes if {
+	not rest.allow with input as mcp_proposal_input("customer.mcp-proposals.decide", {})
+		with data.openbank.bundle as bundle
+}
+
+# Scope control: other customer.* actions are untouched by the prohibition.
+test_allow_mcp_client_token_other_customer_action if {
+	d := rest.allow with input as mcp_proposal_input("customer.accounts.read", {"token_azp": "some-mcp-client", "token_act": false})
+		with data.openbank.bundle as bundle
+	d.allow == true
+}

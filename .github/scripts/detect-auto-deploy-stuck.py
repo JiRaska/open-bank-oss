@@ -244,7 +244,7 @@ def drops_from_comments(number: int, comments: list[dict]) -> list[dict]:
     dw = _deploy_window()
     out: list[dict] = []
     for c in comments:
-        if dw.PRUNE_MARKER in (c.get("body") or "") and c.get("login") in dw.BOT_LOGINS:
+        if dw.PRUNE_MARKER in (c.get("body") or "") and dw.is_trusted_author(c):
             out += [dict(r, pr=number) for r in dw.parse_drop_records(c["body"])]
     return out
 
@@ -273,7 +273,7 @@ def fetch_drops(repo: str, now: datetime | None = None) -> list[dict]:
             continue
         comments = [json.loads(ln) for ln in _gh_lines(
             "api", f"repos/{repo}/issues/{it['number']}/comments", "--paginate",
-            "--jq", ".[] | {body, login: .user.login} | tojson")]
+            "--jq", ".[] | {body, login: .user.login, type: .user.type} | tojson")]
         drops += drops_from_comments(it["number"], comments)
     return drops
 
@@ -570,10 +570,13 @@ def self_test() -> int:
                          '"dropped": "b", "at": "soon"}, {"service": "@all`", "kept": "a", "dropped": "b", "at": 1}] -->')
     check("trust: a non-bot prune comment yields no drops",
           drops_from_comments(9, [{"body": comment, "login": "mallory"}]) == [])
+    check("trust: a User-type account named like the bot is ignored",
+          drops_from_comments(9, [{"body": comment, "login": "openbank-gitops-bot", "type": "User"}]) == []
+          and drops_from_comments(9, [{"body": comment, "login": bot, "type": "User"}]) == [])
     check("trust: a bot comment yields its drops, tagged with the PR",
-          [d["pr"] for d in drops_from_comments(9, [{"body": comment, "login": bot}])] == [9, 9])
+          [d["pr"] for d in drops_from_comments(9, [{"body": comment, "login": bot, "type": "Bot"}])] == [9, 9])
     check("trust: malformed bot-authored records neither raise nor flow through",
-          drops_from_comments(9, [{"body": junk, "login": bot}]) == [])
+          drops_from_comments(9, [{"body": junk, "login": bot, "type": "Bot"}]) == [])
     check("trust: a forged non-int `at` cannot reach int() and crash the watch",
           not evaluate_dropped(dw.parse_drop_records(junk), main_pins, {}, later)["stuck"])
 
@@ -587,7 +590,7 @@ def self_test() -> int:
         if list(args[1:4]) == ["-X", "GET", "search/issues"]:
             return [json.dumps({"number": 9, "title": "chore(gitops): auto-deploy services @ abc"}),
                     json.dumps({"number": 10, "title": "feat: unrelated"})]
-        return [json.dumps({"body": comment, "login": bot}), json.dumps({"body": comment, "login": "mallory"})]
+        return [json.dumps({"body": comment, "login": bot, "type": "Bot"}), json.dumps({"body": comment, "login": "mallory"})]
 
     with patch.object(sys.modules[__name__], "_gh_lines", side_effect=fake_lines):
         got = fetch_drops("o/r", now_dt)

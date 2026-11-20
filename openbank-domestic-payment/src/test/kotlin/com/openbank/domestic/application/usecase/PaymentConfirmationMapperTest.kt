@@ -106,6 +106,17 @@ class PaymentConfirmationMapperTest {
         assertThat(ibanChecksumValid(creditorIban)).describedAs("creditorIban=%s", creditorIban).isTrue()
     }
 
+    @Test
+    fun `a prefixed account keeps its prefix in its own BBAN slot`() {
+        // #16772 review: "19-19" used to collapse to "1919" in the base slot - a confirmation naming
+        // an account the payer never paid from.
+        val p = payment(status = DomesticPaymentStatus.SETTLED).copy(debtorAccountNumber = "19-19")
+
+        @Suppress("UNCHECKED_CAST")
+        val document = PaymentConfirmationMapper.toConfirmationData(p)["document"] as Map<String, Any?>
+        assertThat(document["debtorIban"]).isEqualTo("CZ1908000000190000000019")
+    }
+
     /** Standard IBAN validation (ISO 7064 MOD 97-10): rearrange, letters -> digits, mod 97 == 1. */
     private fun ibanChecksumValid(iban: String): Boolean {
         val rearranged = iban.substring(4) + iban.substring(0, 4)
@@ -126,10 +137,10 @@ class PaymentConfirmationMapperTest {
         idempotencyKey = "idem-${UUID.randomUUID()}",
         status = status,
         debtorAccountId = UUID.randomUUID(),
-        debtorAccountNumber = "1234567890",
+        debtorAccountNumber = "1234567899",
         debtorBankCode = "0800",
         debtorName = "Debtor",
-        creditorAccountNumber = "0987654321",
+        creditorAccountNumber = "0987654327",
         creditorBankCode = "2010",
         creditorName = "Creditor Name",
         amount = Money.of(BigDecimal("20.00"), "CZK"),
@@ -141,7 +152,7 @@ class PaymentConfirmationMapperTest {
         transferScope = DomesticTransferScope.EXTERNAL,
         technicalAccountCode = null,
         statementLabel = null,
-        endToEndId = "DOMS1234567890",
+        endToEndId = "DOMS1234567899",
         rejectReason = null,
         rejectDetail = null,
         submittedAt = Instant.parse("2026-08-01T09:00:00Z"),

@@ -17,6 +17,9 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Optional
 
 /** Operator search shapes: name, name + date of birth, and an exact birth number (never a prefix). */
@@ -26,6 +29,7 @@ class PartyServiceSearchTest {
     private fun service(repo: PartyRepository) = PartyService().apply {
         partyRepo = repo
         rcPepper = Optional.of(pepper)
+        clock = Clock.fixed(Instant.parse("2026-11-19T12:00:00Z"), ZoneOffset.UTC)
     }
 
     @Test
