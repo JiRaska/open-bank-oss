@@ -37,7 +37,7 @@ object DomesticBoundCreatePactFixture {
     val GRANTOR_PARTY_ID: UUID = UUID.fromString("7a1c0000-0000-4000-8000-000000016004")
     private val EVENT_ID: UUID = UUID.fromString("7a1c0000-0000-4000-8000-000000016005")
     const val IDEMPOTENCY_KEY = "pact-bound-create-16000"
-    val DEBTOR_IBAN: String = checkNotNull(CzechDomesticIban.fromAccountNumber("1234567890", "0800"))
+    val DEBTOR_IBAN: String = checkNotNull(CzechDomesticIban.fromAccountNumber("1234567899", "0800"))
     private val AT: Instant = Instant.parse("2026-11-14T00:00:00Z")
 
     /** RESERVED, matching the pact's delegation, grantee, debtor, 1500.00 CZK and key. Fixed event id: re-applying is a no-op. */
