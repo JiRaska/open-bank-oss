@@ -859,6 +859,38 @@ def live_source_intent(gh, number: int, head: str) -> bool:
         return owner_approval_valid(number, ref, app)
 
 
+def already_merged_member(gh, git, number: int, head: str, expected: str) -> str | None:
+    """#16932: the merge commit when GitHub's native auto-merge already merged this carrier member at
+    exactly the verified head, directly over the main the train expected (first parent == `expected`)
+    and that commit is on live main. None otherwise, so the caller stops (fail closed).
+
+    A member stays armed while it rides a carrier, so auto-merge can race the train's own merge call
+    (runs 44711788330 / #16776 and 44800662763 / #16915). The squash is then the one the train would
+    have made: same head, same base. A different head, a merge over another main, a merge commit not on
+    main, or closed-unmerged is never treated as success.
+
+    Governance trade-off, deliberately NOT decided here: disabling native auto-merge for train-eligible
+    PRs would let the train own every member merge and remove this race; but arming (auto_merge set) is
+    today the author's intent signal live_source_intent reads, and native auto-merge is the fallback
+    that still merges a green PR when the train is paused or broken. Keeping it costs this tolerance.
+    """
+    pr = gh.pr(number)
+    if not isinstance(pr, dict) or pr.get("number") != number or pr.get("merged") is not True:
+        return None
+    source, merge = pr.get("head"), pr.get("merge_commit_sha")
+    if (not isinstance(source, dict) or source.get("sha") != head
+            or not isinstance(merge, str) or not re.fullmatch(r"[0-9a-f]{40}", merge)):
+        return None
+    if git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/native-main", check=False).returncode != 0:
+        return None
+    if git("merge-base", "--is-ancestor", merge, "refs/merge-train/native-main", check=False).returncode != 0:
+        return None
+    parent = git("rev-parse", "--verify", "-q", f"{merge}^1", check=False)
+    if parent.returncode != 0 or parent.stdout.strip() != expected:
+        return None
+    return merge
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -4171,8 +4203,15 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             expected = live_main
             for i, (n, head) in enumerate(chain[1]):
                 if not live_source_intent(gh, n, head):
-                    log(f"#{n} source intent or head changed since the train was verified; stopping")
-                    break
+                    native = None if shadow else already_merged_member(gh, git, n, head, expected)
+                    if native is None or (stacked_steps and git.tree(native) != git.tree(stacked_steps[i])):
+                        log(f"#{n} source intent or head changed since the train was verified; stopping")
+                        break
+                    # #16932: native auto-merge won the race at the verified head over the expected main.
+                    log(f"#{n} already merged by native auto-merge at the verified head ({native[:12]}); continuing")
+                    expected = native
+                    summary.setdefault("native_merged", []).append(n)
+                    continue
                 if not shadow and gh.main_sha() != expected:
                     log("main advanced by a foreign merge; stopping, the next tick rebuilds")
                     break
@@ -7736,6 +7775,7 @@ class FakeGitHub:
         sha = self.main_sha()
         self.prs[n]["state"] = "closed"
         self.prs[n]["merged_at"] = "2026-01-01T00:00:00Z"
+        self.prs[n]["merged"], self.prs[n]["merge_commit_sha"] = True, sha
         self.merged.append(n)
         if self.foreign_after_merge:
             p = pathlib.Path(self.origin, self.foreign_after_merge)
@@ -10479,6 +10519,50 @@ def self_test() -> int:
             mode_settle(gh, Git(clone("settle")), "o/r", False)
             check("foreign merge mid-settle: merging stops, the rest waits for the next tick", gh.merged == [1], str(gh.merged))
             reset()
+
+            # #16932: native auto-merge merges a carrier member just before the train's own merge call.
+            def native_race(case):
+                open_only("p1", "p2")
+                tick()
+                real = globals()["live_source_intent"]
+                fired = []
+
+                def racing(g, n, head, _real=real):
+                    if n == 1 and not fired and gh.prs[1]["state"] == "open":
+                        fired.append(n)
+                        p = gh.prs[1]
+                        if case in ("moved-open", "moved-merged"):
+                            new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
+                            gh.g("branch", "-f", p["head"]["ref"], new)
+                            p["head"]["sha"] = new
+                        if case in ("same", "moved-merged"):
+                            gh.merge(1, p["head"]["sha"])
+                        elif case == "closed":
+                            p["state"] = "closed"
+                        elif case == "off-main":
+                            p["state"], p["merged"], p["merge_commit_sha"] = "closed", True, gh.g(
+                                "commit-tree", f"{head}^{{tree}}", "-p", gh.main_sha(), "-m", "off main").stdout.strip()
+                    return _real(g, n, head)
+                globals()["live_source_intent"] = racing
+                try:
+                    s = mode_settle(gh, Git(clone("settle")), "o/r", False)
+                finally:
+                    globals()["live_source_intent"] = real
+                merged = list(gh.merged)
+                reset()
+                return s, merged, bool(fired)
+            s, m, fired = native_race("same")
+            check("#16932: a member natively merged at the verified head -> the rest of the carrier still merges",
+                  fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("moved-merged")
+            check("#16932 NEGATIVE: merged with a different head -> stop, nothing else merges",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("closed")
+            check("#16932 NEGATIVE: closed but not merged -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("moved-open")
+            check("#16932 NEGATIVE: head changed but still open -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("off-main")
+            check("#16932 NEGATIVE: merged commit not on main -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
 
             # ---- strict lane (manual-lane PRs: executable .github/, generators, gates, inventory) ----
             def settle_now():
