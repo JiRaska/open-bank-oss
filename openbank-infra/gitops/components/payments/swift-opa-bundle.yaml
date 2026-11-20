@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "79c4af8b28733d90"
+    openbank.tech/policy-checksum: "4156b82fc54ffcdc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -745,6 +745,22 @@ data:
     # to the interceptor (like four_eyes_required); no allow reason ever fires for such an
     # action, so default-deny also blocks it.
     # ---------------------------------------------------------------------------------------
+    # A customer approves (or reads) an MCP client's payment proposal only from the bank's own
+    # app session — never with a token issued to the MCP client that made the proposal, nor with
+    # an exchanged/delegated one (ADR-0383 D6, #16848). `customer-self-action` admits every
+    # `customer.*` action for any customers-realm HUMAN token, so without this the edge's
+    # `appSessionCustomer()` check was the only control. AuthorizeInterceptor supplies
+    # `token_azp` / `token_act` for every `customer.*` action; an absent value is not the app.
+    customer_app_session if {
+    	input.attributes.token_azp == "openbank-app"
+    	input.attributes.token_act == false
+    }
+
+    prohibited if {
+    	startswith(input.action, "customer.mcp-proposals.")
+    	not customer_app_session
+    }
+
     prohibited if {
     	input.action == "featureflag.flip"
     	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations

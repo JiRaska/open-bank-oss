@@ -43,3 +43,7 @@ A posting leg now carries `accountingClass` + `LedgerRole` (principal, accrued i
 ## Settlement rail vocabulary
 
 The standing-settlement-instruction rail (`CERTIS`, `SEPA`, `TARGET2`, `SWIFT`) is no longer declared in treasury. `SettlementRail` in `ReferencePayloads.kt` is a type alias of the enum in `openbank-libs-iso20022`, beside the bank-own rails it maps to (ADR-0344). The values and the wire format of `SsiPayload` are unchanged, so stored reference data and published events read exactly as before; only the declaring module differs.
+
+## ISIN validation
+
+A security's ISIN is checked in one place, `Isin.isValid` in `Portfolio.kt`: the ISO 6166 format and the Luhn check digit over the letters-as-numbers expansion. The `SecurityPayload` reference record calls the same check as the portfolio snapshots, so the two accept exactly the same values. The prefix is not yet checked against ISO 3166 country codes (#16773).
