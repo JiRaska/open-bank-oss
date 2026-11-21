@@ -132,6 +132,11 @@ spec:
             # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
             - name: PARTY_SERVICE_URL
               value: https://party-service.party.svc:8443
+            # Declare the pod-scoped route while the statutory collection remains disabled.
+            - name: KYB_SERVICE_URL
+              value: https://kyb-service.kyb.svc:8443
+            - name: DELEGATION_STATUTORY_COLLECTION_ENABLED
+              value: "false"
             # Offer-time resource-ownership verification (#3164): a grant naming a
             # stranger's account must not be issuable. ACCOUNT/SAVINGS_GOAL resolve
             # against account-service, CARD against card-issuance. Declared as explicit

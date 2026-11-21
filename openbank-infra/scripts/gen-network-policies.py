@@ -30,6 +30,8 @@ per directory rather than one for the namespace):
     EXCEPT ports named for a datastore wire protocol (INTERNAL_ONLY_PORT_NAMES,
     e.g. "redis") — those are same-namespace-only, since admin-ui never speaks
     the raw wire protocol directly,
+  - named ports in `open-bank.tech/workload-scoped-ingress-ports` admit only
+    workload pods whose manifests declare an explicit URL to that port,
   - ingress-nginx allowed where an Ingress backend declares it,
   - envoy-gateway-system (the shared Gateway's Envoy proxy, ADR-0324) allowed
     where an HTTPRoute backendRef names the Service — the Gateway API twin of
@@ -435,10 +437,20 @@ kind: Deployment
 metadata: {name: payment, namespace: payments}
 spec:
   template:
+    metadata:
+      labels: {app.kubernetes.io/name: payment}
     spec:
       containers:
         - name: payment
           env: [{name: TARGET_URL, value: 'https://fixture-service.fixture.svc:8443'}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fixture-service, namespace: fixture}
+spec:
+  selector: {app.kubernetes.io/name: fixture-service}
+  ports:
+    - {port: 8443, targetPort: https}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -483,6 +495,30 @@ spec:
         case("OPA decision and diagnostics are not BFF application ports", allowed("admin-ui"), [8117, 8443])
         source = component / "workloads.yaml"
         original_fixture = source.read_text(encoding="utf-8")
+        source.write_text(original_fixture.replace(
+            "annotations: {open-bank.tech/port-scoped-ingress: 'true'}",
+            "annotations: {open-bank.tech/port-scoped-ingress: 'true', open-bank.tech/workload-scoped-ingress-ports: https}",
+        ), encoding="utf-8")
+        try:
+            globals()["COMPONENTS"] = temp_dir
+            sys.argv = [sys.argv[0]]
+            main()
+        finally:
+            globals()["COMPONENTS"] = previous_components
+            sys.argv = previous_argv
+        documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+        policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
+        rules = policy["spec"]["ingress"]
+        case("workload-only port remains reachable from the declared caller", allowed("payments"), [8443])
+        case("workload-only port is absent from BFF and portless edges",
+             (allowed("admin-ui"), allowed("legacy")), ([8117], [8117]))
+        case("workload-only port has no same-namespace wildcard", rules[0].get("ports"),
+             [{"protocol": "TCP", "port": 8117}, {"protocol": "TCP", "port": 8181},
+              {"protocol": "TCP", "port": 8282}])
+        case("workload-only port has one namespace-and-pod peer",
+             [rule["from"] for rule in rules if {"protocol": "TCP", "port": 8443} in rule.get("ports", [])],
+             [[{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "payments"}},
+                "podSelector": {"matchLabels": {"app.kubernetes.io/name": "payment"}}}]])
         source.write_text(original_fixture.replace("8117", "8080"), encoding="utf-8")
         try:
             globals()["COMPONENTS"] = temp_dir
@@ -514,7 +550,7 @@ spec:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction, atomic publication and port scoping (27 cases)")
+    print("self-test ok: dependency extraction, atomic publication and port scoping (31 cases)")
     return 0
 
 def main():
@@ -533,6 +569,7 @@ def main():
     # edges: (callee_ns, callee_svc) -> set of caller namespaces
     edges = defaultdict(set)
     edge_ports = defaultdict(set)  # (callee_ns, callee_svc, caller_ns) -> service ports
+    workload_edges = defaultdict(set)  # (callee_ns, callee_svc, service port) -> (caller_ns, caller label)
     unscoped_edges = set()  # annotations and URLs without a port retain every HTTP port
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
     gateway_backends = defaultdict(set)  # (ns, svc-name) -> ports named by an HTTPRoute
@@ -588,19 +625,28 @@ def main():
                     v = e.get("value")
                     if isinstance(v, str):
                         blob_parts.append(v)
+            annotations = meta.get("annotations", {}) or {}
+            scoped_names = annotations.get("open-bank.tech/workload-scoped-ingress-ports", "").split(",")
+            scoped_names = {port_name.strip() for port_name in scoped_names if port_name.strip()}
+            unknown_ports = scoped_names - ports.keys()
+            if unknown_ports:
+                raise ValueError(f"unknown workload-scoped ingress ports on {path}: {sorted(unknown_ports)}")
             workloads[(ns, name)] = {
                 "ports": ports,
+                "workload_scoped_ports": {ports[port_name] for port_name in scoped_names},
                 "dir": os.path.dirname(path),
                 # Roll out per-caller port scoping service by service. Other multi-port
                 # workloads may have callers hidden in Secrets or runtime discovery.
-                "port_scoped": (meta.get("annotations", {}) or {}).get(
-                    "open-bank.tech/port-scoped-ingress") == "true",
+                "port_scoped": annotations.get("open-bank.tech/port-scoped-ingress") == "true",
             }
             ns_dir.setdefault(ns, os.path.dirname(path))
             blob = "\n".join(blob_parts)
             for svc, callee_ns, port in URL_RE.findall(blob):
+                caller_label = labels.get("app.kubernetes.io/name")
+                if port and caller_label:
+                    workload_edges[(callee_ns, svc, int(port))].add((ns, caller_label))
                 if callee_ns == ns:
-                    continue  # same-namespace is allowed wholesale
+                    continue  # ordinary same-namespace ports are admitted below
                 edges[(callee_ns, svc)].add(ns)
                 if port:
                     edge_ports[(callee_ns, svc, ns)].add(int(port))
@@ -807,10 +853,13 @@ def main():
             p for n, p in wl["ports"].items()
             if n in INTERNAL_ONLY_PORT_NAMES or n in SIDECAR_LOCAL_ONLY_PORT_NAMES
         }
-        http_ports = sorted(
-            p for n, p in wl["ports"].items()
-            if p != mgmt_port and p not in internal_only_ports
-        )
+        declared_http_ports = {
+            p for p in wl["ports"].values() if p != mgmt_port and p not in internal_only_ports
+        }
+        workload_scoped_ports = wl["workload_scoped_ports"]
+        if workload_scoped_ports - declared_http_ports:
+            raise ValueError(f"{ns}/{wl_name} workload-scoped ingress requires an application port")
+        http_ports = sorted(declared_http_ports - workload_scoped_ports)
         callers = sorted(edges.get((ns, wl_name), set()) - {ns})
         ing_ports = {
             resolve_pod_port(ns, wl_name, p)
@@ -822,6 +871,12 @@ def main():
         }
 
         rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
+        if workload_scoped_ports:
+            same_namespace_ports = sorted(set(wl["ports"].values()) - workload_scoped_ports)
+            rules = [{
+                "from": [{"podSelector": {}}],
+                "ports": [{"protocol": "TCP", "port": port} for port in same_namespace_ports],
+            }] if same_namespace_ports else []
         if http_ports:
             port_callers = {port: {ADMIN_UI_NS} for port in http_ports}  # BFF dynamic discovery
             for caller in callers:
@@ -830,8 +885,10 @@ def main():
                 # An annotation or URL without a port is deliberately conservative. A port
                 # not exposed by this workload also needs the old all-port behavior rather
                 # than silently dropping a declared caller on an unresolved Service alias.
+                if declared and declared <= workload_scoped_ports and edge not in unscoped_edges:
+                    continue
                 allowed = (set(http_ports) if not wl["port_scoped"] or edge in unscoped_edges or not declared or
-                           not declared.issubset(http_ports) else declared)
+                           not declared.issubset(declared_http_ports) else declared - workload_scoped_ports)
                 for port in allowed:
                     port_callers[port].add(caller)
             if (ns, wl_name) in http_scaled_targets:
@@ -849,6 +906,23 @@ def main():
                     "from": [ns_peer(name) for name in peer_names],
                     "ports": [{"protocol": "TCP", "port": p} for p in sorted(ports)],
                 })
+        if workload_scoped_ports:
+            if workload_scoped_ports & (ing_ports | gw_ports | scrape_ports.get((ns, wl_name), set())):
+                raise ValueError(f"{ns}/{wl_name} workload-scoped ingress conflicts with a gateway, ingress or scrape")
+            scoped_callers = defaultdict(set)
+            for service_port, _ in services.get((ns, wl_name), {}).get("ports", []):
+                port = resolve_pod_port(ns, wl_name, service_port)
+                if port in workload_scoped_ports:
+                    scoped_callers[port].update(workload_edges[(ns, wl_name, service_port)])
+            for port, peers in sorted(scoped_callers.items()):
+                if peers:
+                    rules.append({
+                        "from": [
+                            ns_peer(caller_ns) | {"podSelector": {"matchLabels": {"app.kubernetes.io/name": caller}}}
+                            for caller_ns, caller in sorted(peers)
+                        ],
+                        "ports": [{"protocol": "TCP", "port": port}],
+                    })
         # Prometheus scrape: the Quarkus management port (the fleet PodMonitor's
         # `port: management`, resolved by name above) plus any extra port a dedicated
         # Pod/ServiceMonitor targets (redis_exporter 9121, keycloak management 9000,
