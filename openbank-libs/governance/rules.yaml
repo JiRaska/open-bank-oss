@@ -3509,6 +3509,8 @@ delegation_exposure_delivery:
       role: historical_audit
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/DelegationResource.kt
       role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpClientGrantResolver.kt
+      role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
       role: historical_audit
 
