@@ -61,3 +61,10 @@ kover {
         }
     }
 }
+
+// Offline pilot for ADR-0367. Runs the mapper in its own JVM without starting Quarkus.
+tasks.register<JavaExec>("renderFrozenFinrep") {
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("com.openbank.finrep.infrastructure.batch.FrozenFinrepBatch")
+    maxHeapSize = "192m"
+}

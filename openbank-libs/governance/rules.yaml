@@ -5069,6 +5069,8 @@ security_sensitive_paths:
     cardholder: []
   openbank-ledger-service:
     auth_crypto_payment:
+      # Authenticated transaction-workload identity gates attributed posting.
+      - "src/main/kotlin/**/LedgerResource.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       # ADR-0365: own-book posting, payload identity, startup binding and four-eyes controls.
       - "src/main/kotlin/**/Pension*.kt"

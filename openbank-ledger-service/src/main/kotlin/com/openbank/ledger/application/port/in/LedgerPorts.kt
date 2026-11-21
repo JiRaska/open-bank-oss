@@ -43,6 +43,7 @@ data class PostJournalCommand(
      */
     val additionalOutboxMessages: (JournalEntry) -> List<OutboxMessage> = { emptyList() },
     val origin: com.openbank.ledger.domain.model.JournalOrigin? = null,
+    val bookingAttribution: com.openbank.ledger.domain.model.JournalBookingAttribution? = null,
 )
 
 data class JournalLineRequest(

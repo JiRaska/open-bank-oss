@@ -89,3 +89,15 @@ Re-identification (joining `sub_account_id`/`transaction_id` back to a customer)
 V36 adds optional raw origin columns and immutable snapshot manifests, records and provenance. One repeatable-read transaction copies facts from one SQL/MVCC view; source sequence maxima are not commit watermarks. Provenance includes every opening-balance contributor. Source-row or source-line erasure and origin-evidence changes invalidate derived caches transactionally. Every snapshot read rejects missing attached sources; the existing partition-maintenance tick physically purges those unavailable caches after lifecycle actions and on later ticks. A source-free manifest is returned inline and never stored. No new independent TTL, source deletion, legal-hold release or financial retention duration is introduced. Cache retention follows availability of all its original sources; snapshots are read-caches, not new statutory close evidence.
 
 V37 adds the atomic history-capture receipt after V36 creates its referenced snapshots. V35 remains the existing treasury-instrument migration, unchanged. These additions coexist with the preceding application, which does not use the snapshot endpoint or receipt tables. Roll back the application and disable the new endpoint first; preserve captured data and receipts pending retention review before any separately approved destructive schema rollback. No Flyway repair or checksum rewrite is part of this rollout.
+
+## Historical booking attribution
+
+Migration V46 adds optional company, approved context version, operating mode and
+branch attribution to journal entries. Existing entries retain explicit unknown
+attribution. New attributed entries carry the complete shape; BRANCH requires a
+branch identifier. Attribution is persisted and preserved when reversing a journal.
+
+The attribution migration follows V45 outbox v2 on the current main branch. Apply
+V46 before deploying the new writer. Application rollback preserves these evidence
+columns. An accounting-source owner must reconcile the approved perimeter and
+unknown historical entries before publishing a scoped reporting export.

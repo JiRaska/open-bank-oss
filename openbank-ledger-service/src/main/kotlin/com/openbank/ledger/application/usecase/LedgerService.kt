@@ -107,7 +107,7 @@ class LedgerService(
         // Checked BEFORE the period lock so replaying an entry that was legitimately booked while
         // the year was still open stays idempotent even after the year is later attested.
         journalRepository.findByIdempotencyKey(command.idempotencyKey)?.let {
-            return PostJournalOutcome(it.verifyReplayOrigin(command.synthetic), replayed = true)
+            return PostJournalOutcome(it.verifyReplayOrigin(command), replayed = true)
         }
 
         // Day lock (ADR-0207 D3) runs BEFORE the year check because the day is the tighter
@@ -164,6 +164,7 @@ class LedgerService(
             // same controls upstream — which is the only reason a canary posting proves anything.
             synthetic = command.synthetic,
             origin = command.origin,
+            bookingAttribution = command.bookingAttribution,
         ).post()
 
         // Cross-check that we actually validated every account that the entry references.
@@ -199,11 +200,14 @@ class LedgerService(
             .any { it.message?.contains("ledger_idempotency", ignoreCase = true) == true }
         if (!isIdempotencyKeyConflict) throw e
         return journalRepository.findByIdempotencyKey(command.idempotencyKey)
-            ?.verifyReplayOrigin(command.synthetic) ?: throw e
+            ?.verifyReplayOrigin(command) ?: throw e
     }
 
-    private fun JournalEntry.verifyReplayOrigin(expectedSynthetic: Boolean): JournalEntry {
-        checkConflict(synthetic == expectedSynthetic) { "Idempotency key is bound to a different journal origin" }
+    private fun JournalEntry.verifyReplayOrigin(command: PostJournalCommand): JournalEntry {
+        checkConflict(synthetic == command.synthetic) { "Idempotency key is bound to a different journal origin" }
+        checkConflict(bookingAttribution == command.bookingAttribution) {
+            "Idempotency key is bound to a different booking attribution"
+        }
         return this
     }
 

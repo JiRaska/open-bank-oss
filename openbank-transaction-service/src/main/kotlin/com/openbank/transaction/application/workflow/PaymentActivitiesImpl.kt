@@ -11,9 +11,12 @@ import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.usecase.PaymentJournalFactory
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.infrastructure.client.BookedJournalRequest
+import com.openbank.transaction.infrastructure.client.JournalBookingInput
 import com.openbank.transaction.infrastructure.client.LedgerCallGuard
 import com.openbank.transaction.infrastructure.client.PostJournalRequest
 import com.openbank.transaction.infrastructure.client.ReverseJournalRequest
+import com.openbank.transaction.infrastructure.persistence.repository.PaymentBookingProjection
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -43,6 +46,7 @@ open class PaymentActivitiesImpl(
     private val balanceCoverPort: BalanceCoverPort,
     private val eventPublisher: TransactionEventPublisher,
     private val clock: Clock,
+    private val bookingProjection: PaymentBookingProjection,
 ) : PaymentActivities {
 
     private val log = Logger.getLogger(PaymentActivitiesImpl::class.java)
@@ -80,8 +84,20 @@ open class PaymentActivitiesImpl(
 
     override fun postJournal(transactionId: UUID): UUID = runOnVertxContext {
         val transaction = loadTransaction(transactionId)
-        ledgerCallGuard.postJournal(buildJournalRequest(transaction), synthetic = transaction.synthetic)
-            .awaitSuspending().id
+        val journal = buildJournalRequest(transaction)
+        val booking = bookingProjection.resolve(transaction)
+        val posted = if (booking == null) {
+            ledgerCallGuard.postJournal(journal, synthetic = transaction.synthetic)
+        } else {
+            val attribution = JournalBookingInput(
+                contextVersionId = booking.contextVersionId,
+                legalEntityId = booking.legalEntityId,
+                operatingMode = booking.operatingMode.name,
+                establishmentId = booking.establishmentId,
+            )
+            ledgerCallGuard.postBookedJournal(BookedJournalRequest(journal, attribution, transaction.synthetic))
+        }
+        posted.awaitSuspending().id
     }
 
     // Best-effort compensation: balance-service TTL-expires the hold and the ledger reversal is
