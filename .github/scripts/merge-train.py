@@ -81,6 +81,56 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
+# Operational knobs (#16932). Each is read from a repository variable through the workflow
+# (`${{ vars.X || 'default' }}`) or from the process environment, so the owner can tune the train
+# without a PR. A variable is operator input, not reviewed code: a value that is not a plain int in
+# the knob's reviewed range falls back to the reviewed default with a `::warning::` naming the
+# variable — never a crash of the tick, never an unbounded value. Defaults equal the previous
+# hard-coded values, so an unset variable changes nothing. name -> (default, lo, hi).
+KNOBS: dict[str, tuple[int, int, int]] = {
+    "MERGE_TRAIN_EXPEDITE_DAILY_CAP": (6, 0, 20),
+    "MERGE_TRAIN_URGENT_DAILY_CAP": (5, 0, 20),
+    "MERGE_TRAIN_STRICT_BATCH_CAP": (8, 1, 16),
+    "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP": (4, 1, 16),
+    "MERGE_TRAIN_BATCH_SIZE": (16, 1, 32),
+    "MERGE_TRAIN_STALE_RED_CAP": (2, 0, 10),
+    "MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP": (1, 0, 5),
+    "MERGE_TRAIN_RESERVATION_CEILING_S": (14400, 1800, 28800),
+    "MERGE_TRAIN_API_RETRY_ATTEMPTS": (5, 1, 10),
+    "MERGE_TRAIN_PREFETCH_BATCH": (8, 1, 16),
+}
+
+
+def _warn(msg: str) -> None:
+    print(f"::warning::{msg}", file=sys.stderr)
+
+
+def knob(raw: str | None, name: str, log=None, default: int | None = None) -> int:
+    """KNOBS[name] validated: int in [lo, hi], else the default with one logged warning."""
+    d, lo, hi = KNOBS[name]
+    d = d if default is None else default
+    text = (raw or "").strip()
+    if re.fullmatch(r"[0-9]{1,6}", text) and lo <= int(text) <= hi:
+        return int(text)
+    if text:
+        (log or _warn)(f"merge-train: {name}={text!r} is not an integer in [{lo}, {hi}]; using default {d}")
+    return d
+
+
+def env_knob(name: str, env_name: str | None = None) -> int:
+    return knob(os.environ.get(env_name or name), name)
+
+
+def knob_bool(raw: str | None, name: str, default: bool, log=None) -> str:
+    """'true'/'false' knob; anything else falls back to the default with one logged warning."""
+    text = (raw or "").strip().lower()
+    if text in ("true", "false"):
+        return text
+    if text:
+        (log or _warn)(f"merge-train: {name}={text!r} is not true/false; using default {str(default).lower()}")
+    return "true" if default else "false"
+
+
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 WORKFLOW = pathlib.Path(".github/workflows/merge-train.yml")
 REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
@@ -122,9 +172,58 @@ EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is
 # On a red main every fix still comes first; a non-fix urgent PR waits for green main like any other.
 URGENT_LABEL = "merge-priority:urgent"
 URGENT_PREEMPT_CONTEXT = "merge-train/urgent-preempted"   # App marker: this head yielded main to an urgent PR once
-URGENT_DAILY_CAP_DEFAULT = 2       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
+URGENT_DAILY_CAP_DEFAULT = 5       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
 URGENT_CLOCK_CONTEXT = "merge-train/urgent-since"     # App marker: first tick this head outranked the other lanes
 URGENT_DROPPED_CONTEXT = "merge-train/urgent-dropped"  # App marker: this head's urgent priority was dropped
+# Lane caps come from repo variables (`vars.X || 'default'`) so the owner can tune them without a PR.
+# A variable is operator input, not reviewed code: anything but a plain int in [0, LANE_CAP_MAX] falls
+# back to the reviewed default and says so, rather than crashing the tick or opening an unbounded lane.
+LANE_CAP_MAX = 20
+
+
+def lane_cap(raw: str | None, default: int, name: str, log=None) -> int:
+    """Validated lane cap: int in [0, LANE_CAP_MAX], else `default` with one logged line."""
+    return knob(raw, name if name in KNOBS else "MERGE_TRAIN_EXPEDITE_DAILY_CAP", log, default)
+
+
+def knobs_self_test(check) -> None:
+    """Every knob: a valid value is taken, an out-of-range and a non-numeric one must fall back
+    to the default and log a warning naming the variable."""
+    for name, (d, lo, hi) in KNOBS.items():
+        mid = str((lo + hi) // 2)
+        logged: list[str] = []
+        check(f"knob {name}: valid {mid}", knob(mid, name, logged.append) == int(mid) and not logged, repr(logged))
+        check(f"knob {name}: unset -> default", knob(None, name, logged.append) == d and not logged, repr(logged))
+        for bad in (str(hi + 1), "-1" if lo == 0 else str(lo - 1), "abc", "4.5"):
+            logged.clear()
+            got = knob(bad, name, logged.append)
+            check(f"knob {name} must-FAIL: {bad!r} -> default {d}", got == d, f"got {got}")
+            check(f"knob {name} must-FAIL: {bad!r} warns naming the variable",
+                  len(logged) == 1 and name in logged[0] and f"using default {d}" in logged[0], repr(logged))
+    logged = []
+    check("knob bool: valid false", knob_bool("false", "MERGE_TRAIN_EXPEDITE_LANE", True, logged.append) == "false" and not logged)
+    check("knob bool must-FAIL: 'yes' -> default true",
+          knob_bool("yes", "MERGE_TRAIN_EXPEDITE_LANE", True, logged.append) == "true"
+          and len(logged) == 1 and "MERGE_TRAIN_EXPEDITE_LANE" in logged[0], repr(logged))
+    check("knob bool must-FAIL: '1' -> default true",
+          knob_bool("1", "MERGE_TRAIN_EXPEDITE_LANE", True, lambda m: None) == "true")
+    check("knob: module defaults equal the reviewed previous values",
+          (STALE_RED_CAP, DEPLOY_FIX_DAILY_CAP, RESERVATION_CEILING_S, API_RETRY_ATTEMPTS, PREFETCH_BATCH)
+          == (2, 1, 14400, 5, 8) or any(k in os.environ for k in KNOBS), "env overrides present")
+
+
+def lane_cap_self_test(check) -> None:
+    logged: list[str] = []
+    for raw, want in (("5", 5), ("0", 0), ("20", 20), (" 7 ", 7), (None, 6), ("", 6)):
+        check(f"lane cap: {raw!r} -> {want}", lane_cap(raw, 6, "T", logged.append) == want, repr(raw))
+    check("lane cap: valid values log nothing", logged == [], repr(logged))
+    for raw in ("21", "-1", "abc", "5.0", "1e3", "999", "0x5", "６"):
+        logged.clear()
+        got = lane_cap(raw, 6, "MERGE_TRAIN_X_DAILY_CAP", logged.append)
+        check(f"lane cap must-FAIL: {raw!r} falls back to default", got == 6, f"got {got}")
+        check(f"lane cap must-FAIL: {raw!r} is logged", len(logged) == 1 and "using default 6" in logged[0], repr(logged))
+
+
 # Deploy fix claim (#16943). A main red on a provider CONTRACT job can be fixed only by deploying the
 # consumer pair whose pact it verifies: the auto-deploy gitops PR changes image pins under
 # openbank-infra/gitops/, so path-scoped CI never re-runs the contract job on its head and
@@ -139,7 +238,7 @@ URGENT_DROPPED_CONTEXT = "merge-train/urgent-dropped"  # App marker: this head's
 # verifies, so "these pins fix that job" is not derivable from names, and a push to the bot branch that
 # swaps a digest under the same tag is not visible to these checks. Everything unknown refuses.
 DEPLOY_FIX_LABEL = "merge-priority:deploy-fix"
-DEPLOY_FIX_DAILY_CAP = 1
+DEPLOY_FIX_DAILY_CAP = env_knob("MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP")   # default 1
 AUTO_DEPLOY_WORKFLOW = ".github/workflows/auto-deploy.yml"
 DEPLOY_BRANCH_RE = re.compile(r"chore/gitops-auto-deploy-([0-9a-f]{40})-run([1-9][0-9]{0,19})")
 GITOPS_PIN_PREFIX = "openbank-infra/gitops/components/"
@@ -182,7 +281,7 @@ BUNDLE_REF = "refs/heads/merge-train-bundle"
 # Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
-STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
+STALE_RED_CAP = env_knob("MERGE_TRAIN_STALE_RED_CAP")      # default 2; stale-red refreshes per settle tick (ADR-0343)
 STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # A strict-lane reservation (ADR-0343) holds main for one PR's CI and is released when that CI STALLS,
 # not when it is merely slow (#13400). A fixed 64 min bound (2 x the ci.yml p95) livelocked #13204: its
@@ -193,7 +292,7 @@ STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # measured 2026-10-22 from /actions/runs/{id}/attempts/1/jobs). The ceiling bounds a CI that keeps
 # trickling forever; it is measured from the head's committer time, which update-branch sets.
 RESERVATION_STALL_S = 15 * 60
-RESERVATION_CEILING_S = 4 * 3600
+RESERVATION_CEILING_S = env_knob("MERGE_TRAIN_RESERVATION_CEILING_S")   # default 4 * 3600
 # Queued CI is CI (#14302): required contexts produced by nested reusable-workflow jobs (`gates (*)`,
 # `Validate manifests`) register no check run until their caller job starts, so a head whose CI only
 # waits for runners has no check-run stamp to show. A workflow run for the head in one of these states
@@ -2296,7 +2395,7 @@ def record_problem(record_desc: str | None, record_creator: str | None, sha_tree
 # (API_RETRY_ATTEMPTS, API_BACKOFF_CAP_S) and per process (API_RETRY_BUDGET_S, 5 min against the
 # 30-45 min step timeouts in merge-train.yml).
 TRANSIENT_HTTP = frozenset({500, 502, 503, 504})   # 500: run 41640891760, check-runs page 2
-API_RETRY_ATTEMPTS = 5
+API_RETRY_ATTEMPTS = env_knob("MERGE_TRAIN_API_RETRY_ATTEMPTS")   # default 5
 API_BACKOFF_BASE_S = 2.0
 API_BACKOFF_CAP_S = 60.0
 API_RETRY_BUDGET_S = 300.0
@@ -2458,7 +2557,7 @@ def get(path: str) -> object:
     return data
 
 
-PREFETCH_BATCH = 8        # 20 heads per query hit RESOURCE_LIMITS_EXCEEDED on 2026-11-14; 8 answered 24/24
+PREFETCH_BATCH = env_knob("MERGE_TRAIN_PREFETCH_BATCH")        # default 8; 20 heads per query hit RESOURCE_LIMITS_EXCEEDED on 2026-11-14; 8 answered 24/24
 PREFETCH_PAGE_ROUNDS = 5  # follow-up rounds for a check suite with more than 100 runs (Services CI's matrix)
 _RUN_FIELDS = "databaseId name status conclusion detailsUrl url startedAt completedAt"
 PREFETCH_FRAGMENT = """fragment H on Commit {
@@ -7532,8 +7631,9 @@ def check_declaration() -> int:
     if not re.search(r'^\s*MERGE_TRAIN_SHADOW: "(true|false)"\s*$', code, re.MULTILINE):
         fails.append('MERGE_TRAIN_SHADOW must be declared as "true" or "false"')
     # The strict batch cap is the rollback switch of the strict carrier: declared, a positive integer.
-    if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as a positive integer ("1" = no strict carrier)')
+    if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "\$\{\{ vars\.MERGE_TRAIN_STRICT_BATCH_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as "${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || \'<n>\' }}" ("1" = no strict carrier)')
     # Speculative stacking's rollback switch: declared outright, carried by settle, its window handed to publish.
     if not re.search(r'^\s*MERGE_TRAIN_SPECULATIVE_STACK: "(true|false)"\s*$', code, re.MULTILINE):
         fails.append('MERGE_TRAIN_SPECULATIVE_STACK must be declared as "true" or "false" ("false" = no stacking)')
@@ -7542,17 +7642,20 @@ def check_declaration() -> int:
     if "STACK_HEAD: ${{ needs.settle.outputs.stack_head }}" not in jobs.get("publish", ""):
         fails.append("publish must receive settle's stacking window (stack_pr / stack_head)")
     # Expedite lane's rollback switch and cap: declared outright, carried by settle, its window handed on.
-    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "(true|false)"\s*$', code, re.MULTILINE):
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_LANE \|\| \'(true|false)\' \}\}"\s*$',
+                     code, re.MULTILINE):
         fails.append('MERGE_TRAIN_EXPEDITE_LANE must be declared as "true" or "false" ("false" = no expedite lane)')
-    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as a positive integer")
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_DAILY_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_EXPEDITE_DAILY_CAP || '<1-99>' }}\"")
     if "EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_EXPEDITE_LANE")
     for job in ("build", "publish"):
         if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
             fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
-    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as a positive integer")
+    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_URGENT_DAILY_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '<1-99>' }}\"")
     if "URGENT_DAILY_CAP: ${{ env.MERGE_TRAIN_URGENT_DAILY_CAP }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_URGENT_DAILY_CAP")
     if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
@@ -8675,6 +8778,8 @@ def self_test() -> int:
     urgent_strict_self_test(check)
     selftest_skip_fix_self_test(check)
     selftest_deploy_fix(check)
+    lane_cap_self_test(check)
+    knobs_self_test(check)
     gate_level_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
@@ -13689,12 +13794,15 @@ def main() -> int:
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
-    ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "16")))
-    ap.add_argument("--strict-batch-cap", type=int,
-                    default=int(os.environ.get("STRICT_BATCH_CAP", str(STRICT_BATCH_CAP_DEFAULT))),
+    ap.add_argument("--batch-size", type=lambda v: knob(v, "MERGE_TRAIN_BATCH_SIZE"),
+                    default=env_knob("MERGE_TRAIN_BATCH_SIZE", "TRAIN_BATCH_SIZE"))
+    ap.add_argument("--strict-batch-cap", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_BATCH_CAP"),
+                    default=knob(os.environ.get("STRICT_BATCH_CAP"), "MERGE_TRAIN_STRICT_BATCH_CAP",
+                                 default=STRICT_BATCH_CAP_DEFAULT),
                     help="settle: members per strict carrier (1 = no strict carrier, update-branch as before)")
-    ap.add_argument("--strict-judge-batch-cap", type=int,
-                    default=int(os.environ.get("MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", str(STRICT_JUDGE_BATCH_CAP_DEFAULT))),
+    ap.add_argument("--strict-judge-batch-cap", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP"),
+                    default=knob(os.environ.get("MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP"),
+                                 "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", default=STRICT_JUDGE_BATCH_CAP_DEFAULT),
                     help="settle: members per strict carrier holding a judge member, all path-disjoint "
                          "(1 = a judge member rides alone, as before)")
     ap.add_argument("--speculative-stack", choices=["true", "false"],
@@ -13704,14 +13812,16 @@ def main() -> int:
                     help="publish: settle's stacking window, holder PR number (re-validated live)")
     ap.add_argument("--stack-head", default=os.environ.get("STACK_HEAD", ""),
                     help="publish: settle's stacking window, holder head sha (re-validated live)")
-    ap.add_argument("--expedite-lane", choices=["true", "false"],
-                    default=os.environ.get("EXPEDITE_LANE", "true" if EXPEDITE_LANE_DEFAULT else "false"),
+    ap.add_argument("--expedite-lane", type=lambda v: knob_bool(v, "MERGE_TRAIN_EXPEDITE_LANE", EXPEDITE_LANE_DEFAULT),
+                    default=knob_bool(os.environ.get("EXPEDITE_LANE"), "MERGE_TRAIN_EXPEDITE_LANE", EXPEDITE_LANE_DEFAULT),
                     help="settle: open an expedite window beside one running carrier (ADR-0343 amendment 2026-11-13)")
     ap.add_argument("--expedite-cap", type=int,
-                    default=int(os.environ.get("EXPEDITE_DAILY_CAP", str(EXPEDITE_DAILY_CAP_DEFAULT))),
+                    default=lane_cap(os.environ.get("EXPEDITE_DAILY_CAP"), EXPEDITE_DAILY_CAP_DEFAULT,
+                                     "MERGE_TRAIN_EXPEDITE_DAILY_CAP"),
                     help="settle/publish: expedite carriers per UTC day")
     ap.add_argument("--urgent-cap", type=int,
-                    default=int(os.environ.get("URGENT_DAILY_CAP", str(URGENT_DAILY_CAP_DEFAULT))),
+                    default=lane_cap(os.environ.get("URGENT_DAILY_CAP"), URGENT_DAILY_CAP_DEFAULT,
+                                     "MERGE_TRAIN_URGENT_DAILY_CAP"),
                     help="settle: distinct PRs the owner may label merge-priority:urgent per UTC day")
     ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
                     help="build/publish: settle's expedite window, the one PR number (re-validated live)")

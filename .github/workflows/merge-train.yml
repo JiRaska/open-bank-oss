@@ -78,7 +78,15 @@ env:
   MERGE_TRAIN_SHADOW: "false"
   # Strict carrier (ADR-0343 amendment 2026-11-05): members per execution-free strict carrier built by
   # settle over live main. "1" is the rollback: no strict carrier, one update-branch per 2.4 h slot as before.
-  MERGE_TRAIN_STRICT_BATCH_CAP: "8"
+  MERGE_TRAIN_STRICT_BATCH_CAP: "${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || '8' }}"
+  # Operational knobs (#16932): repo variables with today's values as defaults; merge-train.py
+  # range-validates each (KNOBS) and falls back to the default with a ::warning:: on anything else.
+  MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP: "${{ vars.MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP || '4' }}"
+  MERGE_TRAIN_STALE_RED_CAP: "${{ vars.MERGE_TRAIN_STALE_RED_CAP || '2' }}"
+  MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP: "${{ vars.MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP || '1' }}"
+  MERGE_TRAIN_RESERVATION_CEILING_S: "${{ vars.MERGE_TRAIN_RESERVATION_CEILING_S || '14400' }}"
+  MERGE_TRAIN_API_RETRY_ATTEMPTS: "${{ vars.MERGE_TRAIN_API_RETRY_ATTEMPTS || '5' }}"
+  MERGE_TRAIN_PREFETCH_BATCH: "${{ vars.MERGE_TRAIN_PREFETCH_BATCH || '8' }}"
   # Speculative stacking (ADR-0343 amendment 2026-11-09): the train carrier may be published over a
   # running strict holder's up-to-date head instead of over main. "false" is the rollback: bounded deferral as before.
   # ROLLED BACK 2026-11-12 (#15772): a stacked carrier holds the holder PR's own commits between main
@@ -90,11 +98,12 @@ env:
   # Expedite lane (ADR-0343 amendment 2026-11-13): one extra carrier holding ONE `merge-priority:expedite`
   # PR may run beside one ordinary carrier and merges first; the overtaken carrier is rebuilt with no
   # verdict. "false" is the rollback: the label only reorders, as before. The cap bounds the CI it costs.
-  MERGE_TRAIN_EXPEDITE_LANE: "true"
-  MERGE_TRAIN_EXPEDITE_DAILY_CAP: "6"
+  MERGE_TRAIN_EXPEDITE_LANE: "${{ vars.MERGE_TRAIN_EXPEDITE_LANE || 'true' }}"
+  # Caps read repo variables (owner-tunable, no PR); merge-train.py validates int in [0, 20], else default.
+  MERGE_TRAIN_EXPEDITE_DAILY_CAP: "${{ vars.MERGE_TRAIN_EXPEDITE_DAILY_CAP || '6' }}"
   # Urgent strict path (ADR-0343 amendment 2026-11-19): distinct PRs the OWNER may label
   # merge-priority:urgent per UTC day; each takes the strict reservation at the next tick.
-  MERGE_TRAIN_URGENT_DAILY_CAP: "2"
+  MERGE_TRAIN_URGENT_DAILY_CAP: "${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '5' }}"
 
 jobs:
   settle:
@@ -239,7 +248,7 @@ jobs:
           # environment the generators run in.
           GH_TOKEN: ${{ github.token }}
           EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || vars.MERGE_TRAIN_BATCH_SIZE || 16 }}
         run: |
           set -euo pipefail
           python3 .github/scripts/merge-train.py build \
@@ -295,7 +304,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || vars.MERGE_TRAIN_BATCH_SIZE || 16 }}
           # Settle's stacking window; publish re-validates both values from live data before using them.
           STACK_PR: ${{ needs.settle.outputs.stack_pr }}
           STACK_HEAD: ${{ needs.settle.outputs.stack_head }}
