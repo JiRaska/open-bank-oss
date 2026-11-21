@@ -119,6 +119,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '5e1458d0abd19d575cd667e4fae834a5f5aebe00',
     # merge-train.py of the repo-variable knobs change (caps, operational knobs, guarded stacking, strict-lane aging), reviewed with that PR.
     '3e8b1a854530ad67b8b2c15e6b68b32788519ef2',
+    # merge-train.py of the aging real-tree fix (auto_squash_enabled counts as armed), reviewed with that PR.
+    '37cd2c39045cad2141d220c2eed955c49e75da91',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
