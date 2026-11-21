@@ -90,6 +90,11 @@ spec:
             # (ADR-0387 D5), collected node-side.
             - name: QUARKUS_OTEL_SDK_DISABLED
               value: "true"
+            # Declared, not used: with the SDK disabled nothing exports, and no NetworkPolicy grants
+            # Tempo egress. It is set so that re-enabling tracing points at the fleet collector
+            # instead of localhost:4317 (otel-endpoint-declared gate).
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
             # Stated explicitly, not left to application.yaml: this is where an operator looks.
             - name: OPENBANK_FETCH_BROKER_PDF_ENABLED
               value: "false"
