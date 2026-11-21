@@ -7,6 +7,10 @@ capabilities:
     title: Provenance-aware required test controls
     state: implemented
     evidence: .github/gates/gates.yaml#test-intelligence-ecosystem
+  - id: identifier-spec-conformance
+    title: Identifier validator spec conformance (vectors, independent reference, robustness-only fuzz labelled)
+    state: implemented
+    evidence: .github/workflows/identifier-differential.yml
   - id: multi-region-browser-synthetics
     title: Outside-in browser synthetics from independent regions
     state: external-blocked

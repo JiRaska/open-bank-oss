@@ -522,7 +522,7 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(report["components"], [])
         self.assertEqual(report["contracts"][0]["state"], "failed")
         self.assertEqual(report["mutations"], seed["mutations"])
-        self.assertIn("collected at 2026-10-18T12:00:00Z", report["warnings"][-1])
+        self.assertTrue(any("collected at 2026-10-18T12:00:00Z" in w for w in report["warnings"]))
         self.assertFalse((self.repo / COMPONENT / "build").exists())
 
     def test_synthetic_envelopes_are_visible_to_the_node_collector_and_then_removed(self):
@@ -542,6 +542,37 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(seen, [b"{}"])
         self.assertIn("synthetic note", report["warnings"])
         self.assertFalse((self.repo / staged).exists())
+
+    def conformance_run(self, command, cwd, check):
+        self.conformance_seen.append((self.repo / COLLECTOR.CONFORMANCE_TARGET).read_bytes()
+                                     if (self.repo / COLLECTOR.CONFORMANCE_TARGET).exists() else None)
+        output = Path(command[command.index("--out") + 1])
+        output.write_text(json.dumps({"schemaVersion": 1, "collectedAt": "2026-10-19T13:00:00Z",
+                                      "components": [], "warnings": [], "totals": {}}))
+
+    def test_identifier_conformance_absent_is_no_evidence_and_scheduled_main_is_staged(self):
+        self.conformance_seen = []
+        matrix = json.dumps({"schema": "identifier-conformance/v1", "validators": []}).encode()
+        artifact = {"id": 31, "name": "identifier-conformance", "expired": False,
+                    "workflow_run": {"id": 456, "head_branch": "main"}}
+        scheduled = RUN | {"id": 456, "event": "schedule", "path": ".github/workflows/identifier-differential.yml"}
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = Path(output_dir) / "result.json"
+            self.collect(self.repo, output, "org/repo", "token", fetch_page=lambda _name, _page: [],
+                         seed=None, run_collector=self.conformance_run)
+            report = json.loads(output.read_text())
+            self.assertTrue(any("spec conformance is no evidence" in w for w in report["warnings"]))
+            pages = lambda name, _page: [artifact] if name == "identifier-conformance" else []
+            self.collect(self.repo, output, "org/repo", "token", fetch_page=pages, fetch_run=lambda _id: scheduled,
+                         fetch_archive=lambda _id: archive({"identifier-conformance.json": matrix}),
+                         seed=None, run_collector=self.conformance_run)
+            # A pull_request run of the same producer is not main evidence.
+            with self.assertRaises(COLLECTOR.CollectionError):
+                COLLECTOR.conformance_payload(archive({"other.json": matrix}))
+            for untrusted in (scheduled | {"event": "pull_request"}, scheduled | {"head_repository": {"full_name": "fork/repo"}}):
+                self.assertFalse(COLLECTOR.trusted_conformance_run(untrusted, "org/repo"))
+        self.assertEqual(self.conformance_seen, [None, matrix])
+        self.assertFalse((self.repo / COLLECTOR.CONFORMANCE_TARGET).exists())
 
     def test_absent_component_is_reported_unknown_and_api_errors_fail(self):
         def run(command, cwd, check):
@@ -614,7 +645,7 @@ class CollectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as output_dir:
             result = self.collect(
                 self.repo, Path(output_dir) / "result.json", "org/repo", "token",
-                fetch_page=lambda name, _page: [next(row for row in artifacts.values() if row["name"] == name)],
+                fetch_page=lambda name, _page: [row for row in artifacts.values() if row["name"] == name][:1],
                 fetch_run=lambda run_id: run_calls.append(run_id) or RUN,
                 fetch_attempt=lambda run_id, attempt: attempt_calls.append((run_id, attempt)) or prior_attempt,
                 fetch_archive=archives.__getitem__, seed=None,
