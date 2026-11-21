@@ -24,9 +24,12 @@ that gap is where the cost now sits: pacing, batch sizes, timeouts, runner choic
 values are mostly literals in `.github/workflows` and scripts, so changing them takes a PR,
 which itself has to pass through the very train or queue whose behaviour is being tuned.
 
-Evidence measured on `origin/main` (2026-11-21): 45 distinct `vars.X` names are read by
-workflows, but only 8 reads use the `vars.X || <default>` shape (e.g.
-`MERGE_TRAIN_RUNNER`, `DEPLOY_DROPPED_PIN_HOURS`); every variable is already registered in
+Evidence measured on `origin/main` (2026-11-21,
+`git grep -ohE 'vars\.[A-Z0-9_]+' origin/main -- .github | sort -u | wc -l`): 47 distinct
+`vars.X` names are read under `.github`, but only 7 of them are ever read in the
+`vars.X || <default>` shape (9 reads in workflows), and of those only `MERGE_TRAIN_RUNNER`,
+`DEPLOY_DROPPED_PIN_HOURS` and `MINI_RUNNER_SERVICES` are operational tuning — the rest are
+endpoints, usernames and app ids; every variable is already registered in
 `.github/config-inventory.yaml` and checked by the enforced `config-inventory` gate. So the
 mechanism exists and works; what is missing is the rule saying when to use it and when not.
 
@@ -49,6 +52,11 @@ We will classify every operational value in delivery automation into one of thre
    reviewed PR, because the reviewed change history is the regulatory evidence for them.
 
 Rules that follow:
+
+- **Tie-break.** A value that fits more than one class takes the stricter one. A limit that
+  bounds how much unreviewed work may be in flight (a WIP limit) is GUARDED even though it is
+  also a concurrency value; a timeout or concurrency setting on a security or money-path check
+  is NEVER.
 
 - **Fast-direction principle.** Stopping, freezing or rolling back automation must never
   require a PR. Any control whose safe direction needs a PR is a defect against this ADR.
@@ -101,8 +109,8 @@ Rules that follow:
 ### Delivery check
 
 - `python3 .github/scripts/check-config-inventory.py` exits 0 (every variable registered).
-- `grep -rhoE "vars\.[A-Z_]+ \|\| " .github/workflows | wc -l` grows over time from the
-  2026-11-21 baseline of 8, and the follow-up guard exists in `.github/gates/gates.yaml`.
+- `grep -rhoE "vars\.[A-Z0-9_]+ \|\| " .github/workflows | wc -l` grows over time from the
+  2026-11-21 baseline of 9, and the follow-up guard exists in `.github/gates/gates.yaml`.
 
 ## Compliance impact
 
