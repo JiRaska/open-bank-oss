@@ -3689,7 +3689,10 @@ gates:
   # a one-line regression this gate turns into a red diff.
   - id: merge-train-declaration
     name: "merge-train keeps its App token, non-cancelling concurrency, OPA and shadow default (enforced)"
-    group: registry
+    # Own group = own ci.yml shard (#17006): this gate alone was the registry-kotlin-data critical
+    # path (median 732 s of 145 gates, max 1502 s over 10 runs 2026-11-21). Unscaled either way:
+    # the id matches BUDGET_DENY_ID_RE, and `merge-train` is not in BUDGET_SCALED_GROUPS.
+    group: merge-train
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     # Hard kill for this gate only (#16788). The runner default is 420 s and a budget above the

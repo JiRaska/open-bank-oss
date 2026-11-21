@@ -662,6 +662,10 @@ jobs:
             groups: lint supplychain security
           - slug: registry-kotlin-data
             groups: registry kotlin data
+          # Not a required context: `Validate manifests` (required) needs the whole `gates` matrix,
+          # so a red/cancelled/skipped instance of this one fails it closed (#17006).
+          - slug: merge-train
+            groups: merge-train
     env:
       # ${{ }} expressions cannot be expanded outside the workflow, so the two gate inputs
       # that need them are set here rather than in the manifest.
