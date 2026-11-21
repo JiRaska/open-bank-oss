@@ -37,7 +37,7 @@ spec:
           annotations:
             summary: "mcp-valkey is above 80% of maxmemory"
             description: "mcp-valkey ({{ $labels.pod }}) uses {{ $value | humanizePercentage }} of maxmemory. It runs noeviction, so at 100% every customer-channel request answers 503 replay_store_unavailable. Check for a proof-key or subject flood (the D5.3 buckets bound it) before raising maxmemory; never switch to an evicting policy."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
         - alert: MCPValkeyMemoryFull
           expr: |
             redis_memory_used_bytes{namespace="platform", pod=~"mcp-valkey-.*"}
@@ -50,4 +50,4 @@ spec:
           annotations:
             summary: "mcp-valkey is at maxmemory: the customer MCP channel is refusing requests"
             description: "mcp-valkey ({{ $labels.pod }}) uses {{ $value | humanizePercentage }} of maxmemory with noeviction; new DPoP claims and budget counters fail, so the customer channel answers 503 for everyone."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
