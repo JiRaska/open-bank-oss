@@ -70,6 +70,7 @@ class PartyStandingService(
                         reason = reason,
                         occurredAt = clock.instant(),
                         sourceService = "account-service",
+                        bookingContext = updated.bookingContext,
                     ),
                 )
                 log.infof("Account %s %s -> %s (%s)", updated.id, account.status, updated.status, reason)
