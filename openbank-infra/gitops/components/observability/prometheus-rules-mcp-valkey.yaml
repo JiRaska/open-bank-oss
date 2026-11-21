@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# mcp-valkey memory alerts (ADR-0383 P4, #16590).
+#
+# WHY: mcp-valkey runs `maxmemory-policy noeviction` on purpose. An evicting policy would silently
+# delete live DPoP replay entries and reopen replay. The price of noeviction is that a FULL store
+# refuses writes, so every customer-channel request becomes 503 `replay_store_unavailable`: a
+# channel-wide outage that no error rate in mcp-service names as "memory". This alert sees it coming.
+#
+# Metrics: the fleet's redis_exporter sidecar (copilot-redis pattern), scraped by the
+# mcp-valkey-metrics PodMonitor: redis_memory_used_bytes and redis_memory_max_bytes (the
+# `maxmemory` setting, 128mb). `redis_memory_max_bytes > 0` guards the division: an unset
+# maxmemory reports 0, which would otherwise make the ratio +Inf and fire on a healthy store.
+# Cold value (t=0, fresh pod): an empty Valkey uses ~1 MiB of 128 MiB, ratio < 0.01, silent —
+# proved in openbank-infra/tests/promtool/mcp_valkey_memory_alerts_test.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-mcp-valkey-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: mcp-service
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: openbank.mcp.valkey
+      interval: 1m
+      rules:
+        - alert: MCPValkeyMemoryNearMax
+          expr: |
+            redis_memory_used_bytes{namespace="platform", pod=~"mcp-valkey-.*"}
+              / (redis_memory_max_bytes{namespace="platform", pod=~"mcp-valkey-.*"} > 0)
+              > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "mcp-valkey is above 80% of maxmemory"
+            description: "mcp-valkey ({{ $labels.pod }}) uses {{ $value | humanizePercentage }} of maxmemory. It runs noeviction, so at 100% every customer-channel request answers 503 replay_store_unavailable. Check for a proof-key or subject flood (the D5.3 buckets bound it) before raising maxmemory; never switch to an evicting policy."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md#customer-channel-valkey-mcp-valkey"
+        - alert: MCPValkeyMemoryFull
+          expr: |
+            redis_memory_used_bytes{namespace="platform", pod=~"mcp-valkey-.*"}
+              / (redis_memory_max_bytes{namespace="platform", pod=~"mcp-valkey-.*"} > 0)
+              > 0.95
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "mcp-valkey is at maxmemory: the customer MCP channel is refusing requests"
+            description: "mcp-valkey ({{ $labels.pod }}) uses {{ $value | humanizePercentage }} of maxmemory with noeviction; new DPoP claims and budget counters fail, so the customer channel answers 503 for everyone."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md#customer-channel-valkey-mcp-valkey"

@@ -57,6 +57,7 @@ class McpCustomerTenantResolutionIT {
             "quarkus.http.proxy.allow-x-forwarded" to "true",
             "quarkus.http.proxy.enable-forwarded-host" to "true",
             "mcp.customer.enabled" to "true",
+            "mcp.customer.shared-store" to "memory",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
         )

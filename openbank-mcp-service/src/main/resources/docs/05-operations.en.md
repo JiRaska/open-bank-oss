@@ -86,6 +86,47 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
 
+## Customer-channel Valkey (`mcp-valkey`)
+
+The customer MCP channel's shared DPoP replay store and D5.3 budgets live in `mcp-valkey`
+(namespace `platform`, `openbank-infra/gitops/components/mcp/valkey.yaml`). It is deliberately
+ephemeral, so:
+
+- **A restart, reschedule or OOM-kill empties it.** For up to 365 s afterwards a proof that was
+  already used can be accepted once more, and every customer budget restarts from zero. Do not roll
+  it during customer traffic; if it restarts unexpectedly, treat the next 365 s as a reduced-assurance
+  window and check `mcp-valkey` for OOM (`kubectl -n platform describe pod -l app.kubernetes.io/name=mcp-valkey`).
+- **Full store:** `--maxmemory 128mb` with `noeviction` makes writes fail rather than evict; the channel
+  then answers 503 `replay_store_unavailable`. Never change the policy to an evicting one — eviction
+  silently reopens replay.
+- **Secrets:** generated in-cluster, nothing to provision. Three ESO `Password` generators
+  (`refreshPolicy: CreatedOnce`, 48 letters/digits each) feed three Secrets: `mcp-customer-store-valkey`
+  (`valkey_password`), `mcp-customer-store-hmac` (`key_hmac_secret`) and `mcp-customer-store-metrics`
+  (`metrics_password`, the exporter's ACL user). No copy exists outside the
+  cluster. Until ESO creates them the Valkey pod waits in `CreateContainerConfigError` (by design: it
+  never starts unauthenticated) and mcp-service runs with the customer channel off; enabling the
+  channel without them refuses to boot.
+- **Auth:** the Valkey container reads its passwords from files mounted from the Secrets (tmpfs,
+  mode 0440), validates them (`[A-Za-z0-9]+`, non-empty), renders them into a tmpfs config file and
+  `exec`s `valkey-server`: they are in neither the process arguments, the container environment, nor
+  the node's disk. The exporter's least-privilege `metrics` password is an env var in its own
+  container (redis_exporter has no single-target password file).
+- **Rollout:** merging this restarts the live mcp-service pod once (its env gains the Valkey host,
+  password and HMAC refs; terminate-first, ~160 s unavailable). mcp-valkey is created fresh.
+- **Exporter:** the `redis_exporter` sidecar uses the `metrics` ACL user (own generated password in
+  `mcp-customer-store-metrics`, introspection commands only, no `CONFIG GET`), its `/scrape`
+  multi-target endpoint is disabled, and port 9121 admits only the Prometheus pods.
+- **Alerts:** `MCPValkeyMemoryNearMax` (> 80% of maxmemory for 5m, warning) and
+  `MCPValkeyMemoryFull` (> 95% for 2m, critical) from the redis_exporter sidecar.
+- **Rotation** (customer channel drained):
+  - Valkey password: delete Secret `platform/mcp-customer-store-valkey` (ESO regenerates it), then
+    restart `mcp-valkey` and every mcp-service pod. The Valkey restart empties the store: live replay
+    entries and budgets reset.
+  - Metrics password: delete Secret `platform/mcp-customer-store-metrics`, then restart `mcp-valkey`
+    (same store-emptying effect).
+  - Key HMAC secret: delete Secret `platform/mcp-customer-store-hmac`, then restart every mcp-service
+    pod. Keys hashed with the old secret are orphaned until they expire (at most a day).
+
 ## Customer channel metrics and alerts (ADR-0384 slice 1)
 
 `McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
