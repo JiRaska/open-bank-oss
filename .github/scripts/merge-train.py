@@ -1839,9 +1839,45 @@ def hotfix_withdraw(gh, p: dict, why: str, shadow: bool, summary: dict) -> None:
         gh.post_status(sha, "pending", f"hotfix lane: grant withdrawn — {why}")
 
 
+def hotfix_revoke_sweep(gh, repo: str, granted: dict[int, str], shadow: bool, summary: dict) -> None:
+    """Revocation never depends on how far eligibility got. For EVERY open PR — draft, disarmed, unfetchable
+    or past any candidate limit alike — every head the App ever recorded a hotfix grant for keeps its grant
+    only if it is that PR's current head AND was granted again this very tick (`granted`: PR -> head).
+    Every other recorded head that still carries the marker is withdrawn: marker failure, `merge-train`
+    pending. So a grant on X followed by a push of Y loses X in the same tick, and a later push back to X
+    finds no success to act on. An unreadable comment list cannot be revoked from: logged, never silent."""
+    for p in gh.open_prs():
+        if is_carrier(p, repo) or is_strict_carrier(p, repo):
+            continue
+        n = p["number"]
+        recs = hotfix_grant_records(gh.issue_comments(n))
+        if recs is None:
+            log(f"::warning::#{n:>6} hotfix    revocation sweep: comments unreadable — cannot verify old grants")
+            continue
+        for sha in dict.fromkeys(h for h, _m, _e in recs):
+            if granted.get(n) == sha:
+                continue
+            why = ("merge-priority:hotfix label removed" if not has_label(p, HOTFIX_LABEL)
+                   else f"head is {p['head']['sha'][:12]}, not the granted {sha[:12]}" if p["head"]["sha"] != sha
+                   else "not granted on this tick")
+            hotfix_withdraw(gh, {"number": n, "head": {"sha": sha}}, why, shadow, summary)
+
+
 def hotfix_lane(gh, git, repo: str, base: str, main_red: dict, strict_busy: str | None, cap: int,
                 shadow: bool, summary: dict, now: float | None = None, probe=None,
                 admissible: dict | None = None, marked: dict | None = None) -> set[int]:
+    """One hotfix tick: grant (hotfix_grant_tick), then the revocation sweep over every open PR. The sweep
+    runs whatever the cap — 0 turns granting off and revokes everything still standing."""
+    out = hotfix_grant_tick(gh, git, repo, base, main_red, strict_busy, cap, shadow, summary, now, probe,
+                            admissible, marked)
+    hotfix_revoke_sweep(gh, repo, summary.get("_hotfix_heads", {}), shadow, summary)
+    summary.pop("_hotfix_heads", None)
+    return out
+
+
+def hotfix_grant_tick(gh, git, repo: str, base: str, main_red: dict, strict_busy: str | None, cap: int,
+                      shadow: bool, summary: dict, now: float | None = None, probe=None,
+                      admissible: dict | None = None, marked: dict | None = None) -> set[int]:
     """Grant the eligible hotfix PRs this tick: marker + audit comment once per head, then `merge-train`
     success on the CURRENT head (post_status re-verifies required checks and live source intent). Native
     auto-merge then merges. Returns the granted PR numbers: settle drops them from every other lane."""
@@ -1879,6 +1915,7 @@ def hotfix_lane(gh, git, repo: str, base: str, main_red: dict, strict_busy: str 
         log(f"#{n:>6} hotfix    GRANTED head {head[:12]} over main {base[:12]} "
             f"(label event {record['label_event']} by {record['actor']})")
         out.add(n)
+        summary.setdefault("_hotfix_heads", {})[n] = head
         if shadow:
             continue
         app = gh.app_statuses(head)
@@ -4579,7 +4616,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                 strict_cap: int = STRICT_BATCH_CAP_DEFAULT, judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
                 stack: bool = SPECULATIVE_STACK_DEFAULT,
                 expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT,
-                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT, hotfix_cap: int = 0, aging_s: int = 0,
+                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT, hotfix_cap: int | None = None, aging_s: int = 0,
                 aging_max_hold_s: int = 3600) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
@@ -4951,8 +4988,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                    f"urgent reservation #{holder} is in flight" if holder is not None and holder in urgent else None)
     admissible = {m.number: m.head_sha for m in cands}
     admissible.update({v["number"]: v["head_sha"] for st, v in strict if st == "green"})
-    hotfix = hotfix_lane(gh, git, repo, base, main_red, strict_busy, hotfix_cap, shadow, summary,
-                         admissible=admissible, marked=main_cache.get(HOTFIX_MARKED_KEY)) - {holder}
+    # None = not wired (direct callers); main() always passes the validated int, and 0 still revokes.
+    hotfix = set() if hotfix_cap is None else hotfix_lane(
+        gh, git, repo, base, main_red, strict_busy, hotfix_cap, shadow, summary,
+        admissible=admissible, marked=main_cache.get(HOTFIX_MARKED_KEY)) - {holder}
     if hotfix:
         strict[:] = [sv for sv in strict if sv[1]["number"] not in hotfix]
         cands = [m for m in cands if m.number not in hotfix]
@@ -9531,6 +9570,24 @@ def hotfix_lane_self_test(check) -> None:
     hotfix_lane(kept, None, repo, base, {}, None, 2, False, {}, now=now, probe=Probe(), admissible={},
                 marked={7: (head, [HOTFIX_LABEL])})
     check("hotfix: a still-labelled marked head is not revoked by the unlabel scan", not kept.posted, repr(kept.posted))
+    # Revocation sweep (re-review of f6ebe025, HIGH): grant X, push Y whose CI is pending -> X loses its grant
+    # in that tick, whatever state the PR is in, before any eligibility read can return early.
+    for variant, extra in (("armed", {}), ("disarmed", {"auto_merge": None}), ("drafted", {"draft": True})):
+        pr_y = {**GH().open_prs()[0], "head": {"sha": other, "ref": "fix/x", "repo": {"full_name": repo}}, **extra}
+        sw = GH(prs=[pr_y], comments={7: [rec]}, app_by={head: granted_app, other: {}},
+                unverified="required context(s) pending on the head now: CI")
+        got, summary = run(sw, admissible={})
+        check(f"hotfix must-FAIL: grant X, push Y with CI pending ({variant}) -> X marker failure + merge-train pending",
+              got == set() and (head, "failure", HOTFIX_GRANT_CONTEXT) in sw.posted
+              and (head, "pending", STATUS_CONTEXT) in sw.posted, f"{sw.posted} {summary}")
+    off = GH(prs=[{**GH().open_prs()[0]}], comments={7: [rec]}, app=granted_app)
+    run(off, cap=0)
+    check("hotfix must-FAIL: cap 0 (lane off) revokes a standing grant", (head, "failure", HOTFIX_GRANT_CONTEXT) in off.posted,
+          repr(off.posted))
+    stay = GH(comments={7: [rec]}, app=granted_app, arrived={})
+    got, _ = run(stay)
+    check("hotfix: the sweep never withdraws the head granted in this tick", got == {7}
+          and not [x for x in stay.posted if x[1] in ("failure", "pending")], repr(stay.posted))
     got, _ = run(GH(), probe=Probe(paths=(".github/workflows/x.yml",)))
     check("hotfix: a .github PR with no strict carrier/urgent in flight is granted", got == {7})
     got, _ = run(GH(title="security(auth): x"), main_red={"all-green": "x"})
