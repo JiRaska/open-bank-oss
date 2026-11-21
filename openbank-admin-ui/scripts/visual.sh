@@ -11,10 +11,23 @@
 # variant, whose rasteriser is not guaranteed bit-identical to the amd64 CI runner.
 set -euo pipefail
 
-# amd64 manifest of mcr.microsoft.com/playwright:v1.64.1-noble — the tag is mutable, the digest is not.
-IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8"
+# amd64 manifest of the matching Playwright image; the tag is mutable, the digest is not.
+PLAYWRIGHT_VERSION="1.65.0"
+IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble@sha256:bc4fbb329a25287ed23e9216c97063646abdd1bf2da669a9895fa3e2078b2302"
 ui_dir="$(cd "$(dirname "$0")/.." && pwd)"
 repo_root="$(cd "${ui_dir}/.." && pwd)"
+
+# A successful Docker launch is not evidence the locked client can find its browser.
+# Reject version drift before starting the rendering environment.
+node - "${ui_dir}/package-lock.json" "${PLAYWRIGHT_VERSION}" <<'NODE'
+const fs = require('node:fs')
+const lock = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+for (const name of ['@playwright/test', 'playwright', 'playwright-core']) {
+  if (lock.packages?.[`node_modules/${name}`]?.version !== process.argv[3]) {
+    throw new Error(`Visual Playwright image and locked ${name} versions differ`)
+  }
+}
+NODE
 
 args=()
 if [ "${1:-}" = "--update" ]; then
