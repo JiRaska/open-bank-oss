@@ -1,0 +1,61 @@
+{
+  "identifier": "pan-luhn",
+  "reference": "stdnum.luhn",
+  "sources": [
+    "https://www.iso.org/standard/70484.html"
+  ],
+  "cases": [
+    {
+      "value": "4111111111111111",
+      "valid": true,
+      "rule": "Visa test PAN",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/70484.html",
+      "policy": "spec"
+    },
+    {
+      "value": "5555555555554444",
+      "valid": true,
+      "rule": "Mastercard test PAN",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/70484.html",
+      "policy": "spec"
+    },
+    {
+      "value": "4111111111111112",
+      "valid": false,
+      "rule": "Luhn mismatch",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "79927398713",
+      "valid": true,
+      "rule": "ISO/IEC 7812 Luhn example",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/70484.html",
+      "policy": "spec"
+    },
+    {
+      "value": "79927398710",
+      "valid": false,
+      "rule": "ISO/IEC 7812 Luhn example, wrong check",
+      "stdnum": false,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/70484.html",
+      "policy": "spec"
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-card-issuance-service",
+      "symbol": "com.openbank.cardissuance.domain.model.SyntheticPan.isLuhnValid",
+      "file": "openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/SyntheticPan.kt"
+    }
+  ],
+  "differential": true
+}

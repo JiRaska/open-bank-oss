@@ -1,0 +1,78 @@
+{
+  "identifier": "cz-account",
+  "reference": "stdnum.cz.bankaccount",
+  "sources": [
+    "https://www.zakonyprolidi.cz/cs/2011-169",
+    "https://www.cnb.cz/cs/platebni-styk/.galleries/iban/download/TABELA_v1.pdf"
+  ],
+  "cases": [
+    {
+      "value": "19-2000145399/0800",
+      "valid": true,
+      "rule": "prefix and base both mod-11 (CZ registry example)",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.zakonyprolidi.cz/cs/2011-169",
+      "policy": "spec"
+    },
+    {
+      "value": "2000145399/0800",
+      "valid": true,
+      "rule": "empty prefix",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.zakonyprolidi.cz/cs/2011-169",
+      "policy": "spec"
+    },
+    {
+      "value": "19-2000145398/0800",
+      "valid": false,
+      "rule": "base fails mod-11",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "18-2000145399/0800",
+      "valid": false,
+      "rule": "prefix fails mod-11",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "0000000000/0800",
+      "valid": false,
+      "rule": "all-zero base",
+      "stdnum_divergence": "stdnum does not require the base to carry a significant digit; no bank issues account 0",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "local",
+      "policy_reason": "local rule: base number needs two significant digits (not shown in the cited decree text)"
+    },
+    {
+      "value": "1234567-2000145399/0800",
+      "valid": false,
+      "rule": "prefix longer than 6 digits",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "12345678901/0800",
+      "valid": false,
+      "rule": "base longer than 10 digits",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-libs-domain",
+      "symbol": "com.openbank.libs.domain.account.CzechAccountNumber.isValid",
+      "file": "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/account/CzechAccountNumber.kt"
+    }
+  ],
+  "differential": true
+}
