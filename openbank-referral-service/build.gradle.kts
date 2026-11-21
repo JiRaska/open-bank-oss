@@ -47,3 +47,11 @@ kover {
         }
     }
 }
+
+// The trace-contract IT boots its own Quarkus app under a distinct test profile; at the default
+// heap the test fork died with OutOfMemoryError (instrumentation agent could not allocate, Kafka
+// testcontainer then never came up, the suite hung until the job timeout). Per-module, as
+// statement-service and kyb-service do: nothing measures test heap fleet-wide.
+tasks.test {
+    maxHeapSize = "2g"
+}

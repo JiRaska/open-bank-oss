@@ -51,7 +51,7 @@ Idempotency-Key: 5e9f8b6a-7c3d-4e1f-9a2b-1c8f7e6d5a4b
   "debtorAccountNumber": "19-2000145399",
   "debtorBankCode": "0800",
   "debtorName": "Jan Novák",
-  "creditorAccountNumber": "123456789",
+  "creditorAccountNumber": "123456788",
   "creditorBankCode": "0100",
   "creditorName": "ČEZ a.s.",
   "amount": 1500.00,
@@ -77,7 +77,7 @@ Content-Type: application/json
   "id": "…uuid…",
   "status": "VALIDATED",      // nebo RECEIVED (drženo k revizi / screening nedostupný) / REJECTED (sankční zásah)
   "debtorAccountId": "…",
-  "creditorAccountNumber": "123456789",
+  "creditorAccountNumber": "123456788",
   "creditorBankCode": "0100",
   "amount": 1500.00,
   "currency": "CZK",
@@ -91,6 +91,7 @@ Content-Type: application/json
 - Vrácený `status` odráží výsledek synchronního screeningu (viz [02 — Architektura](./02-architecture.md)): `VALIDATED` (čisté), `RECEIVED` (drženo k revizi nebo screening nedostupný), nebo `REJECTED` s `rejectReason=SANCTIONS_HIT`.
 - `endToEndId` se vygeneruje, pokud není dodán (`DOM<iniciála-priority><epoch-millis><rand>`).
 - `transferScope=TECHNICAL_ACCOUNT` vyžaduje `technicalAccountCode`.
+- Účet plátce i příjemce (`předčíslí-číslo` + 4místný kód banky) musí být vydatelný český účet: nejvýše 6 číslic předčíslí a 10 číslic čísla, obě části musí splnit kontrolu modulo 11 dle vyhlášky ČNB 169/2011. Jinak požadavek skončí 400 `VALIDATION_ERROR` s názvem pole, ještě před svázáním `Idempotency-Key`. Totéž platí pro položky konceptů hromadných plateb a pro delegovanou platbu (#16748). Adaptér schématu skládá IBAN jako `CZ` + kontrolní číslice + `kódBanky(4)` + `předčíslí(6)` + `číslo(10)`. Uložená platba s účtem, který pravidlo nesplní, se neodešle a skončí `REJECTED` s `INVALID_ACCOUNT_NUMBER` (ISO důvod `AC01`).
 - Ve stejné transakci se zapíše outbox událost `domestic.payment.created`; pokud screening platbu přepne, následuje událost `domestic.payment.status-changed`.
 
 ### Získat platbu
@@ -216,3 +217,8 @@ delegace, zmocněnec, účet plátce, částka, měna i `Idempotency-Key` musí 
 `RESERVATION_NOT_RESERVED`, `RESERVATION_MISMATCH` (neutrální) nebo `IDEMPOTENCY_KEY_REUSED`;
 `503 ACCOUNT_AUTHORITY_UNAVAILABLE` lze opakovat. Opakování se stejným klíčem vrátí tutéž platbu.
 Události platby nesou `delegationId` a `reservationId`.
+
+Kontrola oprávnění při vytvoření (ADR-0375 D1) odpoví `409 DELEGATION_AUTHORITY_WITHDRAWN`, když
+byla delegace odvolána nebo už účet nepokrývá. Odmítá jen NOVOU platbu: opakování s klíčem platby,
+která je k rezervaci už navázaná, vrátí tuto platbu, protože peníze odešly ještě za platné delegace.
+Nový klíč proti navázané rezervaci se dál odmítne.

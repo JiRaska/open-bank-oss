@@ -1,0 +1,4 @@
+node_modules/
+# Token/DPoP-key session files written by the journey (MCP_HARNESS_SESSION_FILE). Never commit.
+*.session.json
+reports/

@@ -1,6 +1,6 @@
 ---
 date: 2026-11-15
-decision-status: proposed
+decision-status: accepted
 delivery-status: planned
 authors: [Codex]
 supersedes: []

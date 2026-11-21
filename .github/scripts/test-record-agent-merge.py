@@ -531,6 +531,20 @@ class ReadOnlyTest(unittest.TestCase):
                 self.assertEqual(result, 1)
                 self.assertEqual(len(calls), 1)
 
+    def test_capability_diagnostics_only_emit_fixed_failure_stages(self):
+        scenarios = (
+            ({"actor": "not-owner"}, "owner verification", 0),
+            ({"env_overrides": {"AGENT_MERGE_RECORDER_TOKEN": ""}}, "reader configuration", 0),
+            ({"bad_json": True}, "backend GET or response decoding", 1),
+            ({"capability": {"unexpected": "unlogged-row-marker"}}, "capability schema", 1),
+        )
+        for options, stage, expected_calls in scenarios:
+            with self.subTest(stage=stage):
+                result, calls, _, output = self.observe(["--read-capabilities"], **options)
+                self.assertEqual(result, 1)
+                self.assertEqual(len(calls), expected_calls)
+                self.assertEqual(output, f"record-agent-merge: read-only verification failed at {stage}\n")
+
     def test_existing_row_is_freshly_proved_and_independently_read(self):
         result, calls, github, _ = self.observe(['--pr', '7', '--read-existing'])
         self.assertEqual(result, 0)

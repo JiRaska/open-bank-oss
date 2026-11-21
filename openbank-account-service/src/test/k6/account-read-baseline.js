@@ -4,6 +4,13 @@
 // Account reads are on the hot path of every payment initiation (debtor lookup) and of
 // the whole customer app. There was no load evidence behind their SLO.
 //
+// SCOPE — self-contained account reads only (list by party, detail by id, trigram IBAN
+// search). GET /{id}/balance is deliberately NOT exercised here: it proxies to
+// balance-service via BalanceServiceClient, which the single-service perf-gate lane does
+// not boot, so the probe would time a 500 from the dead outbound call. That read path is
+// covered by the balance-service lane (balance-read-baseline.js), which is wired into the
+// same gate.
+//
 // READ-ONLY BY CONSTRUCTION: every request below is a GET. No openbank-account-service state is created,
 // mutated or deleted, so this lane is safe against any booted stack, including a shared
 // sandbox. Write-path benchmarking for money-path services stays in the manual, isolated
@@ -13,8 +20,8 @@
 // (<module>/src/test/k6/*.js) and executed by the perf workflow — never by Gradle `test`.
 //
 // Run:
-//   BASE_URL=http://localhost:8103 PERF_READ_TOKEN=<token> \
-////     PERF_PARTY_ID=<uuid> PERF_ACCOUNT_ID=<uuid> \
+//   BASE_URL=http://localhost:8100 PERF_READ_TOKEN=<token> \
+//     PERF_PARTY_ID=<uuid> PERF_ACCOUNT_ID=<uuid> \
 //     k6 run openbank-account-service/src/test/k6/account-read-baseline.js
 //
 // Thresholds are ADVISORY in the CI lane (ADR-0243 / issue #334): the run records the
@@ -28,7 +35,7 @@ import { Trend } from "k6/metrics";
 // must fail loudly rather than publish the latency of an auth rejection.
 http.setResponseCallback(http.expectedStatuses(200));
 
-const BASE_URL = __ENV.BASE_URL || "http://localhost:8103";
+const BASE_URL = __ENV.BASE_URL || "http://localhost:8100";
 // PERF_READ_TOKEN is injected by the scheduled workflow from an environment secret.
 // Deliberately no default; never logged, never used as a k6 tag.
 const readHeaders = { Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}` };
@@ -37,7 +44,6 @@ const ACCOUNT_ID = __ENV.PERF_ACCOUNT_ID || "00000000-0000-0000-0000-00000000000
 
 const listMs = new Trend("account_list_ms", true);
 const detailMs = new Trend("account_detail_ms", true);
-const balanceMs = new Trend("account_balance_ms", true);
 const searchMs = new Trend("account_search_ms", true);
 
 export const options = {
@@ -57,7 +63,6 @@ export const options = {
   thresholds: {
     "account_list_ms": ["p(95)<800"],
     "account_detail_ms": ["p(95)<400"],
-    "account_balance_ms": ["p(95)<400"],
     // Trigram IBAN search is the expensive read; a looser tripwire on purpose.
     "account_search_ms": ["p(95)<1200"],
 
@@ -81,13 +86,6 @@ export default function () {
   });
   detailMs.add(d.timings.duration);
   check(d, { "account detail 200": (res) => res.status === 200 });
-
-  const b = http.get(`${BASE_URL}/api/v1/accounts/${ACCOUNT_ID}/balance`, {
-    headers: readHeaders,
-    tags: { name: "account_balance" },
-  });
-  balanceMs.add(b.timings.duration);
-  check(b, { "account balance 200": (res) => res.status === 200 });
 
   const s = http.get(`${BASE_URL}/api/v1/accounts/search?q=CZ&limit=20`, {
     headers: readHeaders,

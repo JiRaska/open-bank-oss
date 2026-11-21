@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.39.0...account-service-v0.39.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
 ## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.38.0...account-service-v0.39.0) (2026-11-13)
 
 

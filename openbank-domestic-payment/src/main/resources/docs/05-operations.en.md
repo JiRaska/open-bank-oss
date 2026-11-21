@@ -213,3 +213,12 @@ Rollback of the flag: set it to `false`. New payments take the previous path; pa
 **Fraud enforcement switched off during a hold** (`openbank.domestic.fraud.enforcement-enabled=false`) releases a payment that was HELD for fraud once its case is CLEARED, without anyone deciding on the fraud evidence: the fraud control no longer applies. That is an operator-controlled release by configuration. It is counted as `openbank_payment_admission_hold_ends_total{end="RELEASED_CONTROL_NOT_APPLICABLE"}` and logged at WARN with the lapsed control. A control that asks for a review without naming what it found (a sanctions review with no matched entry) is treated as unavailable, not reviewable: the payment stays HELD without a case and the control is asked again.
 
 Rollback of the image to one from before the chain is **allowed only once admission is switched off and no payment is HELD**. That image has no `HELD` status: it cannot read a `HELD` row, and it does not poll the admission queue, so an open admission run would be stranded. Runbook, in order: (1) set `OPENBANK_DOMESTIC_ADMISSION_ENABLED=false` and deploy it; (2) wait until `sum(openbank_domestic_payments_non_terminal{service="domestic",status="HELD"}) == 0` (every hold released, rejected or expired; the gauge refreshes every 30 s), and until no admission run is open on the admission task queue; (3) only then roll the image back. Do not roll back with `HELD` rows present: old code is not made to tolerate them.
+
+## Client certificate reload (outbound mTLS)
+
+Every named `quarkus.tls.<name>` configuration that presents a client certificate to a peer's
+8443 listener sets `reload-period: 1h`. cert-manager renews the mounted client certificate
+before it expires; without a reload period the process would keep presenting the old one until
+the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
+After a renewal the new certificate is in use within an hour, with no restart. The
+`tls-certificate-reload` gate keeps every such configuration covered.

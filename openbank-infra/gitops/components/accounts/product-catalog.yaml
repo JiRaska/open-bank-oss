@@ -71,7 +71,7 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f3002b75ae305ce8"
+        openbank.tech/policy-checksum: "f6167fd0dc7c3b1b"
     spec:
       # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
       # workload, not to every pod running as `default` in the namespace.
@@ -85,7 +85,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: product-catalog
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-c9c04a42@sha256:2dfd1188fe7a94c84806e90abdd9716e076085ee276b849c85336035d6508a72
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-744ce085@sha256:16faadd946e45eaa0b84b1b143b4cbd7059c191dec857ea15f956b170216b784
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -95,6 +95,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # glibc sizes its malloc arenas as 8 x ONLINE CPUs read from the host
+            # (/proc/cpuinfo), not from the cgroup quota: on Karpenter's 16-vCPU
+            # 4xlarge nodes that is 128 arenas of native memory against the same
+            # cgroup limit that fit on a 2-4 vCPU node, and the pod OOMKilled in
+            # startup warm-up (exit 137, no Java OOM — #16783, headroom raised in
+            # #16784). Cap the arenas; the JVM's own allocations do not go through
+            # glibc malloc.
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             # Parallel private-CA TLS listener for new east-west clients (first: interest-service's
             # CatalogInterestSnapshotScheduler and lending-service's RestCatalogLoanProfilePort,
             # #10383). HTTP/8104 stays for existing callers and for the KEDA HTTP interceptor, which
@@ -102,6 +111,10 @@ spec:
             # through it. Same shape as account-service's and document-service's 8443 listeners.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -198,7 +211,7 @@ spec:
               memory: 256Mi
             limits:
               cpu: "1"
-              memory: 512Mi
+              memory: 768Mi
         # OPA policy-decision sidecar (ADR-0034, issue #12823). Serves data.openbank.rest.allow
         # for product-catalog's @Authorize endpoints (catalog.read/list/create/update/author/
         # publish, catalog.pensionApproval.*). Bundle mounted from product-catalog-opa-bundle.

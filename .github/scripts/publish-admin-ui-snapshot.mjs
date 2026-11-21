@@ -83,7 +83,7 @@ function safeManifest(bytes, nowMs) {
   return manifest
 }
 
-function manifestBytes({ snapshot, sha256: digest, sourceSha, runId, runAttempt, collectedAt, now }) {
+function manifestBytes({ snapshot, sha256: digest, sourceSha, runId, runAttempt, collectedAt, now, pointerTtlMs }) {
   const manifest = {
     schemaVersion: 1,
     snapshot,
@@ -92,7 +92,7 @@ function manifestBytes({ snapshot, sha256: digest, sourceSha, runId, runAttempt,
     runId,
     runAttempt,
     collectedAt,
-    expiresAt: new Date(now + POINTER_TTL_MS).toISOString(),
+    expiresAt: new Date(now + pointerTtlMs).toISOString(),
     complete: true,
   }
   if (!validateEvidenceManifest(manifest, now)) throw new Error('publisher produced an invalid manifest')
@@ -143,6 +143,7 @@ export function publishEvidenceSnapshot({
   validateSnapshot,
   collectedAt: snapshotCollectedAt,
   snapshotSourceSha,
+  pointerTtlMs = POINTER_TTL_MS,
   rollback,
   env = process.env,
   execFileSync = nodeExecFileSync,
@@ -215,7 +216,7 @@ export function publishEvidenceSnapshot({
       throw new Error('refusing to replace current evidence with an older collectedAt')
     }
 
-    const pointer = manifestBytes({ snapshot, sha256: digest, sourceSha: pointerSourceSha, runId: pointerRunId, runAttempt: pointerRunAttempt, collectedAt, now: now() })
+    const pointer = manifestBytes({ snapshot, sha256: digest, sourceSha: pointerSourceSha, runId: pointerRunId, runAttempt: pointerRunAttempt, collectedAt, now: now(), pointerTtlMs })
     const pointerPath = join(directory, 'manifest.json')
     writeFile(pointerPath, pointer)
 

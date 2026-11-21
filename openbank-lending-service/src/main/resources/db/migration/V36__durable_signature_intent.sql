@@ -4,7 +4,7 @@
 -- revert the application code. Keep the intent rows for evidence after first use.
 CREATE TABLE lending_signature_intent (
     operation_id UUID PRIMARY KEY,
-    application_id UUID NOT NULL UNIQUE REFERENCES loan_application(id) ON DELETE CASCADE,
+    application_id UUID NOT NULL UNIQUE REFERENCES loan_application(id) ON DELETE RESTRICT,
     revision_id UUID NOT NULL,
     revision_content_hash TEXT NOT NULL CHECK (revision_content_hash ~ '^[0-9a-f]{64}$'),
     artefact_hash VARCHAR(64) NOT NULL CHECK (btrim(artefact_hash) <> ''),

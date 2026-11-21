@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# alert-digest: the in-cluster producer of the daily standing-critical digest (issue #6432,
+# ADR-0382). Its own Application so the producer can be suspended or rolled back without
+# touching the monitoring stack it reads. The GET-only relay it reads through is part of the
+# observability component (components/observability/alertmanager-read-proxy.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alert-digest
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/alert-digest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: alert-digest
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

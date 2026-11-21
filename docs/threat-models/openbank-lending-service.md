@@ -1142,6 +1142,12 @@ with `openbank-libs-market`. Tests cover a foreign-only offering leaving no appl
 catalogue country codes, and the existing unscoped application path. Cross-border origination still
 requires the catalogue commitment fence and verified subject evidence.
 
+Residual: a malformed catalogue country code (like any other malformed catalogue field in
+`toProfile`) raises `IllegalArgumentException`, so the application answers 400 rather than a
+catalogue-unavailable refusal. It fails closed: no application is persisted. Only the status code
+misattributes the fault to the caller. Lending has no catalogue-unavailable outcome yet, and adding
+one belongs with the other `toProfile` validation errors, not with this check alone.
+
 ### Durable catalogue-backed signature (ADR-0380)
 
 The signature endpoint records an intent for the authenticated signer against the application's
@@ -1164,3 +1170,12 @@ establishment under the grant lock before admitting an action or returning the m
 Until B2 routes the loan and cash entries to branch books, normal runtime refuses branch origination
 and branch commitment execution, including replay. Synthetic integration tests exercise the shared
 recovery path, the revocation race and refusal before any loan or borrower credit is created.
+
+Residual (durable signature recovery): a `lending_signature_intent` row whose application has left
+`AWAITING_SIGNATURE` without the intent's signature being applied (withdrawn, expired or declined)
+stays pending. `finishSignatureIntent` refuses it on every claim, and `SignatureRecoveryScheduler`
+reclaims it each lease, logging a warning. An intent whose signature is already recorded is left
+pending in the same way. Neither path writes a signature or emits a transition, so this fails
+closed; the cost is retry noise and a pending backlog. Closing an intent as abandoned needs its own
+terminal state. `completed_at` means the signature was applied and is evidence, so it must not be
+reused for that. Tracked as #16993.

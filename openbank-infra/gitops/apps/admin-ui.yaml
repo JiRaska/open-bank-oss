@@ -11,10 +11,17 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
+  # ADR-0358: admin-ui renders from its pin on the bot-owned deploy/sandbox branch, not
+  # from main. pins/admin-ui holds a verbatim copy of components/admin-ui at a main commit
+  # (pin.json manifest_sha) plus a kustomization that sets the image tag and digest.
+  # Manifest changes are still reviewed PRs into components/admin-ui on main; a push there
+  # re-pins automatically (admin-ui-deploy.yml). check-deploy-pin-branch.py proves the copy
+  # is exact and every pinned sha is on main. Same repoURL, so the existing repo credential
+  # is reused.
   source:
     repoURL: git@github.com:JiRaska/open-bank-oss.git
-    targetRevision: main
-    path: openbank-infra/gitops/components/admin-ui
+    targetRevision: deploy/sandbox
+    path: pins/admin-ui
   destination:
     server: https://kubernetes.default.svc
     namespace: admin-ui

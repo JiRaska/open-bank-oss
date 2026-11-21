@@ -36,11 +36,77 @@ scenarios:
   # target or synthetic-data teardown — only a least-privilege read identity.
   - id: account-read-baseline
     definition: openbank-account-service/src/test/k6/account-read-baseline.js
-    execution_mode: planned-read-only-sandbox
-    safety_boundary: Read-only by construction — every request is a GET against openbank-account-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
-    target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-account-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_ACCOUNT_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
-    assertions: Exercises account list (partyId, cursor), account detail, account balance, trigram IBAN search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-account-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope. The id-scoped probes (list by party, account detail) need seeded rows to answer 200, so the module ships src/test/k6/fixtures.sql, which the gate loads into the throwaway database after boot; verified locally end to end. The account balance read is deliberately excluded from this lane — GET /{id}/balance proxies to balance-service via BalanceServiceClient, which the single-service lane does not boot, and that read path is covered by the balance-service lane instead. The perf-baseline.yml leg remains for the shared-sandbox mode (PERF_ACCOUNT_URL plus the PERF_READ_TOKEN secret); a 401 there is rejection evidence, not a handler baseline.
+    assertions: Exercises account list (partyId, limit), account detail and trigram IBAN search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: sanctions-read-baseline
+    definition: openbank-sanctions-service/src/test/k6/sanctions-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-sanctions-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL, Redis and Kafka (OIDC and dev-mode auth disabled, so no read identity is required). The detail probe needs a seeded row, so the module ships src/test/k6/fixtures.sql (one fixed-id CLEAR check plus 199 more across CLEAR/POTENTIAL_HIT/HIT so the pending and hits queues page real rows), loaded into the throwaway database after boot.
+    assertions: Exercises the checks list, the pending queue, the hits queue, check detail and the screened-subject lists. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: standing-order-read-baseline
+    definition: openbank-standing-order-service/src/test/k6/standing-order-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-standing-order-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL, Redis and Kafka (OIDC and dev-mode auth disabled, so no read identity is required). The detail probe needs a seeded row, so the module ships src/test/k6/fixtures.sql (one fixed-id ACTIVE order plus 199 more for the same party), loaded into the throwaway database after boot.
+    assertions: Exercises standing orders by party, list all, and detail by id. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: settlement-read-baseline
+    definition: openbank-settlement-service/src/test/k6/settlement-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-settlement-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required; the settlement-status read only rejects principals whose name starts with the service-account prefix, and the anonymous lane identity is not one). The fixtures (200 settlements across the PENDING/DEBITED/CREDITED/BOOKED/REJECTED lifecycle, 30 live PENDING operator approvals) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises settlement status detail, pending operator-approval queue, approval record detail. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: pension-read-baseline
+    definition: openbank-pension-service/src/test/k6/pension-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-pension-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Kafka (OIDC and dev-mode auth disabled, so no read identity is required; the Temporal worker switch is derived from the module's own openbank.pension.worker.enabled literal by the gate, same as settlement). The fixtures (20 ACTIVE contracts, 200 CZK-only contributions — the aggregates read refuses to sum across currencies — 10 state-contribution returns with 3 filed reports, 3 annuity providers) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises participant period aggregates, state-contribution returns, filed return reports, deadlines, annuity provider directory. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: sdd-read-baseline
+    definition: openbank-sdd-service/src/test/k6/sdd-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-sdd-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required). The mandate fixtures (200 mandates for the fleet-wide fixture account across the ACTIVE/SUSPENDED/CANCELLED/EXPIRED lifecycle, both schemes and all sequence types) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises mandate list, per-account mandate view, newest-mandates queue, mandate detail, post-settlement refund assessment (inside the 8-week unconditional window). Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: interest-read-baseline
+    definition: openbank-interest-service/src/test/k6/interest-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-interest-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required). The accrual fixtures (200 daily accruals for the fleet-wide fixture account against the CURRENT-product rate config seeded by Flyway V10, plus one capitalization row) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises accrual list, per-account accrual ledger, accrual summary, capitalization history, withholding remittance list. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: card-processing-read-baseline
+    definition: openbank-card-processing-service/src/test/k6/card-processing-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-card-processing-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Kafka (OIDC and dev-mode auth disabled, so no read identity is required). The fixtures (200 authorisations across the APPROVED/DECLINED/CLEARED/REVERSED lifecycle for one fixed probe card, one dispute case with its evidence trail, three network-token mirror rows) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises authorisation detail, per-card authorisation history, dispute case detail, per-card dispute list, network-token mirror per card. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: card-issuance-read-baseline
+    definition: openbank-card-issuance-service/src/test/k6/card-issuance-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-card-issuance-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Redis/Kafka (OIDC and dev-mode auth disabled, so no read identity is required; the named-caller-guarded GETs and the product-catalog-backed entitlements read are deliberately NOT probed — they would measure a rejection, not a handler). The card fixtures (200 cards for the fleet-wide fixture account, plus four category rules for the fixed probe card) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises card list, per-account card listing, spend-category taxonomy, per-card category rules. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: treasury-read-baseline
+    definition: openbank-treasury-service/src/test/k6/treasury-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-treasury-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL/Kafka (OIDC and dev-mode auth disabled, so no read identity is required). Counterparties and credit measures are seeded by Flyway (V1, V28); the deal fixtures (60 money-market deals across the three synthetic counterparties and CNB, BOOKED/SETTLED/MATURED, CZK/EUR) ship as src/test/k6/fixtures.sql and are loaded into the throwaway database after boot; verified locally end to end.
+    assertions: Exercises the dealer blotter (list + filtered view), posting-rule matrix, events calendar, counterparty limits with exposure and headroom, limit utilisation, daily positions, day-completion record. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: balance-read-baseline
     definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
@@ -127,3 +193,18 @@ scenarios:
     safety_boundary: Every request writes a fraud_scores row and advances velocity and new-payee state for synthetic random accounts; run only against an isolated disposable local stack. The script refuses a non-localhost FRAUD_URL or KEYCLOAK_URL unless FRAUD_PERF_ALLOW_NONLOCAL=1, and must never target a shared sandbox.
     blocker: No committed baseline yet. Needs an isolated compose stack (postgres, kafka, keycloak, opa) plus a locally booted openbank-fraud-service, which has no compose service today. The measurement deliberately includes today's per-request Postgres work (4 reads and 1 write) — that cost is the subject of the hot-path redesign, not noise.
     assertions: Advisory only (run with --no-thresholds-fail) — fraud_score_ms p99 < 150 ms (the ADR-0084 budget), with p50/p90/p95/p99/p99.9 reported; non-200 rate < 0.01 and fraud_score_failure recorded. A rate counts as sustained only if dropped_iterations is 0 at that offered rate. The verdict mix (fraud_verdict_allow/review/challenge/decline/other) is recorded for steady, ramp and hot-account runs; USD traffic yields REVIEW today, so the mix must be read with the currency share in mind.
+
+  # Customer MCP channel (ADR-0383, test layer 6 of #16617, parent #16590).
+  - id: mcp-customer
+    definition: perf/k6/mcp-customer.js
+    execution_mode: manual-local-isolated
+    safety_boundary: Read-only tool mix plus an over-limit burst against one TEST agent identity. propose_payment is refused by the unwired proposal store today and only ever creates a reviewable proposal afterwards, never a debit. The burst deliberately spends that agent's per-minute window and part of its daily budget, so use a dedicated test agent token against an isolated local or port-forwarded stack; the script refuses a non-localhost MCP_PERF_URL unless MCP_PERF_ALLOW_NONLOCAL=1, and never tags or logs the token.
+    blocker: Runs today only against the governed-agent channel (staff-realm agent token with a consent_id claim); the customer channel itself is not routable yet (ADR-0383, #16590), so the customer-realm client, DPoP and per-party limiter are not measured. The ordering measurement needs the OPA sidecar /metrics reachable (MCP_PERF_PDP_METRICS_URL) and its v1/data request counter has only been exercised against a stand-in, not a live sidecar, so the ordering gate stays recorded-only by default. No isolated stack with a seeded consent is scheduled yet, so there is no baseline and no CI lane.
+    assertions: Two scenarios. tool_mix sends a weighted mix (list_accounts 40, get_balance 30, list_transactions 25, propose_payment 5) at 0.8 calls/s, under the 60/min default limit, and any limiter answer or read-tool error there is an invalid sample. throttle_burst sends 2.5x the configured per-minute limit in one iteration and requires that no more than LIMIT x (clock-aligned minute windows the run spanned) calls are admitted, that the limiter fired, that every over-limit call carries the limiter error (today the JSON-RPC "Rate limit exceeded" result, ADR-0383 target HTTP 429), and that every throttled call is metered as a DENY in openbank_mcp_tool_calls_total. The PDP query cost of throttled calls is recorded against a per-admitted-call cost calibrated from five calls before the burst; with MCP_PERF_EXPECT_LIMITER_BEFORE_POLICY=1 any PDP query spent on a throttled call fails the run, which is the ADR-0383 D5 ordering (limiter before policy) and fails today because McpEndpoint still checks the limit after the policy decision. Latency tripwires p95 < 500 ms and p99 < 1.5 s on the mix are advisory.
+
+  - id: mcp-audit-chain-append
+    definition: perf/k6/mcp-audit-chain-append.js
+    execution_mode: manual-local-isolated
+    safety_boundary: Appends synthetic audit rows to a disposable mcp-service database only; never the shared sandbox or a live audit chain, since a contended append run would pollute an evidentiary hash chain.
+    blocker: Declared but pending ADR-0384 D0 (#16605 under #16590) - mcp-service does not yet opt in to the hash-linked audit publisher or own an AuditChainOutbox, so there is no append path to measure and the script refuses to run. ADR-0384 requires the append rate ceiling to be measured here before the customer route opens.
+    assertions: Pending. Sustained append rate with N concurrent producers contending for the per-producer chain-head lock, p95 below 50 ms and p99 below 200 ms including lock wait (advisory until a baseline exists), and chain integrity after the run with zero gaps or forks (hard).

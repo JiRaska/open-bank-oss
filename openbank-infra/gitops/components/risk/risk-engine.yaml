@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-risk-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3fc53c0233927255"
+        openbank.tech/policy-checksum: "3126429093a68dda"
       labels:
         app.kubernetes.io/name: risk-engine
         app.kubernetes.io/part-of: risk
@@ -49,7 +49,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-risk-engine to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-548fa683@sha256:2ad58479e41992a6eef9748cc29d26ec7b19776817aec1392e92e76d57f39e79
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-6592e526@sha256:f0602e59c1e9121693431d70014cf3f2dece9b354b11bbe5839a8f91b06c182c
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8159 and management 8085 — both read off the service's own application.yaml
@@ -66,6 +66,10 @@ spec:
             # as lending-service's 8443 listener (#10732).
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
