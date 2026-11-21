@@ -30,6 +30,8 @@ object ProxyForwardingSupport {
         "quarkus.http.proxy.trusted-proxies" to trustedProxies,
         "mcp.edge.client-address-header" to EDGE_HEADER,
         "mcp.customer.enabled" to "true",
+        // #16791 boot gate: the channel on requires a shared store; in-process for tests.
+        "mcp.customer.shared-store" to "memory",
         "mcp.customer.issuer" to CUSTOMERS,
         "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
     )
