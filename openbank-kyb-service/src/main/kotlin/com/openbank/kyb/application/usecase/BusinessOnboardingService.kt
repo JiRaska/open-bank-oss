@@ -102,7 +102,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
 
     override suspend fun start(cmd: StartCaseCommand): BusinessOnboardingCase {
-        val identifier = LegalEntityIdentifier.of(cmd.scheme, cmd.identifier)
+        val identifier = LegalEntityIdentifier.of(cmd.scheme, cmd.identifier, clock)
         cases.findOpenByIdentifier(identifier)?.let { existing ->
             // The same person retrying is idempotent; another person starting the same entity joins
             // the open case as a would-be signer via invitation, never by opening a second case.

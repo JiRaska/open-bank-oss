@@ -222,6 +222,7 @@ class KybResource {
             runCatching { IdentifierScheme.valueOf(scheme.uppercase()) }
                 .getOrElse { throw IllegalArgumentException("unknown identifier scheme '$scheme'") },
             identifier,
+            clock,
         )
         // Always 200. A finding whose source is UNAVAILABLE or SELF_DECLARATION is an ANSWER the
         // analyst has to act on, not an error: 404 here would read as "this company has no owners",
