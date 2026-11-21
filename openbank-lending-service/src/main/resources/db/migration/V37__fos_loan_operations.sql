@@ -2,13 +2,13 @@
 -- Rollback: stop FOS admission, reconcile existing operations, then disable service writers.
 -- Retain the route, permits and state guard while any FOS application remains open.
 CREATE TABLE lending_fos_route (
-    application_id UUID PRIMARY KEY REFERENCES loan_application(id) ON DELETE CASCADE,
+    application_id UUID PRIMARY KEY REFERENCES loan_application(id) ON DELETE RESTRICT,
     route JSONB NOT NULL CHECK (jsonb_typeof(route) = 'object')
 );
 
 CREATE TABLE lending_fos_operation (
     operation_id UUID PRIMARY KEY,
-    application_id UUID NOT NULL REFERENCES lending_fos_route(application_id) ON DELETE CASCADE,
+    application_id UUID NOT NULL REFERENCES lending_fos_route(application_id) ON DELETE RESTRICT,
     action TEXT NOT NULL CHECK (action IN ('SIGN', 'DISBURSE')),
     command JSONB NOT NULL CHECK (jsonb_typeof(command) = 'object'),
     admitted_at TIMESTAMPTZ,

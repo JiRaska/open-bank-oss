@@ -19,6 +19,17 @@ function documents(source) {
 }
 
 /** Build evidence, not cluster telemetry. Missing declarations must fail the build. */
+// merge-train.yml declares its knobs either as a literal ("8") or, since #17009, as a
+// repo-variable expression with a fallback ("${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || '8' }}").
+// The evidence reports the DECLARED DEFAULT: a live repo-variable override is not visible
+// from the source tree, so the page shows what the workflow falls back to.
+export function knobDefault(value) {
+  if (typeof value === 'number') return value
+  if (typeof value !== 'string') return undefined
+  const expr = value.trim().match(/^\$\{\{\s*vars\.[A-Za-z_][A-Za-z0-9_]*\s*\|\|\s*'?([^'\s}]+)'?\s*\}\}$/)
+  return expr ? expr[1] : value.trim()
+}
+
 export function deriveSdlcEvidence(read) {
   const rollout = documents(read(SDLC_SOURCES.rollout)).find(doc => doc.kind === 'Rollout' && doc.metadata?.name === 'ledger-service')
   const analysis = documents(read(SDLC_SOURCES.analysis)).find(doc => doc.kind === 'ClusterAnalysisTemplate' && doc.metadata?.name === 'openbank-money-path-canary')
@@ -48,7 +59,7 @@ export function deriveSdlcEvidence(read) {
   const exactWeightsPossible = trafficRouting || steps.filter(step => step.kind === 'weight')
     .every(step => step.value * replicas % 100 === 0)
   const batchSize = Number(train.on?.workflow_dispatch?.inputs?.batch_size?.default)
-  const strictBatchCap = Number(train.env?.MERGE_TRAIN_STRICT_BATCH_CAP)
+  const strictBatchCap = Number(knobDefault(train.env?.MERGE_TRAIN_STRICT_BATCH_CAP))
   if (!Number.isInteger(batchSize) || batchSize < 1 || !Number.isInteger(strictBatchCap) || strictBatchCap < 1) {
     throw new Error('SDLC evidence: missing train batch limits')
   }

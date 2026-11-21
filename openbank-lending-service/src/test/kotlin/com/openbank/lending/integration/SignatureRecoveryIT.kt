@@ -137,7 +137,17 @@ class SignatureRecoveryIT {
                 """.trimIndent(),
                 application,
             ),
-        ).isEqualTo(1L)
+        ).isEqualTo(1L)        assertFosEvidenceOutlivesDeleteAttempt(application)
+    }
+
+    /** FOS operations are commitment evidence: deleting their route is refused, never cascaded. */
+    private fun assertFosEvidenceOutlivesDeleteAttempt(application: UUID) {
+        assertThatThrownBy { execute("DELETE FROM lending_fos_route WHERE application_id = ?", application) }
+            .isInstanceOfSatisfying(SQLException::class.java) {
+                assertThat(it.sqlState).isEqualTo(RESTRICT_VIOLATION)
+            }
+        val operations = "SELECT count(*) FROM lending_fos_operation WHERE application_id = ?"
+        assertThat(scalar(operations, application)).isEqualTo(2L)
     }
 
     @Test
