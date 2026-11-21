@@ -291,8 +291,8 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_0706fa38_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('0706fa384166e6be506fa7dc5393a3d69906b6ea')
 
-    def test_reviewed_3b61550b_source_preserves_bounded_policy_chain(self):
-        self.assert_reviewed_source_chain('3b61550bee9d3371830c2dce8e53a83fc5b1b5e3')
+    def test_reviewed_5e1458d0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('5e1458d0abd19d575cd667e4fae834a5f5aebe00')
 
     def test_reviewed_4ff3f289_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('4ff3f289c41f697c1f498435a0ac7bcf4fa6b507')
