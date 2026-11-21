@@ -1220,7 +1220,7 @@ The network policy now admits the `tax-reporting` namespace, and tax-reporting-s
 
 | Threat | Control | Evidence |
 |---|---|---|
-| A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. | `AccountServiceTest` |
+| A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. A malformed catalogue country code makes the revision `Unavailable` (503), never a caller error. | `ProductRevisionMarketTest`, `ProductCatalogAdapterTest` |
 | A pending account activates after its offering is no longer available on the route | Re-read catalogue scope before activating pinned pending accounts. Refuse catalogue lookup failure, a changed offering or a foreign-only scope before the state transition is persisted. | `AccountServiceLifecycleTest` |
 
 The domestic check uses catalogue distribution metadata. Earlier unscoped catalogue responses and

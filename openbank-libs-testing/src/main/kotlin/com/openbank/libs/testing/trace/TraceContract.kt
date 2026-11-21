@@ -55,6 +55,33 @@ class TraceContract private constructor(private val spans: List<SpanData>) {
         return this
     }
 
+    /**
+     * Like [requiresSameTrace], but anchored to the trace of the ONE span named [referenceSpan]
+     * instead of measuring every same-named span in the recorder.
+     *
+     * Real services generate sibling traffic that lands on the same tables and operations this
+     * contract anchors on — a test fixture's own REST journey produces `UPDATE <table>` spans in
+     * its request traces long before the delivery under test runs. `requiresSameTrace` then
+     * measures the whole recorder, not the one delivery. The reference must be unambiguous in
+     * this recorder (for a Kafka contract: a dedicated topic, so exactly one consume span);
+     * the named spans are required to exist in THAT trace (they may occur in other traces too).
+     */
+    fun requiresSameTraceAs(referenceSpan: String, vararg spanNames: String): TraceContract {
+        require(spanNames.isNotEmpty()) { "at least one span name is required" }
+        val reference = spans.filter { it.name == referenceSpan }
+        assertThat(reference.size)
+            .describedAs("expected exactly one span named '%s' to anchor the trace on", referenceSpan)
+            .isEqualTo(1)
+        val traceId = reference.single().spanContext.traceId
+        spanNames.forEach { name ->
+            assertThat(spans.any { it.name == name && it.spanContext.traceId == traceId })
+                .describedAs("expected the trace of '%s' to also contain span '%s'", referenceSpan, name)
+                .isTrue()
+        }
+        successfulAssertions++
+        return this
+    }
+
     fun hasNoErrorSpan(): TraceContract {
         val errorSpanNames = spans
             .filter { it.status.statusCode == StatusCode.ERROR }
