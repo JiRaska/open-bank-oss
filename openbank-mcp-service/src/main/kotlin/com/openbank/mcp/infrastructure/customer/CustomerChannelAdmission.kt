@@ -9,6 +9,7 @@ import com.openbank.libs.security.DpopProofVerifier
 import com.openbank.libs.security.DpopRequest
 import com.openbank.libs.security.DpopResult
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.McpMetricsPort
 import jakarta.json.JsonObject
 import jakarta.json.JsonString
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -185,7 +186,7 @@ class CustomerChannelAdmission(
             "resource_metadata=\"$resourceMetadataUrl\""
 
     companion object {
-        const val CHANNEL = "mcp-customer"
+        val CHANNEL = McpMetricsPort.McpChannel.CUSTOMER
 
         /** Refusal reason of every store-unavailable 503 (see [storeUnavailable]). */
         const val REPLAY_STORE_UNAVAILABLE = "replay_store_unavailable"

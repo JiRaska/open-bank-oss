@@ -126,3 +126,11 @@ ephemeral, so:
     (same store-emptying effect).
   - Key HMAC secret: delete Secret `platform/mcp-customer-store-hmac`, then restart every mcp-service
     pod. Keys hashed with the old secret are orphaned until they expire (at most a day).
+
+## Customer channel metrics and alerts (ADR-0384 slice 1)
+
+`McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
+(per allowlisted client, per tool, with the DPoP/replay-refusal reason where one applies)
+through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
+reads the same series through the delegations MCP-channel view. Alert thresholds for the
+channel live with the fleet alerting rules, not in this service.
