@@ -4,7 +4,9 @@
 
 package com.openbank.libs.identity
 
+import java.time.Clock
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * Czech birth number (rodné číslo, RČ) parser and validator (ADR-0072).
@@ -29,9 +31,11 @@ import java.time.LocalDate
  * women `+70`). The `+20`/`+70` overflow only exists for birth years 2004 and later, so it
  * fixes the century to the 2000s and is rejected for `YY` below 04.
  *
- * This validator is deterministic and takes no clock: it does not reject "future" birthdates
- * (the caller compares the extracted [Parsed.birthdate] against the declared birthdate, which
- * is the meaningful cross-field check).
+ * The one-argument [parse]/[isValid] check
+ * structure only and do NOT reject a birthdate in the future (a 10-digit number with year digits
+ * 27..53 reads as 2027..2053). A caller that accepts a person uses the overload taking a `Clock`
+ * ("today" is taken in Europe/Prague), which additionally rejects a birthdate after it. The object holds
+ * no clock of its own: the caller supplies one.
  */
 object RodneCislo {
 
@@ -44,6 +48,10 @@ object RodneCislo {
 
     data class Invalid(val reason: String) : Result
 
+    /**
+     * Structure only, NOT issuance: does not reject a birthdate in the future; callers that accept
+     * a person use the overload with a `clock`.
+     */
     fun parse(raw: String): Result {
         val cleaned = raw.trim().replace("/", "").replace(" ", "")
         if (cleaned.isEmpty()) return Invalid("empty")
@@ -113,11 +121,43 @@ object RodneCislo {
     }
 
     private const val NINE_DIGIT_LENGTH = 9
+
+    /** Zákon č. 133/2000 Sb., o evidenci obyvatel, § 13: the 10-digit, divisible-by-11 form is issued from 1954; earlier births keep 9 digits. */
     private const val LAST_NINE_DIGIT_YY = 53
+
+    /** Zákon č. 133/2000 Sb., § 13 as amended with effect from 2004: month +20 (men) / +70 (women) when a day's serial range is exhausted. */
     private const val FIRST_OVERFLOW_YY = 4
     private const val REMAINDER_QUIRK = 10
+
+    /**
+     * Remainder 10 → check digit 0 for numbers issued up to 1985. MV ČR issuing practice for the 1954–1985
+     * cohort; no statutory paragraph is claimed. Later numbers are always divisible by 11.
+     */
     private const val LAST_QUIRK_YEAR = 1985
 
-    /** True iff [raw] is a structurally valid RČ. */
+    /**
+     * [parse] plus the date rule: a birthdate after today is `Invalid("birthdate is in the future")`.
+     * Structure is checked first, so a malformed number keeps its structural reason.
+     *
+     * "Today" is computed here, from [clock], in `Europe/Prague`: a birth number encodes a Czech civil
+     * date (zákon 133/2000 Sb., https://www.zakonyprolidi.cz/cs/2000-133), so a child born in Prague
+     * just after local midnight must not be rejected because the caller's clock is UTC.
+     */
+    fun parse(raw: String, clock: Clock): Result {
+        val result = parse(raw)
+        val today = LocalDate.now(clock.withZone(CIVIL_ZONE))
+        return if (result is Parsed && result.birthdate.isAfter(today)) Invalid(FUTURE_BIRTHDATE) else result
+    }
+
+    /**
+     * True iff [raw] is a structurally valid RČ. Structure only, NOT issuance: does not reject a
+     * birthdate in the future; callers that accept a person use the overload with a `clock`.
+     */
     fun isValid(raw: String): Boolean = parse(raw) is Parsed
+
+    /** True iff [raw] is a valid RČ whose birthdate is not after today in `Europe/Prague` (see [parse]). */
+    fun isValid(raw: String, clock: Clock): Boolean = parse(raw, clock) is Parsed
+
+    private val CIVIL_ZONE: ZoneId = ZoneId.of("Europe/Prague")
+    private const val FUTURE_BIRTHDATE = "birthdate is in the future"
 }
