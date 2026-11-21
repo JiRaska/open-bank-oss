@@ -111,6 +111,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'eef9500b378c7630aff90490b68686b4f0f02cf8',
     # merge-train.py of #16932's fix (a natively merged carrier member at the verified head continues), reviewed with that PR.
     '0706fa384166e6be506fa7dc5393a3d69906b6ea',
+    # merge-train.py of #16932's follow-up (a member natively merged inside the train's merge call continues), reviewed with that PR.
+    '3b61550bee9d3371830c2dce8e53a83fc5b1b5e3',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
 })
