@@ -18,6 +18,12 @@ permissions: {}
 # cancel in progress, and never key coarser than the attempt — the receiver in ci.yml
 # accepts only `ruleset-bypass-<run_id>-a<run_attempt>`, so each attempt (every main
 # commit, every rerun) still gets its own successful collector run.
+# cancel-in-progress stays false on purpose (re-measured 2026-11-19, 39 queued collectors against
+# 29 queued + 3 running CI runs): the queued collectors are DISTINCT attempts, each owing the evidence
+# its own CI attempt waits for, so no newer run supersedes an older one across keys. Within one
+# key, cancelling would restart a near-finished collector on every duplicate delivery and could
+# starve that attempt's evidence for as long as deliveries keep arriving — it saves nothing that
+# the "at most one waits" rule above does not already save.
 concurrency:
   group: ruleset-bypass-evidence-${{ github.event.workflow_run.id }}-a${{ github.event.workflow_run.run_attempt }}
   cancel-in-progress: false
