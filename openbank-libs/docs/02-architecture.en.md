@@ -66,6 +66,8 @@ The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank
 
 The same table attributes `openbank.tpp.registry.event` to tpp-registry-service, so audit-service can label the TPP register changes (registered, blacklisted) it records on the audit trail.
 
+The same table attributes `openbank.delegation.payment-proposal-events` (the ADR-0383 D6 customer MCP payment-proposal lifecycle) to delegation-service, so audit-service can label those rows.
+
 ### Temporal worker pilot
 
 The version catalog exposes Temporal SDK/testing 1.40.0 for transaction-service's
