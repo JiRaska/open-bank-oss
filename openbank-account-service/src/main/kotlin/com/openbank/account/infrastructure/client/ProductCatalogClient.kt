@@ -69,6 +69,7 @@ data class CatalogRevisionResponse(
     val contentHash: String? = null,
     val irSignature: CatalogIrSignature? = null,
     val content: CatalogRevisionContent = CatalogRevisionContent(),
+    val marketCountries: Set<String>? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
