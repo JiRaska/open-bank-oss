@@ -85,7 +85,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: product-catalog
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-744ce085@sha256:16faadd946e45eaa0b84b1b143b4cbd7059c191dec857ea15f956b170216b784
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-product-catalog:sandbox-834d88f6@sha256:d2456fb693e2bb1335be5a4a98df198a95d857e09cdc9a70a4fdbd528a8d2b3d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

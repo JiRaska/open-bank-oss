@@ -63,7 +63,7 @@ spec:
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-1d0ff238@sha256:7c962171d3c0473c20d62c645794e52a3c87e9e7340c9a7d187c33f2def12ed2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-834d88f6@sha256:365d22179d9bdfd2099b2d896c9a09b1e7b907205abcbd08ed84b71f9eb42a1a
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8126 and management 8090 — both read off the service's own
