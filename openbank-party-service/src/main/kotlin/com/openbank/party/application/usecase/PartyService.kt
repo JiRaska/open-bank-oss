@@ -262,7 +262,7 @@ class PartyService : PartyUseCase {
     private fun computeRcBlindIndex(taxId: String?): Pair<String?, Int?> {
         if (taxId == null) return null to null
         val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null to null
-        val rc = RodneCislo.parse(taxId)
+        val rc = RodneCislo.parse(taxId, clock)
         if (rc !is RodneCislo.Parsed) return null to null
         return BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical) to RC_KEY_VERSION
     }
@@ -271,7 +271,7 @@ class PartyService : PartyUseCase {
 
     override suspend fun resolvePartyByRc(cmd: ResolvePartyByRcCommand): Party? {
         val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null
-        val rc = RodneCislo.parse(cmd.rawRc)
+        val rc = RodneCislo.parse(cmd.rawRc, clock)
         if (rc !is RodneCislo.Parsed) return null
         val index = BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical)
         return partyRepo.findByRcBlindIndex(index)
@@ -484,7 +484,7 @@ class PartyService : PartyUseCase {
         if (!query.namesOnly && birthDates.isEmpty()) {
             normalizeIdentifier(raw)?.let { id ->
                 val limit = query.limit.coerceIn(1, MAX_PAGE_SIZE)
-                val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
+                val byIndex = if (RodneCislo.isValid(raw, clock)) {
                     resolvePartyByRc(ResolvePartyByRcCommand(raw))
                 } else {
                     null

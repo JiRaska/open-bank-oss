@@ -40,7 +40,7 @@ class BusinessPaymentBatchDraftStoreIT {
     private fun request() = BusinessPaymentBatchDraftResource.Create(
         UUID.randomUUID(),
         listOf(
-            BusinessPaymentBatchDraftResource.Item(UUID.randomUUID(), "123456789", "0800", "Supplier", 125, "CZK"),
+            BusinessPaymentBatchDraftResource.Item(UUID.randomUUID(), "123456788", "0800", "Supplier", 125, "CZK"),
         ),
     )
     private fun itemsJson() =

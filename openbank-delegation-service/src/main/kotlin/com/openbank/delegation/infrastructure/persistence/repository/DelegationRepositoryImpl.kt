@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.out.DelegationConcurrentTransiti
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationGrantEntity
@@ -112,6 +113,21 @@ class DelegationRepositoryImpl(
             granteePartyId,
             resourceType,
             resourceId,
+        ).list<DelegationGrantEntity>()
+    }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findActiveMcpClientGrants(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+    ): List<DelegationGrant> = Panache.withSession {
+        find(
+            "grantorPartyId = ?1 and granteeClientId = ?2 and granteeKeyThumbprint = ?3 " +
+                "and granteeType = ?4 and status = 'ACTIVE'",
+            grantorPartyId,
+            clientId,
+            keyThumbprint,
+            DelegationGranteeType.MCP_CLIENT,
         ).list<DelegationGrantEntity>()
     }.awaitSuspending().map { it.toDomain() }
 

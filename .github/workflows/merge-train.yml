@@ -92,6 +92,9 @@ env:
   # verdict. "false" is the rollback: the label only reorders, as before. The cap bounds the CI it costs.
   MERGE_TRAIN_EXPEDITE_LANE: "true"
   MERGE_TRAIN_EXPEDITE_DAILY_CAP: "6"
+  # Urgent strict path (ADR-0343 amendment 2026-11-19): distinct PRs the OWNER may label
+  # merge-priority:urgent per UTC day; each takes the strict reservation at the next tick.
+  MERGE_TRAIN_URGENT_DAILY_CAP: "2"
 
 jobs:
   settle:
@@ -159,6 +162,7 @@ jobs:
           SPECULATIVE_STACK: ${{ env.MERGE_TRAIN_SPECULATIVE_STACK }}
           EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}
           EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}
+          URGENT_DAILY_CAP: ${{ env.MERGE_TRAIN_URGENT_DAILY_CAP }}
           # Isolated git config for THIS step only. At job level it also reached actions/checkout,
           # whose safe.directory write then failed: "could not lock config file /dev/null".
           GIT_CONFIG_NOSYSTEM: "1"
