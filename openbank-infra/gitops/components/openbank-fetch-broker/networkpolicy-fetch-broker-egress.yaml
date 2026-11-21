@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Egress lockdown for the fetch broker (ADR-0387 D7, ADR-0081). Hand-written and named
+# networkpolicy-*.yaml so gen-network-policies.py (which owns network-policies.yaml and emits
+# INGRESS only) never overwrites it.
+#
+# What the network layer guarantees, and what it cannot: the cluster runs the
+# aws-network-policy-agent, which matches CIDRs only — never hostnames. So the per-charter host
+# allowlist is NOT here (OPA + the broker's SafeHttpClient enforce it after DNS). What IS here:
+#   - the internet on TCP 443 only, with every private and link-local range carved out, so a
+#     public name that resolves to an in-cluster / VPC / instance-metadata address is dropped by
+#     the network even if the application check were bypassed;
+#   - DNS and Keycloak (OIDC/JWKS). The OPA sidecar is localhost, which a NetworkPolicy does not
+#     police. Audit events go to the log stream (collected node-side by Alloy), so no audit egress
+#     is needed; tracing is disabled in the Deployment, so there is no Tempo edge either.
+# check-public-web-fetch.py fails if the except list loses any of the ranges below, or if any
+# other agent-plane NetworkPolicy gains a 0.0.0.0/0 egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbank-fetch-broker-egress
+  namespace: fetch-broker
+  labels:
+    app.kubernetes.io/part-of: fetch-broker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbank-fetch-broker
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Keycloak: OIDC discovery + JWKS for the caller's bearer token. The engine resolves a
+    # Service VIP only through a Service-backed selector, so name the pods, not an IP.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+    # The deliberate internet hole: HTTPS only, never a private or link-local destination.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 443

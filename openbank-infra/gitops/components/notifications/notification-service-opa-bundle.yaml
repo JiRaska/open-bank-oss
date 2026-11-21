@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "a2cbc8d353838042"
+    openbank.tech/policy-checksum: "921c9fe8b9b997f0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -978,6 +978,52 @@ data:
     	glob_match(pattern, input.resource)
     }
 
+    # ADR-0387: the public-web read. The fetch broker queries data.openbank.rest.allow for an
+    # AI_AGENT with action `read.public_web` and attributes {tool: web.fetch, tier: read, host}, so
+    # rest.rego's bridge arrives here with input.tool == "read.public_web", no input.tier and no
+    # input.resource -- the generic tier/resource rule above can never fire for it. The grant needs
+    # all four: the declared tier is `read` (a write/execute claim gets nothing), the tool is the
+    # broker's one tool, the charter's object-shaped `read` grant covers the resource, AND the
+    # request host is listed verbatim in that SAME charter's data_scope.public_web.hosts (a string
+    # entry or a {host, render} mapping). The broker re-checks the host after DNS; this rule is the
+    # PDP half of ADR-0387 D2, so an off-list host is denied by policy, not only by broker code.
+    public_web_resource := "read.public_web"
+
+    charter_allowed if public_web_allowed
+
+    charter_denied if public_web_denied
+
+    public_web_allowed if {
+    	input.tool == public_web_resource
+    	input.attributes.tier == "read"
+    	input.attributes.tool == "web.fetch"
+    	is_string(input.attributes.host)
+    	some a in charter
+    	some entry in a.tools.allow
+    	entry.tier == "read"
+    	some pattern in entry.resources
+    	glob_match(pattern, public_web_resource)
+    	public_web_host_listed(a.data_scope.public_web.hosts, input.attributes.host)
+    }
+
+    # A charter's own tools.deny on the resource beats its allow, whatever tier the caller claims.
+    public_web_denied if {
+    	input.tool == public_web_resource
+    	some entry in tier_resource_deny_entries
+    	some pattern in entry.resources
+    	glob_match(pattern, public_web_resource)
+    }
+
+    public_web_host_listed(hosts, host) if {
+    	some h in hosts
+    	h == host
+    }
+
+    public_web_host_listed(hosts, host) if {
+    	some h in hosts
+    	h.host == host
+    }
+
     # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
     # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
     # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
@@ -1908,7 +1954,7 @@ data:
     # MCP and REST decision is unchanged before it writes.
     #
     # Derived paths (read out of the .rego sources, never listed by hand):
-    #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
+    #   data.agents.agents  (each element projected to: data_scope.public_web.hosts, id, skills, tools.allow, tools.deny)
     #   data.agents.tool_tiers.deny
     #   data.agents.tool_tiers.read
     #   data.agents.tool_tiers.write_proposal
@@ -1954,6 +2000,7 @@ data:
       - product.sign
     agents:
     - id: compliance-officer
+      data_scope: {}
       tools:
         allow:
         - query.ledger.readonly
@@ -1978,6 +2025,7 @@ data:
       - bump
       - open-pr
       - release
+      data_scope: {}
       tools:
         allow:
         - git.branch
@@ -1991,6 +2039,7 @@ data:
         - gh.pr.approve
         - money.*
     - id: ui-assistant
+      data_scope: {}
       tools:
         allow:
         - query.ledger.readonly
@@ -2008,6 +2057,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
     - id: product-author
+      data_scope: {}
       tools:
         allow:
         - product.lint
@@ -2023,6 +2073,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: rca-investigator
+      data_scope: {}
       tools:
         allow:
         - query.observability.readonly
@@ -2035,6 +2086,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: customer-copilot
+      data_scope: {}
       tools:
         allow:
         - query.balance.readonly
@@ -2047,6 +2099,7 @@ data:
         - gh.pr.*
         - secrets.read.raw
     - id: mcp-anonymous
+      data_scope: {}
       tools:
         allow:
         - query.account.readonly
@@ -2060,6 +2113,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: ap2-anonymous
+      data_scope: {}
       tools:
         allow:
         - verify.mandate
@@ -2069,6 +2123,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2085,6 +2140,7 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2101,6 +2157,7 @@ data:
           resources:
           - '*'
     - id: card-dispute-evidence-agent
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2117,6 +2174,7 @@ data:
           resources:
           - '*'
     - id: treasury-dealing-assistant
+      data_scope: {}
       tools:
         allow:
         - treasury.deal.read
@@ -2141,6 +2199,7 @@ data:
         - gh.pr.*
         - secrets.read.raw
     - id: finops-agent
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2161,6 +2220,7 @@ data:
           resources:
           - '*'
     - id: devops-agent
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2181,6 +2241,7 @@ data:
           resources:
           - '*'
     - id: control-liveness-sentinel
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2198,6 +2259,7 @@ data:
           resources:
           - '*'
     - id: governance-auditor
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2216,6 +2278,7 @@ data:
           resources:
           - '*'
     - id: release-steward
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2233,6 +2296,7 @@ data:
           resources:
           - '*'
     - id: docs-truth-agent
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2249,6 +2313,7 @@ data:
           resources:
           - '*'
     - id: authz-policy-auditor
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2265,6 +2330,7 @@ data:
           resources:
           - '*'
     - id: flaky-test-hunter
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2284,6 +2350,7 @@ data:
           resources:
           - '*'
     - id: case-coordinator
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2306,6 +2373,7 @@ data:
           - gh.pr.*
           - secrets.*
     - id: kyb-analyst
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -2323,6 +2391,7 @@ data:
           resources:
           - '*'
     - id: business-copilot
+      data_scope: {}
       tools:
         allow:
         - query.balance.readonly

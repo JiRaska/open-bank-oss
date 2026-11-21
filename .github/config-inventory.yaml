@@ -234,6 +234,12 @@ openbao:
     - pricing-console
     - pricing-service
     - temporal/db
+  unprovisioned:
+    - kind: openbao
+      names: [fetch-broker/browser-run]
+      reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
+      issue: 16754
+      review_by: 2027-02-18
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
