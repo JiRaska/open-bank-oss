@@ -971,6 +971,24 @@ gates:
     run: |
       python3 .github/scripts/check-config-inventory.py
 
+  # ADR-0389: pausing automation must never need a PR. Every schedule-triggered workflow gates
+  # its entry jobs on vars.<WORKFLOW_ID>_SCHEDULE_PAUSED and the global vars.SCHEDULES_PAUSED,
+  # or is listed in the checker's EXCLUDED map with the reason pausing it must stay reviewed.
+  - id: schedule-pause-switch
+    name: "every scheduled workflow carries an instant pause switch or a stated exclusion (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 15
+    min_subjects: 40    # 63 scheduled workflows on 2026-11-21
+    verified: "2026-11-21 — 0 findings; 15 switched, 48 excluded with reasons"
+    rationale: "A pause that needs a PR waits in the queue the runaway cron may be flooding; the gate makes a new scheduled workflow either carry the switch or state why pausing it must stay reviewed (#17006)."
+    review_after: "2027-05-21"
+    selftest: python3 .github/scripts/check-schedule-pause-switch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-schedule-pause-switch.py"]
+    run: |
+      python3 .github/scripts/check-schedule-pause-switch.py
+
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
     group: gitops
