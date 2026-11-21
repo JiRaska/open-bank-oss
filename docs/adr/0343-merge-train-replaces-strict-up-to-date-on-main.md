@@ -795,6 +795,27 @@ Decision: a label `merge-priority:urgent`.
 
 Self-tests (`urgent_strict_self_test`). Each guard was removed in turn (19 mutants: main-red guard, `urgent_yield` and its call, the fast-lane and carrier skips, the marker call and post, both fail-closed reads of each events API, the merge-tree check, the starvation drop, the carrier-in-flight test, the cap, the day rule, the owner actor, removed-label counting, once per head, and the not-blamed skip) and every mutant fails at least one case. The hook has its own suite (9 write forms denied, 4 read forms allowed), and an inert hook fails 9 of its cases.
 
+### Amendment (2026-11-21) — strict-lane aging, and stacking read as a guarded variable
+
+Observed 2026-11-21: back-to-back fast carriers kept `in_flight` true. The strict lane yields to an in-flight carrier, so it yielded every tick, and green, armed strict PRs starved for 30 minutes and more.
+
+Decision: a strict candidate that has been continuously green and armed, and unserved, for `MERGE_TRAIN_STRICT_AGING_S` is aged. That is the default 1800 s, deliberately on. `0` turns aging off and is the rollback; any other value must be in [600, 14400]. When an aged candidate exists and no strict carrier or reservation exists, two things happen:
+
+- **The turn is taken back.** If the strict lane is yielding because the train's or the fast lane's turn after a strict merge is still open, the aged PR takes that turn back. The strict lane then serves it in the same tick, by update-branch or a strict carrier. Holding the carrier while the strict lane yields would leave both lanes idle until the turn expired.
+- **No new carriers.** Otherwise settle publishes no NEW fast or expedite carrier. The aged-candidate check runs only in ticks that would publish one or are yielding a turn, so a quiet tick spends no API reads on it.
+
+- **Nothing in flight is touched.** Carriers already running are judged as usual and never cancelled. The strict lane takes the reservation on the tick after they settle.
+- **Measured from live data.** The wait runs from the later of the head's green time (its last required check completing) and its armed time (latest `auto_merge_enabled`). Both are re-derived from the live API every tick, with no stored state.
+- **Fails open.** If either time cannot be read (any API error included), there is no hold, and the miss is logged. A required context that reports skipped or neutral has no green time either, so it also gives no hold.
+- **Bounded per head.** One head holds carriers for at most `MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S` past its threshold (default 3600, validated in [600, 14400]). After that it is released and logged, so one unservable head cannot stall the fast lane. There is also a global budget: the hold, counted from the later of its earliest start (released heads included) and the last train-carrier merge, lasts at most the same `MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S` in total. A rotation of aged heads therefore cannot starve the fast lane either.
+- **Exemptions.** Nothing is held while `main` is red, so the red-main fix and deploy-fix lanes are never delayed. Urgent PRs, which pre-empt on their own, are not aged.
+- **Ordering.** The hold is decided before the expedite window, so a held tick never opens a window. The summary records `strict-aging hold: #N waited Xs`.
+- **Direction.** This is the opposite of #16736. It stops new carriers and never lets a carrier jump a strict PR.
+
+Same change: `MERGE_TRAIN_SPECULATIVE_STACK` is read from a repo variable (`vars.X || 'false'`). It is GUARDED per ADR-0389: only `true`/`false` are accepted, and anything else becomes `false` with a `::warning::`. Settle logs the effective value every tick, plus a prominent notice whenever it is `true`, because the last time it was on it made the money-path checklist gate fail closed (#15772).
+
+Self-tests: unit cases for the threshold boundary, lifting once a reservation is taken, failing open, the hold budget, red `main` and the expedite window. End-to-end settle ticks go through `build_parser` and `settle_from_args` with the real validated knob values: an aged strict PR holds and a young one does not, and with the knobs unset settle behaves exactly as before. Removing the hold, the budget or the red-`main` exemption makes cases fail.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
@@ -1018,3 +1039,39 @@ authenticity, required and extra checks, lane routing and the exact-head merge A
 After a strict-lane update, review the combined head and its fresh CI before recording a new
 owner decision. A closed PR cannot receive a retroactive approval, and this change does not
 alter historical merge execution or recorder evidence.
+
+## Amendment: owner break-glass for the `merge-train` status (#17006)
+
+**When.** Only when the merge train itself cannot post `merge-train` — the train is broken, and
+the PR that would fix it is therefore unmergeable too. It is not a fast lane and not a way past a
+red check.
+
+**Who.** The repository owner, dispatching `.github/workflows/merge-train-break-glass.yml` from
+`main`, through the `merge-train-break-glass` environment. Before the workflow is usable the owner
+must create that environment (required reviewers exactly the owner, deployment branches exactly
+`main`) and store environment-scoped secrets `BREAK_GLASS_APP_ID` / `BREAK_GLASS_APP_PRIVATE_KEY`
+for the App the ruleset pins `merge-train` to (or a dedicated App, with the ruleset pin moved to
+it by the owner). Token isolation requires an environment-scoped dedicated credential; see owner
+setup. The job checks the environment protection with the workflow's own token BEFORE minting any
+App credential, never reads the repo-level `GITOPS_APP_*` secrets, and fails closed if either
+the protection or the environment secrets are missing. The environment gates the RUN; it is not
+claimed to protect any other credential. The ruleset, its required contexts and its (empty)
+bypass list are unchanged; no `--admin` is involved.
+
+**What it checks.** `break_glass_check.py` re-derives live, on the PR's current head: owner actor;
+PR open, not draft, base `main`, native auto-merge armed; head not behind `main`; every OTHER
+context required on `main` (read from the rules API, pinned to its integration) `success`; and no
+removal or weakening of a `deploy_holds` entry, no change to `money_path_services`, no file under
+a money-path service directory, and no edit to the break-glass workflow or validator themselves
+(no self-widening). A required context without an integration pin, or one produced as a commit
+status rather than a check run, refuses. `.github/`
+paths are allowed on purpose — fixing the train is the use case. A deploy hold or the money-path
+list are controls the train does not own, so lifting them waits for a working train. It then posts
+`merge-train=success` with the same App the ruleset pins the context to; native auto-merge does
+the rest. Any later push invalidates the status, as for the train's own.
+
+**Audit and post-use review.** Every use writes the job summary first, then a comment on the PR, and a
+comment on the standing `merge-train break-glass log` issue (label `governance`). Each entry is
+reviewed after the fact: was the train genuinely unable to post, and did the fix land. If any
+audit write fails after the status is posted, the run fails and posts a
+`merge-train/break-glass-audit-incomplete` failure status on the same head.

@@ -132,7 +132,13 @@ https://mcp.test.example/mcp does not match the request HTTP uri http://localhos
   `ClientAddressKey` is an HMAC-SHA256 (per-boot random key) of IPv4 /32 or the IPv6 /64 prefix,
   parsed by a strict literal grammar (`IpLiteral`, no DNS); anything else keys as `ip:unknown`. The
   header must occur exactly once. Distinct subject-less keys are capped at 4096 per minute; past the
-  cap new keys share `ip:overflow`, so memory stays bounded.
+  cap new keys share `ip:overflow`, so memory stays bounded. The cap is tiered, because one party
+  cheaply holds many networks: one allocation (IPv6 /48, IPv4 /24) may hold 64 distinct keys per
+  minute, after which its further networks share one `net:` allocation key; one region (IPv6 /32)
+  may hold 256 keys, allocation keys included, after which they share one `region:` key. So filling
+  the 4096 budget, which would push other callers into `ip:overflow` and suppress their audit rows,
+  needs at least 16 distinct /32s or a spread of IPv4 /24s. The first overflow of each minute logs
+  one WARN, so that state is never silent.
 - **Deployed state: forwarding OFF.** No route to mcp-service exists. The route PR must, together:
   narrow `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES` to the gateway's source (never the pod CIDR); make the
   edge authoritative (Envoy `ClientTrafficPolicy` client IP detection, client-supplied
