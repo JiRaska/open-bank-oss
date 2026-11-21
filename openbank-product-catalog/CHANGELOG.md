@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.8.0...product-catalog-v1.9.0) (2026-11-21)
+
+
+### Features
+
+* **product-catalog:** fence FOS loan signing and disbursement ([#16454](https://github.com/JiRaska/open-bank-oss/issues/16454)) ([d599256](https://github.com/JiRaska/open-bank-oss/commit/d59925620c883b3d6d6784f92170e5e230bf2f51))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.7.0...product-catalog-v1.8.0) (2026-11-21)
 
 
