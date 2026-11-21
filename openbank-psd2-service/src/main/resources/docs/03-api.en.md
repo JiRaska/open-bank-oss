@@ -155,3 +155,8 @@ Errors use the Open Banking / Berlin-Group `tppMessages` envelope (not the gener
 - **API version in the path** — `/open-banking/v2/...`. The OpenAPI `info.version` is `2.0.0`.
 - **Event version in the topic** — `openbank.psd2.events` (additive evolution; breaking change ⇒ new topic).
 - The two version axes (release `version.txt` vs API `openapi.yaml:info.version`) are independent (ADR-0048).
+
+## Payment symbols (#16748)
+
+`variableSymbol` and `specificSymbol` must be 1-10 ASCII digits and `constantSymbol` 1-4 (libs-domain `CzechPaymentSymbol`; KS matches the domestic-payment column); a blank value counts as absent. Anything else is refused with 400 before the request goes further.
+For `DOMESTIC_CZ` and `SIPO` the check runs before consent is validated.

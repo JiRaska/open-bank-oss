@@ -47,6 +47,23 @@ class SwiftMessageTest {
         assertThat(message.validate()).isEmpty()
     }
 
+    @Test
+    fun `money round trips at the currency own minor unit scale`() {
+        // #11604: the wire/column pair is (amount_minor_units, currency) — the scale is the
+        // currency's own (EUR 2, JPY 0, KWD 3), never a fixed two decimals.
+        val eur = message(amountMinorUnits = 1299)
+        assertThat(eur.amountMinorUnits).isEqualTo(1299)
+        assertThat(eur.currency).isEqualTo("EUR")
+        assertThat(eur.amount.amount.toPlainString()).isEqualTo("12.99")
+
+        val jpy = SwiftMessage.moneyOfMinorUnits(1234, "JPY")
+        assertThat(jpy.amount.toPlainString()).isEqualTo("1234")
+        assertThat(jpy.amount.unscaledValue().toLong()).isEqualTo(1234)
+
+        val kwd = SwiftMessage.moneyOfMinorUnits(1234, "KWD")
+        assertThat(kwd.amount.toPlainString()).isEqualTo("1.234")
+    }
+
     private fun message(
         senderBic: String = "ABCDEFGH",
         receiverBic: String = "IJKLMNOP",

@@ -34,11 +34,19 @@ dependencies {
     // Reuse the existing fleet contract validator version for POST response schema proofs.
     testImplementation("com.networknt:json-schema-validator:1.5.9")
     testImplementation(libs.mockk)
+    testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     // Executable, assertion-backed trace evidence for the detector boundary.
     testImplementation(project(":openbank-libs-testing"))
+}
+
+// Quarkus profiles and Pact replay share the test worker; size that worker explicitly.
+// A heap exhaustion must fail the test task immediately instead of leaving it stalled.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "1g"
+    jvmArgs("-XX:+ExitOnOutOfMemoryError")
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its system
