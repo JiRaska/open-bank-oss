@@ -90,6 +90,8 @@ from dataclasses import dataclass, field
 KNOBS: dict[str, tuple[int, int, int]] = {
     "MERGE_TRAIN_EXPEDITE_DAILY_CAP": (6, 0, 20),
     "MERGE_TRAIN_URGENT_DAILY_CAP": (5, 0, 20),
+    "MERGE_TRAIN_STRICT_AGING_S": (1800, 600, 14400),
+    "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S": (3600, 600, 14400),
     "MERGE_TRAIN_STRICT_BATCH_CAP": (8, 1, 16),
     "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP": (4, 1, 16),
     "MERGE_TRAIN_BATCH_SIZE": (16, 1, 32),
@@ -105,6 +107,12 @@ def _warn(msg: str) -> None:
     print(f"::warning::{msg}", file=sys.stderr)
 
 
+def knob_text(text: str) -> str:
+    """An operator-supplied value made safe to echo in a log line: no CR/LF, no workflow-command `::`, bounded."""
+    clean = re.sub(r"[\r\n\x00-\x1f]", " ", text).replace("::", ": :")
+    return clean[:40] + ("…" if len(clean) > 40 else "")
+
+
 def knob(raw: str | None, name: str, log=None, default: int | None = None) -> int:
     """KNOBS[name] validated: int in [lo, hi], else the default with one logged warning."""
     d, lo, hi = KNOBS[name]
@@ -113,7 +121,7 @@ def knob(raw: str | None, name: str, log=None, default: int | None = None) -> in
     if re.fullmatch(r"[0-9]{1,6}", text) and lo <= int(text) <= hi:
         return int(text)
     if text:
-        (log or _warn)(f"merge-train: {name}={text!r} is not an integer in [{lo}, {hi}]; using default {d}")
+        (log or _warn)(f"merge-train: {name}={knob_text(text)!r} is not an integer in [{lo}, {hi}]; using default {d}")
     return d
 
 
@@ -127,7 +135,7 @@ def knob_bool(raw: str | None, name: str, default: bool, log=None) -> str:
     if text in ("true", "false"):
         return text
     if text:
-        (log or _warn)(f"merge-train: {name}={text!r} is not true/false; using default {str(default).lower()}")
+        (log or _warn)(f"merge-train: {name}={knob_text(text)!r} is not true/false; using default {str(default).lower()}")
     return "true" if default else "false"
 
 
@@ -187,7 +195,9 @@ LANE_CAP_MAX = 20
 
 def lane_cap(raw: str | None, default: int, name: str, log=None) -> int:
     """Validated lane cap: int in [0, LANE_CAP_MAX], else `default` with one logged line."""
-    return knob(raw, name if name in KNOBS else "MERGE_TRAIN_EXPEDITE_DAILY_CAP", log, default)
+    if name not in KNOBS:
+        raise ValueError(f"lane_cap: unknown knob {name!r} (programming error)")
+    return knob(raw, name, log, default)
 
 
 def knobs_self_test(check) -> None:
@@ -219,13 +229,24 @@ def knobs_self_test(check) -> None:
 def lane_cap_self_test(check) -> None:
     logged: list[str] = []
     for raw, want in (("5", 5), ("0", 0), ("20", 20), (" 7 ", 7), (None, 6), ("", 6)):
-        check(f"lane cap: {raw!r} -> {want}", lane_cap(raw, 6, "T", logged.append) == want, repr(raw))
+        check(f"lane cap: {raw!r} -> {want}", lane_cap(raw, 6, "MERGE_TRAIN_EXPEDITE_DAILY_CAP", logged.append) == want, repr(raw))
     check("lane cap: valid values log nothing", logged == [], repr(logged))
     for raw in ("21", "-1", "abc", "5.0", "1e3", "999", "0x5", "６"):
         logged.clear()
-        got = lane_cap(raw, 6, "MERGE_TRAIN_X_DAILY_CAP", logged.append)
+        got = lane_cap(raw, 6, "MERGE_TRAIN_EXPEDITE_DAILY_CAP", logged.append)
         check(f"lane cap must-FAIL: {raw!r} falls back to default", got == 6, f"got {got}")
         check(f"lane cap must-FAIL: {raw!r} is logged", len(logged) == 1 and "using default 6" in logged[0], repr(logged))
+    try:
+        lane_cap("3", 6, "MERGE_TRAIN_NO_SUCH_CAP")
+        raised = False
+    except ValueError:
+        raised = True
+    check("lane cap must-FAIL: an unknown knob name raises (programming error), never a silent fallback", raised)
+    logged.clear()
+    knob("5\r\n::error::pwn" + "x" * 80, "MERGE_TRAIN_EXPEDITE_DAILY_CAP", logged.append)
+    check("knob warning must-FAIL: CR/LF and workflow commands are stripped, length bounded",
+          len(logged) == 1 and "\n" not in logged[0] and "\r" not in logged[0] and "::error::" not in logged[0]
+          and len(logged[0]) < 200, repr(logged))
 
 
 # Deploy fix claim (#16943). A main red on a provider CONTRACT job can be fixed only by deploying the
@@ -420,6 +441,16 @@ STACK_CONTEXT = "merge-train/stacked-carrier"   # App marker: a carrier was stac
 STACK_DESC_RE = re.compile(r"^stacked carrier (train/[0-9]+-[0-9]+) over #([0-9]+)$")   # on the holder head
 STACK_TIP_RE = re.compile(r"^stacked over ([0-9a-f]{40}) of #([0-9]+)$")                  # on the carrier head
 SPECULATIVE_STACK_DEFAULT = True
+# GUARDED knob (ADR-0389): the repo variable may say only 'true' or 'false'; anything else is 'false'
+# (today's rolled-back value, #15772) with a ::warning::. 'true' made the money-path checklist gate fail
+# closed when it was last on, so settle logs a prominent notice on every tick it is effective.
+SPECULATIVE_STACK_ON_NOTICE = ("::notice::MERGE_TRAIN_SPECULATIVE_STACK=true is EFFECTIVE: speculative stacking is ON "
+                               "(rolled back 2026-11-12, #15772, when it made the money-path checklist gate fail closed)")
+
+
+def speculative_stack_setting(raw: str | None, log=None) -> str:
+    """GUARDED: 'true'/'false' only; unset or anything else -> 'false' (+ ::warning:: when set)."""
+    return knob_bool(raw, "MERGE_TRAIN_SPECULATIVE_STACK", False, log)
 STALE_CULPRIT_CONTEXT = "merge-train/stale-culprit-refresh"   # App marker: this culprit head was update-branched once
 # Stale-base refresh: an armed PR red on a required context that was NOT red on main at its base but is
 # green on main now (the red came from an old base whose defect main has since fixed — 2026-11-20/21,
@@ -501,6 +532,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
     ".github/scripts/check-test-script-reachability.py",    # names merge-train in its text; a lenient copy must not ride a train
+    ".github/scripts/check-schedule-pause-switch.py",       # names merge-train.yml in its text; a lenient copy must not ride a train
     ".github/scripts/test-merge-train-carrier-lock.py",     # exercises the carrier library
     ".github/scripts/test-merge-train-main-red-freshness.py",  # exercises settle / the strict lane
     ".github/scripts/test-merge-train-owner-approval.py",   # exercises the owner-approval writer
@@ -3430,6 +3462,50 @@ class GitHub:
                 return out
         return None   # more than 1000 events: cannot be read whole, so it is not read at all
 
+    def green_since(self, sha: str) -> float | None:
+        """When the last required context (merge-train aside) went green on `sha`; None = unknowable."""
+        latest: dict[str, dict] = {}
+        for c in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if c["name"] not in latest or c["id"] > latest[c["name"]]["id"]:
+                latest[c["name"]] = c
+        statuses: dict[str, dict] = {}
+        for st in sorted(paginate(f"/repos/{self.repo}/commits/{sha}/statuses"), key=lambda x: x["id"], reverse=True):
+            statuses.setdefault(st["context"], st)
+        times = []
+        for ctx in self.required():
+            if ctx == STATUS_CONTEXT:
+                continue
+            c, st = latest.get(ctx), statuses.get(ctx)
+            if c and c.get("conclusion") == "success":
+                times.append(iso_epoch(c.get("completed_at")))
+            elif st and st.get("state") == "success":
+                times.append(iso_epoch(st.get("updated_at")))
+            else:
+                return None
+        return max(times) if times and None not in times else None
+
+    def armed_since(self, n: int) -> float | None:
+        """created_at of #n's latest auto_merge_enabled timeline item; None = unknowable."""
+        at = None
+        for e in self.pr_timeline(n) or []:
+            if e.get("event") == "auto_merge_enabled":
+                at = e.get("created_at")
+        return iso_epoch(at) if at else None
+
+    def pr_timeline(self, n: int) -> list | None:
+        """Every timeline item of #n in order (labels with actor and id, commits, force-pushes); None =
+        unreadable or longer than 1000 items (callers fail open or closed as they document)."""
+        out: list = []
+        for page in range(1, 11):
+            code, data = api("GET", f"/repos/{self.repo}/issues/{int(n)}/timeline?per_page=100&page={page}")
+            if code != 200 or not isinstance(data, list):
+                log(f"::warning::#{n} timeline unreadable ({code}) ")
+                return None
+            out += data
+            if len(data) < 100:
+                return out
+        return None
+
     def urgent_grants_today(self, day: str, owner: str, label: str = URGENT_LABEL) -> dict[int, str] | None:
         """urgent_grants over the repository's issue events for UTC `day`, newest first. Authoritative: an
         event exists the moment the label is applied (no search index), and a removed label leaves its
@@ -4190,11 +4266,91 @@ def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int, base: 
     return None   # one expedited PR per tick: the chosen one, never a later one past it
 
 
+# Strict-lane aging (#17006 follow-up). Back-to-back fast carriers keep `in_flight` true, and the strict lane
+# yields to an in-flight carrier, so a green, armed strict PR can starve indefinitely (observed 2026-11-21:
+# two strict PRs waited 30+ min behind successive carriers). Once any strict candidate has been continuously
+# green and armed, unserved, for MERGE_TRAIN_STRICT_AGING_S, settle publishes no NEW fast or expedite carrier;
+# carriers already in flight are judged as usual (never cancelled), and the strict lane takes the reservation
+# on the tick after they settle. No persisted state: the wait is re-derived from the live API each tick, and an
+# unknowable time fails OPEN (no hold, logged) so aging can never wedge the train. Urgent PRs pre-empt
+# on their own and are not aged. This is the opposite direction of #16736 (fast passing strict): it only stops
+# NEW carriers, it never lets a fast carrier jump a strict one.
+STRICT_AGING_S_DEFAULT = 1800
+
+
+def iso_epoch(text: str | None) -> float | None:
+    try:
+        return datetime.datetime.strptime(text or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def strict_unserved_since(gh, view: dict) -> float | None:
+    """When this strict PR became continuously green AND armed: the later of its head's green time (last
+    required check completed) and its armed time (latest auto_merge_enabled). None = unknowable."""
+    green = gh.green_since(view["head_sha"])
+    armed = gh.armed_since(view["number"])
+    if green is None or armed is None:
+        return None
+    return max(green, armed)
+
+
+def strict_aging_candidate(gh, strict: list, exempt: set, now: float, threshold: int,
+                           max_hold: int = 3600) -> tuple[int, int] | None:
+    """(PR, waited s) of the longest-waiting green strict PR at or past `threshold`; None = no hold. Per-head
+    budget: a head holds carriers for at most `max_hold` s past its threshold (stateless: unserved-since +
+    threshold + max_hold), after which it is released and logged, so one unservable head cannot stall the
+    fast lane for ever."""
+    best = None
+    for st, v in strict:
+        if st != "green" or v["number"] in exempt:
+            continue
+        since = strict_unserved_since(gh, v)
+        if since is None:
+            log(f"#{v['number']:>6} strict    aging: green/armed time unknowable — no aging hold (fail open)")
+            continue
+        waited = int(now - since)
+        if waited >= threshold + max_hold:
+            log(f"#{v['number']:>6} strict    aging: held carriers for its {max_hold}s budget on this head — "
+                "released, the fast lane proceeds")
+            continue
+        if waited >= threshold and (best is None or waited > best[1]):
+            best = (v["number"], waited)
+    return best
+
+
+def apply_strict_aging(gh, summary: dict, strict: list, exempt: set, holder, strict_carrier_open: bool,
+                       now: float, threshold: int, max_hold: int = 3600, main_red: bool = False) -> None:
+    """Hold NEW fast/expedite carriers for an aged strict candidate while no strict carrier or reservation
+    exists. Only acts when this tick would otherwise publish one (in_flight false, or an expedite window).
+    Never while main is red: the red-main fix and deploy-fix lanes are what such a carrier serves."""
+    if holder is not None or strict_carrier_open or main_red:
+        return
+    if summary.get("in_flight") and not summary.get("expedite_window"):
+        return
+    aged = strict_aging_candidate(gh, strict, exempt, now, threshold, max_hold)
+    if aged is not None:
+        strict_aging_hold(summary, aged)
+
+
+def strict_aging_hold(summary: dict, aged: tuple[int, int]) -> None:
+    """Apply one aging hold: no new fast/expedite carrier this tick (in-flight ones are untouched)."""
+    if summary.get("in_flight") and not summary.get("expedite_window"):
+        return   # nothing would be published this tick anyway
+    n, waited = aged
+    log(f"strict-aging hold: #{n} waited {waited}s — no new fast or expedite carrier until the strict lane takes it")
+    summary["in_flight"] = True
+    for k in ("expedite_window", "stack_window", "deferral_window"):
+        summary.pop(k, None)
+    summary["strict_aging_hold"] = f"strict-aging hold: #{n} waited {waited}s"
+
+
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
                 strict_cap: int = STRICT_BATCH_CAP_DEFAULT, judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
                 stack: bool = SPECULATIVE_STACK_DEFAULT,
                 expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT,
-                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT) -> dict:
+                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT, aging_s: int = 0,
+                aging_max_hold_s: int = 3600) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
@@ -4673,7 +4829,11 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             f"over the same main during its CI (bounded deferral)")
         summary["in_flight"] = False
         summary["deferral_window"] = n
-    if (expedite and not shadow and pending_carrier is not None and summary["in_flight"]
+    # Strict aging, decided BEFORE the expedite window so a held tick never opens (and records) a window it
+    # would then have to close: 0 (the default for direct callers) = off; main() passes the validated knob.
+    aged = (strict_aging_candidate(gh, strict, set(urgent), time.time(), aging_s, aging_max_hold_s)
+            if aging_s > 0 and not shadow and holder is None and not strict_carrier_open and not main_red else None)
+    if (expedite and not shadow and pending_carrier is not None and summary["in_flight"] and aged is None
             and holder is None and not strict_carrier_open and not main_red
             and not summary["updated"] and not summary["strict"] and not summary["merged"]
             and not summary.get("stack_window") and not summary.get("deferral_window")):
@@ -4688,6 +4848,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             desc = f"expedite window over main {base}"
             if head and gh.app_statuses(head).get(EXPEDITE_WINDOW_CONTEXT, ("", "")) != ("success", desc):
                 gh.post_status(head, "success", desc, context=EXPEDITE_WINDOW_CONTEXT)
+    if aged is not None:
+        strict_aging_hold(summary, aged)
     # Strict priority (#15827): a holder GREEN on a head that contains live main but not merged in this
     # tick's strict_lane (a train in flight, merge refused, source intent re-read, main moved under the
     # read) would be pushed behind main by the next carrier and restart its full CI. For ONE tick per
@@ -7909,8 +8071,9 @@ def check_declaration() -> int:
                      code, re.MULTILINE):
         fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as "${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || \'<n>\' }}" ("1" = no strict carrier)')
     # Speculative stacking's rollback switch: declared outright, carried by settle, its window handed to publish.
-    if not re.search(r'^\s*MERGE_TRAIN_SPECULATIVE_STACK: "(true|false)"\s*$', code, re.MULTILINE):
-        fails.append('MERGE_TRAIN_SPECULATIVE_STACK must be declared as "true" or "false" ("false" = no stacking)')
+    if not re.search(r'^\s*MERGE_TRAIN_SPECULATIVE_STACK: "\$\{\{ vars\.MERGE_TRAIN_SPECULATIVE_STACK \|\| \'false\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_SPECULATIVE_STACK must be declared as \"${{ vars.MERGE_TRAIN_SPECULATIVE_STACK || 'false' }}\"")
     if "SPECULATIVE_STACK: ${{ env.MERGE_TRAIN_SPECULATIVE_STACK }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_SPECULATIVE_STACK")
     if "STACK_HEAD: ${{ needs.settle.outputs.stack_head }}" not in jobs.get("publish", ""):
@@ -7919,17 +8082,17 @@ def check_declaration() -> int:
     if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_LANE \|\| \'(true|false)\' \}\}"\s*$',
                      code, re.MULTILINE):
         fails.append('MERGE_TRAIN_EXPEDITE_LANE must be declared as "true" or "false" ("false" = no expedite lane)')
-    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_DAILY_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_DAILY_CAP \|\| \'(?:[0-9]|1[0-9]|20)\' \}\}"\s*$',
                      code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_EXPEDITE_DAILY_CAP || '<1-99>' }}\"")
+        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_EXPEDITE_DAILY_CAP || '<0-20>' }}\"")
     if "EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_EXPEDITE_LANE")
     for job in ("build", "publish"):
         if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
             fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
-    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_URGENT_DAILY_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_URGENT_DAILY_CAP \|\| \'(?:[0-9]|1[0-9]|20)\' \}\}"\s*$',
                      code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '<1-99>' }}\"")
+        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '<0-20>' }}\"")
     if "URGENT_DAILY_CAP: ${{ env.MERGE_TRAIN_URGENT_DAILY_CAP }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_URGENT_DAILY_CAP")
     if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
@@ -8080,6 +8243,10 @@ class FakeGitHub:
                        "base": {"ref": self.branch, "repo": {"full_name": self.repo}}}
 
     def head_refspec(self, n): return f"refs/heads/{self.prs[n]['head']['ref']}"
+    # Strict aging (end-to-end cases): fixtures default to "times unknowable".
+    def pr_timeline(self, n): return list(self.__dict__.get("timelines", {}).get(n, []))
+    def green_since(self, sha): return self.__dict__.get("green_at", {}).get(sha)
+    def armed_since(self, n): return self.__dict__.get("armed_at", {}).get(n)
     def required(self): return list(SYN_REQUIRED)
     def main_sha(self):
         # Semantically "live main NOW", re-read by production code before every merge; the fixture's
@@ -9036,6 +9203,58 @@ def prefetch_self_test(check) -> None:
         API_STATS.update(saved[3])
 
 
+def strict_aging_self_test(check) -> None:
+    """Strict-lane aging: threshold, lift on reservation, fail open, exemptions."""
+    now, thr = 1795262400.0, 1800
+
+    class GH:
+        def __init__(self, green, armed): self.g, self.a = green, armed
+        def green_since(self, sha): return self.g
+        def armed_since(self, n): return self.a
+
+    strict = [("green", {"number": 17003, "head_sha": "a" * 40})]
+
+    def settle(gh, summary=None, holder=None, sco=False, exempt=frozenset()):
+        s = {"in_flight": False} if summary is None else summary
+        apply_strict_aging(gh, s, strict, set(exempt), holder, sco, now, thr)
+        return s
+
+    s = settle(GH(now - thr, now - 4000))
+    check("strict aging must-FAIL: green+armed exactly at threshold -> no new carrier (starvation case)",
+          s["in_flight"] is True and s.get("strict_aging_hold") == f"strict-aging hold: #17003 waited {thr}s", repr(s))
+    s = settle(GH(now - thr + 1, now - 4000))
+    check("strict aging: below threshold -> carriers publish as before", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 4000, now - 100))
+    check("strict aging: re-armed recently -> the later time counts, no hold", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, now - 9000), holder=17003)
+    check("strict aging: hold lifts once the strict reservation is taken", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, now - 9000), sco=True)
+    check("strict aging: no hold while a strict carrier is open", s == {"in_flight": False}, repr(s))
+    s = settle(GH(None, now - 9000))
+    check("strict aging: unknowable green time -> no hold (fail open)", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, None))
+    check("strict aging: unknowable armed time -> no hold (fail open)", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, now - 9000), exempt={17003})
+    check("strict aging: urgent PRs are not aged", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 3000, now - 3000), summary={"in_flight": True, "expedite_window": 5})
+    check("strict aging must-FAIL: an aged strict PR closes the expedite window",
+          s["in_flight"] is True and "expedite_window" not in s, repr(s))
+    s = settle(GH(now - 9000, now - 9000), summary={"in_flight": True})
+    check("strict aging: in-flight carriers untouched (nothing cancelled)", s == {"in_flight": True}, repr(s))
+    s = {"in_flight": False}
+    apply_strict_aging(GH(now - thr - 3600, now - 99999), s, strict, set(), None, False, now, thr, 3600)
+    check("strict aging: a head past its hold budget is released (fast lane proceeds)", s == {"in_flight": False}, repr(s))
+    s = {"in_flight": False}
+    apply_strict_aging(GH(now - thr - 3599, now - 99999), s, strict, set(), None, False, now, thr, 3600)
+    check("strict aging must-FAIL: within its hold budget the head still holds", s.get("in_flight") is True, repr(s))
+    s = {"in_flight": False}
+    apply_strict_aging(GH(now - 3000, now - 3000), s, strict, set(), None, False, now, thr, 3600, main_red=True)
+    check("strict aging: red main (fix and deploy-fix lanes) is never held", s == {"in_flight": False}, repr(s))
+    check("strict aging: knob default 1800, range 600..14400",
+          knob(None, "MERGE_TRAIN_STRICT_AGING_S") == 1800 and knob("599", "MERGE_TRAIN_STRICT_AGING_S", lambda _m: None) == 1800
+          and knob("600", "MERGE_TRAIN_STRICT_AGING_S") == 600)
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -9050,6 +9269,15 @@ def self_test() -> int:
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
     urgent_strict_self_test(check)
+    strict_aging_self_test(check)
+    for raw, want in ((None, "false"), ("", "false"), ("false", "false"), ("true", "true"), ("TRUE", "true"),
+                      ("yes", "false"), ("1", "false"), ("on", "false")):
+        seen: list[str] = []
+        got = speculative_stack_setting(raw, seen.append)
+        check(f"speculative stack GUARDED: {raw!r} -> {want}", got == want
+              and (bool(seen) == (raw not in (None, "") and raw.strip().lower() not in ("true", "false"))), f"{got} {seen}")
+    check("speculative stack: 'true' is logged prominently", "EFFECTIVE" in SPECULATIVE_STACK_ON_NOTICE
+          and SPECULATIVE_STACK_ON_NOTICE.startswith("::notice::"))
     selftest_skip_fix_self_test(check)
     selftest_deploy_fix(check)
     lane_cap_self_test(check)
@@ -10819,6 +11047,66 @@ def self_test() -> int:
             del gh.pr_files
             reset()
 
+            # ---- End-to-end: main()'s parser + settle_from_args with the REAL validated knob values ----------
+            # (#16957 shipped lane functions tested and the wiring not; these go through the same path a tick does.)
+            knob_envs = ("MERGE_TRAIN_STRICT_AGING_S", "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S", "SPECULATIVE_STACK",
+                         "STRICT_BATCH_CAP", "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", "EXPEDITE_LANE", "EXPEDITE_DAILY_CAP",
+                         "URGENT_DAILY_CAP")
+
+            def e2e_args():
+                saved_env = {k: os.environ.pop(k, None) for k in knob_envs}   # unset = the reviewed defaults
+                try:
+                    return build_parser().parse_args(["settle", "--repo", "o/r"])
+                finally:
+                    os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+
+            args = e2e_args()
+            check("e2e: unset knobs give the reviewed defaults (aging 1800, max hold 3600, stack false)",
+                  (args.strict_aging_s, args.strict_aging_max_hold_s, args.speculative_stack) == (1800, 3600, "false"),
+                  repr((args.strict_aging_s, args.strict_aging_max_hold_s, args.speculative_stack)))
+            t0 = time.time()
+            # (b) an aged green strict candidate + a fast candidate while the strict lane yields to the train:
+            # settle publishes no new carrier and says so. Control: the same state, not aged, publishes.
+            real_turn = train_turn
+            globals()["train_turn"] = lambda *a, **k: "train's turn (e2e fixture)"
+            try:
+                def aging_state(age):
+                    reset()
+                    gh.g("checkout", "-q", "main")
+                    pathlib.Path(origin, "moved.txt").write_text("m\n")
+                    gh.g("add", "moved.txt")
+                    gh.g("commit", "-q", "-m", "move main")
+                    open_only("pW", "pF")
+                    hw = gh.prs[numbers["pW"]]["head"]["sha"]
+                    gh.__dict__["green_at"] = {hw: t0 - age}
+                    gh.__dict__["armed_at"] = {numbers["pW"]: t0 - age}
+                    return settle_from_args(gh, Git(clone("settle")), args)
+                young = aging_state(60)
+                aged = aging_state(1800)
+            finally:
+                globals()["train_turn"] = real_turn
+                gh.__dict__.pop("green_at", None)
+                gh.__dict__.pop("armed_at", None)
+            check("e2e (b) control: a young strict candidate does not hold carriers", young["in_flight"] is False
+                  and "strict_aging_hold" not in young, repr(young))
+            check("e2e (b): an aged strict candidate -> settle publishes NO new carrier and logs strict-aging hold",
+                  aged["in_flight"] is True
+                  and aged.get("strict_aging_hold") == f"strict-aging hold: #{numbers['pW']} waited 1800s", repr(aged))
+            reset()
+
+            # (c) knobs unset, times unknowable: identical to the pre-change settle.
+            open_only("pF", "pX")
+            sc_new = settle_from_args(gh, Git(clone("settle")), args)
+            sc_new.pop("speculative_stack", None)
+            reset()
+            open_only("pF", "pX")
+            sc_old = mode_settle(gh, Git(clone("settle")), "o/r", False, strict_cap=args.strict_batch_cap,
+                                 judge_cap=args.strict_judge_batch_cap, stack=False, expedite=args.expedite_lane == "true",
+                                 expedite_cap=args.expedite_cap, urgent_cap=args.urgent_cap)
+            check("e2e (c): knobs unset -> the settle summary is identical to main's behaviour", sc_new == sc_old,
+                  f"{sc_new} != {sc_old}")
+            reset()
+
             # Fast lane: computed live in settle. A docs/adr member is never fast-laned, and settle
             # has no input through which a stored classification could be injected.
             open_only("pF", "pX")
@@ -10829,10 +11117,12 @@ def self_test() -> int:
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
                   # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
                   # are the lane's switch and cap; judge_cap bounds a judge carrier; urgent_cap is the urgent
-                  # path's daily cap (admission is read live): none is a classification.
+                  # path's daily cap, aging_s/aging_max_hold_s bound the strict-aging hold (admission is read live):
+                  # none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
                   == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "judge_cap", "stack", "expedite",
-                      "expedite_cap", "urgent_cap"})
+                      "expedite_cap", "urgent_cap", "aging_s",
+                      "aging_max_hold_s"})
             reset()
 
             # Bundle verification, directly.
@@ -14158,7 +14448,9 @@ def self_test() -> int:
 
 
 # --------------------------------------------------------------------------- main
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """main()'s parser; every knob default is read from the environment HERE (validated), so the
+    end-to-end self-test builds it exactly as a workflow tick does."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval", "owner-status"])
     ap.add_argument("--self-test", action="store_true")
@@ -14176,8 +14468,8 @@ def main() -> int:
                                  "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", default=STRICT_JUDGE_BATCH_CAP_DEFAULT),
                     help="settle: members per strict carrier holding a judge member, all path-disjoint "
                          "(1 = a judge member rides alone, as before)")
-    ap.add_argument("--speculative-stack", choices=["true", "false"],
-                    default=os.environ.get("SPECULATIVE_STACK", "true" if SPECULATIVE_STACK_DEFAULT else "false"),
+    ap.add_argument("--speculative-stack", type=speculative_stack_setting,
+                    default=speculative_stack_setting(os.environ.get("SPECULATIVE_STACK")),
                     help="settle: open a speculative-stacking window over a running strict holder")
     ap.add_argument("--stack-pr", default=os.environ.get("STACK_PR", ""),
                     help="publish: settle's stacking window, holder PR number (re-validated live)")
@@ -14186,14 +14478,20 @@ def main() -> int:
     ap.add_argument("--expedite-lane", type=lambda v: knob_bool(v, "MERGE_TRAIN_EXPEDITE_LANE", EXPEDITE_LANE_DEFAULT),
                     default=knob_bool(os.environ.get("EXPEDITE_LANE"), "MERGE_TRAIN_EXPEDITE_LANE", EXPEDITE_LANE_DEFAULT),
                     help="settle: open an expedite window beside one running carrier (ADR-0343 amendment 2026-11-13)")
-    ap.add_argument("--expedite-cap", type=int,
+    ap.add_argument("--expedite-cap", type=lambda v: lane_cap(v, EXPEDITE_DAILY_CAP_DEFAULT, "MERGE_TRAIN_EXPEDITE_DAILY_CAP"),
                     default=lane_cap(os.environ.get("EXPEDITE_DAILY_CAP"), EXPEDITE_DAILY_CAP_DEFAULT,
                                      "MERGE_TRAIN_EXPEDITE_DAILY_CAP"),
                     help="settle/publish: expedite carriers per UTC day")
-    ap.add_argument("--urgent-cap", type=int,
+    ap.add_argument("--urgent-cap", type=lambda v: lane_cap(v, URGENT_DAILY_CAP_DEFAULT, "MERGE_TRAIN_URGENT_DAILY_CAP"),
                     default=lane_cap(os.environ.get("URGENT_DAILY_CAP"), URGENT_DAILY_CAP_DEFAULT,
                                      "MERGE_TRAIN_URGENT_DAILY_CAP"),
                     help="settle: distinct PRs the owner may label merge-priority:urgent per UTC day")
+    ap.add_argument("--strict-aging-s", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_AGING_S"),
+                    default=env_knob("MERGE_TRAIN_STRICT_AGING_S"),
+                    help="settle: a green armed strict PR unserved this long holds new fast/expedite carriers")
+    ap.add_argument("--strict-aging-max-hold-s", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S"),
+                    default=env_knob("MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S"),
+                    help="settle: the most one aged strict head may hold new carriers before it is released")
     ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
                     help="build/publish: settle's expedite window, the one PR number (re-validated live)")
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
@@ -14206,6 +14504,25 @@ def main() -> int:
     ap.add_argument("--pr", type=int, default=0, help="owner-approval: exact PR number")
     ap.add_argument("--head", default="", help="owner-approval: full current head SHA")
     ap.add_argument("--decision", choices=["approve", "revoke"], default="approve")
+    return ap
+
+
+def settle_from_args(gh, git, args) -> dict:
+    """The settle tick as main() runs it: every validated knob passed through to mode_settle."""
+    s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
+                    strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap,
+                    stack=args.speculative_stack == "true",
+                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
+                    urgent_cap=args.urgent_cap, aging_s=args.strict_aging_s,
+                    aging_max_hold_s=args.strict_aging_max_hold_s)
+    s["speculative_stack"] = args.speculative_stack
+    if args.speculative_stack == "true":
+        log(SPECULATIVE_STACK_ON_NOTICE)
+    return s
+
+
+def main() -> int:
+    ap = build_parser()
     args = ap.parse_args()
     if args.self_test:
         return self_test()
@@ -14276,10 +14593,7 @@ def run_mode(gh, args, ap) -> int:
                               expedite_arg(args, ap), args.expedite_cap)
         log(f"publish: {result}")
         return 0
-    s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap, stack=args.speculative_stack == "true",
-                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
-                    urgent_cap=args.urgent_cap)
+    s = settle_from_args(gh, git, args)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
     window = s.get("stack_window")

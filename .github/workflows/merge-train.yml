@@ -94,7 +94,8 @@ env:
   # that is not the train's own. So gate security-checklist-money-path failed closed on every stacked
   # carrier seen (#15695, #15769), the carrier went red, and its members were bisected for a fault that
   # was the carrier's shape. Turn back on only together with a carrier resolver that knows the holder base.
-  MERGE_TRAIN_SPECULATIVE_STACK: "false"
+  # GUARDED repo variable (ADR-0389): only 'true'/'false'; anything else -> 'false' + ::warning::.
+  MERGE_TRAIN_SPECULATIVE_STACK: "${{ vars.MERGE_TRAIN_SPECULATIVE_STACK || 'false' }}"
   # Expedite lane (ADR-0343 amendment 2026-11-13): one extra carrier holding ONE `merge-priority:expedite`
   # PR may run beside one ordinary carrier and merges first; the overtaken carrier is rebuilt with no
   # verdict. "false" is the rollback: the label only reorders, as before. The cap bounds the CI it costs.
@@ -104,6 +105,10 @@ env:
   # Urgent strict path (ADR-0343 amendment 2026-11-19): distinct PRs the OWNER may label
   # merge-priority:urgent per UTC day; each takes the strict reservation at the next tick.
   MERGE_TRAIN_URGENT_DAILY_CAP: "${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '5' }}"
+  # Strict-lane aging: a green armed strict PR unserved this long (s) holds NEW fast/expedite carriers.
+  MERGE_TRAIN_STRICT_AGING_S: "${{ vars.MERGE_TRAIN_STRICT_AGING_S || '1800' }}"
+  # Per-head budget for that hold (s): past it the head is released and the fast lane proceeds.
+  MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S: "${{ vars.MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S || '3600' }}"
 
 jobs:
   settle:

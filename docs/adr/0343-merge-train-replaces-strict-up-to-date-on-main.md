@@ -795,6 +795,24 @@ Decision: a label `merge-priority:urgent`.
 
 Self-tests (`urgent_strict_self_test`). Each guard was removed in turn (19 mutants: main-red guard, `urgent_yield` and its call, the fast-lane and carrier skips, the marker call and post, both fail-closed reads of each events API, the merge-tree check, the starvation drop, the carrier-in-flight test, the cap, the day rule, the owner actor, removed-label counting, once per head, and the not-blamed skip) and every mutant fails at least one case. The hook has its own suite (9 write forms denied, 4 read forms allowed), and an inert hook fails 9 of its cases.
 
+### Amendment (2026-11-21) — strict-lane aging, and stacking read as a guarded variable
+
+Observed 2026-11-21: back-to-back fast carriers kept `in_flight` true. The strict lane yields to an in-flight carrier, so it yielded every tick, and green, armed strict PRs starved for 30 minutes and more.
+
+Decision: when a strict candidate has been continuously green and armed, and unserved, for `MERGE_TRAIN_STRICT_AGING_S` (default 1800, validated in [600, 14400]), and no strict carrier or reservation exists, settle publishes no NEW fast or expedite carrier.
+
+- **Nothing in flight is touched.** Carriers already running are judged as usual and never cancelled. The strict lane takes the reservation on the tick after they settle.
+- **Measured from live data.** The wait runs from the later of the head's green time (its last required check completing) and its armed time (latest `auto_merge_enabled`). Both are re-derived from the live API every tick, with no stored state.
+- **Fails open.** If either time cannot be read, there is no hold, and the miss is logged.
+- **Bounded per head.** One head holds carriers for at most `MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S` past its threshold (default 3600, validated in [600, 14400]). After that it is released and logged, so one unservable head cannot stall the fast lane.
+- **Exemptions.** Nothing is held while `main` is red, so the red-main fix and deploy-fix lanes are never delayed. Urgent PRs, which pre-empt on their own, are not aged.
+- **Ordering.** The hold is decided before the expedite window, so a held tick never opens a window. The summary records `strict-aging hold: #N waited Xs`.
+- **Direction.** This is the opposite of #16736. It stops new carriers and never lets a carrier jump a strict PR.
+
+Same change: `MERGE_TRAIN_SPECULATIVE_STACK` is read from a repo variable (`vars.X || 'false'`). It is GUARDED per ADR-0389: only `true`/`false` are accepted, and anything else becomes `false` with a `::warning::`. Settle logs the effective value every tick, plus a prominent notice whenever it is `true`, because the last time it was on it made the money-path checklist gate fail closed (#15772).
+
+Self-tests: unit cases for the threshold boundary, lifting once a reservation is taken, failing open, the hold budget, red `main` and the expedite window. End-to-end settle ticks go through `build_parser` and `settle_from_args` with the real validated knob values: an aged strict PR holds and a young one does not, and with the knobs unset settle behaves exactly as before. Removing the hold, the budget or the red-`main` exemption makes cases fail.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
