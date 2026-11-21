@@ -7,6 +7,11 @@ plugins {
     id("info.solidsoft.pitest") version "1.19.0"
 }
 
+tasks.test {
+    // *TraceContractIT boots a second Quarkus app (ADR-0388); the default 512 MiB heap OOMs.
+    maxHeapSize = "2g"
+}
+
 dependencies {
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
