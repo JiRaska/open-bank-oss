@@ -230,6 +230,19 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-21** — **New ingress edge: mcp-service -> delegation-service** (ADR-0383 D3).
+  `delegation-service-ingress-allow-list` now admits the `platform` namespace, where mcp-service
+  runs, so it can call `POST /api/v1/delegations/mcp-client/resolve`. The edge is derived by
+  `gen-network-policies.py` from `QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL` in the mcp-service
+  manifest, never hand-written. The lookup is read-only (`McpClientGrantResolver` queries ACTIVE
+  `MCP_CLIENT` grants for one party/client/key triple and writes nothing) and authenticated: the
+  caller is mcp-service's own `m2m` identity, and a tokenless request is refused 401 — pinned by the
+  adversarial interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json`.
+  Information disclosure is bounded by the triple: the party id comes from the verified customer
+  token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
+  Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the
+  endpoint's authn, not the NetworkPolicy, is the control that separates callers.
+
 - **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
   customer-admitted third-party MCP client as grantee instead of a party. Existing grants are
   `PARTY` (V34 defaults the column), and their behaviour is unchanged. Elevation of privilege is

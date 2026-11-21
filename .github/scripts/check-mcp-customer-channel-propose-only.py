@@ -68,6 +68,14 @@ ALLOWLIST: dict[tuple[str, str, str], str] = {
         "ADR-0195 consent validation: a POST that READS (consent-service answers whether a consent "
         "covers an action, and changes no state). It predates this gate. ADR-0383 D3 replaces it "
         "with a server-side grant lookup on the customer channel.",
+    ("com.openbank.mcp.infrastructure.customer.DelegationGrantClient", "resolve", "POST"):
+        "ADR-0383 D3 grant lookup: a POST that READS. delegation-service's McpClientGrantResolver "
+        "only queries ACTIVE MCP_CLIENT grants for the (party, client, key) triple and writes "
+        "nothing; POST keeps the party id and key thumbprint out of the URL and access logs.",
+    ("com.openbank.mcp.infrastructure.customer.CustomerTokenEndpointClient", "exchange", "POST"):
+        "ADR-0383 D4 RFC 8693 token exchange at the customers realm: the token endpoint is POST by "
+        "specification and mints a short-lived, single-audience READ-scoped token. It changes no "
+        "banking state and cannot authorise a write.",
 }
 
 # Non-GET operations a client INHERITS from a generated openbank-client-* API.
