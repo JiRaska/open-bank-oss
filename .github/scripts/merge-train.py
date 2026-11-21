@@ -322,6 +322,15 @@ STACK_DESC_RE = re.compile(r"^stacked carrier (train/[0-9]+-[0-9]+) over #([0-9]
 STACK_TIP_RE = re.compile(r"^stacked over ([0-9a-f]{40}) of #([0-9]+)$")                  # on the carrier head
 SPECULATIVE_STACK_DEFAULT = True
 STALE_CULPRIT_CONTEXT = "merge-train/stale-culprit-refresh"   # App marker: this culprit head was update-branched once
+# Stale-base refresh: an armed PR red on a required context that was NOT red on main at its base but is
+# green on main now (the red came from an old base whose defect main has since fixed — 2026-11-20/21,
+# ~20 armed PRs stuck on "its own defect" until main was merged in by hand). It gets ONE update-branch
+# per lineage (marker on the head; the update-branch head inherits it through its first parent), at
+# most STALE_BASE_REFRESH_CAP per tick, never when conflicting, draft or unarmed. A bulk update is a CI
+# denial of service, hence the cap and the per-head memo.
+STALE_BASE_CONTEXT = "merge-train/stale-base-refresh"
+STALE_BASE_REFRESH_CAP = 2
+_STALE_BASE_MEMO: set[str] = set()   # heads update-branched by this process (survives a lost status write)
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -4362,8 +4371,16 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     continue
                 merged = gh.merge(n, head)
                 if not merged:
-                    log(f"#{n} did not merge; stopping")
-                    break
+                    # #16932 / run 44872757590: our own success status above can release native auto-merge,
+                    # which then wins against GitHub.merge's last intent read. Same fail-closed proof as above.
+                    native = already_merged_member(gh, git, n, head, expected)
+                    if native is None or (stacked_steps and git.tree(native) != git.tree(stacked_steps[i])):
+                        log(f"#{n} did not merge; stopping")
+                        break
+                    log(f"#{n} already merged by native auto-merge at the verified head ({native[:12]}); continuing")
+                    expected = native
+                    summary.setdefault("native_merged", []).append(n)
+                    continue
                 expected = merged
                 summary["merged"].append(n)
                 if stacked_steps:
@@ -6474,6 +6491,27 @@ def main_ci_result(gh, git, ctx: str, sha: str, cache: dict | None = None, depth
     return None
 
 
+def stale_base_refusal(gh, git, base: str, view: dict, summary: dict) -> str | None:
+    """Why an armed, behind PR whose red was NOT red on main at its base (but is green on main now) must
+    NOT be update-branched, or None. Only a refresh: no merge decision reads this. Fails closed."""
+    head = view["head_sha"]
+    if view.get("draft"):
+        return "it is a draft"
+    if not view.get("auto_merge"):
+        return "it is not armed"
+    if head in _STALE_BASE_MEMO:
+        return "this head was already update-branched — its own defect"
+    parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
+    if any(gh.app_statuses(sha).get(STALE_BASE_CONTEXT, ("", ""))[0] == "success" for sha in [head] + parents[1:2]):
+        return "its lineage was already refreshed over a newer main — its own defect"
+    if len(summary.get("stale_base_refreshed", [])) >= STALE_BASE_REFRESH_CAP:
+        return f"the stale-base cap ({STALE_BASE_REFRESH_CAP}/tick) is reached"
+    if git("merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", base, head,
+           check=False).returncode != 0:
+        return "it conflicts with main"
+    return None
+
+
 def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict) -> None:
     """Stale-red refresh (ADR-0343): an armed PR left red only because MAIN was red when its CI ran gets
     ONE update-branch once main is green again. Every failing required context must have failed on main
@@ -6482,6 +6520,7 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
     then fails the attribution test and is never refreshed again — no loop. Oldest first, at most
     STALE_RED_CAP per tick. Git queries and the API only; no PR code runs."""
     summary.setdefault("refreshed", [])
+    summary.setdefault("stale_base_refreshed", [])
     cache: dict = {}
     for view, failing in red:
         if len(summary["refreshed"]) >= STALE_RED_CAP:
@@ -6494,17 +6533,36 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
         if not mb:
             continue
         why = None
+        base_stale = []
         for ctx in failing:
-            at_base = main_ci_result(gh, git, ctx, mb, cache)
-            if not at_base or at_base[1] != "failure":
-                why = f"{ctx} was not red on main at its base {mb[:12]} — its own defect"
-                break
             at_tip = main_ci_result(gh, git, ctx, base, cache)   # one walk per tick, not one per PR
             if not at_tip or at_tip[1] not in OK_STATES:
                 why = f"{ctx} is not green on main yet — no point refreshing"
                 break
+            at_base = main_ci_result(gh, git, ctx, mb, cache)
+            if not at_base or at_base[1] != "failure":
+                base_stale.append(ctx)
         if why:
             log(f"#{n:>6} stale-red skip: {why}")
+            continue
+        if base_stale:
+            why = stale_base_refusal(gh, git, base, view, summary)
+            if why:
+                log(f"#{n:>6} stale-red skip: {', '.join(base_stale)} was not red on main at its base "
+                    f"{mb[:12]} and {why}")
+                continue
+            msg = (f"stale-base refresh: {', '.join(failing)} red over old base {mb[:12]}, "
+                   f"not red on main {base[:12]}")
+            if shadow:
+                log(f"#{n:>6} {msg} (shadow: no update)")
+                continue
+            ok = gh.update_branch(n, head)
+            _STALE_BASE_MEMO.add(head)
+            log(f"#{n:>6} {msg}: update-branch {'requested' if ok else 'refused'}")
+            if ok:
+                gh.post_status(head, "success", f"update-branched once over main {base[:12]}",
+                               context=STALE_BASE_CONTEXT)
+                summary["stale_base_refreshed"].append(n)
             continue
         msg = f"stale-red refresh: {', '.join(failing)} was red on main {mb[:12]}, green on {base[:12]}"
         if shadow:
@@ -10815,17 +10873,42 @@ def self_test() -> int:
                             p["state"], p["merged"], p["merge_commit_sha"] = "closed", True, gh.g(
                                 "commit-tree", f"{head}^{{tree}}", "-p", gh.main_sha(), "-m", "off main").stdout.strip()
                     return _real(g, n, head)
-                globals()["live_source_intent"] = racing
+                own_merge = gh.merge
+
+                def late(n, head, _own=own_merge):
+                    # Run 44872757590 / #16817: the train's own success status released native auto-merge,
+                    # which merged the member between the loop's intent read and GitHub.merge's last read;
+                    # GitHub.merge then refuses (intent gone) and returns None.
+                    if n == 1 and not fired:
+                        fired.append(n)
+                        if case == "late-moved":
+                            new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
+                            gh.g("branch", "-f", gh.prs[1]["head"]["ref"], new)
+                            gh.prs[1]["head"]["sha"] = new
+                        _own(n, gh.prs[1]["head"]["sha"])
+                        return None
+                    return _own(n, head)
+                if case.startswith("late"):
+                    gh.merge = late
+                else:
+                    globals()["live_source_intent"] = racing
                 try:
                     s = mode_settle(gh, Git(clone("settle")), "o/r", False)
                 finally:
                     globals()["live_source_intent"] = real
+                    gh.__dict__.pop("merge", None)
                 merged = list(gh.merged)
                 reset()
                 return s, merged, bool(fired)
             s, m, fired = native_race("same")
             check("#16932: a member natively merged at the verified head -> the rest of the carrier still merges",
                   fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("late")
+            check("#16932: member natively merged INSIDE the train's merge call (after its success status) -> the rest still merges",
+                  fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("late-moved")
+            check("#16932 NEGATIVE: natively merged inside the merge call at a different head -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
             s, m, fired = native_race("moved-merged")
             check("#16932 NEGATIVE: merged with a different head -> stop, nothing else merges",
                   fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
@@ -13274,11 +13357,66 @@ def self_test() -> int:
                   gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
             stale_done()
 
+            # The real shape of 2026-11-20/21: Validate manifests red over an old base where main's own
+            # CI was not red, green on main now -> ONE stale-base update-branch, no merge.
+            _STALE_BASE_MEMO.clear()
             stale_red("p1", base_red=False)
             s = settle_now()
-            check("stale-red: red on a context that was green on main at its base -> NOT refreshed (own defect)",
-                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            check("stale-base: VM red over an old base, not red on main then, green on main now -> refreshed",
+                  gh.updates == [1] and s["stale_base_refreshed"] == [1] and s["refreshed"] == [] and gh.merged == [],
+                  f"updates={gh.updates} {s}")
+            gh.updates.clear()
+            s = settle_now()
+            check("stale-base: the same head is never update-branched twice (memo + marker)",
+                  gh.updates == [] and s["stale_base_refreshed"] == [], f"updates={gh.updates} {s}")
             stale_done()
+            _STALE_BASE_MEMO.clear()
+
+            stale_red("p1", base_red=False, tip_red=True)
+            s = settle_now()
+            check("stale-base: red on current main too -> NOT refreshed (not stale)",
+                  gh.updates == [] and s.get("stale_base_refreshed") == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p4", "p2", "p1", base_red=False)
+            s = settle_now()
+            check(f"stale-base: three eligible PRs -> only {STALE_BASE_REFRESH_CAP} refreshed (cap)",
+                  gh.updates == [1, 2] and s["stale_base_refreshed"] == [1, 2], f"updates={gh.updates} {s}")
+            stale_done()
+            _STALE_BASE_MEMO.clear()
+
+            class _SbGit:
+                def __init__(self, conflict=False):
+                    self.conflict = conflict
+
+                def __call__(self, *args, check=True):
+                    rc = 1 if (args[0] == "merge-tree" and self.conflict) else 0
+                    return subprocess.CompletedProcess(args, rc, stdout="h1 p1\n" if args[0] == "rev-list" else "", stderr="")
+
+            class _SbGh:
+                def __init__(self, marked=()):
+                    self.marked = set(marked)
+
+                def app_statuses(self, sha):
+                    return {STALE_BASE_CONTEXT: ("success", "x")} if sha in self.marked else {}
+
+            def sb(view=None, git_=None, gh_=None, summary=None):
+                v = {"number": 9, "head_sha": "h1", "draft": False, "auto_merge": {"x": 1}}
+                v.update(view or {})
+                return stale_base_refusal(gh_ or _SbGh(), git_ or _SbGit(), "b0", v, summary or {})
+
+            check("stale-base unit: armed, behind, clean -> update allowed", sb() is None, str(sb()))
+            check("stale-base unit: CONFLICTING -> no update", sb(git_=_SbGit(conflict=True)) is not None, "")
+            check("stale-base unit: draft -> no update", sb({"draft": True}) is not None, "")
+            check("stale-base unit: unarmed -> no update", sb({"auto_merge": None}) is not None, "")
+            check("stale-base unit: head marked already updated -> no update", sb(gh_=_SbGh({"h1"})) is not None, "")
+            check("stale-base unit: first parent marked (post-update head) -> no update (no loop)",
+                  sb(gh_=_SbGh({"p1"})) is not None, "")
+            _STALE_BASE_MEMO.add("h1")
+            check("stale-base unit: head in the per-head memo -> no update", sb() is not None, "")
+            _STALE_BASE_MEMO.clear()
+            check("stale-base unit: cap reached -> no update",
+                  sb(summary={"stale_base_refreshed": list(range(STALE_BASE_REFRESH_CAP))}) is not None, "")
 
             # Not behind: main's CI for the tip finishes mid-tick (a re-run of the failed job going
             # green), so one read says red and the next green. Only the behind test stops it.

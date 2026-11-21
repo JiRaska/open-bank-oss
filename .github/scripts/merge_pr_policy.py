@@ -115,14 +115,18 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'eef9500b378c7630aff90490b68686b4f0f02cf8',
     # merge-train.py of #16932's fix (a natively merged carrier member at the verified head continues), reviewed with that PR.
     '0706fa384166e6be506fa7dc5393a3d69906b6ea',
+    # merge-train.py of #16986 (a member natively merged inside the train's merge call continues) merged with #16972, reviewed with #16986.
+    '5e1458d0abd19d575cd667e4fae834a5f5aebe00',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
     '1e5e9f5b334f640d8102054b8155a9526d035e79',
     # merge-train.py of #16972's tick-speed change merged with #16973's claim_evidence(now) fix, reviewed with that PR.
     'bffe20f4c51c3b6fe3a7d961617d4f484276478e',
-    # merge-train.py of #16885 after merging main with #16972 (ruff B007 + stale-ref fix kept), reviewed with that PR.
-    'cc5af4b46128de5bf8f51283c1d9f02f8a50f46f',
+    # merge-train.py of the stale-base refresh (armed PR red over an old base, green on main: one capped update-branch) stacked on #16986 and merged with #16972, reviewed with #16988.
+    '82f517cde74e25753d7c498401c4cc9d861074b5',
+    # merge-train.py of #16885 stacked on #16988 and #16986, merged with #16972 (ruff B007 + stale-ref fix kept), reviewed with #16885.
+    'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
