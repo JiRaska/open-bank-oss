@@ -92,3 +92,7 @@ V34) nebo `MCP_CLIENT`, tedy MCP klient třetí strany, kterého zákazník při
   (`400 MCP_CLIENT_GRANTEE_DORMANT`) a nelze pro něj sestavit žádnou událost, protože současní
   konzumenti (account-service, card-issuance-service, context-service) znají jen osoby. Ochrana se
   zruší až poté, co budou granty jiné než PARTY přeskakovat.
+- **Vyhledání pro mcp-service:** `POST /api/v1/delegations/mcp-client/resolve` vrátí aktivní granty
+  `MCP_CLIENT` pro trojici (poskytovatel, ID klienta, otisk klíče DPoP). Volat ho smí jen vlastní
+  servisní účet mcp-service (OPA `delegation.mcp-client.resolve` + kontrola v kódu). Odpověď nese
+  jen ID grantu, typ a ID zdroje, oprávnění a `validTo`; prázdný seznam znamená odmítnutí.
