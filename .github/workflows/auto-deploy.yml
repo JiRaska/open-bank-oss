@@ -725,6 +725,7 @@ jobs:
         env:
           NEEDS_CHANGES_SERVICES: ${{ needs.changes.outputs.services }}
           STEP_BUILD_TAG: ${{ steps.build.outputs.tag }}
+          AUTO_DEPLOY_MAX_PARALLEL: ${{ vars.AUTO_DEPLOY_MAX_PARALLEL || '3' }}
         run: |
           set -euo pipefail
           SERVICES="${NEEDS_CHANGES_SERVICES}"
@@ -816,7 +817,8 @@ jobs:
               "$metadata" > "${RUNNER_TEMP}/image-digest-${svc}" || return 1
           }
 
-          MAX_PARALLEL=3   # limit concurrent buildx to avoid OOM on 16GB Docker host
+          MAX_PARALLEL="${AUTO_DEPLOY_MAX_PARALLEL}"   # concurrent buildx; >4 risks OOM on a 16GB host
+          case "$MAX_PARALLEL" in [1-4]) ;; *) echo "::warning::AUTO_DEPLOY_MAX_PARALLEL='${MAX_PARALLEL}' is not an integer in [1, 4]; using default 3"; MAX_PARALLEL=3 ;; esac
           RUNNING=0; PIDS=(); SVCS=()
 
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
