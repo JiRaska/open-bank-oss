@@ -891,6 +891,23 @@ def already_merged_member(gh, git, number: int, head: str, expected: str) -> str
     return merge
 
 
+def path_refusal(pr: dict, untrainable) -> str | None:
+    """The part of qualifies() decided by the verified diff alone (files, gates_append, special_paths):
+    no check, status or approval read can turn it into a pass. live_candidates uses it to skip those
+    reads for a PR it already knows is not a candidate, where nothing but `ok` is consumed (#16955)."""
+    for f in pr.get("files") or []:
+        if unsafe_path(f):
+            return "a path contains a control character — manual lane, never a train"
+        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
+            return f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
+    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
+                                       for f in pr.get("files") or []):
+        # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
+        # whole carrier for it. Gate code next to one never rides (review of #13750).
+        return "gate code next to a symlink or gitlink — never a train"
+    return None
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -911,16 +928,9 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     ref = pr.get("head_ref") or ""
     if not owner_approval_valid(pr.get("number"), ref, app):
         return False, "codex PR needs owner approval on this exact head"
-    for f in pr.get("files") or []:
-        if unsafe_path(f):
-            return False, "a path contains a control character — manual lane, never a train"
-        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
-            return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
-                                       for f in pr.get("files") or []):
-        # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
-        # whole carrier for it. Gate code next to one never rides (review of #13750).
-        return False, "gate code next to a symlink or gitlink — never a train"
+    why = path_refusal(pr, untrainable)
+    if why:
+        return False, why
     app_state, app_desc = (app or {}).get(STATUS_CONTEXT, ("", ""))
     if app_state == "failure" and not app_desc.startswith((LEGACY_CULPRIT_PREFIX, *NOTICE_PREFIXES)):
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
@@ -3382,6 +3392,9 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
     return f"admission check exited {rc} — fail closed"
 
 
+PATH_SHORTCUT_OFF = [False]   # self-test switch: True = the pre-#16955 full read path
+
+
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
                     red: list | None = None, main_red: dict[str, str] | None = None,
@@ -3455,6 +3468,15 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             view["gates_append"] = why_not is None
             if why_not:
                 log(f"#{p['number']:>6} gates.yaml not a pure append ({why_not}) — strict lane")
+        if strict is None and red is None and not PATH_SHORTCUT_OFF[0]:
+            # build/publish (#16955): only `ok` is consumed here, and qualifies() refuses on the diff
+            # alone whatever the API says, so the statuses, approval chain, admission subprocess and
+            # check-runs (~16 requests, ~7 s per PR live) cannot change this PR's verdict. settle
+            # passes strict/red — a manual-lane PR may still be a strict-lane or stale-red entry there.
+            pwhy = path_refusal(view, untrainable or FAIL_CLOSED_UNTRAINABLE)
+            if pwhy:
+                log(f"#{n:>6} skip      {pwhy}")
+                continue
         app = gh.app_statuses(fetched)
         if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
             chain = remember_approval_chain(gh, git, base, fetched)
@@ -4227,8 +4249,16 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     continue
                 merged = gh.merge(n, head)
                 if not merged:
-                    log(f"#{n} did not merge; stopping")
-                    break
+                    # #16932 / run 44872757590: our own success status above can release native auto-merge,
+                    # which then wins against GitHub.merge's last intent read. Same fail-closed proof as above.
+                    native = already_merged_member(gh, git, n, head, expected)
+                    if native is None or (stacked_steps and git.tree(native) != git.tree(stacked_steps[i])):
+                        log(f"#{n} did not merge; stopping")
+                        break
+                    log(f"#{n} already merged by native auto-merge at the verified head ({native[:12]}); continuing")
+                    expected = native
+                    summary.setdefault("native_merged", []).append(n)
+                    continue
                 expected = merged
                 summary["merged"].append(n)
                 if stacked_steps:
@@ -10102,6 +10132,26 @@ def self_test() -> int:
             open_only("pS", "p1")
             cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
             check("gate code + symlink: never a train candidate", [m.number for m in cands] == [1], str([m.number for m in cands]))
+            # #16955: the diff-only shortcut in build/publish changes no verdict. Same queue (trainable,
+            # gate-code+symlink, workflow, generator, gates.yaml members), with and without it: identical
+            # candidates at identical heads, and the shortcut demonstrably skipped the per-PR reads.
+            open_only("pW", "pG", "pR", "p2")
+            def shortcut_run(off: bool):
+                PATH_SHORTCUT_OFF[0] = off
+                reads: list[str] = []
+                real = gh.app_statuses
+                gh.app_statuses = lambda sha: (reads.append(sha), real(sha))[1]
+                try:
+                    c, a = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+                finally:
+                    gh.app_statuses = real
+                    PATH_SHORTCUT_OFF[0] = False
+                return [(m.number, m.head_sha) for m in c], sorted(a), len(reads)
+            full, fast = shortcut_run(True), shortcut_run(False)
+            check("diff-only shortcut: identical candidates, heads and app map with and without it (#16955)",
+                  full[:2] == fast[:2] and full[0], f"full={full} fast={fast}")
+            check("diff-only shortcut: CONTROL — it skipped the reads for the manual-lane PRs",
+                  fast[2] < full[2], f"reads full={full[2]} fast={fast[2]}")
             bdir = clone("build")
             b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",), untrainable=Untrainable(SYN_INVENTORY))
             ms = []
@@ -10549,17 +10599,42 @@ def self_test() -> int:
                             p["state"], p["merged"], p["merge_commit_sha"] = "closed", True, gh.g(
                                 "commit-tree", f"{head}^{{tree}}", "-p", gh.main_sha(), "-m", "off main").stdout.strip()
                     return _real(g, n, head)
-                globals()["live_source_intent"] = racing
+                own_merge = gh.merge
+
+                def late(n, head, _own=own_merge):
+                    # Run 44872757590 / #16817: the train's own success status released native auto-merge,
+                    # which merged the member between the loop's intent read and GitHub.merge's last read;
+                    # GitHub.merge then refuses (intent gone) and returns None.
+                    if n == 1 and not fired:
+                        fired.append(n)
+                        if case == "late-moved":
+                            new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
+                            gh.g("branch", "-f", gh.prs[1]["head"]["ref"], new)
+                            gh.prs[1]["head"]["sha"] = new
+                        _own(n, gh.prs[1]["head"]["sha"])
+                        return None
+                    return _own(n, head)
+                if case.startswith("late"):
+                    gh.merge = late
+                else:
+                    globals()["live_source_intent"] = racing
                 try:
                     s = mode_settle(gh, Git(clone("settle")), "o/r", False)
                 finally:
                     globals()["live_source_intent"] = real
+                    gh.__dict__.pop("merge", None)
                 merged = list(gh.merged)
                 reset()
                 return s, merged, bool(fired)
             s, m, fired = native_race("same")
             check("#16932: a member natively merged at the verified head -> the rest of the carrier still merges",
                   fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("late")
+            check("#16932: member natively merged INSIDE the train's merge call (after its success status) -> the rest still merges",
+                  fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("late-moved")
+            check("#16932 NEGATIVE: natively merged inside the merge call at a different head -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
             s, m, fired = native_race("moved-merged")
             check("#16932 NEGATIVE: merged with a different head -> stop, nothing else merges",
                   fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
