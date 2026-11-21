@@ -12,8 +12,10 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.time.Duration
 import java.util.UUID
 import javax.sql.DataSource
@@ -56,6 +58,17 @@ class SignatureRecoveryIT {
         assertThat(sign(application, ARTEFACT)).isEqualTo(200)
         assertThat(sign(application, "bb".repeat(32))).isEqualTo(422)
         assertThat(outboxCount(application)).isEqualTo(1L)
+        assertIntentOutlivesDeleteAttempt(application)
+    }
+
+    /** The intent is signature evidence: deleting its application is refused, never cascaded. */
+    private fun assertIntentOutlivesDeleteAttempt(application: UUID) {
+        assertThatThrownBy { execute("DELETE FROM loan_application WHERE id = ?", application) }
+            .isInstanceOfSatisfying(SQLException::class.java) {
+                assertThat(it.sqlState).isEqualTo(RESTRICT_VIOLATION)
+            }
+        val intentSql = "SELECT artefact_hash FROM lending_signature_intent WHERE application_id = ?"
+        assertThat(scalar(intentSql, application)).isEqualTo(ARTEFACT)
     }
 
     private fun sign(application: UUID, artefactHash: String): Int = given()
@@ -133,5 +146,8 @@ class SignatureRecoveryIT {
     private companion object {
         const val SIGNER = "synthetic-signature-operator"
         val ARTEFACT = "aa".repeat(32)
+
+        // ON DELETE RESTRICT raises restrict_violation, distinct from a generic foreign_key_violation (23503).
+        const val RESTRICT_VIOLATION = "23001"
     }
 }
