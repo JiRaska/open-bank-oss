@@ -4750,9 +4750,9 @@ def selftest_deploy_fix(check) -> None:
     gh = G(owner_ev, grant)
     cache: dict = {}
     check("deploy fix live: claim_evidence admits and records a job-level strength",
-          claim_evidence(gh, git, "b" * 40, AG, "m" * 40, view, cache) is None
+          claim_evidence(gh, git, "b" * 40, AG, "m" * 40, view, cache, now=now) is None
           and cache.get((FIX_STRENGTH_KEY, view["head_sha"], AG), (0,))[0] == FIX_JOB_LEVEL)
-    w = claim_evidence(gh, git, "b" * 40, AG, "m" * 40, {**view, "author": "JiRaska"}, {})
+    w = claim_evidence(gh, git, "b" * 40, AG, "m" * 40, {**view, "author": "JiRaska"}, {}, now=now)
     check("deploy fix live must FAIL: claim_evidence keeps the job-rule refusal for a non-bot author",
           w is not None and "deploy fix" not in w, str(w))
 
@@ -6465,7 +6465,8 @@ def deploy_fix_claim(gh, git, base: str, ctx: str, main_commit: str, view: dict,
     return why
 
 
-def claim_evidence(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None) -> str | None:
+def claim_evidence(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None,
+                   now: float | None = None) -> str | None:
     """fix_evidence, or — for an App-authored auto-deploy PR only — the deploy fix claim (#16943). The
     deploy path is consulted only after the job rule refused, and its refusal is appended to that reason
     when the PR carries the label, so a refused deploy fix says why."""
@@ -6473,7 +6474,7 @@ def claim_evidence(gh, git, base: str, ctx: str, main_commit: str, view: dict, c
     why = fix_evidence(gh, git, base, ctx, main_commit, head, cache)
     if not why or view.get("author") != BOT_LOGIN or DEPLOY_FIX_LABEL not in (view.get("labels") or []):
         return why
-    dwhy = deploy_fix_claim(gh, git, base, ctx, main_commit, view, cache)
+    dwhy = deploy_fix_claim(gh, git, base, ctx, main_commit, view, cache, now=now)
     if dwhy:
         return f"{why}; deploy fix refused: {dwhy}"
     if cache is not None:
