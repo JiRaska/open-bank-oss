@@ -437,6 +437,75 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
+  - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
+    edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
+    `authorization-scheme: DPoP`) compares `htu` with the request's absolute URI — measured; this service's own
+    admission compares with the static published resource, but with
+    `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
+    then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
+    forwarding on and no list (or a trust-all one). Proven by `McpUntrustedProxyForwardingIT`: from
+    an untrusted peer the same request that `McpTrustedProxyForwardingIT` admits is refused (htu
+    mismatch), and a spoofed `X-Forwarded-For` does not change the audit key.
+  - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
+    value, so one caller's flood could spend every subject-less caller's audit window. It is now
+    keyed by `ClientAddressKey` (HMAC under a per-boot key; IPv4 /32, IPv6 /64 so rotation inside one
+    /64 shares a window; strict literal parse; distinct keys capped per minute) over
+    the address `ClientAddressResolver` picks: the raw TCP peer, or one edge-set header from a
+    trusted peer — never Quarkus' leftmost `X-Forwarded-For`, which an appending edge leaves under
+    the client's control (IT: an appended forged entry does not become the key).
+  - *Residual / route prerequisite.* Forwarding stays OFF in the deployment until the route PR, which
+    must narrow `trusted-proxies` to the gateway's source (not the pod CIDR), make the edge overwrite
+    client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
+    NetworkPolicy on `:8150` to the gateway and known callers.
+
+- **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
+  default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
+  - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`
+    (`quarkus.oidc.customers`, issuer resolution enabled only with the channel). A customers-realm
+    token is decided ONLY by `CustomerChannelAdmission`; `CallerContextResolver` returns null for it
+    before the `agent:` prefix or OBO path is inspected, so a customer token shaped like an agent
+    token cannot reach a staff charter's tools (unit + IT, both proven red with the guard removed).
+    A staff-realm token is never admitted as a customer, whatever its `azp`/`cnf`.
+  - *Token theft / replay.* Admission requires `aud` = this server, an `azp` declared AND enabled in
+    the MCP client allowlist (tier from the allowlist, never from the token), `cnf.jkt`, the `DPoP`
+    authorization scheme, and an RFC 9449 proof verified by the ADR-0320 P2 primitive (`htm`, `htu`
+    against the allowlist's published resource rather than the request's `Host`, `iat` window,
+    `ath`, `cnf.jkt`, `jti` replay). Tier H bearer tokens are NOT admitted in this slice.
+  - *Discovery.* RFC 9728 metadata at `/.well-known/oauth-protected-resource[/mcp]`, 404 while off;
+    an unauthenticated call gets 401 with `resource_metadata`. Values come from config, never the request.
+  - *Boot gate.* `CustomerChannel` is `@Startup`: with the channel on, a missing issuer or a
+    missing/malformed allowlist stops the service from starting.
+  - *Review hardening (same PR).* The fleet NUL guard now runs before the customer branch and the
+    audience check, so no path echoes a U+0000 id. Admission order (re-review of #16721): token
+    and structural checks, then the STATELESS proof check (`DpopProofVerifier.check`: signature over
+    the header key, `htm`, `htu` against the published resource, `iat`, `ath`, proof key == `cnf.jkt`),
+    then a non-mutating replay peek (a captured proof replayed on a victim's token is refused
+    REPLAYED before any budget, so replays cannot drain the victim's proof-key bucket; two
+    CONCURRENT copies of one proof can both pass the peek and both spend, and the claim still
+    admits only one), then — only for a proof signed by the token's own key — the proof-key bucket and a coarse
+    per-client cap (minute-only), then the replay claim, then the per-(subject, client) window. A
+    missing, duplicate or unparseable proof, a proof from another key, or a junk proof carrying a
+    victim's PUBLIC key therefore spends no one's budget and writes nothing; raw volume before that
+    point is the edge's per-IP limit (D5.1), since nothing stateful has happened yet. Refused customer calls write at most one audit row per
+    subject per minute, and that audit-window check also prunes closed windows, at most one full scan per minute. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
+    any parser failure (including a YAML syntax error). Measured with real signed tokens: Quarkus's
+    issuer resolver returns no tenant for an unknown `iss` and the request FALLS BACK to the default
+    (staff) tenant, so a foreign or forged issuer is stopped by that tenant's signature and issuer
+    checks — with the issuer check off (`token.issuer=any`) a third-issuer token signed by the staff
+    key is accepted. Production relies on the discovered issuer for that check.
+  - **Residual, and why the channel must stay off:** the replay store is the single-pod
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
+    D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
+    by all of a client's customers and is spent only by proofs signed by a key some token of that
+    client is bound to, so exhausting it needs many valid tokens (a coarse cap by design, sized well
+    above one customer's budget); the tenant-level DPoP check compares `htu` with the request URL,
+    so the edge must forward the external scheme and host (proved end to end in
+    `McpCustomerTenantResolutionIT` with `X-Forwarded-*`); an admitted customer reaches NO
+    tool (empty `tools/list`, refused `tools/call`), because the `MCP_CLIENT` grant lookup (P2/D3)
+    and downstream party enforcement (P5) do not exist; the customers tenant config is not yet
+    verified against a live Keycloak (P3).
+
 - **2026-09-03** — Doc correction, no behavior change: the ADR-0181 phase-2 entry said
   "`propose_payment` / `StubProposalPort` were deliberately left untouched". `StubProposalPort` no
   longer exists — `git grep -n "class StubProposalPort" -- '*.kt'` returns nothing, and the four

@@ -71,6 +71,8 @@ class McpRateLimiter @Inject constructor(
 
     private val counters = ConcurrentHashMap<String, AtomicLong>()
     private val inFlight = ConcurrentHashMap<String, Int>()
+    private val lastPrunedMinute = AtomicLong(Long.MIN_VALUE)
+    private val pruneRuns = AtomicLong()
 
     /**
      * Consumes one slot for [agentId] and reports whether the call is within both windows.
@@ -85,6 +87,17 @@ class McpRateLimiter @Inject constructor(
      * key lives in a different namespace from [check]'s, so no caller id can collide with it.
      */
     fun checkAnonymous(): Outcome = consume(ANONYMOUS_KEY, anonymousCallsPerMinute)
+
+    /**
+     * Consumes one slot of a coarse SHARED bucket (e.g. one customer-MCP client across all its
+     * users and proof keys, ADR-0383 D5.3) with its own, larger per-minute budget. Own key namespace.
+     * MINUTE-ONLY: the per-caller daily budget ([callsPerDay]) would make a shared bucket a daily cap
+     * across every caller sharing it (review of #16721).
+     */
+    fun checkShared(key: String): Outcome = consume("s:$key", sharedCallsPerMinute, daily = false)
+
+    /** Per-minute budget of a [checkShared] bucket. Not injected: overridden by tests. */
+    var sharedCallsPerMinute: Int = DEFAULT_SHARED_PER_MINUTE
 
     /**
      * Reserves one in-flight slot for [agentId]; false when the caller already holds
@@ -120,23 +133,32 @@ class McpRateLimiter @Inject constructor(
     fun shouldAuditThrottle(agentId: String?): Boolean {
         val now = Instant.now(clock).epochSecond
         val key = agentId?.let { "c:$it" } ?: ANONYMOUS_KEY
+        // Refusal-only traffic reaches this without ever calling consume(): prune here too, or a
+        // flood of distinct refused subjects grows the map without bound (review of #16721).
+        pruneExpired(now)
         return hit("$key|t|${now / SECONDS_PER_MINUTE}") == 1L
     }
 
-    private fun consume(key: String, perMinute: Int): Outcome {
+    private fun consume(key: String, perMinute: Int, daily: Boolean = true): Outcome {
         if (!enabled) return Outcome.ALLOWED
         val now = Instant.now(clock).epochSecond
         val minuteKey = "$key|m|${now / SECONDS_PER_MINUTE}"
         val dayKey = "$key|d|${now / SECONDS_PER_DAY}"
         pruneExpired(now)
         val minute = hit(minuteKey)
-        val day = hit(dayKey)
+        val day = if (daily) hit(dayKey) else 0L
         return when {
             minute > perMinute -> Outcome.THROTTLED_BURST
-            day > callsPerDay -> Outcome.THROTTLED_DAILY
+            daily && day > callsPerDay -> Outcome.THROTTLED_DAILY
             else -> Outcome.ALLOWED
         }
     }
+
+    /** Live window counters held; for the bounded-growth test. */
+    internal val trackedWindows: Int get() = counters.size
+
+    /** Full prune scans performed; for the once-per-minute test. */
+    internal val pruneRunCount: Long get() = pruneRuns.get()
 
     private fun hit(key: String): Long = counters.computeIfAbsent(key) { AtomicLong() }.incrementAndGet()
 
@@ -148,6 +170,12 @@ class McpRateLimiter @Inject constructor(
      */
     private fun pruneExpired(now: Long) {
         if (counters.size <= MAX_TRACKED_WINDOWS) return
+        // At most one full scan per minute window: over the cap, every call used to rescan the whole
+        // map, an O(n) cost per request exactly while under flood (review of #16721).
+        val minute = now / SECONDS_PER_MINUTE
+        val previous = lastPrunedMinute.get()
+        if (previous == minute || !lastPrunedMinute.compareAndSet(previous, minute)) return
+        pruneRuns.incrementAndGet()
         val liveMinute = "|m|${now / SECONDS_PER_MINUTE}"
         val liveDay = "|d|${now / SECONDS_PER_DAY}"
         val liveThrottle = "|t|${now / SECONDS_PER_MINUTE}"
@@ -164,6 +192,9 @@ class McpRateLimiter @Inject constructor(
     val inFlightReason: String get() = "too many concurrent calls"
 
     companion object {
+        /** Coarse per-client cap on the customer channel's pre-verify path (ADR-0383 D5.3). */
+        const val DEFAULT_SHARED_PER_MINUTE = 600
+
         /** The documented defaults, for code that builds a limiter outside CDI (tests). */
         fun withDefaults() = McpRateLimiter(
             enabled = true,

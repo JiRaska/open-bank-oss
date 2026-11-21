@@ -33,8 +33,7 @@
             }
           ],
           "pagination": {
-            "hasNextPage": false,
-            "nextCursor": "AAAAAAAAAAAAAAAAAAAAAQ"
+            "hasNextPage": false
           }
         },
         "generators": {
@@ -120,14 +119,6 @@
               ]
             },
             "$.pagination.hasNextPage": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.pagination.nextCursor": {
               "combine": "AND",
               "matchers": [
                 {

@@ -131,4 +131,11 @@ data class ConsentContext(
      * token positively reads as a person (the OBO staff exchange) sets it `false`.
      */
     val serviceAccount: Boolean = true,
+    /**
+     * The MCP channel this caller was resolved on (ADR-0384 D1): set by the resolution BRANCH that
+     * admitted the token, never inferred from a claim afterwards. Agent tokens are the default;
+     * the OBO staff branch sets OPERATOR; the customer branch (ADR-0383 D1) sets CUSTOMER. A
+     * customer context is never handed to a staff tool: `McpEndpoint` answers it on its own branch.
+     */
+    val channel: McpMetricsPort.McpChannel = McpMetricsPort.McpChannel.AGENT,
 )
