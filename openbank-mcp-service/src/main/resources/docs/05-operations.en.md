@@ -106,6 +106,41 @@ With the customer channel on, an admitted customer sees only the read tools its 
 - **Audit.** Every customer call is audited under the customer's subject; an allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 drops the cached grant.
 - **Not yet working end to end:** the downstream services accept only the staff realm today, so exchanged customer tokens are refused there until ADR-0383 P5 lands. Every failure on this path is a refusal.
 
+## Forwarded headers behind the edge (#16847)
+
+Behind the edge the customers OIDC tenant needs the external URL: with
+`quarkus.oidc.customers.token.authorization-scheme=DPoP`, quarkus-oidc's
+`BearerAuthenticationMechanism` compares the proof's `htu` with `HttpServerRequest.absoluteURI()`
+before the request reaches this service (whose own admission checks `htu` against the static
+published resource). Measured with forwarding not applied: `DPoP proof HTTP request uri claim
+https://mcp.test.example/mcp does not match the request HTTP uri http://localhost:…/mcp`, answered
+401 with a bare `DPoP` challenge. Quarkus applies `X-Forwarded-Proto`/`-Host`/`-For` when `MCP_PROXY_FORWARDING=true`
+(default `false`), and ONLY from peers listed in `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES`.
+
+- **Boot gate.** `ProxyForwardingGuard` is `@Startup`: any Quarkus 3.40 forwarding switch
+  (`proxy-address-forwarding`, `allow-forwarded`, `allow-x-forwarded`, `enable-forwarded-host`,
+  `enable-forwarded-prefix`, `enable-trusted-proxy-header`, `use-proxy-protocol`) or the edge
+  client-address header, with a trusted-proxy list that is empty, contains a hostname, or has a
+  prefix shorter than /8 (IPv4) or /16 (IPv6), stops the service. An unset list would make Quarkus
+  trust forwarded headers from any peer.
+- **Untrusted peers.** Their forwarded headers are ignored: the request keeps its direct URL, so a
+  proof bound to the published resource fails the tenant's `htu` check with 401.
+- **Audit key.** `ClientAddressResolver` never uses Quarkus' forwarded address: Quarkus takes the
+  LEFTMOST `X-Forwarded-For` entry, which a client controls whenever the edge appends. The key is
+  the raw TCP peer, or the ONE edge-set header named by `MCP_EDGE_CLIENT_ADDRESS_HEADER` (e.g.
+  `X-Envoy-External-Address`) when the peer is in the trusted list and the value is a single IP.
+  `ClientAddressKey` is an HMAC-SHA256 (per-boot random key) of IPv4 /32 or the IPv6 /64 prefix,
+  parsed by a strict literal grammar (`IpLiteral`, no DNS); anything else keys as `ip:unknown`. The
+  header must occur exactly once. Distinct subject-less keys are capped at 4096 per minute; past the
+  cap new keys share `ip:overflow`, so memory stays bounded.
+- **Deployed state: forwarding OFF.** No route to mcp-service exists. The route PR must, together:
+  narrow `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES` to the gateway's source (never the pod CIDR); make the
+  edge authoritative (Envoy `ClientTrafficPolicy` client IP detection, client-supplied
+  `X-Forwarded-*` overwritten); set `MCP_EDGE_CLIENT_ADDRESS_HEADER`; and admit only the gateway and
+  known callers to `:8150` in the NetworkPolicy.
+- **Symptom of a wrong list:** every real customer call refused 401 `invalid_dpop_proof` at the
+  tenant (forwarding not applied), or every tokenless caller sharing one audit key (the gateway's).
+
 ## Customer channel metrics and alerts (ADR-0384 slice 1)
 
 `McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes

@@ -131,6 +131,10 @@ class McpEndpoint(
     @Inject
     lateinit var customerTools: CustomerReadTools
 
+    /** Field-injected for the same reason as [metrics]: the subject-less audit key (#16847). */
+    @Inject
+    lateinit var clientAddress: ClientAddressResolver
+
     /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
     @Inject
     lateinit var httpRequest: HttpServerRequest
@@ -145,8 +149,10 @@ class McpEndpoint(
         if (!::customerChannel.isInitialized || !::httpRequest.isInitialized || !::customerGrants.isInitialized) {
             return@lazy null
         }
-        customerChannel.admission?.let {
-            McpCustomerBranch(it, auditor, metrics, rateLimiter, customerGrants, customerTools)
+        customerChannel.admission?.let { admission ->
+            McpCustomerBranch(admission, auditor, metrics, rateLimiter, customerGrants, customerTools) {
+                if (::clientAddress.isInitialized) clientAddress.key(httpRequest) else ClientAddressKey.UNKNOWN
+            }
         }
     }
 
@@ -194,10 +200,14 @@ class McpEndpoint(
             return DPOP_SCHEME.containsMatchIn(authorization)
         }
 
-    /** The channel-off audit window key: the token subject if any, else a hash of the client address. */
+    /**
+     * The channel-off audit window key: the token subject if any, else the client NETWORK key
+     * ([tokenlessRefusalSource]: [ClientAddressKey] over the address [ClientAddressResolver] picks,
+     * so an IPv6 /64 shares one window and a forwarded header from an untrusted peer moves nothing).
+     */
     private val refusalSource: String
         get() = callerResolver.token.subject?.let { "sub:" + sha256(it) }
-            ?: runCatching { "ip:" + sha256(httpRequest.remoteAddress().hostAddress()) }.getOrDefault("unknown")
+            ?: tokenlessRefusalSource { clientAddress.key(httpRequest) }
 
     @POST
     @Suppress("ReturnCount")

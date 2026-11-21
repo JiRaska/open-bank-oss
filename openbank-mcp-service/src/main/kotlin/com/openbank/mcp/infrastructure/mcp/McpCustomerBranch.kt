@@ -55,6 +55,8 @@ internal class McpCustomerBranch(
     private val limiter: McpRateLimiter,
     private val grantCache: CustomerGrantCache,
     private val tools: CustomerReadTools,
+    /** The subject-less window key for this request ([ClientAddressResolver]). */
+    private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
 ) {
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
@@ -108,7 +110,7 @@ internal class McpCustomerBranch(
      */
     private fun refuse(outcome: Outcome.Refused, subject: String?, method: String, params: JsonNode): Response {
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
-        val auditable = limiter.shouldAuditThrottle(REFUSAL_KEY_PREFIX + (subject ?: UNKNOWN))
+        val auditable = limiter.shouldAuditThrottle(customerRefusalWindowKey(subject, clientKey))
         if (auditable) log.warnf("customer channel refused %s: %s", McpInputBounds.logSafe(method), outcome.reason)
         if (auditable && method == TOOLS_CALL && !McpInputBounds.containsNul(params)) {
             audit(UNKNOWN, McpInputBounds.echo(params.path("name").asText("")), params, outcome.reason, emptyList())
@@ -277,7 +279,6 @@ internal class McpCustomerBranch(
         const val WWW_AUTHENTICATE = "WWW-Authenticate"
         const val TOOLS_CALL = "tools/call"
         const val UNKNOWN = "unknown"
-        const val REFUSAL_KEY_PREFIX = "customer-refused:"
         const val NO_CONSENT = "none"
         const val TOOLS_LIST = "tools/list"
         const val DPOP_SCHEME = "DPoP "
@@ -291,3 +292,23 @@ internal class McpCustomerBranch(
         val UUID_SHAPE = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
     }
 }
+
+/** Prefix of every customer-channel refusal audit window (`McpRateLimiter.shouldAuditThrottle`). */
+internal const val CUSTOMER_REFUSAL_KEY_PREFIX = "customer-refused:"
+
+/**
+ * The refusal audit-window key: the token subject when there is one, otherwise the client NETWORK
+ * ([ClientAddressKey]: HMAC of IPv4 /32 or IPv6 /64, over the address [ClientAddressResolver] picks,
+ * #16847) — never one shared `unknown` key, which would let one tokenless caller's flood suppress
+ * every other tokenless caller's audit row. A failing [clientKey] degrades to [ClientAddressKey.UNKNOWN].
+ */
+internal fun customerRefusalWindowKey(subject: String?, clientKey: () -> String): String =
+    CUSTOMER_REFUSAL_KEY_PREFIX + (subject?.let { "sub:$it" } ?: tokenlessRefusalSource(clientKey))
+
+/**
+ * The audit-window source of a refusal that carries no token subject: [ClientAddressKey] of the
+ * client address, never the raw peer string. Any failure to resolve it (no request in scope, an
+ * unreadable connection) keys as [ClientAddressKey.UNKNOWN], never as a fresh per-call key.
+ */
+internal fun tokenlessRefusalSource(clientKey: () -> String): String =
+    runCatching(clientKey).getOrDefault(ClientAddressKey.UNKNOWN)

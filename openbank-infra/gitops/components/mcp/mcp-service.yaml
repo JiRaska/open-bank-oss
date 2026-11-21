@@ -58,6 +58,16 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # ADR-0383 D5 / #16847 — ROUTE PREREQUISITE, deliberately NOT set here yet:
+            # forwarded-header trust (MCP_PROXY_FORWARDING) stays OFF while no route to mcp-service
+            # exists. The route PR must, together: (1) narrow quarkus.http.proxy.trusted-proxies
+            # (QUARKUS_HTTP_PROXY_TRUSTED_PROXIES) to the gateway's source before any route to
+            # mcp-service exists — never the whole pod CIDR; (2) make the edge authoritative
+            # (Envoy ClientTrafficPolicy clientIPDetection + overwrite of client-supplied
+            # X-Forwarded-For/Host/Proto); (3) set MCP_EDGE_CLIENT_ADDRESS_HEADER to the one edge-set
+            # header (X-Envoy-External-Address); (4) admit only the gateway + known callers to :8150
+            # in network-policies.yaml. ProxyForwardingGuard refuses to boot with forwarding on and
+            # no trusted list.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0224 D2: the agent-session store — CNPG `mcp-db` cluster (postgres.yaml here),
