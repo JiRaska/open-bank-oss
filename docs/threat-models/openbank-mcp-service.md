@@ -478,6 +478,19 @@ a stub (T-T2/T-D2).
     can mint the gateway SAN. Constrain issuance of that SAN (approver policy or a dedicated
     issuer) before go-live. The gateway presents its client certificate to every
     BackendTLSPolicy backend (option A, owner decision); that discloses no key.
+- **2026-11-21 (#16847 follow-up)** — Subject-less audit key budget per allocation and region.
+  - *Repudiation / audit suppression.* The per-minute cap of 4096 distinct subject-less keys could
+    be spent by one party holding one IPv6 allocation (a /48 is 65 536 /64s), pushing every other
+    subject-less caller into the shared overflow key for the rest of the minute. Distinct keys are
+    now capped per allocation (IPv6 /48, IPv4 /24: 64 keys, then one shared allocation key) and per
+    IPv6 region (/32: 256 keys including allocation keys, then one shared region key). One
+    allocation therefore admits at most 65 keys a minute and one /32 at most 257, so filling the
+    global budget needs at least 16 distinct /32s (RIR scale) or a spread of IPv4 /24s. The first
+    global overflow per minute is logged; every refusal remains metered regardless of key.
+  - *Tradeoff.* Once an allocation (or region) has spent its slots, a new neighbour inside it
+    shares that allocation's (region's) key, and so its one-row-per-minute refusal audit window,
+    for at most 60 s. Neighbours admitted earlier in the minute keep their own key. The key feeds
+    only that audit window, not a rate limit.
 
 - **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
   - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the

@@ -107,8 +107,14 @@ from a peer header.
   occurs once as a single IP literal. Every other peer, and plain HTTP, keys on the raw TCP peer;
   `X-Forwarded-For` is never read. `ClientAddressKey` is an HMAC-SHA256 (per-boot random key) of
   IPv4 /32 or the IPv6 /64 prefix (`IpLiteral`, no DNS); anything else keys as `ip:unknown`.
-  Distinct subject-less keys are capped at 4096 per minute, then share `ip:overflow`. The guard
-  refuses the header without the SAN pin or without client-auth REQUIRED.
+  Distinct subject-less keys are capped at 4096 per minute, then share `ip:overflow`. The cap is
+  tiered, because one party cheaply holds many networks: one allocation (IPv6 /48, IPv4 /24) may
+  hold 64 distinct keys per minute, after which its further networks share one `net:` allocation
+  key; one region (IPv6 /32) may hold 256 keys, allocation keys included, after which they share
+  one `region:` key. So filling the 4096 budget, which would push other callers into `ip:overflow`
+  and suppress their audit rows, needs at least 16 distinct /32s or a spread of IPv4 /24s. The
+  first overflow of each minute logs one WARN, so that state is never silent. The guard refuses
+  the header without the SAN pin or without client-auth REQUIRED.
 - **Canonical paths only.** `McpPathCanonicalFilter` answers 400 to any raw path with `;`, `%`,
   `\`, an empty, `.` or `..` segment, before authentication, on both listeners — the HTTP
   permissions, the OIDC `tenant-paths` and the JAX-RS match must all see the same spelling.

@@ -8,6 +8,7 @@ import io.vertx.core.http.HttpServerRequest
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.security.cert.X509Certificate
 import java.util.Optional
 
@@ -38,7 +39,13 @@ class ClientAddressResolver @Inject constructor(
     fun key(request: HttpServerRequest): String {
         val peer = runCatching { request.connection()?.remoteAddress()?.hostAddress() }.getOrNull()
         val values = header?.let { name -> runCatching { request.headers().getAll(name).orEmpty() }.getOrNull() }
-        return capped(ClientAddressKey.of(resolve(peer, values, fromGateway(request))), System.currentTimeMillis())
+        val address = resolve(peer, values, fromGateway(request))
+        return capped(
+            ClientAddressKey.of(address),
+            System.currentTimeMillis(),
+            ClientAddressKey.allocationOf(address),
+            ClientAddressKey.regionOf(address),
+        )
     }
 
     /** True only for a TLS request whose verified peer leaf carries the pinned gateway DNS SAN. */
@@ -56,31 +63,82 @@ class ClientAddressResolver @Inject constructor(
 
     /** Distinct subject-less keys admitted in the current minute; above the cap they share [OVERFLOW]. */
     internal var maxKeysPerMinute: Int = MAX_KEYS_PER_MINUTE
+
+    /** Distinct keys one allocation (IPv6 /48, IPv4 /24) may hold per minute; past it they share the allocation key. */
+    internal var maxKeysPerAllocation: Int = MAX_KEYS_PER_ALLOCATION
+
+    /** Distinct keys one region (IPv6 /32) may hold per minute, allocation keys included; past it they share the region key. */
+    internal var maxKeysPerRegion: Int = MAX_KEYS_PER_REGION
+
+    /** How many times the overflow WARN has been written (one per minute at most); visible for the unit test. */
+    internal var overflowWarnings: Int = 0
     private var minute = -1L
     private val seen = HashSet<String>()
+    private val perAllocation = HashMap<String, Int>()
+    private val perRegion = HashMap<String, Int>()
+    private var overflowLogged = false
 
     /**
      * Bounds the number of distinct subject-less keys per minute (#16847 review): the limiter's
      * window map is pruned per minute, but within one minute a caller cycling /64s (or a botnet)
-     * could otherwise mint unbounded entries. Past the cap every NEW key collapses into one shared
-     * key, so memory is bounded and the overflow still gets its one audit row per window.
+     * could otherwise mint unbounded entries.
+     *
+     * Three tiers, because one party cheaply holds many networks: one IPv6 /48 is 65 536 /64s and
+     * one /32 is 65 536 /48s. Past [maxKeysPerAllocation] distinct keys an allocation (/48, IPv4 /24)
+     * shares ONE allocation key; past [maxKeysPerRegion] keys (allocation keys included) a /32 shares
+     * ONE region key. So one allocation admits at most 65 keys a minute and one /32 at most 257;
+     * filling the [maxKeysPerMinute] budget of 4096 — and pushing other callers into [OVERFLOW],
+     * which suppresses their audit rows — needs at least 16 distinct /32s (RIR scale) or a spread
+     * of IPv4 /24s. The first overflow of each minute is logged, so that state is never silent.
+     *
+     * Tradeoff: once an allocation (or region) has spent its slots, a NEW neighbour in it shares
+     * that allocation's (region's) key — and so its one-row-per-minute audit window for refused
+     * calls ([McpCustomerBranch]) — for the rest of the minute (at most 60 s). Neighbours already
+     * admitted that minute keep their own key. This key feeds only that audit window, not a rate limit.
      */
     @Synchronized
-    internal fun capped(key: String, nowMillis: Long): String {
+    internal fun capped(key: String, nowMillis: Long, allocation: String = key, region: String = allocation): String {
         val m = nowMillis / MILLIS_PER_MINUTE
         if (m != minute) {
             minute = m
             seen.clear()
+            perAllocation.clear()
+            perRegion.clear()
+            overflowLogged = false
         }
         if (key in seen) return key
-        if (seen.size >= maxKeysPerMinute) return OVERFLOW
-        seen += key
-        return key
+        val allocationHeld = perAllocation[allocation] ?: 0
+        var admitted = if (allocationHeld >= maxKeysPerAllocation) allocation else key
+        if (admitted in seen) return admitted
+        val regionHeld = perRegion[region] ?: 0
+        if (regionHeld >= maxKeysPerRegion) admitted = region
+        if (admitted in seen) return admitted
+        if (seen.size >= maxKeysPerMinute) return overflow()
+        seen += admitted
+        if (admitted == key) perAllocation[allocation] = allocationHeld + 1
+        if (admitted != region) perRegion[region] = regionHeld + 1
+        return admitted
+    }
+
+    private fun overflow(): String {
+        if (!overflowLogged) {
+            overflowLogged = true
+            overflowWarnings++
+            log.warnf(
+                "subject-less audit key budget (%d/min) exhausted; further new networks share %s",
+                maxKeysPerMinute,
+                OVERFLOW,
+            )
+        }
+        return OVERFLOW
     }
 
     companion object {
         const val OVERFLOW = "ip:overflow"
         const val MAX_KEYS_PER_MINUTE = 4096
+        const val MAX_KEYS_PER_ALLOCATION = 64
+        const val MAX_KEYS_PER_REGION = 256
+        private val log = Logger.getLogger(ClientAddressResolver::class.java)
         private const val MILLIS_PER_MINUTE = 60_000L
         private const val DNS_SAN = 2
     }
