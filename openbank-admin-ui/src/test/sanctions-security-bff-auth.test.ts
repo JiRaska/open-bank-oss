@@ -92,7 +92,7 @@ describe('sanctions BFF relays the operator bearer', () => {
     }))
 
     const [url, init] = lastFetchCall()
-    expect(String(url)).toContain('/api/v1/sanctions/screen')
+    expect(String(url)).toContain('/api/v3/sanctions/screen')
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer operator-token')
     expect(JSON.parse(String(init.body))).toEqual({ name: 'Jan Novak' })
   })

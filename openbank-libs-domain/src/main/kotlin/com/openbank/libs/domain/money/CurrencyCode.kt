@@ -18,6 +18,11 @@ import java.util.Locale
  * `XXX` for which the JDK reports `defaultFractionDigits == -1`. Such a code has no scale a
  * monetary amount could be held at, and a `-1` would reach every caller that writes
  * `setScale(currency.defaultFractionDigits)`. [defaultFractionDigits] is therefore always `>= 0`.
+ *
+ * **Withdrawn currencies are rejected.** `java.util.Currency` keeps every code ISO 4217 ever
+ * published (List Three, "historic denominations") so it can parse old data: `DEM`, `FRF`, `ITL`,
+ * `HRK`, `SKK` all resolve with a minor unit. None of them can denominate a payment today, so an
+ * amount in one is a data error, not a currency. [WITHDRAWN] is that list as the JDK knows it.
  */
 class CurrencyCode private constructor(val code: String, val defaultFractionDigits: Int) {
 
@@ -30,6 +35,18 @@ class CurrencyCode private constructor(val code: String, val defaultFractionDigi
     companion object {
         private const val CODE_LENGTH = 3
         private const val ECHO_LIMIT = 16
+
+        /**
+         * ISO 4217 List Three codes the JDK still resolves with a minor unit. Must stay a literal
+         * table: no JDK API distinguishes an active code from a historic one. Declared before the
+         * constants below, which call [of] during companion initialisation.
+         */
+        private val WITHDRAWN: Set<String> = setOf(
+            "ADP", "AFA", "ANG", "ATS", "AYM", "AZM", "BEF", "BGL", "BYB", "BYR", "CSD", "CYP", "DEM",
+            "EEK", "ESP", "FIM", "FRF", "GHC", "GRD", "GWP", "HRK", "IEP", "ITL", "LTL", "LUF", "LVL",
+            "MGF", "MRO", "MTL", "MZM", "NLG", "PTE", "ROL", "RUR", "SDD", "SIT", "SKK", "SLL", "SRG",
+            "STD", "TMM", "TPE", "TRL", "USS", "VEB", "VEF", "YUM", "ZMK", "ZWD", "ZWL", "ZWN", "ZWR",
+        )
 
         val CZK = of("CZK")
         val EUR = of("EUR")
@@ -59,10 +76,27 @@ class CurrencyCode private constructor(val code: String, val defaultFractionDigi
             return CurrencyCode(normalised, currency.defaultFractionDigits)
         }
 
+        /**
+         * True iff [code] is already the canonical form [of] would produce: three upper-case
+         * letters naming an active ISO 4217 currency with a minor unit. For validators that store
+         * the string as-is and compare it by equality, where `eur` must not pass as `EUR`.
+         */
+        fun isCanonical(code: String): Boolean = runCatching { of(code).code == code }.getOrDefault(false)
+
         private fun isoCurrency(normalised: String): Currency = try {
+            require(normalised !in WITHDRAWN) {
+                "Currency $normalised is withdrawn from ISO 4217 and cannot denominate a payment"
+            }
             Currency.getInstance(normalised)
         } catch (e: IllegalArgumentException) {
-            throw unsupported("Unknown ISO 4217 currency code: $normalised", e)
+            val reason = if (normalised in
+                WITHDRAWN
+            ) {
+                e.message.orEmpty()
+            } else {
+                "Unknown ISO 4217 currency code: $normalised"
+            }
+            throw unsupported(reason, e)
         }
 
         private fun unsupported(message: String, cause: Throwable? = null) = InvalidMoneyException(

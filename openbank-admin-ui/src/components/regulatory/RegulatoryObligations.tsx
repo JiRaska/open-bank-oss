@@ -6,6 +6,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import styles from './RegulatoryObligations.module.css'
 import { ExternalLink, Scale } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -43,6 +44,14 @@ export function RegulatoryObligations({ register }: { register: ObligationRegist
   const { t, language } = useLanguage()
   const [area, setArea] = useState<string>('all')
   const [status, setStatus] = useState<CoverageStatus | 'all'>('all')
+  const [query, setQuery] = useState('')
+  const [authority, setAuthority] = useState('all')
+  const [confidence, setConfidence] = useState<CadenceConfidence | 'all'>('all')
+  const [page, setPage] = useState(0)
+  const pageSize = 25
+  const resetFilters = () => {
+    setQuery(''); setArea('all'); setStatus('all'); setAuthority('all'); setConfidence('all'); setPage(0)
+  }
 
   const statusLabel: Record<CoverageStatus, string> = {
     'filed-return': t('Výkaz počítá backend', 'Computed by a backend'),
@@ -94,10 +103,19 @@ export function RegulatoryObligations({ register }: { register: ObligationRegist
     )
   }
 
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase(language).trim()
+  const search = normalize(query)
   const visible = register.obligations
     .filter(o => area === 'all' || o.area === area)
     .filter(o => status === 'all' || o.coverage.status === status)
+    .filter(o => authority === 'all' || o.authority === authority)
+    .filter(o => confidence === 'all' || o.cadenceConfidence === confidence)
+    .filter(o => !search || normalize([o.id, o.name.cs, o.name.en, o.legalBasis, ...o.coverage.reports].join(' ')).includes(search))
     .sort((a, b) => COVERAGE_ORDER.indexOf(a.coverage.status) - COVERAGE_ORDER.indexOf(b.coverage.status))
+
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize))
+  const currentPage = Math.min(page, pageCount - 1)
+  const pageRows = visible.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
 
   const name = (o: RegulatoryObligation) => (language === 'cs' ? o.name.cs : o.name.en)
 
@@ -105,116 +123,115 @@ export function RegulatoryObligations({ register }: { register: ObligationRegist
     <div className="space-y-4">
       {header}
 
-      <section aria-labelledby="obligations-context" className="card" style={{ padding: 16 }}>
-        <h2 id="obligations-context" style={{ marginTop: 0 }}>{t('Jak stránku číst', 'How to read this page')}</h2>
-        <p>
-          {t(
-            'Registr vychází ze zákona, ne z kódu. Každý řádek je jedna povinnost se zdrojem — zněním předpisu a specifikací úřadu — a teprve potom je k ní přiřazen výkaz platformy. Povinnost bez výkazu je proto vidět jako „Chybí“.',
-            'The register starts from the law, not the code. Each row is one duty with its source — the legal text and the authority’s specification — and only then mapped to a platform report. A duty without a report therefore shows as “Missing”.',
-          )}
-        </p>
-        <p>
-          {t(
-            'Lhůty nesou míru jistoty. „NEOVĚŘENO“ je stopa pro ověření, ne fakt — před podáním vždy ověřte aktuální znění předpisu. Charta agenta regulatory-obligations-watcher je navržena, ale je vypnutá, dokud nebude zapojen stahovač zdrojů — dnes zdroje nikdo automaticky nesleduje. Registr mění jen schválený PR.',
-            'Deadlines carry a confidence. “UNVERIFIED” is a lead, not a fact — check the current text before filing. A regulatory-obligations-watcher agent charter is proposed but disabled until a source fetcher is wired — nothing watches the sources automatically today. Only a reviewed PR changes the register.',
-          )}
-        </p>
-        <p style={{ marginBottom: 0 }}>
-          <a href={DOC_URL} target="_blank" rel="noreferrer" className="btn btn-secondary">
-            <ExternalLink size={13} aria-hidden="true" /> {t('Dokumentace registru', 'Register documentation')}
-          </a>{' '}
-          <Link href="/regulatory" className="btn btn-secondary">{t('Katalog výkazů', 'Report catalogue')}</Link>{' '}
-          <Link href="/regulatory/statutory-returns" className="btn btn-secondary">{t('Statutární výkazy a termíny', 'Statutory returns and deadlines')}</Link>
-        </p>
-      </section>
+      <nav className={styles.links} aria-label={t('Regulatorní reporting', 'Regulatory reporting')}>
+        <Link href="/regulatory" className="btn btn-secondary">{t('Katalog výkazů', 'Report catalogue')}</Link>
+        <Link href="/regulatory/statutory-returns" className="btn btn-secondary">{t('Statutární výkazy a termíny', 'Statutory returns and deadlines')}</Link>
+        <a href={DOC_URL} target="_blank" rel="noreferrer" className="btn btn-secondary">
+          <ExternalLink size={13} aria-hidden="true" /> {t('Dokumentace registru', 'Register documentation')}
+        </a>
+      </nav>
+      <p className={styles.context}>{t(
+        'Jedna položka je povinnost, nikoli podaný výkaz. Pokrytí popisuje implementaci; použitelnost pro konkrétní subjekt a přijetí podání se ověřují samostatně.',
+        'Each item is an obligation, not a filed return. Coverage describes implementation; applicability to an entity and acceptance of a filing are checked separately.',
+      )}</p>
+      <details className={styles.context}>
+        <summary>{t('Jak číst ověření lhůt', 'How to read deadline verification')}</summary>
+        <p>{t(
+          'Neověřená lhůta není potvrzený termín. Před podáním ověřte aktuální metodiku a povinnost subjektu. Zdroje zatím nejsou sledovány automaticky; registr se mění schválenou změnou.',
+          'An unverified cadence is not a confirmed deadline. Check the current methodology and entity obligation before filing. Sources are not yet monitored automatically; register changes require review.',
+        )}</p>
+      </details>
 
-      <div role="group" aria-label={t('Souhrn pokrytí', 'Coverage summary')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+      <div role="group" aria-label={t('Souhrn pokrytí', 'Coverage summary')} className={styles.summary}>
         {COVERAGE_ORDER.map(s => (
           <button
             key={s}
             type="button"
             aria-pressed={status === s}
-            onClick={() => setStatus(status === s ? 'all' : s)}
-            className="card"
-            style={{ padding: 12, textAlign: 'left', background: STATUS_STYLE[s].bg, color: STATUS_STYLE[s].color, cursor: 'pointer' }}
+            onClick={() => { setStatus(status === s ? 'all' : s); setPage(0) }}
+            className="btn btn-secondary"
           >
-            <div style={{ fontSize: 24, fontWeight: 700 }} data-testid={`count-${s}`}>{counts[s]}</div>
-            <div style={{ fontSize: 13 }}>{statusLabel[s]}</div>
+            <span data-testid={`count-${s}`}>{counts[s]}</span> {statusLabel[s]}
           </button>
         ))}
       </div>
 
-      <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-        {t('Oblast', 'Area')}
-        <select value={area} onChange={e => setArea(e.target.value)} aria-label={t('Oblast', 'Area')}>
-          <option value="all">{t('Všechny', 'All')}</option>
-          {register.areas.map(a => (
-            <option key={a.id} value={a.id}>{language === 'cs' ? a.cs : a.en}</option>
-          ))}
-        </select>
-      </label>
-
-      <ul style={{ listStyle: 'none', padding: 0, display: 'grid', gap: 12 }}>
-        {visible.map(o => {
-          const auth = authorities.get(o.authority)
-          const law = trustedHttpsUrl(o.sources.law)
-          const spec = trustedHttpsUrl(o.sources.spec)
-          return (
-            <li key={o.id} id={o.id} className="card" style={{ padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                <h3 style={{ margin: 0 }}>{name(o)}</h3>
-                <span
-                  data-testid={`status-${o.id}`}
-                  style={{ padding: '2px 8px', borderRadius: 6, fontSize: 12, background: STATUS_STYLE[o.coverage.status].bg, color: STATUS_STYLE[o.coverage.status].color }}
-                >
-                  {statusLabel[o.coverage.status]}
-                </span>
-              </div>
-              <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px', margin: '10px 0 0', fontSize: 14 }}>
-                <dt>{t('Adresát', 'Authority')}</dt>
-                <dd style={{ margin: 0 }}>{auth ? (language === 'cs' ? auth.cs : auth.en) : o.authority}</dd>
-                <dt>{t('Právní základ', 'Legal basis')}</dt>
-                <dd style={{ margin: 0 }}>{o.legalBasis}</dd>
-                <dt>{t('Zdroj', 'Source')}</dt>
-                <dd style={{ margin: 0 }}>
-                  {law && <a href={law} target="_blank" rel="noreferrer">{t('Znění předpisu', 'Legal text')}</a>}
-                  {spec && <>{' · '}<a href={spec} target="_blank" rel="noreferrer">{t('Specifikace úřadu', 'Authority specification')}</a></>}
-                </dd>
-                <dt>{t('Lhůta', 'Deadline')}</dt>
-                <dd style={{ margin: 0 }}>{o.cadence} <em>({confidenceLabel[o.cadenceConfidence]})</em></dd>
-                <dt>{t('Kanál', 'Channel')}</dt>
-                <dd style={{ margin: 0 }}>{o.transport}</dd>
-                {o.applicability !== 'always' && (
-                  <>
-                    <dt>{t('Použitelnost', 'Applies when')}</dt>
-                    <dd style={{ margin: 0 }}>{o.applicability.replace(/^conditional:\s*/, '')}</dd>
-                  </>
-                )}
-                <dt>{t('Pokrytí', 'Coverage')}</dt>
-                <dd style={{ margin: 0 }}>
-                  {o.coverage.reports.length > 0 && (
-                    <span>
-                      {t('Výkazy: ', 'Reports: ')}
-                      {o.coverage.reports.map((r, i) => (
-                        <span key={r}>{i > 0 && ', '}<Link href={`/regulatory#${r}`}>{r}</Link></span>
-                      ))}
-                    </span>
-                  )}
-                  {o.coverage.services.length > 0 && <span>{o.coverage.reports.length > 0 && ' · '}{t('Služby: ', 'Services: ')}{o.coverage.services.join(', ')}</span>}
-                  {o.coverage.tracking && <span>{' · '}{t('Sleduje ', 'Tracked by ')}{o.coverage.tracking}</span>}
-                  {o.coverage.reports.length === 0 && o.coverage.services.length === 0 && !o.coverage.tracking && '—'}
-                </dd>
-                {o.note && (
-                  <>
-                    <dt>{t('Poznámka', 'Note')}</dt>
-                    <dd style={{ margin: 0 }}>{o.note}</dd>
-                  </>
-                )}
-              </dl>
-            </li>
-          )
-        })}
-      </ul>
+      <div className={styles.filters}>
+        <label>{t('Hledat povinnost', 'Search obligations')}
+          <input type="search" className="input" value={query} onChange={e => { setQuery(e.target.value); setPage(0) }}
+            placeholder={t('Název, kód nebo právní základ', 'Name, code or legal basis')} />
+        </label>
+        <label>{t('Oblast', 'Area')}
+          <select className="input" value={area} onChange={e => { setArea(e.target.value); setPage(0) }}>
+            <option value="all">{t('Všechny', 'All')}</option>
+            {register.areas.map(a => <option key={a.id} value={a.id}>{language === 'cs' ? a.cs : a.en}</option>)}
+          </select>
+        </label>
+        <label>{t('Adresát', 'Authority')}
+          <select className="input" value={authority} onChange={e => { setAuthority(e.target.value); setPage(0) }}>
+            <option value="all">{t('Všichni', 'All')}</option>
+            {register.authorities.map(a => <option key={a.id} value={a.id}>{language === 'cs' ? a.cs : a.en}</option>)}
+          </select>
+        </label>
+        <label>{t('Pokrytí', 'Coverage')}
+          <select className="input" value={status} onChange={e => { setStatus(e.target.value as CoverageStatus | 'all'); setPage(0) }}>
+            <option value="all">{t('Všechna pokrytí', 'All coverage states')}</option>
+            {COVERAGE_ORDER.map(s => <option key={s} value={s}>{statusLabel[s]}</option>)}
+          </select>
+        </label>
+        <label>{t('Ověření lhůty', 'Deadline verification')}
+          <select className="input" value={confidence} onChange={e => { setConfidence(e.target.value as CadenceConfidence | 'all'); setPage(0) }}>
+            <option value="all">{t('Všechny úrovně', 'All levels')}</option>
+            {(['verified', 'known-eu', 'unverified'] as const).map(c => <option key={c} value={c}>{confidenceLabel[c]}</option>)}
+          </select>
+        </label>
+        <button type="button" className="btn btn-secondary" onClick={resetFilters}>{t('Zrušit filtry', 'Clear filters')}</button>
+      </div>
+      <p role="status" className={styles.context}>
+        {visible.length === 0 ? t('Žádná povinnost neodpovídá filtrům.', 'No obligation matches these filters.')
+          : `${t('Nalezeno', 'Matched')}: ${visible.length} / ${register.obligations.length} · ${t('Strana', 'Page')} ${currentPage + 1} / ${pageCount}`}
+      </p>
+      <div className={styles.tableScroll}>
+        <table className={`table ${styles.table}`} aria-label={title}>
+          <thead><tr>
+            <th scope="col">{t('Povinnost a zdroje', 'Obligation and sources')}</th>
+            <th scope="col">{t('Adresát', 'Authority')}</th>
+            <th scope="col">{t('Pokrytí', 'Coverage')}</th>
+            <th scope="col">{t('Lhůta a ověření', 'Cadence and verification')}</th>
+            <th scope="col">{t('Výkazy', 'Reports')}</th>
+          </tr></thead>
+          <tbody>{pageRows.map(o => {
+            const auth = authorities.get(o.authority)
+            const law = trustedHttpsUrl(o.sources.law)
+            const spec = trustedHttpsUrl(o.sources.spec)
+            return <tr key={o.id} id={o.id}>
+              <td>
+                <strong>{name(o)}</strong>
+                <details className={styles.detail}>
+                  <summary>{t('Právní základ a podrobnosti', 'Legal basis and details')}</summary>
+                  <p>{o.legalBasis}</p>
+                  <p>{law && <a href={law} target="_blank" rel="noreferrer">{t('Znění předpisu', 'Legal text')}</a>}
+                    {spec && <> · <a href={spec} target="_blank" rel="noreferrer">{t('Specifikace úřadu', 'Authority specification')}</a></>}</p>
+                  <p>{t('Kanál', 'Channel')}: {o.transport}</p>
+                  <p>{t('Použitelnost', 'Applicability')}: {o.applicability === 'always' ? t('Obecná povinnost dle registru', 'General obligation in the register') : o.applicability.replace(/^conditional:\s*/, '')}</p>
+                  {o.coverage.services.length > 0 && <p>{t('Služby', 'Services')}: {o.coverage.services.join(', ')}</p>}
+                  {o.coverage.tracking && <p>{t('Sleduje', 'Tracked by')}: {o.coverage.tracking}</p>}
+                  {o.note && <p>{o.note}</p>}
+                </details>
+              </td>
+              <td>{auth ? (language === 'cs' ? auth.cs : auth.en) : o.authority}</td>
+              <td><span data-testid={`status-${o.id}`} className={styles.coverage}
+                style={{ background: STATUS_STYLE[o.coverage.status].bg, color: STATUS_STYLE[o.coverage.status].color }}>{statusLabel[o.coverage.status]}</span></td>
+              <td>{o.cadence}<div className={styles.confidence}>{confidenceLabel[o.cadenceConfidence]}</div></td>
+              <td>{o.coverage.reports.length === 0 ? '—' : o.coverage.reports.map(r => <div key={r}><Link href={`/regulatory#${r}`}>{r}</Link></div>)}</td>
+            </tr>
+          })}</tbody>
+        </table>
+      </div>
+      {pageCount > 1 && <nav className={styles.links} aria-label={t('Stránkování povinností', 'Obligation pagination')}>
+        <button type="button" className="btn btn-secondary" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t('Předchozí', 'Previous')}</button>
+        <button type="button" className="btn btn-secondary" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>{t('Další', 'Next')}</button>
+      </nav>}
     </div>
   )
 }

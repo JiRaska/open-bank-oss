@@ -4,6 +4,8 @@
 
 package com.openbank.simulation.runner
 
+import com.openbank.cardissuance.domain.model.Card
+import com.openbank.cardissuance.domain.model.DelegatedCardGrant
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clearing.domain.model.ClearingBatch
 import com.openbank.clearing.domain.model.ClearingItem
@@ -32,6 +34,7 @@ import com.openbank.simulation.model.CardClearingBook
 import com.openbank.simulation.model.DelegationSpendBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
+import com.openbank.simulation.model.PensionFundBook
 import com.openbank.simulation.model.ScreeningBook
 import com.openbank.simulation.model.SddCollectionBook
 import com.openbank.simulation.model.SimPaymentSaga
@@ -41,6 +44,7 @@ import com.openbank.simulation.model.StatementCloseBook
 import com.openbank.simulation.model.SwiftBook
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.swift.domain.model.SwiftMessage
+import com.openbank.treasury.domain.model.NostroBreak
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -182,6 +186,30 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // landed as ledger journals and how much of the hold was released back to available balance.
     // Populated by CardAuthorizationScenario; empty (trivially satisfied) otherwise.
     val cardAuths = CardAuthorizationBook()
+
+    // Test Intelligence simulation gap: the REAL card-issuance-service lifecycle driven by
+    // CardIssuanceScenario — the Card status machine (activate/suspend/resume/block/cancel/
+    // consume/expireUnused), limit and control invariants, and the DelegatedCardGrant authority
+    // link (ADR-0249 D2) — kept here so the Layer-3 invariants can assert no card is live past
+    // its validity window, no block lacks its reason, and no delegated card outlives its grant.
+    // Same convention as pensionContracts above.
+    val cards = mutableListOf<Card>()
+    val delegatedCardGrants = mutableListOf<DelegatedCardGrant>()
+
+    // Test Intelligence simulation gap: the REAL treasury-service nostro-reconciliation desk
+    // driven by NostroBreakScenario — the NostroBreak aggregate (two-sided identity, BusinessDays
+    // aging, alert policy) and its four-eyes manual resolution — kept here so the Layer-3
+    // invariants can assert no break carries a proposal overnight and no aged break goes
+    // unalerted. Same convention as cards above.
+    val nostroBreaks = mutableListOf<NostroBreak>()
+
+    // Test Intelligence simulation gap (money path): the REAL pension-fund-service unit register
+    // driven by PensionFundTradingScenario — NAVs struck by the real NavCalculator and published
+    // under the real four-eyes rule, orders settled by the real ForwardPricer (forward pricing,
+    // switch legs, fee cancellation, NAV corrections) — kept here so the Layer-3 invariants can
+    // assert no order is left without a forward NAV and that holdings equal the fold of every
+    // transaction. Same convention as pensionContracts above.
+    val pensionFundBook = PensionFundBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency

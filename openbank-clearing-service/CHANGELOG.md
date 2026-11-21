@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.13.0...clearing-service-v0.13.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **clearing,context,copilot:** reload outbound mTLS client certificates ([#16412](https://github.com/JiRaska/open-bank-oss/issues/16412)) ([1bb10d2](https://github.com/JiRaska/open-bank-oss/commit/1bb10d207000311e6fd1a73b9cc0346be958f754))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.12.3...clearing-service-v0.13.0) (2026-10-16)
 
 

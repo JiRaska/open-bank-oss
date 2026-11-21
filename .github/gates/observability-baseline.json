@@ -7,7 +7,7 @@
     "observed_gate_ids": 204
   },
   "allowed": {
-    "missing_budget_seconds": 159,
+    "missing_budget_seconds": 157,
     "missing_min_subjects": 2
   },
   "known": {
@@ -46,8 +46,6 @@
       "clickhouse-migration-configmap-sync",
       "cnpg-scrape-coverage",
       "co-deploy-set-derivation-unit-test",
-      "compliance-matrix",
-      "compliance-page-evidence",
       "configproperty-kotlin-defaults",
       "configproperty-supplied",
       "critical-alert-egress",

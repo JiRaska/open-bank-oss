@@ -51,3 +51,16 @@ výsledku, `X-AI-Generated: true` a `X-AI-Disclosure` (stejný český text, UTF
 první událostí (API kontrakt 1.7.0, aditivní). Použity jsou hlavičky, protože stávající klienti streamu
 zobrazují každý řádek `data:` jako text odpovědi, takže vložený prvek by viděl zákazník, kdežto nečtená
 hlavička se ignoruje. Zatím nehotovo: lokalizace textu a čtení hlaviček v mobilní aplikaci.
+
+## Obnova klientského certifikátu (odchozí mTLS)
+
+Každá pojmenovaná konfigurace `quarkus.tls.<name>`, kterou se služba prokazuje vůči
+naslouchání 8443 jiné služby, nastavuje `reload-period: 1h`. cert-manager klientský certifikát
+obnoví před expirací; bez této volby by proces dál předkládal ten starý, dokud by ho protistrana
+neodmítla, zatímco všechny signály expirace měřily obnovený Secret a hlásily zelenou. Po obnově
+se nový certifikát použije do hodiny, bez restartu. Gate `tls-certificate-reload` hlídá, aby
+žádná taková konfigurace nevypadla.
+
+## Validace vstupů návrhů (#16748)
+
+`propose_payment` ověřuje IBAN příjemce přes `Iban.isValid` z libs-domain a měnu přes `CurrencyCode.isCanonical`. Chybějící měna znamená CZK; uvedená, ale neznámá nebo stažená měna je chyba a nikdy se nenahradí CZK. `propose_fx_conversion` používá stejnou kontrolu měny.

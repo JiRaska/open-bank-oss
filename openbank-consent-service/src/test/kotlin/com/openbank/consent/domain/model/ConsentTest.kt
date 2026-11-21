@@ -38,16 +38,24 @@ class ConsentTest {
     }
 
     @Test
-    fun `coversAccount returns true when accountIbans is null`() {
+    fun `coversAccount is false for a consent with no account list`() {
         val consent = consent(accountIbans = null)
 
-        assertThat(consent.coversAccount("CZ6508000000192000145399")).isTrue()
+        assertThat(consent.coversAccount("CZ6508000000192000145399")).isFalse()
     }
 
     @Test
-    fun `coversAccount returns false when IBAN not in list`() {
+    fun `coversAccount is false for a consent with an empty account list`() {
+        val consent = consent(accountIbans = emptyList())
+
+        assertThat(consent.coversAccount("CZ6508000000192000145399")).isFalse()
+    }
+
+    @Test
+    fun `coversAccount is true exactly for listed accounts`() {
         val consent = consent(accountIbans = listOf("CZ6508000000192000145399"))
 
+        assertThat(consent.coversAccount("CZ6508000000192000145399")).isTrue()
         assertThat(consent.coversAccount("CZ7108000000192000145399")).isFalse()
     }
 

@@ -297,6 +297,7 @@ public final class com/openbank/libs/testing/trace/TraceContract {
 	public final fun hasNoErrorSpan ()Lcom/openbank/libs/testing/trace/TraceContract;
 	public final fun requiresAttribute (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
 	public final fun requiresSameTrace ([Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
+	public final fun requiresSameTraceAs (Ljava/lang/String;[Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
 	public final fun requiresSpan (Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
 	public final fun spanCompletesWithin (Ljava/lang/String;Ljava/time/Duration;)Lcom/openbank/libs/testing/trace/TraceContract;
 	public final fun verifiedAs (Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;

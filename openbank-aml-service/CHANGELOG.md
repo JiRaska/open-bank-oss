@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.2...aml-service-v0.21.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **aml:** validate monitoring currencies with CurrencyCode ([#16769](https://github.com/JiRaska/open-bank-oss/issues/16769)) ([3e712d8](https://github.com/JiRaska/open-bank-oss/commit/3e712d85204cd19b25b66eedb8f5d1977394f5c2))
+
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.1...aml-service-v0.21.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
 ## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.21.0...aml-service-v0.21.1) (2026-11-15)
 
 
