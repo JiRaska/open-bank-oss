@@ -1141,3 +1141,9 @@ The authorizing boundary is the lending application service. The adapter validat
 with `openbank-libs-market`. Tests cover a foreign-only offering leaving no application, malformed
 catalogue country codes, and the existing unscoped application path. Cross-border origination still
 requires the catalogue commitment fence and verified subject evidence.
+
+Residual: a malformed catalogue country code (like any other malformed catalogue field in
+`toProfile`) raises `IllegalArgumentException`, so the application answers 400 rather than a
+catalogue-unavailable refusal. It fails closed: no application is persisted. Only the status code
+misattributes the fault to the caller. Lending has no catalogue-unavailable outcome yet, and adding
+one belongs with the other `toProfile` validation errors, not with this check alone.
