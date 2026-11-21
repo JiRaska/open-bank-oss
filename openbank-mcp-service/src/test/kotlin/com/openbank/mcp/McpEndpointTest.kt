@@ -159,6 +159,20 @@ class McpEndpointTest {
     }
 
     @Test
+    fun `the tool-call series carries the channel the resolver admitted the caller on (ADR-0384 D1)`() {
+        endpoint(allowAll(), jwt = staffOboJwt(), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val byChannel = registry.find("openbank.mcp.tool_calls").counters()
+            .groupBy { it.id.getTag("channel") }
+            .mapValues { (_, c) -> c.sumOf { it.count() } }
+        assertThat(byChannel).containsEntry("operator", 1.0).containsEntry("agent", 1.0)
+    }
+
+    @Test
     fun `with the obo flag on a staff token reaches the PDP as HUMAN with its bounded roles`() {
         val pdp = RecordingPdp()
         endpoint(pdp, jwt = staffOboJwt(), oboEnabled = true).handle(
