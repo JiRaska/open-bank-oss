@@ -103,6 +103,84 @@ MAX_TIMEOUT = 1800  # cap on a per-gate `timeout_seconds`
 MEASUREMENTS = ".github/gates/gate-runtime-measurements.json"
 VALID_EXPECT = {"pass", "fail"}
 
+# ADR-0389 operational knob: ONE repository variable scales every SAFE gate's `budget_seconds`
+# and hard timeout, so a slower runner fleet is answered by a var change instead of a PR that
+# re-tunes dozens of gates.yaml lines (6 such PRs before this knob existed). Security,
+# money-path and authorization/policy gates are NEVER scaled (ADR-0389 tie-break: the stricter
+# class wins): their budgets are part of the control, not a performance hint.
+BUDGET_MULTIPLIER_ENV = "GATE_BUDGET_MULTIPLIER"
+BUDGET_MULTIPLIER_MIN, BUDGET_MULTIPLIER_MAX = 0.5, 4.0
+# Derivation rule (kept explicit so a reviewer sees the set): group `security`, or an id naming
+# a money-path / authz / OPA / rego / policy / secret / threat-model / ledger / idempotency
+# control. budget_multiplier_exempt() ALSO applies the rule itself, so a NEW gate matching it is
+# exempt even before it is added here (fail towards the stricter class); the self-test fails if
+# this list and the rule disagree about the current manifest.
+BUDGET_EXEMPT_ID_RE = re.compile(
+    r"money|authz|opa|rego|policy|secret|threat|ledger|idempoten|four-eyes|realm|oidc|pdp|principal|pci"
+)
+BUDGET_EXEMPT_GROUPS = frozenset({"security"})
+BUDGET_EXEMPT_IDS = frozenset({
+    # group: security
+    "pdp-flag-rollout-probe-self-test", "audit-anchor-offline-verifier-unit-test",
+    "xml-factory-hardened", "principal-name-trust", "security-txt-policy-reachable",
+    "adversarial-contract-test", "critical-alert-egress", "threat-model-coverage",
+    "threat-model-updated-on-trust-boundary-change", "security-checklist-money-path",
+    "security-sensitive-paths-coverage", "security-checklist-append-helper",
+    "threat-model-claims-resolve", "threat-model-test-evidence", "scheduler-exercised-in-tests",
+    "feature-flag-governance", "no-dead-code-service-principal-rego-rule",
+    "no-allow-all-pdp-in-main", "psd2-anonymous-grant-stays-behind-eidas-mtls",
+    "mcp-real-port-requires-caller-auth-first", "authz-enforce-pdp-sidecar-parity",
+    "authz-enforce-money-path", "four-eyes-enforce-deployed", "rolesallowed-realm-parity",
+    "rego-service-account-profile-scope", "oidc-client-configured",
+    "oidc-tls-verification-profile-scoped", "pr-build-cloud-credentials",
+    "realm-template-importable", "realm-import-secret-sources", "synthetic-customer-identity",
+    "ops-cli-client-contract", "realm-devci-artifact-parity", "mcp-customer-channel-propose-only",
+    "pdp-flag-rollout-complete",
+    # other groups, by id
+    "pitest-money-path-coverage", "alert-rca-ledger-guards", "oidc-secret-convention",
+    "oidc-client-secret-wiring", "journey-money-path-accountability", "opa-sidecar-bundle-shape",
+    "appyaml-secret-literals", "agent-merge-pr-policy-selftest", "money-rounding-inline-ratchet",
+    "idempotency-coverage-money-path", "money-path-pact-coverage",
+    "audit-money-path-subscription", "ledger-instance-switches-off", "opa-bundle-parses",
+    "opa-bundle-apply-size", "four-eyes-verb-grantable", "idempotency-contract-parity",
+    "network-policy-code-edges",
+})
+
+
+def budget_multiplier_exempt(gate) -> bool:
+    return (gate["id"] in BUDGET_EXEMPT_IDS or gate.get("group") in BUDGET_EXEMPT_GROUPS
+            or bool(BUDGET_EXEMPT_ID_RE.search(gate["id"])))
+
+
+def parse_budget_multiplier(raw):
+    """(multiplier, warning-or-None). Unset/empty is 1.0 silently; anything invalid is 1.0 + a warning."""
+    if raw is None or str(raw).strip() == "":
+        return 1.0, None
+    try:
+        m = float(str(raw).strip())
+    except ValueError:
+        m = None
+    if m is None or m != m or not (BUDGET_MULTIPLIER_MIN <= m <= BUDGET_MULTIPLIER_MAX):
+        return 1.0, (f"::warning::run-gates: {BUDGET_MULTIPLIER_ENV}=`{raw}` is not a number in "
+                     f"[{BUDGET_MULTIPLIER_MIN}, {BUDGET_MULTIPLIER_MAX}]; using 1.0")
+    return m, None
+
+
+def apply_budget_multiplier(gates, m: float, default_timeout: int):
+    """Scale budget_seconds and the hard timeout of every non-exempt gate in place. Returns the
+    exempt ids actually seen. The kill must stay above the budget, so both scale together."""
+    exempt = []
+    for g in gates:
+        if budget_multiplier_exempt(g):
+            exempt.append(g["id"])
+            continue
+        if m == 1.0:
+            continue
+        if g.get("budget_seconds") is not None:
+            g["budget_seconds"] = round(g["budget_seconds"] * m, 3)
+        g["timeout_seconds"] = max(1, int(round(g.get("timeout_seconds", default_timeout) * m)))
+    return exempt
+
 # Variables the Actions runner sets and a laptop does not. A gate reading one of these BARE dies
 # under `bash -euo pipefail` with `unbound variable`, which is the same failure the PR_DIFF_BASE
 # guard below already exists to dress properly — see its comment: "refusing to run vacuously" says
@@ -1193,6 +1271,20 @@ def main(argv=None):
         sys.stderr.write("::error::selection matched no gates — refusing to report success\n")
         return 2
 
+    mult, mult_warn = parse_budget_multiplier(os.environ.get(BUDGET_MULTIPLIER_ENV))
+    if mult_warn:
+        print(mult_warn)
+    exempt_seen = apply_budget_multiplier(sel, mult, args.timeout)
+    mult_line = (f"[run-gates] effective {BUDGET_MULTIPLIER_ENV}={mult:g} (ADR-0389); "
+                 f"{len(exempt_seen)} of {len(sel)} selected gates exempt (security/money-path/policy)")
+    print(mult_line)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        try:
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                fh.write(f"\n{mult_line.replace('[run-gates] ', '')}\n")
+        except OSError as exc:
+            sys.stderr.write(f"::warning::run-gates: could not write the job summary: {exc}\n")
+
     is_pr = os.environ.get("GITHUB_EVENT_NAME", "pull_request") == "pull_request"
     jobs = args.jobs or min(8, (os.cpu_count() or 2))
     print(f"[run-gates] {len(sel)} gates, {jobs} concurrent, event="
@@ -1594,6 +1686,42 @@ def self_test():
                 bad.append(f"load() gave no diagnostic for ({body!r})")
             if not want_abort and fixture_output:
                 bad.append(f"load() emitted output for valid ({body!r})")
+
+        # ADR-0389 budget multiplier: parsing, scaling, and the exempt set.
+        for raw, want_m, want_warn in (
+            (None, 1.0, False), ("", 1.0, False), ("2", 2.0, False), ("0.5", 0.5, False),
+            ("4.0", 4.0, False), ("4.5", 1.0, True), ("0.1", 1.0, True), ("-1", 1.0, True),
+            ("abc", 1.0, True), ("nan", 1.0, True), ("inf", 1.0, True),
+        ):
+            got_m, got_w = parse_budget_multiplier(raw)
+            if got_m != want_m or bool(got_w) != want_warn:
+                bad.append(f"parse_budget_multiplier({raw!r}): want ({want_m}, warn={want_warn}), "
+                           f"got ({got_m}, {got_w!r})")
+        scaled = [{"id": "plain", "group": "lint", "budget_seconds": 30},
+                  {"id": "plain-tmo", "group": "lint", "budget_seconds": 100, "timeout_seconds": 600},
+                  {"id": "sec", "group": "security", "budget_seconds": 30},
+                  {"id": "x-money-path-y", "group": "lint", "budget_seconds": 30},
+                  {"id": "security-checklist-money-path", "group": "lint", "budget_seconds": 60}]
+        ex = apply_budget_multiplier(scaled, 2.0, 420)
+        want = {"plain": (60, 840), "plain-tmo": (200, 1200), "sec": (30, None),
+                "x-money-path-y": (30, None), "security-checklist-money-path": (60, None)}
+        for g in scaled:
+            if (g["budget_seconds"], g.get("timeout_seconds")) != want[g["id"]]:
+                # must-FAIL direction: an exempt gate that WAS multiplied lands here
+                bad.append(f"apply_budget_multiplier: {g['id']} -> budget {g['budget_seconds']}, "
+                           f"timeout {g.get('timeout_seconds')}; want {want[g['id']]}")
+        if sorted(ex) != sorted(["security-checklist-money-path", "sec", "x-money-path-y"]):
+            bad.append(f"apply_budget_multiplier exempt set wrong: {ex}")
+        # The explicit list and the derivation rule must agree about the REAL manifest.
+        real = pathlib.Path(__file__).resolve().parents[2]
+        if (real / MANIFEST).exists():
+            with open(real / MANIFEST, encoding="utf-8") as fh:
+                real_gates = (yaml.safe_load(fh) or {}).get("gates") or []
+            derived = {g["id"] for g in real_gates if g.get("group") in BUDGET_EXEMPT_GROUPS
+                       or BUDGET_EXEMPT_ID_RE.search(g["id"])}
+            if derived != set(BUDGET_EXEMPT_IDS):
+                bad.append(f"BUDGET_EXEMPT_IDS drifted from the rule: missing "
+                           f"{sorted(derived - BUDGET_EXEMPT_IDS)}, stale {sorted(BUDGET_EXEMPT_IDS - derived)}")
 
         # Headroom warning: 85% warns, 50% does not, p95 alone triggers, failures are not repeated.
         def fake(seconds, budget=100, timeout=420, status="ok"):

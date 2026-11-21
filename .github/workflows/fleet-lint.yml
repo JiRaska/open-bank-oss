@@ -89,7 +89,10 @@ jobs:
     # limit must exceed the cold duration or the gate cannot recover on its own. This value is
     # the backstop for setup and post steps; the Gradle step carries its own, lower limit below,
     # because a STEP that times out fails the job whereas a JOB that times out is `cancelled`.
-    timeout-minutes: 75
+    # ADR-0389 SAFE knob: repo var FLEET_LINT_TIMEOUT_MINUTES overrides (positive integer minutes); unset = today's
+    # value. A non-numeric value makes fromJSON fail the job LOUDLY at start, never silently.
+    # Keep it ABOVE FLEET_LINT_STEP_TIMEOUT_MINUTES (see the step) or the job kill lands first.
+    timeout-minutes: ${{ fromJSON(vars.FLEET_LINT_TIMEOUT_MINUTES || '75') }}
     permissions:
       contents: read
       issues: write
@@ -228,7 +231,8 @@ jobs:
       # the run concludes `failure`, the alert fires and the watch reads it as red.
       - name: Fleet compile + detekt + ktlint
         id: lint
-        timeout-minutes: 70
+        # ADR-0389 knob FLEET_LINT_STEP_TIMEOUT_MINUTES; must stay below the job's limit.
+        timeout-minutes: ${{ fromJSON(vars.FLEET_LINT_STEP_TIMEOUT_MINUTES || '70') }}
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/fleet-lint.log"
