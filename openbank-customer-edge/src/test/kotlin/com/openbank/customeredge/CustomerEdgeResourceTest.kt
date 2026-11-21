@@ -906,6 +906,28 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
+    fun `buildDomesticRequest refuses a malformed payment symbol and keeps one at its maximum length`() {
+        fun build(field: String, value: String) = CustomerEdgeResource.buildDomesticRequest(
+            mapper,
+            """{"amount":"10.00","creditorName":"A","$field":"$value"}""",
+            "d",
+            "da",
+            "db",
+            "dn",
+            "ca",
+            "cb",
+        )
+        listOf("variableSymbol" to 10, "specificSymbol" to 10, "constantSymbol" to 4).forEach { (field, max) ->
+            // Boundary: max digits pass, max + 1 or any non-digit is refused (-> 400 at the caller).
+            // KS stops at 4: the domestic-payment column is VARCHAR(4) CHECK ^[0-9]{1,4}$.
+            assertThat(build(field, "1".repeat(max))).describedAs(field).isNotNull()
+            assertThat(build(field, "1".repeat(max + 1))).describedAs(field).isNull()
+            assertThat(build(field, "12A4")).describedAs(field).isNull()
+            assertThat(build(field, "12 34")).describedAs(field).isNull()
+        }
+    }
+
+    @Test
     fun `buildDomesticRequest returns null when a required field is missing`() {
         assertThat(
             CustomerEdgeResource.buildDomesticRequest(
@@ -1297,6 +1319,22 @@ class CustomerEdgeResourceTest {
         val r = statusResourceFor(upstream, caller)
         assertThat(r.getDomesticPaymentStatus("not-a-uuid").status).isEqualTo(404)
         assertThat(r.getDomesticPaymentStatus(pid.toString()).status).isEqualTo(404)
+    }
+
+    @Test
+    fun `getDomesticPaymentStatus reports a dependency outage without exposing upstream details`() {
+        val caller = UUID.randomUUID()
+        val paymentId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val resource = statusResourceFor(upstream, caller)
+        for (status in 502..504) {
+            every { upstream.get(match { it.endsWith("/domestic-payments/$paymentId") }, any()) } returns
+                Response.status(status).entity("internal policy deadline").build()
+
+            val response = resource.getDomesticPaymentStatus(paymentId.toString())
+            assertThat(response.status).isEqualTo(503)
+            assertThat(response.entity).isEqualTo(mapOf("error" to "Payment status temporarily unavailable"))
+        }
     }
 
     @Test

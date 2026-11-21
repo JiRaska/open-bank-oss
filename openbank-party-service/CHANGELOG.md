@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.1...party-service-v0.32.2) (2026-11-20)
+
+
+### Bug Fixes
+
+* **party:** reject a birth number whose birthdate is in the future (rule in libs RodneCislo, refs [#16748](https://github.com/JiRaska/open-bank-oss/issues/16748)) ([#16891](https://github.com/JiRaska/open-bank-oss/issues/16891)) ([d607303](https://github.com/JiRaska/open-bank-oss/commit/d6073034a1aae7f8e7e566dcfd938abac4bbe738))
+
 ## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.0...party-service-v0.32.1) (2026-11-15)
 
 

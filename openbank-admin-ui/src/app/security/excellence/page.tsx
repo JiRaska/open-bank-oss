@@ -29,7 +29,7 @@ import {
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { svcUrl } from '@/lib/services/bff'
+import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { parseIctIncidentEnvelope, summarizeIctIncidents } from '@/lib/security/ictIncidentContract'
 import { parseSecurityEnvelope, summarizeReachable } from '@/lib/security/summary'
 import { hasSecurityObservations, isCurrentSecurityReport } from '@/lib/security/reportFreshness'
@@ -46,7 +46,7 @@ interface Domain {
   nameEn: string
   descCs: string
   descEn: string
-  href: string
+  href?: string
   icon: React.ElementType
   status: DomainStatus
   /** 0–100; undefined u unavailable/loading */
@@ -91,16 +91,17 @@ const STATUS_TONE: Record<DomainStatus, { color: string; bg: string; border: str
 interface SafeJsonResult {
   ok: boolean
   status: number
+  failure?: string
   body: unknown
 }
 
 async function safeJson(url: string): Promise<SafeJsonResult> {
   try {
     const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
-    if (!res.ok) return { ok: false, status: res.status, body: null }
+    if (!res.ok) return { ok: false, status: res.status, failure: await classifyBffFailure(res), body: null }
     return { ok: true, status: res.status, body: await res.json() }
   } catch {
-    return { ok: false, status: 0, body: null }
+    return { ok: false, status: 0, failure: 'unreachable', body: null }
   }
 }
 
@@ -208,24 +209,46 @@ async function fetchApprovals(): Promise<Patch> {
 }
 
 async function fetchAudit(): Promise<Patch> {
-  const { ok, status } = await safeJson('/api/svc/audit-service/api/v1/audit/entries?limit=1')
-  if (!ok) return unavailable(status === 404 ? 'not_deployed' : status === 401 || status === 403 ? 'unauthorized' : 'unreachable')
+  // Read a single persisted checkpoint. A full integrity walk belongs to the audit service's scheduler.
+  const { ok, failure, body } = await safeJson(svcUrl('audit-service', '/api/v1/audit/anchors', { limit: '1' }))
+  if (!ok) return unavailable(failure ?? 'error')
+  if (!Array.isArray(body)) return unavailable('invalid_evidence')
+  if (body.length === 0) return unavailable('no_audit_checkpoint')
+
+  const [anchor] = body as Array<{ chainStatus?: unknown; signature?: unknown; signedAt?: unknown } | null>
+  if (!anchor || (anchor.chainStatus !== 'INTACT' && anchor.chainStatus !== 'BROKEN')
+    || (anchor.signature != null && typeof anchor.signature !== 'string')
+    || typeof anchor.signedAt !== 'string') return unavailable('invalid_evidence')
+  const capturedAt = Date.parse(anchor.signedAt)
+  if (!Number.isFinite(capturedAt) || capturedAt > Date.now() + 5 * 60_000) return unavailable('invalid_evidence')
+  if (anchor.chainStatus === 'BROKEN') {
+    return { status: 'critical', score: 0, metricCs: 'Kontrolní bod hlásí porušený řetězec', metricEn: 'Checkpoint reports a broken chain' }
+  }
+  if (!anchor.signature?.trim()) {
+    return { status: 'degraded', score: 0, metricCs: 'Poslední kontrolní bod je bez podpisu', metricEn: 'Latest checkpoint is unsigned' }
+  }
+  // The audit-service captures hourly. Allow a missed capture before withholding the score.
+  if (Date.now() - capturedAt >= 2 * 60 * 60_000) return unavailable('stale_audit_checkpoint')
   return {
     status: 'ok', score: 100,
-    metricCs: 'Auditní stopa je aktivní', metricEn: 'Audit trail is active',
+    metricCs: 'Poslední podepsaný kontrolní bod hlásí neporušený řetězec',
+    metricEn: 'Latest signed checkpoint reports an intact chain',
   }
 }
 
 async function fetchIdentity(): Promise<Patch> {
-  const { ok, status, body } = await safeJson(svcUrl('party-service', '/api/v1/parties/cases'))
-  if (!ok) return unavailable(status === 404 ? 'not_deployed' : status === 401 || status === 403 ? 'unauthorized' : 'unreachable')
-  const items = Array.isArray(body) ? body : ((body as { cases?: unknown[] })?.cases ?? [])
-  const open = (items as Array<{ status?: string }>).filter(c => !/closed|approved|rejected/i.test(c.status ?? ''))
+  const { ok, failure, body } = await safeJson(svcUrl('pid-service', '/api/v1/parties/cases'))
+  if (!ok) return unavailable(failure ?? 'error')
+  // PID lists only active cases. Fail closed if the response no longer matches that contract.
+  if (!Array.isArray(body) || !body.every(item => item?.status === 'OPEN' || item?.status === 'AWAITING_SECOND_APPROVAL')) {
+    return unavailable('invalid_evidence')
+  }
+  const open = body.length
   return {
-    status: open.length > 10 ? 'degraded' : 'ok',
-    score: Math.max(0, 100 - open.length * 5),
-    metricCs: `${open.length} otevřených případů identity`,
-    metricEn: `${open.length} open identity cases`,
+    status: open > 10 ? 'degraded' : 'ok',
+    score: Math.max(0, 100 - open * 5),
+    metricCs: `${open} aktivních případů ověření identity`,
+    metricEn: `${open} active identity verification cases`,
   }
 }
 
@@ -262,7 +285,7 @@ async function fetchKpis(): Promise<KpisSnapshotResult> {
   const { ok, body } = await safeJson('/api/security/kpis')
   if (!ok) return { snapshot: null, freshness: 'unavailable' }
   const env = body as { available?: unknown; kpis?: unknown; status?: unknown }
-  if (env.available !== true) return { snapshot: null, freshness: 'unavailable' }
+  if (env?.available !== true) return { snapshot: null, freshness: 'unavailable' }
   try {
     const snapshot = parseSecurityKpis(env.kpis)
     const ageFreshness = classifySecurityKpiFreshness(snapshot.generatedAt)
@@ -281,7 +304,7 @@ async function fetchSegmentation(snap: KpisSnapshot | null): Promise<Patch> {
   // NetworkPolicy coverage KPI (gate netpol-coverage-kpi): na CNI bez audit módu
   // je podíl komponent se zvolenou ingress policy = postoj segmentace.
   const n = snap?.netpol
-  if (!n?.available || n.coveragePct == null) return unavailable('not_deployed')
+  if (!n?.available || n.coveragePct == null) return unavailable('collector_unavailable')
   return {
     status: n.coveragePct < 100 ? 'degraded' : 'ok',
     score: n.coveragePct,
@@ -292,7 +315,7 @@ async function fetchSegmentation(snap: KpisSnapshot | null): Promise<Patch> {
 
 async function fetchFreshness(snap: KpisSnapshot | null): Promise<Patch> {
   const f = snap?.freshness
-  if (!f?.available || f.fleetScore == null) return unavailable('not_deployed')
+  if (!f?.available || f.fleetScore == null) return unavailable('collector_unavailable')
   return {
     status: f.fleetScore < 60 ? 'degraded' : 'ok',
     score: f.fleetScore,
@@ -305,7 +328,7 @@ async function fetchCredentials(snap: KpisSnapshot | null): Promise<Patch> {
   // Long-lived credentials: skóre = podíl statických secretů s rotačním deadlinem;
   // overdue deadline je critical, ne degraded — prošlá rotace je aktivní dluh.
   const c = snap?.credentials
-  if (!c?.available || c.staticSecrets == null) return unavailable('not_deployed')
+  if (!c?.available || c.staticSecrets == null) return unavailable('collector_unavailable')
   const declared = c.withDeadline ?? 0
   const score = c.staticSecrets ? Math.round((declared / c.staticSecrets) * 100) : 100
   return {
@@ -320,7 +343,7 @@ async function fetchFuzz(snap: KpisSnapshot | null): Promise<Patch> {
   // DAST coverage (ADR-0279 #2): podíl in-scope služeb, které poslední api-fuzz běh
   // skutečně profuzzoval (exercised-surface záznam), ne jen zobrazil v job listu.
   const z = snap?.fuzz
-  if (!z?.available || z.coveragePct == null) return unavailable('not_deployed')
+  if (!z?.available || z.coveragePct == null) return unavailable('collector_unavailable')
   // Auth-blocked operations ran no handler logic: say so next to the green, never fold them in.
   const notRun = z.totalNotRun ?? 0
   const blockedSvc = z.authBlockedServices ?? 0
@@ -344,7 +367,7 @@ async function fetchThreatModels(snap: KpisSnapshot | null): Promise<Patch> {
   // (governance pravidlo), model > 90 dní bez změny je stale — prose, které nikdo
   // nepřepočítal proti kódu.
   const m = snap?.threatModels
-  if (!m?.available || m.moneyPathTotal == null) return unavailable('not_deployed')
+  if (!m?.available || m.moneyPathTotal == null) return unavailable('collector_unavailable')
   const pct = Math.round(100 * (m.withModel ?? 0) / m.moneyPathTotal)
   const missing = (m.withModel ?? 0) < m.moneyPathTotal
   return {
@@ -360,7 +383,12 @@ async function fetchMttr(snap: KpisSnapshot | null): Promise<Patch> {
   // kritická zranitelnost > 14 dní je critical postoj; median fix čas se ukáže,
   // jakmile historie existuje.
   const v = snap?.mttr
-  if (!v?.available) return unavailable('not_deployed')
+  if (!v?.available) {
+    const reason = v?.reason
+    return unavailable(reason === 'dependabot_access_unavailable' || reason?.startsWith('dependabot alerts API answered 403')
+      ? 'dependabot_access_unavailable'
+      : 'collector_unavailable')
+  }
   const open = v.openCount ?? 0
   const oldest = v.oldestOpenDays ?? 0
   const median = v.medianFixDays != null ? `median fix ${v.medianFixDays} d` : 'zatím bez fix dat'
@@ -403,22 +431,22 @@ const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
   { id: 'sbom',      icon: Package,        href: '/system/inventory',
     nameCs: 'Supply chain (SBOM)', nameEn: 'Supply Chain (SBOM)',
     descCs: 'Image↔GitOps drift, inventář komponent, CVE', descEn: 'Image↔GitOps drift, component inventory, CVEs' },
-  { id: 'segmentation', icon: Network,     href: '/security/excellence',
+  { id: 'segmentation', icon: Network,
     nameCs: 'Segmentace sítě', nameEn: 'Network Segmentation',
     descCs: 'NetworkPolicy coverage KPI — podíl komponent s ingress policy', descEn: 'NetworkPolicy coverage KPI — share of components with ingress policy' },
-  { id: 'freshness', icon: TrendingUp,     href: '/security/excellence',
+  { id: 'freshness', icon: TrendingUp,
     nameCs: 'Čerstvost závislostí', nameEn: 'Dependency Freshness',
     descCs: 'Fleet skóre 0–100 z catalog pinů vs Maven Central', descEn: 'Fleet score 0–100 from catalog pins vs Maven Central' },
-  { id: 'credentials', icon: KeyRound,     href: '/security/excellence',
+  { id: 'credentials', icon: KeyRound,
     nameCs: 'Dlouhožijící credentials', nameEn: 'Long-lived Credentials',
     descCs: 'Statické ExternalSecrets s rotačním deadlinem', descEn: 'Static ExternalSecrets carrying a rotation deadline' },
-  { id: 'fuzz', icon: Bug,                 href: '/security/excellence',
+  { id: 'fuzz', icon: Bug,
     nameCs: 'DAST pokrytí', nameEn: 'DAST Coverage',
     descCs: 'Schemathesis nightly — skutečně profuzzované služby, ne job list', descEn: 'Schemathesis nightly — services actually fuzzed, not the job list' },
-  { id: 'threatmodels', icon: FileClock,   href: '/security/excellence',
+  { id: 'threatmodels', icon: FileClock,
     nameCs: 'Čerstvost threat modelů', nameEn: 'Threat-model Freshness',
     descCs: 'Money-path pokrytí a stáří modelů — stale model je prose, ne kontrola', descEn: 'Money-path coverage and model age — a stale model is prose, not a control' },
-  { id: 'mttr', icon: Timer,               href: '/security/excellence',
+  { id: 'mttr', icon: Timer,
     nameCs: 'CVE remediation', nameEn: 'CVE Remediation',
     descCs: 'SLO S1 proxy: otevřené kritické zranitelnosti a median čas opravy', descEn: 'SLO S1 proxy: open critical vulns and median time to fix' },
 ]
@@ -453,7 +481,7 @@ export default function SecurityExcellencePage() {
     })
     const withFreshKpis = async (select: (snapshot: KpisSnapshot) => Promise<Patch>): Promise<Patch> => {
       const evidence = await kpisSnapshot
-      if (!evidence.snapshot) return unavailable('not_deployed')
+      if (!evidence.snapshot) return unavailable('missing_kpi_snapshot')
       if (evidence.freshness === 'stale') return unavailable('stale_snapshot')
       return select(evidence.snapshot)
     }
@@ -533,6 +561,14 @@ export default function SecurityExcellencePage() {
     switch (reason) {
       case 'not_deployed': return t('Nenasazeno v tomto prostředí', 'Not deployed in this environment')
       case 'unauthorized': return t('Role bez oprávnění', 'Role lacks permission')
+      case 'not_found': return t('Datový endpoint nenalezen', 'Data endpoint not found')
+      case 'scaled_to_zero': return t('Nasazená služba je uspána', 'Deployed service is scaled to zero')
+      case 'discovery_unavailable': return t('Registr služeb neodpovídá', 'Service discovery unavailable')
+      case 'missing_kpi_snapshot': return t('Chybí společný zdroj KPI', 'Shared KPI evidence unavailable')
+      case 'dependabot_access_unavailable': return t('Sběr nemá přístup k alertům Dependabot', 'Collector cannot read Dependabot alerts')
+      case 'collector_unavailable': return t('Sběr této metriky nedodal data', 'Collector supplied no evidence')
+      case 'no_audit_checkpoint': return t('Auditní služba zatím nemá kontrolní bod', 'Audit service has no checkpoint yet')
+      case 'stale_audit_checkpoint': return t('Poslední kontrolní bod je starší než dvě hodiny', 'Latest checkpoint is older than two hours')
       case 'unreachable':  return t('Služba neodpovídá', 'Service unreachable')
       case 'invalid_evidence': return t('Neplatná evidence — skóre zadrženo', 'Invalid evidence — score withheld')
       case 'stale_snapshot': return t('Bezpečnostní KPI snímek je zastaralý', 'Security KPI snapshot is stale')
@@ -578,11 +614,13 @@ export default function SecurityExcellencePage() {
             {grade && <div style={{ marginTop: 6, display: 'inline-block', padding: '2px 12px', borderRadius: 999, fontWeight: 700, color: gradeTone(grade).text, background: gradeTone(grade).bg, border: `1px solid ${gradeTone(grade).border}` }}>{grade}</div>}
           </div>
           <div style={{ flex: 1 }}>
-            <strong>{t('Skóre excelence platformy', 'Platform excellence score')}</strong>
+            <strong>{answered < total
+              ? t('Dílčí skóre bezpečnosti', 'Partial security score')
+              : t('Skóre bezpečnosti platformy', 'Platform security score')}</strong>
             <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 14 }}>
               {t(
-                `Vážený průměr ${answered} z ${total} domén, které odpověděly. Domény označené „Nedostupné" skóre nesnižují — degradace je vidět na kartách, ne skrytá v čísle.`,
-                `Weighted average of ${answered} of ${total} responding domains. Domains marked “Unavailable” do not drag the score down — degradation is visible on the cards, not hidden in the number.`,
+                `Vážený průměr z ${answered} z celkem ${total} disciplín s aktuální evidencí.`,
+                `Weighted average using current evidence from ${answered} of ${total} disciplines.`,
               )}
             </p>
             {liveCheckedAt && (
@@ -608,45 +646,48 @@ export default function SecurityExcellencePage() {
           {domains.map(d => {
             const tone = STATUS_TONE[d.status]
             const Icon = d.icon
-            return (
+            const card = (
+              <article style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--surface-1)' }}>
+                <header style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Icon size={18} aria-hidden="true" />
+                  <strong style={{ flex: 1 }}>{language === 'cs' ? d.nameCs : d.nameEn}</strong>
+                  <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 999, color: tone.color, background: tone.bg, border: `1px solid ${tone.border}` }}>
+                    {statusLabel(d.status)}
+                  </span>
+                </header>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-tertiary)' }}>
+                  {language === 'cs' ? d.descCs : d.descEn}
+                </p>
+                <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {d.status === 'unavailable' ? (
+                    <span style={{ fontSize: 13, color: tone.color }}>{reasonLabel(d.unavailableReason)}</span>
+                  ) : d.status === 'loading' ? (
+                    <span style={{ fontSize: 13, color: tone.color }} role="status">{t('Načítám…', 'Loading…')}</span>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 22, fontWeight: 700, color: gradeTone(gradeFor(d.score ?? 0)).text }}>{d.score}</span>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1 }}>
+                        {language === 'cs' ? d.metricCs : d.metricEn}
+                      </span>
+                    </>
+                  )}
+                  {d.href && <ArrowRight size={14} aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />}
+                </div>
+              </article>
+            )
+            return d.href ? (
               <Link key={d.id} href={d.href} style={{ textDecoration: 'none', color: 'inherit' }}
                 aria-label={`${language === 'cs' ? d.nameCs : d.nameEn} — ${statusLabel(d.status)}`}>
-                <article style={{ border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', height: '100%', display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--surface-1)' }}>
-                  <header style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Icon size={18} aria-hidden="true" />
-                    <strong style={{ flex: 1 }}>{language === 'cs' ? d.nameCs : d.nameEn}</strong>
-                    <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 10px', borderRadius: 999, color: tone.color, background: tone.bg, border: `1px solid ${tone.border}` }}>
-                      {statusLabel(d.status)}
-                    </span>
-                  </header>
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-tertiary)' }}>
-                    {language === 'cs' ? d.descCs : d.descEn}
-                  </p>
-                  <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {d.status === 'unavailable' ? (
-                      <span style={{ fontSize: 13, color: tone.color }}>{reasonLabel(d.unavailableReason)}</span>
-                    ) : d.status === 'loading' ? (
-                      <span style={{ fontSize: 13, color: tone.color }} role="status">{t('Načítám…', 'Loading…')}</span>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: 22, fontWeight: 700, color: gradeTone(gradeFor(d.score ?? 0)).text }}>{d.score}</span>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1 }}>
-                          {language === 'cs' ? d.metricCs : d.metricEn}
-                        </span>
-                      </>
-                    )}
-                    <ArrowRight size={14} aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--text-tertiary)' }} />
-                  </div>
-                </article>
+                {card}
               </Link>
-            )
+            ) : <div key={d.id}>{card}</div>
           })}
         </section>
 
         <p style={{ marginTop: 20, fontSize: 12, color: 'var(--text-tertiary)' }}>
           {t(
-            'Hub agreguje read-only signály nad specializovanými obrazovkami — žádná z nich není nahrazena; každá karta vede na její detail. Zdroje: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service, /api/sbom/drift.',
-            'The hub aggregates read-only signals over the specialised screens — none of them is replaced; every card drills through to its detail. Sources: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service, /api/sbom/drift.',
+            'Hub agreguje read-only signály nad specializovanými obrazovkami — žádná z nich není nahrazena; Zdroje: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, pid-service, /api/sbom/drift, /api/security/kpis.',
+            'The hub aggregates read-only signals over the specialised screens — none of them is replaced; Sources: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, pid-service, /api/sbom/drift, /api/security/kpis.',
           )}
         </p>
       </div>

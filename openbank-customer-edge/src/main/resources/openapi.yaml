@@ -65,7 +65,7 @@ info:
   # 1.94.0 -> 1.95.0 (#16000): additive — documents the 409 PAYMENT_NOT_ACCEPTED and the 503
   # PAYMENT_TEMPORARILY_UNAVAILABLE / PAYMENT_STATUS_UNKNOWN that POST /domestic-payments answers for a DELEGATED payment
   # once the reservation-bound create is switched on. Request shape unchanged.
-  version: 1.95.0
+  version: 1.96.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3846,6 +3846,15 @@ paths:
                     enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
         '404':
           description: Payment not found, or not owned by the caller (no existence oracle)
+        '503':
+          description: The payment status service is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: {type: string}
 
   /sepa-payments:
     post:

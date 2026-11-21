@@ -51,7 +51,7 @@ Idempotency-Key: 5e9f8b6a-7c3d-4e1f-9a2b-1c8f7e6d5a4b
   "debtorAccountNumber": "19-2000145399",
   "debtorBankCode": "0800",
   "debtorName": "Jan Novák",
-  "creditorAccountNumber": "123456789",
+  "creditorAccountNumber": "123456788",
   "creditorBankCode": "0100",
   "creditorName": "ČEZ a.s.",
   "amount": 1500.00,
@@ -77,7 +77,7 @@ Content-Type: application/json
   "id": "…uuid…",
   "status": "VALIDATED",      // or RECEIVED (held for review / screening down) / REJECTED (sanctions hit)
   "debtorAccountId": "…",
-  "creditorAccountNumber": "123456789",
+  "creditorAccountNumber": "123456788",
   "creditorBankCode": "0100",
   "amount": 1500.00,
   "currency": "CZK",
@@ -91,6 +91,7 @@ Content-Type: application/json
 - The returned `status` reflects the synchronous screening outcome (see [02 — Architecture](./02-architecture.md)): `VALIDATED` (clear), `RECEIVED` (held for review or screening unavailable), or `REJECTED` with `rejectReason=SANCTIONS_HIT`.
 - `endToEndId` is generated if not supplied (`DOM<priority-initial><epoch-millis><rand>`).
 - `transferScope=TECHNICAL_ACCOUNT` requires `technicalAccountCode`.
+- Debtor and creditor accounts (`prefix-base` + 4-digit bank code) must be issuable Czech accounts: at most 6 prefix and 10 base digits, and both parts must pass the CNB mod-11 checksum (Decree 169/2011). Otherwise the request is a 400 `VALIDATION_ERROR` naming the field, before the `Idempotency-Key` is bound. The same rule applies to batch draft items and to the delegated create (#16748). The scheme adapter builds the IBAN as `CZ` + check digits + `bankCode(4)` + `prefix(6)` + `base(10)`. A stored payment whose account fails the rule is not transmitted: it ends `REJECTED` with `INVALID_ACCOUNT_NUMBER` (ISO reason `AC01`).
 - A `domestic.payment.created` outbox event is written in the same transaction; a `domestic.payment.status-changed` event follows if screening transitions the payment.
 
 ### Get a payment
@@ -204,6 +205,11 @@ currency and `Idempotency-Key` must match it. Refusals are `409` with a `code`:
 `RESERVATION_MISMATCH` (neutral) or `IDEMPOTENCY_KEY_REUSED`; `503 ACCOUNT_AUTHORITY_UNAVAILABLE` is
 retryable. A retry with the same key replays the one payment. The payment's events carry
 `delegationId` and `reservationId`.
+
+The create-time authority re-check (ADR-0375 D1) answers `409 DELEGATION_AUTHORITY_WITHDRAWN`
+when the grant was revoked or no longer covers the account. It refuses a NEW debit only: a retry
+with the key of the payment already bound to the reservation replays that payment, because the
+money moved while the grant was live. A new key against a bound reservation is still refused.
 
 ## Customer submission lookup
 

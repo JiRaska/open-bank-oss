@@ -1,5 +1,66 @@
 # Changelog
 
+## [4.21.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.0...admin-ui-v4.21.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore security excellence evidence ([#16493](https://github.com/JiRaska/open-bank-oss/issues/16493)) ([19698b6](https://github.com/JiRaska/open-bank-oss/commit/19698b6dd1984e30799d59afd17418b699e744ca))
+
+## [4.21.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.20.0...admin-ui-v4.21.0) (2026-11-17)
+
+
+### Features
+
+* **admin-ui:** explain the customer MCP channel with repo-derived control status ([#16610](https://github.com/JiRaska/open-bank-oss/issues/16610)) ([88a1002](https://github.com/JiRaska/open-bank-oss/commit/88a10024593737e759ab70e8b95407657b8a1351))
+
+## [4.20.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.1...admin-ui-v4.20.0) (2026-11-17)
+
+
+### Features
+
+* **infra:** produce the standing-critical digest in-cluster behind a GET-only Alertmanager relay ([#16557](https://github.com/JiRaska/open-bank-oss/issues/16557)) ([a1c1b84](https://github.com/JiRaska/open-bank-oss/commit/a1c1b8423cc79e5331d8f4302e60ee10114b5518))
+
+
+### Security
+
+* **sanctions:** agent as four-eyes maker on behalf of a person, human checker ([#16455](https://github.com/JiRaska/open-bank-oss/issues/16455)) ([5748892](https://github.com/JiRaska/open-bank-oss/commit/57488924909878bba2957fdf4a787e8dfaedde2b))
+
+## [4.19.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.0...admin-ui-v4.19.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** screen against sanctions v3 so CZ_TERRORISTS works ([#16383](https://github.com/JiRaska/open-bank-oss/issues/16383)) ([73e4470](https://github.com/JiRaska/open-bank-oss/commit/73e4470aae106e699736242e85145bf309044f68))
+
+## [4.19.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.18.1...admin-ui-v4.19.0) (2026-11-16)
+
+
+### Features
+
+* **risk-engine:** expose snapshot-only liquidity runoff ([#16407](https://github.com/JiRaska/open-bank-oss/issues/16407)) ([69dc401](https://github.com/JiRaska/open-bank-oss/commit/69dc401972dbfda994d5f1e9c53723c7fa869b88))
+
+## [4.18.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.18.0...admin-ui-v4.18.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** attribute six live simulation scenarios in Test Intelligence ([#16409](https://github.com/JiRaska/open-bank-oss/issues/16409)) ([6b177b6](https://github.com/JiRaska/open-bank-oss/commit/6b177b624d7bb2d89632b5ae130a14e9ff54ea92)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
+## [4.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.1...admin-ui-v4.18.0) (2026-11-15)
+
+
+### Features
+
+* **admin-ui:** derive /docs/compliance from the obligation-control-evidence trace ([#16164](https://github.com/JiRaska/open-bank-oss/issues/16164)) ([d582cd8](https://github.com/JiRaska/open-bank-oss/commit/d582cd8cc81560f8d3d2441d45733f46cab0fe3d))
+
+## [4.17.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.17.0...admin-ui-v4.17.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **admin-ui:** filter regulatory obligations and preserve filing entities ([#16362](https://github.com/JiRaska/open-bank-oss/issues/16362)) ([cf461e6](https://github.com/JiRaska/open-bank-oss/commit/cf461e6a42e0e0864e7748b07d4a95029873441e))
+
 ## [4.17.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.16.0...admin-ui-v4.17.0) (2026-11-15)
 
 
