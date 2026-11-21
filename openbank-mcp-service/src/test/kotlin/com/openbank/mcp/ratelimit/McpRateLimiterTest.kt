@@ -100,4 +100,30 @@ class McpRateLimiterTest {
 
         assertThat(limiter.tryAcquire("agent:a")).isTrue()
     }
+
+    @Test
+    fun `refusal-only traffic cannot grow the counter map without bound`() {
+        val start = Instant.parse("2026-11-18T10:00:00Z")
+        val limiter = limiterAt(start)
+        repeat(12_000) { limiter.shouldAuditThrottle("refused-only-$it") }
+        assertThat(limiter.trackedWindows).isEqualTo(12_000)
+        // Two minutes later every one of those windows has closed; the next audit-window check prunes them.
+        limiter.clock = Clock.fixed(start.plus(Duration.ofMinutes(2)), ZoneOffset.UTC)
+        limiter.shouldAuditThrottle("after")
+        assertThat(limiter.trackedWindows).isEqualTo(1)
+    }
+
+    @Test
+    fun `a flood over the tracked-window cap triggers at most one full prune per minute`() {
+        val limiter = limiterAt(Instant.parse("2026-11-18T10:00:30Z"))
+        repeat(12_000) { limiter.shouldAuditThrottle("same-minute-$it") }
+        assertThat(limiter.pruneRunCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `a shared bucket has no daily budget`() {
+        val limiter = limiterAt(Instant.parse("2026-11-18T10:00:00Z")).apply { sharedCallsPerMinute = 5_000 }
+        val outcomes = (1..1_001).map { limiter.checkShared("client-x") }
+        assertThat(outcomes.last()).isEqualTo(McpRateLimiter.Outcome.ALLOWED)
+    }
 }

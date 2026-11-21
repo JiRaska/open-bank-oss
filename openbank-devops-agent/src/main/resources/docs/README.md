@@ -21,3 +21,16 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Consumer-driven findings contract
+
+The Admin UI consumer contract calls the real `/api/devops/insights` BFF handler against a
+Pact mock server for `GET /api/v1/devops/findings`. It covers an empty list and an active
+finding, including nullable fields. A separate consumer test refuses an anonymous caller
+before any provider request.
+
+Provider verification runs the real HTTP resource with PostgreSQL-backed provider states.
+The local verifier reads the generated Pact; the broker verifier uses `@PactBroker` with
+pending Pacts disabled. A local pass does not publish a broker result and does not establish
+`can-i-deploy`. Those verdicts must name the exact verified provider and consumer versions.
+Adding this contract does not enable delivery shadow sampling or qualify an older image.

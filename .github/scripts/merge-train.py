@@ -90,6 +90,9 @@ REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
 STATUS_CONTEXT = "merge-train"
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
 BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
+# The App merge-train.yml hands update-branch (UPDATE_BRANCH_TOKEN). Measured on #16719's branch
+# (68c7fffab4, c96091eef2): author openbank-branch-updater[bot], committer web-flow, verified (#16947).
+BRANCH_UPDATER_LOGIN = "openbank-branch-updater[bot]"
 BOT_ID = 305_862_397                             # its numeric user id (carrier #13817); merge_train_carrier pins it too
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
@@ -122,6 +125,29 @@ URGENT_PREEMPT_CONTEXT = "merge-train/urgent-preempted"   # App marker: this hea
 URGENT_DAILY_CAP_DEFAULT = 2       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
 URGENT_CLOCK_CONTEXT = "merge-train/urgent-since"     # App marker: first tick this head outranked the other lanes
 URGENT_DROPPED_CONTEXT = "merge-train/urgent-dropped"  # App marker: this head's urgent priority was dropped
+# Deploy fix claim (#16943). A main red on a provider CONTRACT job can be fixed only by deploying the
+# consumer pair whose pact it verifies: the auto-deploy gitops PR changes image pins under
+# openbank-infra/gitops/, so path-scoped CI never re-runs the contract job on its head and
+# fix_job_evidence reads it `(absent)` forever — the train deadlocks (2026-11-20, #16940). Such a PR may
+# claim the fix slot only when ALL hold, each read from git or the Actions API, never from the PR body:
+# authored by the App; its head branch is auto-deploy's `chore/gitops-auto-deploy-<sha>-run<id>`; every
+# changed line is an image pin under gitops/components whose new tag is built from that <sha>; the run
+# <id> is auto-deploy.yml over main at <sha>, an ancestor of main, and its `can-i-deploy` job (red if
+# ANY service is blocked) succeeded; every job red on main for the context, besides the aggregate
+# itself, is a `(contract)` job; and the OWNER applied DEPLOY_FIX_LABEL today, within a daily cap.
+# The label is the human step, not decoration: a provider job names the provider, not the consumers it
+# verifies, so "these pins fix that job" is not derivable from names, and a push to the bot branch that
+# swaps a digest under the same tag is not visible to these checks. Everything unknown refuses.
+DEPLOY_FIX_LABEL = "merge-priority:deploy-fix"
+DEPLOY_FIX_DAILY_CAP = 1
+AUTO_DEPLOY_WORKFLOW = ".github/workflows/auto-deploy.yml"
+DEPLOY_BRANCH_RE = re.compile(r"chore/gitops-auto-deploy-([0-9a-f]{40})-run([1-9][0-9]{0,19})")
+GITOPS_PIN_PREFIX = "openbank-infra/gitops/components/"
+CONTRACT_JOB_RE = re.compile(r".*\(contract\)")
+# One image pin, sign stripped: (indent, registry/repository, service, tag).
+PIN_LINE_RE = re.compile(r"([ \t]*)image:[ \t]*([A-Za-z0-9.:_-]+/openbank-([a-z0-9-]+)):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}[ \t]*")
+ISO_Z_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+DEPLOY_REQUIRED_JOBS = ("can-i-deploy", "Gitops PR")
 # A picked urgent PR leaves that state within one or two ticks (update-branch, or merge). 60 min is two
 # TRAIN_TURN_S (each two */10 ticks at the measured p90 gap) and covers one carrier in flight finishing; past
 # it the PR is not progressing, and it must not hold the train's and the fast lane's turns any longer.
@@ -833,6 +859,38 @@ def live_source_intent(gh, number: int, head: str) -> bool:
         return owner_approval_valid(number, ref, app)
 
 
+def already_merged_member(gh, git, number: int, head: str, expected: str) -> str | None:
+    """#16932: the merge commit when GitHub's native auto-merge already merged this carrier member at
+    exactly the verified head, directly over the main the train expected (first parent == `expected`)
+    and that commit is on live main. None otherwise, so the caller stops (fail closed).
+
+    A member stays armed while it rides a carrier, so auto-merge can race the train's own merge call
+    (runs 44711788330 / #16776 and 44800662763 / #16915). The squash is then the one the train would
+    have made: same head, same base. A different head, a merge over another main, a merge commit not on
+    main, or closed-unmerged is never treated as success.
+
+    Governance trade-off, deliberately NOT decided here: disabling native auto-merge for train-eligible
+    PRs would let the train own every member merge and remove this race; but arming (auto_merge set) is
+    today the author's intent signal live_source_intent reads, and native auto-merge is the fallback
+    that still merges a green PR when the train is paused or broken. Keeping it costs this tolerance.
+    """
+    pr = gh.pr(number)
+    if not isinstance(pr, dict) or pr.get("number") != number or pr.get("merged") is not True:
+        return None
+    source, merge = pr.get("head"), pr.get("merge_commit_sha")
+    if (not isinstance(source, dict) or source.get("sha") != head
+            or not isinstance(merge, str) or not re.fullmatch(r"[0-9a-f]{40}", merge)):
+        return None
+    if git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/native-main", check=False).returncode != 0:
+        return None
+    if git("merge-base", "--is-ancestor", merge, "refs/merge-train/native-main", check=False).returncode != 0:
+        return None
+    parent = git("rev-parse", "--verify", "-q", f"{merge}^1", check=False)
+    if parent.returncode != 0 or parent.stdout.strip() != expected:
+        return None
+    return merge
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -1015,6 +1073,54 @@ def parse_selftest_inputs(text: str) -> dict[str, list[str]]:
     return out
 
 
+GATE_CMD_KEYS_RE = re.compile(r"^\s+(run|selftest):\s*(.*)$")   # NOT selftest_inputs: those are the gate's SUBJECTS
+PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./@-]*/[A-Za-z0-9_./@-]*$")   # after normpath: repo-relative, has a `/`
+
+
+def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]:
+    """(files, directories) every repo path the gates.yaml entries of `gate_ids` name in `run` and
+    `selftest` — the code that JUDGES — by simple tokenisation of those strings (security review of #16832:
+    gates run scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py, which no
+    prefix covers). NOT `selftest_inputs`: those are the SUBJECTS a gate checks (eight services' src/main
+    for event-contract-code-agreement); a subject edit cannot make a red gate pass vacuously, at worst it
+    breaks it, and refusing it would send exactly the legitimate main-red fixes (#16599's class) to a
+    human — the inverse of #16675. A token with `/` and an extension is a file; a `/`-token without one,
+    or ending in `/`, a directory. Tokens split on whitespace, shell punctuation AND `:` (PYTHONPATH-style
+    lists), normalised with posixpath.normpath (`./x`, `a/./b`); `..`-relative and absolute tokens, globs,
+    `$VAR`s, flags and URLs are dropped — never a blanket refusal for an odd slash token: over-refusal is
+    what bit before. No import parsing, no spawn."""
+    files: set[str] = set()
+    dirs: set[str] = set()
+    gid, key = None, None
+    for ln in text.splitlines():
+        m = GATE_ID_RE.match(ln)
+        if m:
+            gid, key = m.group(1), None
+            continue
+        if gid not in gate_ids:
+            continue
+        m = GATE_CMD_KEYS_RE.match(ln)
+        if m:
+            key, rest = m.group(1), m.group(2)
+        elif key is not None and (ln.startswith("      ") or ln.strip().startswith("- ")):
+            rest = ln
+        else:
+            key = None
+            continue
+        for tok in re.split(r"[\s\"'|;&()<>=,:\[\]`]+", rest):
+            if not tok or tok.startswith(("$", "-", "#", "/")) or "*" in tok or "{" in tok or "/" not in tok:
+                continue
+            as_dir = tok.endswith("/")
+            p = posixpath.normpath(tok)
+            if p.startswith("..") or p == "." or not PATH_TOKEN_RE.match(p):
+                continue
+            if as_dir or not re.search(r"\.[A-Za-z0-9]+$", p.rsplit("/", 1)[-1]):
+                dirs.add(p + "/")
+            else:
+                files.add(p)
+    return files, dirs
+
+
 def selftest_skip_refusal(main_jobs: dict[str, str | None] | None, records: dict[str, list | None] | None,
                           head_files: list[str], declared: dict[str, list[str]] | None) -> str | None:
     """Why a head green on every gate shard red on main still does NOT prove it fixes that shard, or
@@ -1064,6 +1170,16 @@ def selftest_skip_refusal(main_jobs: dict[str, str | None] | None, records: dict
 FIX_JOB_LEVEL = 1        # every job red on main ran green on the head (gate results unreadable on the head)
 FIX_GATE_VERIFIED = 2    # ...and every gate red on main is `ok` in the head's own gate-results artifact
 FIX_STRENGTH_KEY = "fix_strength"   # cache slot: (FIX_STRENGTH_KEY, head sha, context) -> level
+NOT_FIX_HEAD_KEY = ("not_fix_head",)   # cache slot: PR number -> head sha the refusal in NOT_FIX_KEY is about
+FIX_CLAIM_CONTEXT = "merge-train/fix-claim"   # App marker: why this head was refused as a main-red fix (publish_fix_claims)
+# The JUDGE (security review of 75ca372b, HIGH): a fix claim may not edit anything that judges it. A
+# dependency parser was tried first and could not be made to follow the fleet's own `__file__` idioms —
+# run-gates.py itself read as UNKNOWN, every gate shard's fix claim was refused, and main-red recovery
+# was defeated. So no parsing: a fail-closed PREFIX rule over the trees that hold gate scripts and their
+# helpers, the workflows, the actions, and the gate manifest, baselines and measurements.
+FIX_JUDGE_PREFIXES = (".github/scripts/", ".github/workflows/", ".github/actions/", ".github/gates/")
+FIX_JUDGE_FILES = (".github/scripts/run-gates.py",                  # covered by the prefixes; named so the rule reads whole
+                   "openbank-libs/governance/rules.yaml")             # the governance rules gates read (as in JUDGE_PATHS)
 
 
 RED_GATE_STATES = ("failed", "unfalsified")
@@ -1128,22 +1244,6 @@ def trusted_head_records(head_records: dict[str, list | None] | None, main_jobs:
     base = {m.group(1) for n in (main_jobs or {}) for m in [GATE_SHARD_JOB_RE.fullmatch(n)] if m}
     return {slug: recs for slug, recs in head_records.items()
             if slug in base and (head_jobs or {}).get(f"gates ({slug})") in OK_STATES}
-
-
-def parse_gate_scripts(text: str) -> dict[str, set[str]]:
-    """gate id -> every `.github/scripts/...` path its gates.yaml entry names (run, selftest, inputs),
-    by line scan: the scripts that JUDGE that gate."""
-    out: dict[str, set[str]] = {}
-    gid = None
-    for ln in text.splitlines():
-        m = GATE_ID_RE.match(ln)
-        if m:
-            gid = m.group(1)
-            out.setdefault(gid, set())
-            continue
-        if gid is not None:
-            out[gid].update(re.findall(r"\.github/scripts/[A-Za-z0-9_./-]+", ln))
-    return out
 
 
 def fix_strength(cache: dict | None, view: dict, ctxs: list[str]) -> int:
@@ -1257,7 +1357,7 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     return out
 
 
-def urgent_grant(events, owner: str) -> tuple[str | None, str]:
+def urgent_grant(events, owner: str, label: str = URGENT_LABEL) -> tuple[str | None, str]:
     """(labelled_at, why). The LATEST `labeled` event for URGENT_LABEL decides: only the repo owner may have
     applied it (anyone else re-applying it after the owner takes the grant away). Fail closed: unreadable
     events, no such event, or an event without a timestamp grant nothing."""
@@ -1265,20 +1365,20 @@ def urgent_grant(events, owner: str) -> tuple[str | None, str]:
         return None, "label events unreadable"
     last = None
     for e in events:
-        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL:
+        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label:
             last = e
     if last is None:
-        return None, f"no readable {URGENT_LABEL} label event"
+        return None, f"no readable {label} label event"
     actor = (last.get("actor") or {}).get("login") or ""
     if actor != owner:
-        return None, f"{URGENT_LABEL} applied by {actor or 'unknown'}, not the repo owner {owner}"
+        return None, f"{label} applied by {actor or 'unknown'}, not the repo owner {owner}"
     at = last.get("created_at") or ""
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T.*", at):
         return None, "label event carries no timestamp"
     return at, ""
 
 
-def urgent_grants(events, owner: str, day: str) -> dict[int, str]:
+def urgent_grants(events, owner: str, day: str, label: str = URGENT_LABEL) -> dict[int, str]:
     """{PR: its FIRST owner `labeled merge-priority:urgent` event on UTC `day`} from repository issue events.
     An event is never deleted, so removing the label afterwards does not uncount a grant, and re-applying it
     to the same PR counts once."""
@@ -1286,29 +1386,30 @@ def urgent_grants(events, owner: str, day: str) -> dict[int, str]:
     for e in events or []:
         at = e.get("created_at") or ""
         n = (e.get("issue") or {}).get("number")
-        if (e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL
+        if (e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label
                 and (e.get("actor") or {}).get("login") == owner and at[:10] == day and isinstance(n, int)):
             out[n] = min(out.get(n, at), at)
     return out
 
 
-def urgent_refusal(n: int, events, owner: str, grants: dict | None, cap: int, day: str) -> str | None:
+def urgent_refusal(n: int, events, owner: str, grants: dict | None, cap: int, day: str,
+                   label: str = URGENT_LABEL) -> str | None:
     """Why #n's urgent label grants nothing; None = admitted. The latest label event must be the owner's
     (urgent_grant) and fall on UTC `day`: a grant lasts the day it was made, so yesterday's grants never
     carry over uncounted. `grants` = every PR the owner granted on `day` (urgent_grants over a COMPLETE
     enumeration; None = incomplete -> refused); #n must be among its first `cap` by grant time."""
-    at, why = urgent_grant(events, owner)
+    at, why = urgent_grant(events, owner, label)
     if at is None:
         return why
     if at[:10] != day:
         return f"granted on {at[:10]}, not today ({day}): a grant lasts its UTC day — re-apply to use today's cap"
     if grants is None:
-        return "today's urgent grants could not be enumerated completely"
+        return f"today's {label} grants could not be enumerated completely"
     if n not in grants:
         return "today's grant enumeration does not contain this PR's own grant (incomplete)"
     rank = sorted(grants, key=lambda k: (grants[k], k)).index(n)
     if rank >= cap:
-        return f"daily cap reached ({rank + 1} urgent PRs granted on {day}, cap {cap})"
+        return f"daily cap reached ({rank + 1} PRs granted {label} on {day}, cap {cap})"
     return None
 
 
@@ -2912,6 +3013,38 @@ class GitHub:
             out[name] = v if out.get(name, v) == v else None   # two jobs, one name, disagreeing: not green
         return out or None
 
+    def workflow_run(self, run_id: int) -> dict | None:
+        """The Actions run object (path, head_sha, head_branch), or None when unreadable (callers fail closed)."""
+        code, data = api("GET", f"/repos/{self.repo}/actions/runs/{int(run_id)}")
+        return data if code == 200 and isinstance(data, dict) else None
+
+    def compare_commits(self, base: str, head: str) -> list[dict] | None:
+        """The commits of base...head as {sha, author, committer, verified, date, parents}; None when
+        unreadable or truncated (the compare API lists at most 250)."""
+        code, data = api("GET", f"/repos/{self.repo}/compare/{base}...{head}")
+        if code != 200 or not isinstance(data, dict) or not isinstance(data.get("commits"), list):
+            return None
+        cs = data["commits"]
+        if data.get("total_commits") != len(cs):
+            return None
+        return [{"sha": c.get("sha"), "author": (c.get("author") or {}).get("login"),
+                 "committer": (c.get("committer") or {}).get("login"),
+                 "verified": ((c.get("commit") or {}).get("verification") or {}).get("verified"),
+                 "date": ((c.get("commit") or {}).get("committer") or {}).get("date"),
+                 "parents": len(c.get("parents") or [])} for c in cs if isinstance(c, dict)]
+
+    def run_jobs(self, run_id: int) -> dict[str, str | None] | None:
+        """Latest-attempt job name -> conclusion (None while running) of run `run_id`; None when unreadable
+        or two jobs of one name disagree being indistinguishable is folded to None like ctx_jobs."""
+        out: dict[str, str | None] = {}
+        for j in paginate(f"/repos/{self.repo}/actions/runs/{int(run_id)}/jobs?filter=latest", "jobs"):
+            name = j.get("name") if isinstance(j, dict) else None
+            if not isinstance(name, str):
+                return None
+            v = j.get("conclusion") if j.get("status") == "completed" else None
+            out[name] = v if out.get(name, v) == v else None
+        return out or None
+
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
         """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
         NOT EVALUATED), from the gate runner's own --json artifacts — never from the log. Any read that
@@ -3089,7 +3222,7 @@ class GitHub:
                 return out
         return None   # more than 1000 events: cannot be read whole, so it is not read at all
 
-    def urgent_grants_today(self, day: str, owner: str) -> dict[int, str] | None:
+    def urgent_grants_today(self, day: str, owner: str, label: str = URGENT_LABEL) -> dict[int, str] | None:
         """urgent_grants over the repository's issue events for UTC `day`, newest first. Authoritative: an
         event exists the moment the label is applied (no search index), and a removed label leaves its
         `labeled` event in place. Complete once a page reaches before `day` or the stream ends; None when a
@@ -3102,7 +3235,7 @@ class GitHub:
                 return None
             seen += data
             if len(data) < 100 or any((e.get("created_at") or "9")[:10] < day for e in data):
-                return urgent_grants(seen, owner, day)
+                return urgent_grants(seen, owner, day, label)
         log(f"::warning::{URGENT_EVENT_PAGES} event pages do not reach back to {day} — no PR admitted as urgent")
         return None
 
@@ -3205,7 +3338,7 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
     return {"number": p["number"], "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
             "same_repo": (p["head"].get("repo") or {}).get("full_name") == repo, "head_ref": p["head"]["ref"],
             "head_sha": p["head"]["sha"], "created_at": p.get("created_at", ""), "title": p.get("title", ""),
-            "body": p.get("body") or "", "files": files,
+            "body": p.get("body") or "", "files": files, "author": (p.get("user") or {}).get("login"),
             "labels": [lb.get("name") if isinstance(lb, dict) else lb for lb in p.get("labels") or []]}
 
 
@@ -3839,6 +3972,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     stuck: list = []
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
     not_fix: dict[int, str] = {}   # summary["not_fix"]: refusals from EVERY settle view this tick, not just the last
+    not_fix_heads: dict[int, str] = {}   # PR number -> the head the refusal was about (publish_fix_claims)
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
     relevant = served_relevant_fixes(gh, git, base, strict, main_red, main_cache)
@@ -4069,8 +4203,15 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             expected = live_main
             for i, (n, head) in enumerate(chain[1]):
                 if not live_source_intent(gh, n, head):
-                    log(f"#{n} source intent or head changed since the train was verified; stopping")
-                    break
+                    native = None if shadow else already_merged_member(gh, git, n, head, expected)
+                    if native is None or (stacked_steps and git.tree(native) != git.tree(stacked_steps[i])):
+                        log(f"#{n} source intent or head changed since the train was verified; stopping")
+                        break
+                    # #16932: native auto-merge won the race at the verified head over the expected main.
+                    log(f"#{n} already merged by native auto-merge at the verified head ({native[:12]}); continuing")
+                    expected = native
+                    summary.setdefault("native_merged", []).append(n)
+                    continue
                 if not shadow and gh.main_sha() != expected:
                     log("main advanced by a foreign merge; stopping, the next tick rebuilds")
                     break
@@ -4158,6 +4299,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             Pusher(git, branch, gh.remote).delete()
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
         not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
+        not_fix_heads.update(main_cache.get(NOT_FIX_HEAD_KEY, {}))
         base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
         relevant = served_relevant_fixes(gh, git, base, strict, main_red, main_cache)
         urgent = urgent_expire(gh, strict, urgent_prs(gh, repo, strict, urgent_cap), time.time(), shadow)
@@ -4240,8 +4382,12 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why, relevant=relevant, urgent=urgent)
     not_fix.update(main_cache.get(NOT_FIX_KEY, {}))
+    not_fix_heads.update(main_cache.get(NOT_FIX_HEAD_KEY, {}))
     if not_fix:
         summary["not_fix"] = dict(sorted(not_fix.items()))
+        posted = publish_fix_claims(gh, base, not_fix, not_fix_heads, shadow)
+        if posted:
+            summary["fix_claim_posted"] = posted
     if summary.get("main_health_deferred"):
         return summary
     stack_head = next((v["head_sha"] for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -4444,6 +4590,173 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     return age is None or age <= CARRIER_PRIORITY_S
 
 
+def selftest_deploy_fix(check) -> None:
+    """#16943: an App-authored auto-deploy PR may claim a main-red CONTRACT context only on the full
+    evidence of deploy_fix_refusal. Built on the real #16940 shape (two image pins, run 44740185064, one
+    App commit committed by web-flow, main red on a libs-runtime contract job), then every must-FAIL
+    case, then the live path (claim_evidence -> deploy_fix_claim) over a stubbed GitHub and git."""
+    AG, CJ = "all-green", "build (openbank-libs-runtime) / openbank-libs-runtime (contract)"
+    src, run_id, day = "730965564a4ff9706b4817238ded37e367281c25", 44740185064, "2026-11-20"
+    reg = "registry.example"
+    pin = lambda sign, svc, tag, c, r=reg: f"{sign}          image: {r}/openbank-{svc}:{tag}@sha256:{c * 64}"
+    files = ["openbank-infra/gitops/components/customer-edge/customer-edge.yaml",
+             "openbank-infra/gitops/components/payments/payments-services.yaml"]
+    entries = [("M", "100644", "100644", f) for f in files]
+    def block(f, hunks):
+        out = [f"diff --git a/{f} b/{f}", "index 1111111..2222222 100644", f"--- a/{f}", f"+++ b/{f}"]
+        for h in hunks:
+            out += ["@@ -1 +1 @@"] + h
+        return out
+    ce = [pin("-", "customer-edge", "sandbox-abaa92c7", "3"), pin("+", "customer-edge", "sandbox-73096556", "0")]
+    dp = [pin("-", "domestic-payment", "sandbox-7e9d36e9", "7"), pin("+", "domestic-payment", "sandbox-73096556", "1")]
+    mk = lambda ce_h=ce, dp_h=dp, extra=(): "\n".join(block(files[0], [ce_h]) + block(files[1], [dp_h]) + list(extra))
+    diff = mk()
+    head = "5a25b16b195fa1f74c5720b597437e392ccd71f7"
+    view = {"number": 16940, "author": BOT_LOGIN, "head_sha": head,
+            "head_ref": f"chore/gitops-auto-deploy-{src}-run{run_id}", "labels": ["chore", "gitops", DEPLOY_FIX_LABEL]}
+    main_jobs = {CJ: "failure", AG: "failure", "build (openbank-x)": "success"}
+    run = {"id": run_id, "path": AUTO_DEPLOY_WORKFLOW, "head_sha": src, "head_branch": "main"}
+    run_jobs = {"Detect changed services": "success", "Build + push": "success", "can-i-deploy": "success",
+                "Gitops PR": "success", "Push failures": "skipped"}
+    bot_commit = {"sha": head, "author": BOT_LOGIN, "committer": "web-flow", "verified": True,
+                  "date": f"{day}T13:07:43Z", "parents": 1}
+    label_at = f"{day}T13:30:00Z"
+    base = dict(view=view, ctx=AG, main_jobs=main_jobs, entries=entries, diff=diff, run=run, run_jobs=run_jobs,
+                src_on_main=True, label_why=None, commits=[bot_commit], label_at=label_at)
+    got = deploy_fix_refusal(**base)
+    check("deploy fix: the real #16940 shape is admitted", got is None, str(got))
+    update_merge = {**bot_commit, "sha": "c" * 40, "date": f"{day}T14:00:00Z", "parents": 2}
+    got = deploy_fix_refusal(**{**base, "commits": [bot_commit, update_merge]})
+    check("deploy fix: the train's own update-branch merge after the label still admits", got is None, str(got))
+    human = {**bot_commit, "sha": "d" * 40, "author": "JiRaska", "committer": "JiRaska", "date": f"{day}T14:00:00Z"}
+    # The real shape of a train update-branch merge (#16719's 68c7fffab4, #16947).
+    updater_merge = {**update_merge, "author": BRANCH_UPDATER_LOGIN, "committer": "web-flow", "verified": True}
+    got = deploy_fix_refusal(**{**base, "commits": [bot_commit, updater_merge]})
+    check("deploy fix: the branch-updater App's real update-branch merge admits", got is None, str(got))
+    for label, change, want in [
+        ("a non-bot author", {"view": {**view, "author": "JiRaska"}}, "is not"),
+        ("an unknown author", {"view": {k: v for k, v in view.items() if k != "author"}}, "is not"),
+        ("a branch that is not auto-deploy's", {"view": {**view, "head_ref": "agent/pins"}}, "not an auto-deploy"),
+        ("an extra file outside gitops", {"entries": entries + [("M", "100644", "100644", ".github/scripts/merge-train.py")]},
+         "not a gitops image-pin file"),
+        ("an extra non-yaml gitops file", {"entries": entries + [("M", "100644", "100644", "openbank-infra/gitops/components/x/run.sh")]},
+         "not a gitops"),
+        ("a new file", {"entries": entries + [("A", "000000", "100644", "openbank-infra/gitops/components/x/new.yaml")]}, "plain modification"),
+        ("a deleted file", {"entries": [("D", "100644", "000000", files[0]), entries[1]]}, "plain modification"),
+        ("a renamed file", {"entries": [("R100", "100644", "100644", files[0]), entries[1]]}, "plain modification"),
+        ("a mode change", {"entries": [("M", "100644", "100755", files[0]), entries[1]]}, "plain modification"),
+        ("a new-file header in the diff", {"diff": mk(extra=block("openbank-infra/gitops/components/x/n.yaml", [])[:1]
+                                                        + ["new file mode 100644"])}, "plain modification"),
+        ("an extra non-pin line in a gitops file", {"diff": mk(ce_h=ce + ["+          replicas: 3"])}, "not an image pin"),
+        ("an added `++evil: true` line", {"diff": mk(ce_h=[ce[0], "+++evil: true", ce[1]])}, "not an image pin"),
+        ("a removed `---` YAML separator", {"diff": mk(ce_h=[ce[0], "----", ce[1]])}, "not an image pin"),
+        ("a pin moved to a foreign registry host",
+         {"diff": mk(ce_h=[ce[0], pin("+", "customer-edge", "sandbox-73096556", "0", "evil.example")])}, "registry or repository"),
+        ("an unreadable diff", {"diff": None}, "unreadable"),
+        ("unreadable files", {"entries": None}, "unreadable"),
+        ("a pin not built from the run's source (carried)",
+         {"diff": mk(dp_h=[dp[0], pin("+", "domestic-payment", "sandbox-deadbeef", "1")])}, "not built from"),
+        ("a pin added for a service it did not remove",
+         {"diff": mk(dp_h=[dp[0], pin("+", "ledger", "sandbox-73096556", "1")])}, "registry or repository"),
+        ("a human commit pushed after the label", {"commits": [bot_commit, human]}, "not the App's verified commit"),
+        ("an unverified App-authored commit", {"commits": [{**bot_commit, "verified": False}]}, "not the App's verified"),
+        ("an App-authored commit committed by a human", {"commits": [{**bot_commit, "committer": "JiRaska"}]}, "not the App's"),
+        ("a human-authored merge", {"commits": [bot_commit, {**updater_merge, "author": "JiRaska"}]}, "not the App's verified"),
+        ("an unverified branch-updater merge", {"commits": [bot_commit, {**updater_merge, "verified": False}]}, "not the App's verified"),
+        ("a merge by another App", {"commits": [bot_commit, {**updater_merge, "author": "dependabot[bot]"}]}, "not the App's verified"),
+        ("a non-merge commit by the branch-updater App",
+         {"commits": [bot_commit, {**updater_merge, "parents": 1}]}, "not the App's verified"),
+        ("unreadable commits", {"commits": None}, "unreadable"),
+        ("a label applied before the last push", {"label_at": f"{day}T13:00:00Z"}, "before the last commit"),
+        ("an unreadable label time", {"label_at": None}, "unreadable"),
+        ("a missing can-i-deploy job", {"run_jobs": {k: v for k, v in run_jobs.items() if k != "can-i-deploy"}}, "can-i-deploy"),
+        ("a failed can-i-deploy job", {"run_jobs": {**run_jobs, "can-i-deploy": "failure"}}, "can-i-deploy"),
+        ("a can-i-deploy still running", {"run_jobs": {**run_jobs, "can-i-deploy": None}}, "can-i-deploy"),
+        ("unreadable run jobs", {"run_jobs": None}, "can-i-deploy"),
+        ("an unreadable run", {"run": None}, "unreadable"),
+        ("a run of another workflow", {"run": {**run, "path": ".github/workflows/ci.yml"}}, "is not"),
+        ("a run over another commit", {"run": {**run, "head_sha": "f" * 40}}, "is not"),
+        ("a run over another branch", {"run": {**run, "head_branch": "agent/x"}}, "is not"),
+        ("a run id that does not match the branch", {"run": {**run, "id": run_id + 1}}, "is not"),
+        ("a source not on main", {"src_on_main": False}, "not on main"),
+        ("main red on an unrelated, non-contract job (unrelated service)",
+         {"main_jobs": {**main_jobs, "build (openbank-ledger-service)": "failure"}}, "not a contract job"),
+        ("main red only on the aggregate", {"main_jobs": {AG: "failure", CJ: "success"}}, "no failed job"),
+        ("no job record for main", {"main_jobs": None}, "no job record"),
+        ("a missing or refused owner label", {"label_why": f"no readable {DEPLOY_FIX_LABEL} label event"}, "label"),
+    ]:
+        got = deploy_fix_refusal(**{**base, **change})
+        check(f"deploy fix must FAIL: {label}", got is not None and want in got, str(got))
+
+    # Live path: claim_evidence over a stub GitHub/git. The job rule refuses (the contract job is absent
+    # on the head), the deploy path admits — and refuses again without the label or without its grant.
+    class G:
+        repo = "JiRaska/open-bank-oss"
+        def __init__(self, events, grants, cid="success", commits=(bot_commit,)):
+            self.events, self.grants, self.cid, self.commits = events, grants, cid, list(commits)
+        def ctx_jobs(self, sha, ctx):
+            return main_jobs if sha == "m" * 40 else {AG: "success"}
+        def workflow_run(self, rid):
+            return run if rid == run_id else None
+        def run_jobs(self, rid):
+            return {**run_jobs, "can-i-deploy": self.cid} if rid == run_id else None
+        def compare_commits(self, mb, h):
+            return self.commits if (mb, h) == (src, head) else None
+        def issue_events(self, n):
+            return self.events
+        def urgent_grants_today(self, d, owner, label=URGENT_LABEL):
+            return self.grants if label == DEPLOY_FIX_LABEL else {}
+
+    class R:
+        def __init__(self, out="", rc=0):
+            self.stdout, self.returncode = out, rc
+    raw = "".join(f":100644 100644 {'a' * 7} {'b' * 7} M\0{f}\0" for f in files)
+    def git(*args, check=True):
+        if args[0] == "diff" and "--raw" in args:
+            return R(raw)
+        if args[0] == "diff":
+            return R(diff)
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            return R("", 0 if args[2] == src else 1)
+        if args[0] == "merge-base":
+            return R(src + "\n")
+        return R("", 1)
+    owner_ev = [{"event": "labeled", "label": {"name": DEPLOY_FIX_LABEL}, "actor": {"login": "JiRaska"},
+                 "created_at": label_at}]
+    grant = {16940: label_at}
+    now = datetime.datetime(2026, 11, 20, 15, tzinfo=datetime.timezone.utc).timestamp()
+    def live(gh, v=view):
+        cache: dict = {}
+        why = fix_evidence(gh, git, "b" * 40, AG, "m" * 40, v["head_sha"], cache)
+        d = deploy_fix_claim(gh, git, "b" * 40, AG, "m" * 40, v, cache, now=now)
+        return why, d
+    why, d = live(G(owner_ev, grant))
+    check("deploy fix live: the job rule alone refuses #16940 (the deadlock)", why is not None and "absent" in why, str(why))
+    check("deploy fix live: the owner-labelled #16940 shape is admitted", d is None, str(d))
+    _w, d = live(G([{**owner_ev[0], "actor": {"login": "some-agent"}}], {}))
+    check("deploy fix live must FAIL: label applied by someone other than the owner", d is not None and "not the repo owner" in d, str(d))
+    _w, d = live(G(owner_ev, {1: f"{day}T09:00:00Z", **grant}))
+    check("deploy fix live must FAIL: over the daily cap", d is not None and "daily cap" in d, str(d))
+    _w, d = live(G(owner_ev, None))
+    check("deploy fix live must FAIL: grants not enumerable", d is not None and "enumerated" in d, str(d))
+    _w, d = live(G(owner_ev, grant, cid="failure"))
+    check("deploy fix live must FAIL: can-i-deploy failed in the run", d is not None and "can-i-deploy" in d, str(d))
+    _w, d = live(G(owner_ev, grant, commits=[bot_commit, human]))
+    check("deploy fix live must FAIL: a human commit pushed after the label", d is not None and "verified commit" in d, str(d))
+    _w, d = live(G(owner_ev, grant, commits=[{**bot_commit, "date": f"{day}T14:00:00Z"}]))
+    check("deploy fix live must FAIL: the label predates the last push", d is not None and "before the last commit" in d, str(d))
+    d = deploy_fix_claim(G(owner_ev, grant), git, "b" * 40, AG, "m" * 40, {**view, "labels": ["chore", "gitops"]}, {}, now=now)
+    check("deploy fix live must FAIL: no label", d is not None and DEPLOY_FIX_LABEL in d, str(d))
+    gh = G(owner_ev, grant)
+    cache: dict = {}
+    check("deploy fix live: claim_evidence admits and records a job-level strength",
+          claim_evidence(gh, git, "b" * 40, AG, "m" * 40, view, cache, now=now) is None
+          and cache.get((FIX_STRENGTH_KEY, view["head_sha"], AG), (0,))[0] == FIX_JOB_LEVEL)
+    w = claim_evidence(gh, git, "b" * 40, AG, "m" * 40, {**view, "author": "JiRaska"}, {}, now=now)
+    check("deploy fix live must FAIL: claim_evidence keeps the job-rule refusal for a non-bot author",
+          w is not None and "deploy fix" not in w, str(w))
+
+
 def selftest_skip_fix_self_test(check) -> None:
     """A head green on a gate shard whose red on main is a SELF-TEST (unfalsified) is a fix only if its
     own run executed that self-test (2026-11-17: #16627/#16644 served as fixes of
@@ -4537,7 +4850,8 @@ def selftest_skip_fix_self_test(check) -> None:
           "judge rule (security review of 7ca5c4a1): it is merged by a human, never by its own verdict",
           got == [] and "changes the judge" in why, f"{got} {why}")
     got, why, gh, _c = live(unf, ["openbank-x/src/k/E.kt"])
-    check("live: a block-list declared directory counts", got == [MR], f"{got} {why}")
+    check("live: a block-list declared directory counts — a declared input is a SUBJECT, never judge code, so the head is the fix",
+          got == [MR], f"{got} {why}")
     got, why, gh, _c = live(content, ["openbank-y/Foo.kt"])
     check("live: a content failure on the shard keeps today's behaviour (the fix is accepted)", got == [MR], f"{got} {why}")
     got, why, gh, _c = live(None, [".github/scripts/check-g1.py"])
@@ -4723,9 +5037,119 @@ def gate_level_fix_self_test(check) -> None:
     got = fix_contexts(gh, git, mb, {"number": 9, "head_sha": A}, {MR: main_c}, cache)
     check("LOW-4: a non-gate job red on main is judged by job evidence alone, no artifact read, worded as such",
           got == [MR] and gh.reads == [] and rec(A) == (J, "job-level (no gate red on main)"), f"{got} reads={gh.reads} {rec(A)}")
-    check("gate scripts: the gates.yaml entry's scripts are found per id",
-          parse_gate_scripts(gates_text + "  - id: g2\n    selftest: |\n      python3 .github/scripts/t.py --self-test\n    run: true\n")
-          == {"adr-registry": {".github/scripts/check-adr-registry.py"}, "g2": {".github/scripts/t.py"}})
+    # Follow-ups (review LOWs of #16760) and the HIGH of 75ca372b: the judge is a PREFIX rule, not a parser.
+    judge_edits = {"g" * 40: ".github/scripts/gatelib.py", "i" * 40: ".github/actions/setup/action.yml",
+                   "2" * 40: ".github/scripts/lib/probe.sh", "4" * 40: ".github/scripts/selftest_input_trace.py",
+                   "5" * 40: ".github/gates/selftest-undeclared-inputs.baseline", "6" * 40: ".github/gates/gates.yaml",
+                   "7" * 40: ".github/scripts/run-gates.py", "8" * 40: ".github/gates/gate-runtime-measurements.json",
+                   "0" * 40: "openbank-libs/governance/rules.yaml"}
+    service_edits = {"9" * 40: "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/Foo.kt", "1" * 40: "docs/adr/0009-q.md"}
+    files.update(judge_edits); files.update(service_edits)
+    for h_ in list(judge_edits) + list(service_edits):
+        heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    gh, cache = _Gh(heads), {}
+    got = {h_: fix_contexts(gh, git, mb, {"number": i + 20, "head_sha": h_}, {MR: main_c}, cache)
+           for i, h_ in enumerate(list(judge_edits) + list(service_edits))}
+    nf = cache.get(NOT_FIX_KEY, {})
+    for i, (h_, path) in enumerate(judge_edits.items()):
+        check(f"judge prefix: a head editing {path} is refused as a fix, naming the path",
+              got[h_] == [] and "changes the judge" in nf.get(i + 20, "") and path in nf.get(i + 20, ""), f"{got[h_]} {nf.get(i + 20)}")
+    for h_ in service_edits:
+        check(f"judge prefix: a head editing only {service_edits[h_].split('/')[0]} with the red gate ok is the fix, gate-verified",
+              got[h_] == [MR] and rec(h_)[0] == V, f"{got[h_]} {rec(h_)}")
+    check("judge prefix: every universal self-test input (the runner's data) lies under the judge prefixes",
+          all(p.startswith(FIX_JUDGE_PREFIXES) for p in UNIVERSAL_SELFTEST_INPUTS), str(UNIVERSAL_SELFTEST_INPUTS))
+    check("refusal visibility: note_not_fix records the head the refusal is about",
+          cache.get(NOT_FIX_HEAD_KEY, {}).get(20) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
+    # Paths a RED gate's entry names outside .github/ (security review of #16832): tokenised, both revs.
+    gates_named = ("gates:\n  - id: adr-registry\n    run: |\n      python3 openbank-infra/scripts/check-db-migration.py --root docs/adr/ > /dev/null\n"
+                   "    selftest_inputs: [\"openbank-infra/scripts/lib/db.py\"]\n"
+                   "  - id: green-one\n    run: python3 openbank-infra/scripts/other.py\n")
+    fs, ds = gate_named_paths(gates_named, {"adr-registry"})
+    check("named paths: a red gate's run/selftest yield its files and directories; its selftest_inputs (subjects) and a green gate's paths do not",
+          fs == {"openbank-infra/scripts/check-db-migration.py"} and "docs/adr/" in ds
+          and "openbank-infra/scripts/lib/db.py" not in fs and "openbank-infra/scripts/other.py" not in fs, f"{fs} {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: n\n    run: |\n      PYTHONPATH=a:openbank-infra/scripts python3 ./openbank-infra/scripts/x.py openbank-infra/./scripts/y.py ../up.py /dev/null --root=docs/adr/\n", {"n"})
+    check("named paths: `./x`, `a/./b` normalise, `PYTHONPATH=a:dir` splits on `:`, `..` and absolute tokens are dropped",
+          fs == {"openbank-infra/scripts/x.py", "openbank-infra/scripts/y.py"} and ds == {"openbank-infra/scripts/", "docs/adr/"}, f"{fs} {ds}")
+    def ngit(*a, **_k):
+        if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
+            return _R(0, gates_named)
+        return git(*a, **_k)
+    named_edits = {"a" * 39 + "2": "openbank-infra/scripts/check-db-migration.py", "a" * 39 + "3": "docs/adr/0011-under-named-dir.md",
+                   "a" * 39 + "4": "openbank-infra/scripts/lib/db.py", "a" * 39 + "5": "openbank-infra/scripts/other.py"}
+    files.update(named_edits)
+    for h_ in named_edits:
+        heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    gh_n, cache_n = _Gh(heads), {}
+    got_n = {h_: fix_contexts(gh_n, ngit, mb, {"number": i + 40, "head_sha": h_}, {MR: main_c}, cache_n) for i, h_ in enumerate(named_edits)}
+    nf_n = cache_n.get(NOT_FIX_KEY, {})
+    check("named paths (live): a head editing the script a RED gate's run names (outside .github/) is refused, naming the path",
+          got_n["a" * 39 + "2"] == [] and "check-db-migration.py" in nf_n.get(40, "") and "names in its run/selftest" in nf_n.get(40, ""), f"{got_n['a' * 39 + '2']} {nf_n.get(40)}")
+    check("named paths (live): a head editing a file under a directory the red gate's run names is refused",
+          got_n["a" * 39 + "3"] == [] and "docs/adr/0011-under-named-dir.md" in nf_n.get(41, ""), f"{got_n['a' * 39 + '3']} {nf_n.get(41)}")
+    check("named paths (live): a head editing a red gate's declared selftest INPUT outside .github/ is still the fix, gate-verified "
+          "(subjects are not judge code)",
+          got_n["a" * 39 + "4"] == [MR] and 42 not in nf_n and cache_n.get((FIX_STRENGTH_KEY, "a" * 39 + "4", MR), (0, ""))[0] == V,
+          f"{got_n['a' * 39 + '4']} {nf_n.get(42)}")
+    check("named paths (live): a script named only by a gate GREEN on main does not refuse — still the fix",
+          got_n["a" * 39 + "5"] == [MR] and 43 not in nf_n, f"{got_n['a' * 39 + '5']} {nf_n.get(43)}")
+    gates_norm = ("gates:\n  - id: adr-registry\n    run: |\n      PYTHONPATH=a:openbank-infra/lib python3 ./openbank-infra/scripts/x.py openbank-infra/./scripts/y.py\n")
+    def mgit(*a, **_k):
+        if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
+            return _R(0, gates_norm)
+        return git(*a, **_k)
+    norm_edits = {"a" * 39 + "6": "openbank-infra/scripts/x.py", "a" * 39 + "7": "openbank-infra/scripts/y.py", "a" * 39 + "8": "openbank-infra/lib/helper.py"}
+    files.update(norm_edits)
+    for h_ in norm_edits:
+        heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
+    gh_m, cache_m = _Gh(heads), {}
+    got_m = {h_: fix_contexts(gh_m, mgit, mb, {"number": i + 50, "head_sha": h_}, {MR: main_c}, cache_m) for i, h_ in enumerate(norm_edits)}
+    nf_m = cache_m.get(NOT_FIX_KEY, {})
+    check("named paths (live): `./openbank-infra/scripts/x.py` in a red gate's run resolves — a head editing x.py is refused",
+          got_m["a" * 39 + "6"] == [] and "openbank-infra/scripts/x.py" in nf_m.get(50, ""), f"{got_m['a' * 39 + '6']} {nf_m.get(50)}")
+    check("named paths (live): `openbank-infra/./scripts/y.py` resolves — a head editing y.py is refused",
+          got_m["a" * 39 + "7"] == [] and "openbank-infra/scripts/y.py" in nf_m.get(51, ""), f"{got_m['a' * 39 + '7']} {nf_m.get(51)}")
+    check("named paths (live): `PYTHONPATH=a:openbank-infra/lib` names the directory — a head editing a file under it is refused",
+          got_m["a" * 39 + "8"] == [] and "openbank-infra/lib/helper.py" in nf_m.get(52, ""), f"{got_m['a' * 39 + '8']} {nf_m.get(52)}")
+    # REAL text, not a synthetic fixture (the HIGH of 75ca372b was invisible to every fixture): the runner on
+    # this checkout uses `__file__` in shapes a parser did not follow; the prefix rule needs none of that.
+    runner = pathlib.Path(".github/scripts/run-gates.py")
+    if runner.is_file():
+        text = runner.read_text(encoding="utf-8")
+        check("real run-gates.py: it uses `__file__` (the shapes that defeated the parser) and a head editing it is refused by the prefix rule alone",
+              text.count("__file__") >= 1 and ".github/scripts/run-gates.py".startswith(FIX_JUDGE_PREFIXES)
+              and got["7" * 40] == [] and "run-gates.py" in nf.get(26, ""), f"__file__ x{text.count('__file__')} {nf.get(26)}")
+
+    class _GhMask:
+        def __init__(self, jobs):
+            self.jobs = jobs
+        def ctx_jobs(self, sha, _ctx):
+            return self.jobs[sha]
+    check("masking: a head with the same failing job as main may be masked",
+          masked_no_worse(_GhMask({"m": {MR: "failure", "A": "failure"}, "h": {MR: "failure", "A": "failure"}}), MR, "h", "m", {}))
+    check("masking: a head red on the context with NO failing job (inconsistent) never masks",
+          not masked_no_worse(_GhMask({"m": {MR: "failure"}, "h": {MR: "success"}}), MR, "h", "m", {}))
+    check("masking: a head failing an extra job never masks",
+          not masked_no_worse(_GhMask({"m": {MR: "failure"}, "h": {MR: "failure", "B": "failure"}}), MR, "h", "m", {}))
+
+    class _GhPost:
+        def __init__(self, existing=None):
+            self.existing, self.posted = existing or {}, []
+        def app_statuses(self, sha):
+            return self.existing.get(sha, {})
+        def post_status(self, sha, state, desc, context=STATUS_CONTEXT, **_kw):
+            self.posted.append((sha, state, desc, context))
+    g = _GhPost()
+    p = publish_fix_claims(g, "m" * 40, {5: "the head changes the judge (x)"}, {5: "1" * 40}, shadow=False)
+    check("refusal visibility: the reason is posted as the App's merge-train/fix-claim status on the refused head",
+          p == [5] and g.posted == [("1" * 40, "failure", "not a fix over main mmmmmmmmmmmm: the head changes the judge (x)", FIX_CLAIM_CONTEXT)], str(g.posted))
+    g = _GhPost({"1" * 40: {FIX_CLAIM_CONTEXT: ("failure", "not a fix over main mmmmmmmmmmmm: the head changes the judge (x)")}})
+    check("refusal visibility: idempotent — the same reason over the same main posts nothing",
+          publish_fix_claims(g, "m" * 40, {5: "the head changes the judge (x)"}, {5: "1" * 40}, False) == [] and g.posted == [])
+    check("refusal visibility: shadow posts nothing; a refusal with no recorded head posts nothing",
+          publish_fix_claims(_GhPost(), "m" * 40, {5: "x"}, {5: "1" * 40}, True) == [] and publish_fix_claims(_GhPost(), "m" * 40, {5: "x"}, {}, False) == [])
+
 
 def fix_preempts_strict_self_test(check) -> None:
     """ADR-0343 amendment 2026-11-14: on a red main a fix pre-empts a strict reservation whose CI is still
@@ -5872,12 +6296,225 @@ def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[st
     return f"did not run green on the head: {', '.join(missing)}" if missing else None
 
 
+def pin_changes(diff: str | None) -> tuple[list[tuple[str, str, str]], str | None]:
+    """([(service, new tag, new ref)], why-not) of a `git diff -U0` text. Parsed by structure, never by
+    line prefix: a file block's header runs from `diff --git` to its first `@@`, and only `index`,
+    `--- a/` and `+++ b/` may appear there (a new, deleted, renamed, copied, mode-changed or binary file
+    refuses). Inside a hunk every `-`/`+` line is CONTENT — an added `++x` or a removed `---` YAML
+    separator is a changed line like any other, and must be an image pin. Each hunk must replace pins
+    one for one, and a new pin must keep the replaced line's indentation and exact registry/repository:
+    only the tag and digest may change."""
+    if diff is None:
+        return [], "diff unreadable"
+    out: list[tuple[str, str, str]] = []
+    state, rem, add = "none", [], []
+
+    def close() -> str | None:
+        if len(rem) != len(add):
+            return "a hunk does not replace image pins one for one"
+        for r, a in zip(rem, add, strict=True):
+            if (r.group(1), r.group(2)) != (a.group(1), a.group(2)):
+                return f"a pin changes its registry or repository ({r.group(2)} -> {a.group(2)})"
+            out.append((a.group(3), a.group(4), a.group(2)))
+        rem.clear()
+        add.clear()
+        return None
+
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            why = close()
+            if why:
+                return [], why
+            state = "header"
+            continue
+        if state == "header":
+            if line.startswith("@@ "):
+                state = "hunk"
+            elif not (line.startswith("index ") or line.startswith("--- a/") or line.startswith("+++ b/")):
+                return [], f"not a plain modification of an existing file: {line[:60]!r}"
+            continue
+        if state != "hunk":
+            return [], f"unparseable diff line: {line[:60]!r}"
+        if line.startswith("@@ "):
+            why = close()
+            if why:
+                return [], why
+            continue
+        if line.startswith("\\"):
+            continue   # "\ No newline at end of file"
+        if not line.startswith(("+", "-")):
+            return [], f"unexpected diff line: {line[:60]!r}"
+        m = PIN_LINE_RE.fullmatch(line[1:])
+        if not m:
+            return [], f"changes a line that is not an image pin: {line[:60]!r}"
+        (add if line[0] == "+" else rem).append(m)
+    why = close()
+    if why:
+        return [], why
+    if not out:
+        return [], "changes no image pin"
+    return out, None
+
+
+def deploy_fix_refusal(view: dict, ctx: str, main_jobs: dict[str, str | None] | None,
+                       entries: list[tuple[str, str, str, str]] | None, diff: str | None, run: dict | None,
+                       run_jobs: dict[str, str | None] | None, src_on_main: bool, label_why: str | None,
+                       commits: list[dict] | None = None, label_at: str | None = None) -> str | None:
+    """Why `view` may NOT claim the fix slot for `ctx` as an auto-deploy gitops PR (see DEPLOY_FIX_LABEL),
+    or None when it may. Pure: every input was read by deploy_fix_claim from git or the API. `entries` are
+    (status, old mode, new mode, path) of base...head; `commits` the head's commits since the merge-base
+    (GitHub.compare_commits); `label_at` the owner's latest label event time.
+
+    Trust anchor: the run publishes its built digests nowhere this script can read, so the pins are not
+    cross-checked against the build. What ties the pins to the run is that every commit is the App's —
+    authored by it and committed by it or by GitHub on its behalf (`web-flow`, which is how the API
+    commits of auto-deploy and the train's own update-branch merges are committed), with a signature
+    GitHub verified — and that the owner's label is newer than every non-merge commit, so a push after
+    the label withdraws the grant."""
+    if view.get("author") != BOT_LOGIN:
+        return f"author {view.get('author') or 'unknown'} is not {BOT_LOGIN}"
+    m = DEPLOY_BRANCH_RE.fullmatch(view.get("head_ref") or "")
+    if not m:
+        return "head branch is not an auto-deploy gitops branch"
+    src, run_id = m.group(1), int(m.group(2))
+    if not entries:
+        return "changed files unreadable"
+    for status, old_mode, new_mode, path in entries:
+        if status != "M" or old_mode != "100644" or new_mode != "100644":
+            return f"{path}: {status} {old_mode}->{new_mode} is not a plain modification of a regular file"
+        if unsafe_path(path) or not path.startswith(GITOPS_PIN_PREFIX) or not path.endswith(".yaml"):
+            return f"changes {path}, not a gitops image-pin file"
+    pins, why = pin_changes(diff)
+    if why:
+        return why
+    stale = [f"{s}:{t}" for s, t, _r in pins if not t.endswith(f"-{src[:8]}")]
+    if stale:
+        return f"pin {stale[0]} was not built from the run's source {src[:12]} (a carried or foreign pin)"
+    if not commits:
+        return "the head's commits are unreadable"
+    for c in commits:
+        # A merge commit (two parents) may also be the train's own update-branch merge, authored by the
+        # branch-updater App (#16947); its content is still bounded by the pin-only base...head diff above.
+        authors = (BOT_LOGIN, BRANCH_UPDATER_LOGIN) if c.get("parents") == 2 else (BOT_LOGIN,)
+        if not (c.get("author") in authors and c.get("committer") in (BOT_LOGIN, "web-flow") and c.get("verified") is True):
+            return (f"commit {str(c.get('sha'))[:12]} is not the App's verified commit "
+                    f"(author {c.get('author')}, committer {c.get('committer')}, verified {c.get('verified')})")
+    if not isinstance(run, dict):
+        return f"auto-deploy run {run_id} unreadable"
+    if (run.get("id") != run_id or run.get("path") != AUTO_DEPLOY_WORKFLOW or run.get("head_sha") != src
+            or run.get("head_branch") != "main"):
+        return f"run {run_id} is not {AUTO_DEPLOY_WORKFLOW} over main at {src[:12]}"
+    if not src_on_main:
+        return f"the run's source {src[:12]} is not on main"
+    missing = [j for j in DEPLOY_REQUIRED_JOBS if (run_jobs or {}).get(j) != "success"]
+    if missing:
+        return f"run {run_id} job `{missing[0]}` did not succeed ({(run_jobs or {}).get(missing[0]) or 'absent'})"
+    if not main_jobs:
+        return "no job record for main's red run"
+    failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK and n != ctx)
+    if not failed:
+        return "main's red run names no failed job besides the aggregate"
+    other = [n for n in failed if not CONTRACT_JOB_RE.fullmatch(n)]
+    if other:
+        return f"main is red on `{other[0]}`, not a contract job: a deploy cannot fix it"
+    if label_why:
+        return label_why
+    pushed = [str(c.get("date") or "") for c in commits if c.get("parents") != 2]
+    if not label_at or not pushed or any(not ISO_Z_RE.fullmatch(d) for d in pushed + [label_at]):
+        return "label or commit times unreadable"
+    if label_at <= max(pushed):
+        return f"{DEPLOY_FIX_LABEL} was applied ({label_at}) before the last commit ({max(pushed)}): re-apply it"
+    return None
+
+
+def deploy_fix_claim(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None,
+                     now: float | None = None) -> str | None:
+    """None = `view`'s head claims `ctx` as an auto-deploy fix (deploy_fix_refusal). The cheap refusals
+    (author, label, branch) cost no API read; the rest is read once per head and context per tick."""
+    if view.get("author") != BOT_LOGIN:
+        return deploy_fix_refusal(view, ctx, None, None, None, None, None, False, None)
+    if DEPLOY_FIX_LABEL not in (view.get("labels") or []):
+        return f"no {DEPLOY_FIX_LABEL} label"
+    m = DEPLOY_BRANCH_RE.fullmatch(view.get("head_ref") or "")
+    head = view.get("head_sha") or ""
+    if not m or not SHA_RE.fullmatch(head):
+        return deploy_fix_refusal({**view, "head_ref": ""}, ctx, None, None, None, None, None, False, None)
+    key = ("deploy_fix", view.get("number"), head, ctx, main_commit)
+    if cache is not None and key in cache:
+        return cache[key]
+    src, run_id = m.group(1), int(m.group(2))
+    r = git("diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--no-textconv", f"{base}...{head}", check=False)
+    diff = r.stdout if r.returncode == 0 else None
+    entries = [(c.status, c.old_mode, c.new_mode, p) for c in changed_entries(git, f"{base}...{head}") for p in c.paths]
+    src_on_main = git("merge-base", "--is-ancestor", src, base, check=False).returncode == 0
+    mb = git("merge-base", base, head, check=False).stdout.strip()
+    commits = gh.compare_commits(mb, head) if SHA_RE.fullmatch(mb) else None
+    owner = (getattr(gh, "repo", "") or "").split("/", 1)[0]
+    day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if now is None else now))
+    n = view.get("number")
+    label_why, label_at = "repository owner or PR number unknown", None
+    if owner and isinstance(n, int):
+        events = gh.issue_events(n)
+        label_at, _ = urgent_grant(events, owner, DEPLOY_FIX_LABEL)
+        label_why = urgent_refusal(n, events, owner, gh.urgent_grants_today(day, owner, DEPLOY_FIX_LABEL),
+                                   DEPLOY_FIX_DAILY_CAP, day, label=DEPLOY_FIX_LABEL)
+    why = deploy_fix_refusal(view, ctx, cached_ctx_jobs(gh, main_commit, ctx, cache), entries, diff,
+                             gh.workflow_run(run_id), gh.run_jobs(run_id), src_on_main, label_why, commits, label_at)
+    if cache is not None:
+        cache[key] = why
+    return why
+
+
+def claim_evidence(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None,
+                   now: float | None = None) -> str | None:
+    """fix_evidence, or — for an App-authored auto-deploy PR only — the deploy fix claim (#16943). The
+    deploy path is consulted only after the job rule refused, and its refusal is appended to that reason
+    when the PR carries the label, so a refused deploy fix says why."""
+    head = view["head_sha"]
+    why = fix_evidence(gh, git, base, ctx, main_commit, head, cache)
+    if not why or view.get("author") != BOT_LOGIN or DEPLOY_FIX_LABEL not in (view.get("labels") or []):
+        return why
+    dwhy = deploy_fix_claim(gh, git, base, ctx, main_commit, view, cache, now=now)
+    if dwhy:
+        return f"{why}; deploy fix refused: {dwhy}"
+    if cache is not None:
+        cache[(FIX_STRENGTH_KEY, head, ctx)] = (FIX_JOB_LEVEL, "deploy fix (can-i-deploy passed, owner-labelled)")
+    log(f"#{view.get('number', 0):>6} deploy fix for {ctx}: auto-deploy pins, can-i-deploy green, {DEPLOY_FIX_LABEL}")
+    return None
+
+
 def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
     """Record why a green strict PR was refused as a main-red fix: settle copies the slot into
     summary["not_fix"], so a real fix refused (a renamed or restructured job) is visible to a human."""
     log(f"#{view.get('number', 0):>6} not a fix: {why}")
     if cache is not None and view.get("number") is not None:
         cache.setdefault(NOT_FIX_KEY, {})[view["number"]] = why
+        if view.get("head_sha"):
+            cache.setdefault(NOT_FIX_HEAD_KEY, {})[view["number"]] = view["head_sha"]
+
+
+def publish_fix_claims(gh, base: str, not_fix: dict[int, str], heads: dict[int, str], shadow: bool) -> list[int]:
+    """Refusal visibility (review LOW of #16760): the reason a fix claim was refused reaches the PR as the
+    App's `merge-train/fix-claim` status on the refused head — until now it lived only in the settle log
+    and summary["not_fix"]. A status, not a comment: one GET (the App's own statuses on the head) and a
+    POST only when the description changed, against a comment's list + create/update, and no thread
+    noise. State `failure` like `merge-train/notice`: never required, so it blocks nothing. The
+    description names the main it was judged against, so a stale one reads as stale. NEVER read back
+    for any decision: fix evidence is re-derived every tick. Shadow posts nothing."""
+    posted: list[int] = []
+    for n, why in sorted(not_fix.items()):
+        head = heads.get(n)
+        if not head or not SHA_RE.fullmatch(head):
+            continue
+        desc = f"not a fix over main {base[:12]}: {why}"[:140]
+        if gh.app_statuses(head).get(FIX_CLAIM_CONTEXT) == ("failure", desc):
+            continue   # already says exactly this: idempotent
+        if shadow:
+            log(f"#{n:>6} fix-claim status (shadow, not posted): {desc}")
+            continue
+        gh.post_status(head, "failure", desc, context=FIX_CLAIM_CONTEXT)
+        posted.append(n)
+    return posted
 
 
 def cached_ctx_jobs(gh, sha: str, ctx: str, cache: dict | None) -> dict[str, str | None] | None:
@@ -5902,6 +6539,32 @@ def cached_gate_records(gh, sha: str, ctx: str, slugs: list[str], cache: dict | 
     return out
 
 
+def cached_text(git, rev: str, path: str, cache: dict | None) -> str | None:
+    """`git show rev:path` once per tick (None = absent): fix_contexts runs two or three times per head and
+    tick (promotion, then strict_fixes in the reservation and in the strict lane), and each run read the
+    head's gates.yaml again — one spawn each, identical inputs."""
+    key = ("text", rev, path)
+    if cache is not None and key in cache:
+        return cache[key]
+    r = git("show", f"{rev}:{path}", check=False)
+    out = r.stdout if r.returncode == 0 else None
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def cached_changes(git, base: str, head: str, cache: dict | None) -> list:
+    """changed_entries(base...head) once per tick per head: every context of a claim and the dependency walk
+    read the same change set (one `git diff` spawn, not one per context)."""
+    key = ("changes", base, head)
+    if cache is not None and key in cache:
+        return cache[key]
+    out = changed_entries(git, f"{base}...{head}")
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
 def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cache: dict | None) -> str | None:
     """Why `head` does NOT prove it fixes `ctx`, red on main at `main_commit`, or None when it does:
     fix_job_evidence (every job red on main ran green on the head), then selftest_skip_refusal (a red
@@ -5920,10 +6583,10 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
         if cache is not None:
             cache[(FIX_STRENGTH_KEY, head, ctx)] = (FIX_JOB_LEVEL, "job-level (no gate red on main)")
         return None
-    r = git("show", f"{head}:{GATES_YAML}", check=False)
-    gates_text = r.stdout if r.returncode == 0 else None
+    gates_text = cached_text(git, head, GATES_YAML, cache)
     declared = parse_selftest_inputs(gates_text) if gates_text is not None else None
-    head_files = changed_paths(git, f"{base}...{head}")
+    changes = cached_changes(git, base, head, cache)
+    head_files = list(dict.fromkeys(p for c in changes for p in c.paths))
     main_records = cached_gate_records(gh, main_commit, ctx, slugs, cache)
     why = selftest_skip_refusal(main_jobs, main_records, head_files, declared)
     if why:
@@ -5931,16 +6594,29 @@ def fix_evidence(gh, git, base: str, ctx: str, main_commit: str, head: str, cach
     # Gate-level evidence: the gate red on main should be `ok` somewhere in the head's own gate results
     # (all shards: a gate may move), not skipped inside a green shard job — a full-fleet CI run of an
     # unrelated PR passes the job rule for every job. Skipped/absent caps the strength; red refuses.
-    # A head that changes the judge — gates.yaml, the runner, any workflow, or a red gate's own scripts —
-    # cannot be verified BY that judge: its green may be the edit talking. Refused outright (security
-    # review of 7ca5c4a1), not capped: such a fix is merged by a human, never by its own verdict.
+    # A head that changes the JUDGE — any gate script or helper, workflow, action, or the gate manifest,
+    # baselines and measurements — cannot be verified BY that judge: its green may be the edit talking.
+    # Refused outright, never capped: such a fix is merged by a human. A prefix rule, deliberately: a
+    # dependency parser read run-gates.py itself as unknown and refused every gate-shard fix claim.
+    touched = sorted(f for f in head_files if f.startswith(FIX_JUDGE_PREFIXES) or f in FIX_JUDGE_FILES)
+    if touched:
+        return (f"the head changes the judge ({touched[0]}): a fix claim may not edit CI gates, scripts, workflows "
+                "or actions — its own green cannot verify a fix; it is merged by a human")
+    # ...and whatever the RED gates' own entries name in run/selftest — scripts outside .github/ included —
+    # read from BOTH the base's and the head's gates.yaml, so a head cannot rename its way out. Not their
+    # selftest_inputs (subjects, not judge). A path named only by a gate green on main does not refuse.
     red_ids = {str(r.get("id")) for recs in (main_records or {}).values() if isinstance(recs, list)
                for r in recs if isinstance(r, dict) and r.get("status") in RED_GATE_STATES}
-    scripts = parse_gate_scripts(gates_text) if gates_text is not None else {}
-    judge = {GATES_YAML, ".github/scripts/run-gates.py"} | {s for gid in red_ids for s in scripts.get(gid, ())}
-    touched = sorted(f for f in head_files if f in judge or f.startswith(".github/workflows/"))
-    if touched:
-        return f"the head changes the judge ({touched[0]}): its own green cannot verify a fix"
+    named_files, named_dirs = set(), set()
+    for text in (cached_text(git, base, GATES_YAML, cache), gates_text):
+        if text:
+            fs, ds = gate_named_paths(text, red_ids)
+            named_files |= fs
+            named_dirs |= ds
+    hit = sorted(f for f in head_files if f in named_files or f.startswith(tuple(named_dirs)))
+    if hit:
+        return (f"the head changes {hit[0]}, which a gate red on main names in its run/selftest: its own "
+                "green cannot verify a fix; it is merged by a human")
     # Head artifacts count only for the BASE shard set with a green `gates (<slug>)` job behind each.
     head_records = trusted_head_records(cached_gate_records(gh, head, ctx, None, cache), main_jobs,
                                         cached_ctx_jobs(gh, head, ctx, cache))
@@ -5963,7 +6639,12 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
     if not mb:
         return []
     out = []
-    extra = train_extra_gates(git, base) or {}
+    if cache is not None and ("extra_gates", base) in cache:
+        extra = cache[("extra_gates", base)]
+    else:
+        extra = train_extra_gates(git, base) or {}   # one rules.yaml read per tick, not one per claim
+        if cache is not None:
+            cache[("extra_gates", base)] = extra
     for ctx in sorted(main_red):
         if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
             continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
@@ -5972,7 +6653,7 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
-        why = fix_evidence(gh, git, base, ctx, at_base[0], view["head_sha"], cache)
+        why = claim_evidence(gh, git, base, ctx, at_base[0], view, cache)
         if why:
             note_not_fix(cache if record else None, view, f"{ctx} {why}")
             continue
@@ -5989,7 +6670,10 @@ def masked_no_worse(gh, ctx: str, head: str, main_commit: str, cache: dict | Non
         return False
     def failing(jobs):
         return {n for n, v in jobs.items() if v is not None and v not in FIX_JOB_OK}
-    return failing(hj) <= failing(mj)
+    fh = failing(hj)
+    # A head red on the context with NO failing job is inconsistent evidence (an empty set is a subset
+    # of anything): it never masks the context as success.
+    return bool(fh) and fh <= failing(mj)
 
 
 def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: dict[str, str | None],
@@ -6029,7 +6713,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
         mb = git("merge-base", claim_from, base, check=False).stdout.strip()
         for c in claimed:
             at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
-            why = (fix_evidence(gh, git, base, c, at_base[0], head, cache)
+            why = (claim_evidence(gh, git, base, c, at_base[0], {**view, "head_sha": head}, cache)
                    if at_base else "no main verdict at the claim's base")
             if why:
                 note_not_fix(cache, view, f"combined head: {c} {why}")
@@ -7092,6 +7776,7 @@ class FakeGitHub:
         sha = self.main_sha()
         self.prs[n]["state"] = "closed"
         self.prs[n]["merged_at"] = "2026-01-01T00:00:00Z"
+        self.prs[n]["merged"], self.prs[n]["merge_commit_sha"] = True, sha
         self.merged.append(n)
         if self.foreign_after_merge:
             p = pathlib.Path(self.origin, self.foreign_after_merge)
@@ -7959,6 +8644,7 @@ def self_test() -> int:
     fix_preempts_strict_self_test(check)
     urgent_strict_self_test(check)
     selftest_skip_fix_self_test(check)
+    selftest_deploy_fix(check)
     gate_level_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
@@ -9835,6 +10521,61 @@ def self_test() -> int:
             check("foreign merge mid-settle: merging stops, the rest waits for the next tick", gh.merged == [1], str(gh.merged))
             reset()
 
+            # #16932: native auto-merge merges a carrier member just before the train's own merge call.
+            def native_race(case):
+                open_only("p1", "p2")
+                tick()
+                real = globals()["live_source_intent"]
+                fired = []
+
+                def racing(g, n, head, _real=real):
+                    if n == 1 and not fired and gh.prs[1]["state"] == "open":
+                        fired.append(n)
+                        p = gh.prs[1]
+                        if case in ("moved-open", "moved-merged"):
+                            new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
+                            gh.g("branch", "-f", p["head"]["ref"], new)
+                            p["head"]["sha"] = new
+                        if case == "parent":   # something else lands first: merged over another main
+                            gh.g("checkout", "-q", "-f", "main")
+                            gh.g("commit", "-q", "--allow-empty", "-m", "foreign first")
+                        if case in ("same", "moved-merged", "parent", "unmerged"):
+                            gh.merge(1, p["head"]["sha"])
+                        if case == "unmerged":  # closed, merged=False, though the sha is on main
+                            p["merged"] = False
+                        elif case == "closed":
+                            p["state"] = "closed"
+                        elif case == "off-main":
+                            p["state"], p["merged"], p["merge_commit_sha"] = "closed", True, gh.g(
+                                "commit-tree", f"{head}^{{tree}}", "-p", gh.main_sha(), "-m", "off main").stdout.strip()
+                    return _real(g, n, head)
+                globals()["live_source_intent"] = racing
+                try:
+                    s = mode_settle(gh, Git(clone("settle")), "o/r", False)
+                finally:
+                    globals()["live_source_intent"] = real
+                merged = list(gh.merged)
+                reset()
+                return s, merged, bool(fired)
+            s, m, fired = native_race("same")
+            check("#16932: a member natively merged at the verified head -> the rest of the carrier still merges",
+                  fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("moved-merged")
+            check("#16932 NEGATIVE: merged with a different head -> stop, nothing else merges",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("closed")
+            check("#16932 NEGATIVE: closed but not merged -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("moved-open")
+            check("#16932 NEGATIVE: head changed but still open -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("parent")
+            check("#16932 NEGATIVE: merged over a main other than the expected one -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("unmerged")
+            check("#16932 NEGATIVE: merged=False at the verified head -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("off-main")
+            check("#16932 NEGATIVE: merged commit not on main -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+
             # ---- strict lane (manual-lane PRs: executable .github/, generators, gates, inventory) ----
             def settle_now():
                 return mode_settle(gh, Git(clone("settle")), "o/r", False)
@@ -10943,6 +11684,33 @@ def self_test() -> int:
             gh.head_checks.clear()
             reset()
 
+            # #16932 NEGATIVE: a stacked member natively merged at the verified head and over the expected main,
+            # but to a tree other than the verified stacked step -> not counted as merged.
+            h, s, st = stacked_setup()
+            gh.head_checks.clear()
+            settle_now()                                       # the holder merges
+            real = globals()["live_source_intent"]
+            fired = []
+
+            def stacked_racing(g, n, head, _real=real):
+                if n == 1 and not fired and gh.prs[1]["state"] == "open":
+                    fired.append(n)
+                    m0 = gh.main_sha()
+                    bad = gh.g("commit-tree", f"{m0}^{{tree}}", "-p", m0, "-m", "#1 wrong tree").stdout.strip()
+                    gh.g("update-ref", "refs/heads/main", bad)
+                    gh.g("checkout", "-q", "-f", "main")
+                    gh.prs[1].update(state="closed", merged=True, merge_commit_sha=bad)
+                return _real(g, n, head)
+            globals()["live_source_intent"] = stacked_racing
+            try:
+                s2 = settle_now()
+            finally:
+                globals()["live_source_intent"] = real
+            check("#16932 NEGATIVE: stacked member natively merged to a tree other than the verified step -> stop",
+                  fired == [1] and not s2.get("native_merged") and 1 not in gh.merged, f"{fired} {s2.get('native_merged')} {gh.merged}")
+            gh.head_checks.clear()
+            reset()
+
             # (S6) tree mismatch: something else lands with the holder, so main's tree is not h's -> rejected,
             # nobody blamed, the member does not merge.
             h, s, st = stacked_setup()
@@ -11878,33 +12646,37 @@ def self_test() -> int:
                 return lambda _p: (gh.jobs.update({base0: {"gates (data)": "failure"}}),
                                    gh.head_jobs.update({"gates (data)": "success"}),
                                    gh.gate_records_by.update({(base0, "data"): records}))
-            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-nine")))
-            check("main red on an UNFALSIFIED gate the head does not declare: a head green on the shard is REFUSED",
-                  gh.updates == [] and gh.merged == [] and "self-test of gate `g-nine`" in (s1.get("not_fix") or {}).get(36, ""),
+            # Fix PRs here edit docs (pX #33), not .github/scripts/: a fix claim may not edit the judge (prefix rule).
+            s1, s2 = fix_behind({}, fix="pX", tamper=shard_red(unf("g-nine")))
+            # pX is a promoted train candidate: promote_fixes judges it with record=False (a candidate that is not
+            # a fix just stays a candidate), so the refusal shows as "not served", never as a not_fix reason.
+            check("main red on an UNFALSIFIED gate the head does not declare: a head green on the shard is REFUSED (not served)",
+                  gh.updates == [] and gh.merged == [] and 33 not in (s1.get("not_fix") or {}),
                   f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             gh.gate_records_by.clear()
             main_red_done()
-            s1, s2 = fix_behind({}, tamper=shard_red(unf("g-one")))
+            s1, s2 = fix_behind({}, fix="pX", tamper=shard_red(unf("g-one")))
             check("main red on an UNFALSIFIED gate whose self-test always runs on a PR: the green head is the fix",
-                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+                  gh.updates == [33] and gh.merged == [33], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             gh.gate_records_by.clear()
             main_red_done()
-            s1, s2 = fix_behind({}, tamper=shard_red([{"id": "g-one", "status": "failed", "failure_kind": "content"}]))
+            s1, s2 = fix_behind({}, fix="pX", tamper=shard_red([{"id": "g-one", "status": "failed", "failure_kind": "content"}]))
             check("main red on a gate shard for CONTENT: a head green on the shard is the fix, as before",
-                  gh.updates == [36] and gh.merged == [36], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
+                  gh.updates == [33] and gh.merged == [33], f"merged={gh.merged} updates={gh.updates} {s1} {s2}")
             gh.gate_records_by.clear()
             main_red_done()
             # Gate-level evidence and evidence-first ordering (2026-11-18): two green strict-lane fixes
-            # behind a main red on the content of gate g-one in shard `data`: pW2 (#36, older) and pP1
-            # (#88, newer). Each case names what the HEAD's gate results say about g-one.
-            def two_fixes(rec36, rec88, slug36="data"):
-                open_only("pW", "pW2", "pP1")
+            # behind a main red on the content of gate g-one in shard `data`: pX (#33, docs, older) and pF
+            # (#34, svc, newer) — both outside the judge trees, so the prefix rule lets them claim. Each case
+            # names what the HEAD's gate results say about g-one.
+            def two_fixes(rec33, rec34, slug33="data"):
+                open_only("pW", "pX", "pF")
                 main_breaks(base_red=True)
                 gh.jobs[base0] = {"gates (data)": "failure", "gates (kotlin)": "success"}   # both shards exist on the base run
                 gh.head_jobs.update({"gates (data)": "success", "gates (kotlin)": "success"})
                 gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
                 gh.gate_records_by[(base0, "data")] = [{"id": "g-one", "status": "failed", "failure_kind": "content"}]
-                for n, rec, slug in ((36, rec36, slug36), (88, rec88, "data")):
+                for n, rec, slug in ((33, rec33, slug33), (34, rec34, "data")):
                     if rec is not None:
                         gh.gate_records_by[(gh.prs[n]["head"]["sha"], slug)] = rec
                 s = settle_now()
@@ -11917,20 +12689,32 @@ def self_test() -> int:
             g_red = [{"id": "g-one", "status": "failed", "failure_kind": "content"}]
             updates, not_fix = two_fixes(g_skipped, g_ok)
             check("#16690 shape: the older full-fleet head that SKIPPED the red gate is only job-level; the head that passed it is served first",
-                  updates == [88] and 36 not in not_fix, f"updates={updates} not_fix={not_fix}")
+                  updates == [34] and 33 not in not_fix, f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(None, g_ok)
             check("evidence first: a newer gate-verified fix is update-branched before an older job-level one (artifacts unreadable)",
-                  updates == [88] and 36 not in not_fix, f"updates={updates} not_fix={not_fix}")
-            updates, not_fix = two_fixes(g_ok, None, slug36="kotlin")
+                  updates == [34] and 33 not in not_fix, f"updates={updates} not_fix={not_fix}")
+            updates, not_fix = two_fixes(g_ok, None, slug33="kotlin")
             check("moved shard: the red gate ok in ANOTHER shard of the older head verifies it, and it is served first",
-                  updates == [36], f"updates={updates} not_fix={not_fix}")
+                  updates == [33], f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(g_red, g_ok)
-            check("a head on which the red gate is still red is not a fix", updates == [88] and "red on the head too" in not_fix.get(36, ""),
-                  f"updates={updates} not_fix={not_fix}")
+            check("a head on which the red gate is still red is not a fix: the other head is served, this one never (promoted "
+                  "candidates are refused silently, record=False)", updates == [34] and 33 not in updates, f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(g_ok, g_ok)
-            check("equal evidence: the older fix is served first", updates == [36], f"updates={updates} not_fix={not_fix}")
+            check("equal evidence: the older fix is served first", updates == [33], f"updates={updates} not_fix={not_fix}")
             updates, not_fix = two_fixes(None, None)
-            check("both heads unreadable: the job rule stands and age decides, as before", updates == [36], f"updates={updates}")
+            check("both heads unreadable: the job rule stands and age decides, as before", updates == [33], f"updates={updates}")
+            # And the fixture's own strict-lane "fix" PRs, which edit .github/scripts/, are now refused by the prefix rule.
+            open_only("pW", "pW2")
+            main_breaks(base_red=True)
+            gh.jobs[base0] = {"gates (data)": "failure"}
+            gh.head_jobs["gates (data)"] = "success"
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            s = settle_now()
+            check("judge prefix (e2e): a green PR editing .github/scripts/ is refused as a fix on a red gate shard, not update-branched",
+                  gh.updates == [] and "changes the judge (.github/scripts/two.py)" in (s.get("not_fix") or {}).get(36, ""),
+                  f"updates={gh.updates} not_fix={s.get('not_fix')}")
+            gh.gate_records_by.clear()
+            main_red_done()
             # Judge change: a fix candidate that edits a workflow is refused outright (security review).
             open_only("pW", "pJ2")
             main_breaks(base_red=True)
@@ -11940,6 +12724,17 @@ def self_test() -> int:
             s = settle_now()
             check("judge change: a green PR editing .github/workflows/ is refused as a fix, not update-branched",
                   gh.updates == [] and "changes the judge" in (s.get("not_fix") or {}).get(82, ""), f"updates={gh.updates} not_fix={s.get('not_fix')}")
+            h82 = gh.prs[82]["head"]["sha"]
+            claims = [st for st in gh.statuses.get(h82, []) if st[0] == FIX_CLAIM_CONTEXT]
+            check("refusal visibility (e2e): the refused head carries ONE merge-train/fix-claim status naming the reason and main",
+                  len(claims) == 1 and claims[0][1] == "failure" and "changes the judge" in claims[0][2] and "over main" in claims[0][2]
+                  and s.get("fix_claim_posted") == [82], f"{claims} {s.get('fix_claim_posted')}")
+            # The same refusal again (what the next tick would publish, without spending a whole fixture tick
+            # on it: the self-test budgets subprocess spawns): nothing more is posted.
+            again = publish_fix_claims(gh, gh.main_sha(), dict(s.get("not_fix") or {}), {82: h82}, shadow=False)
+            claims = [st for st in gh.statuses.get(h82, []) if st[0] == FIX_CLAIM_CONTEXT]
+            check("refusal visibility (e2e): publishing the same refusal again over the same main posts nothing more",
+                  len(claims) == 1 and again == [], f"{claims} {again}")
             gh.gate_records_by.clear()
             main_red_done()
             # Independent masking: an unclaimed context red on main may be masked on the combined head only
