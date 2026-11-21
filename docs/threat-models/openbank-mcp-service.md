@@ -344,7 +344,7 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
 
 The public route is `openbank-infra/gitops/components/mcp-customer-route/` and is **off by
 construction**: no ArgoCD Application applies it, its `kustomization.yaml` lists only the
-certificate grant, and its `parentRef` names a listener (`https-mcp`) the Gateway does not
+certificate grant, and its Gateway parent reference names a listener (`https-mcp`) the Gateway does not
 declare. Every row below must read LIVE before
 [`docs/runbooks/mcp-customer-channel-go-live.md`](../runbooks/mcp-customer-channel-go-live.md)
 step 1 starts. "Open PR" means not on `main`; the PR number is the only claim made about it.
