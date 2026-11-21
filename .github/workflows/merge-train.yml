@@ -111,6 +111,8 @@ env:
   MERGE_TRAIN_HOTFIX_DAILY_CAP: "${{ vars.MERGE_TRAIN_HOTFIX_DAILY_CAP || '2' }}"
   # Strict-lane aging: a green armed strict PR unserved this long (s) holds NEW fast/expedite carriers.
   MERGE_TRAIN_STRICT_AGING_S: "${{ vars.MERGE_TRAIN_STRICT_AGING_S || '1800' }}"
+  # Per-head budget for that hold (s): past it the head is released and the fast lane proceeds.
+  MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S: "${{ vars.MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S || '3600' }}"
 
 jobs:
   settle:

@@ -114,7 +114,7 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # merge-train.py of #16986 (a member natively merged inside the train's merge call continues) merged with #16972, reviewed with #16986.
     '5e1458d0abd19d575cd667e4fae834a5f5aebe00',
     # merge-train.py of the repo-variable knobs + owner hotfix lane + guarded speculative-stack + strict-aging change, reviewed with that PR.
-    'a385ea0c4e10a740123db13aa34b8533428bb411',
+    'cec49e4c1621ef645eda09909f978fc5723e4510',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16972's tick-speed change merged with #16973's claim_evidence(now) fix, reviewed with that PR.
