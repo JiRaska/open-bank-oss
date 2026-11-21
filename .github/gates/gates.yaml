@@ -3715,6 +3715,7 @@ gates:
     selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
+      exit 1  # TEMP negative proof #17035, reverted next commit
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
