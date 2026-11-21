@@ -132,6 +132,21 @@ class DelegationRepositoryImpl(
         ).list<DelegationGrantEntity>()
     }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findActiveMcpClientGrants(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+    ): List<DelegationGrant> = Panache.withSession {
+        find(
+            "grantorPartyId = ?1 and granteeClientId = ?2 and granteeKeyThumbprint = ?3 " +
+                "and granteeType = ?4 and status = 'ACTIVE'",
+            grantorPartyId,
+            clientId,
+            keyThumbprint,
+            DelegationGranteeType.MCP_CLIENT,
+        ).list<DelegationGrantEntity>()
+    }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun findActiveWithRecertificationAudience(): List<DelegationGrant> {
         val entities = Panache.withSession {
             find(

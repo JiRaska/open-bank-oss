@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.filter.InteractionFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import com.fasterxml.jackson.databind.SerializationFeature
@@ -70,9 +71,11 @@ import java.util.UUID
  * former delegate must cross the equivalent of a 403 boundary instead of retaining access.
  */
 @Provider("openbank-delegation-service")
-// The HTTP payment-proposal interactions are replayed by DelegationProposalPactFolderProviderVerificationTest;
-// this message target takes the complement, so no interaction is replayed twice or skipped.
-@PactFilter("^(?!" + DelegationProposalPactFolderProviderVerificationTest.PROPOSAL_STATES + "$).*$")
+// Messages only: pact-jvm's @PactFilter defaults to matching provider-STATE names; this filters by
+// interaction TYPE instead, so it does not depend on how states are named. mcp-service's HTTP pact is
+// replayed against the running service by DelegationMcpClientGrantPactFolderProviderVerificationTest, and
+// the HTTP payment-proposal interactions by DelegationProposalPactFolderProviderVerificationTest.
+@PactFilter(value = ["Asynchronous/Messages"], filter = InteractionFilter.ByInteractionType::class)
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
@@ -106,6 +109,15 @@ class DelegationEventPactBrokerProviderVerificationTest {
 
     @State("an ACCOUNT-scoped delegation grant has been activated")
     fun accountGrantActivated() = Unit
+
+    // mcp-service's HTTP interactions are excluded above by @PactFilter (messages only) and replayed
+    // by DelegationMcpClientGrantPactFolderProviderVerificationTest; these two states exist here so
+    // the folder/broker twin @State parity gate (#9752) sees the same set on both sides.
+    @State("an active MCP_CLIENT grant exists for the pact party, client and key")
+    fun mcpClientGrantActive() = Unit
+
+    @State("no MCP_CLIENT grant exists for the pact party, client and key")
+    fun mcpClientGrantAbsent() = Unit
 
     @PactVerifyProvider("a DelegationActivated event for an account")
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(

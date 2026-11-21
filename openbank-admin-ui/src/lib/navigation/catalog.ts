@@ -152,6 +152,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view', owner: 'pid' },
   { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view', owner: 'kyb' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view', owner: 'delegation' },
+  { nameCs: 'MCP kanál', nameEn: 'MCP channel', href: '/delegations/mcp-channel', icon: Bot, permission: 'delegations:view', owner: 'mcp' },
 ]
 
 const paymentsNav: NavItem[] = [

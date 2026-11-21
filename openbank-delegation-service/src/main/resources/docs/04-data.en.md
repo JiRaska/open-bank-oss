@@ -101,6 +101,11 @@ V34) or `MCP_CLIENT`, a customer-admitted third-party MCP client.
   (`400 MCP_CLIENT_GRANTEE_DORMANT`) and no lifecycle event can be built for one, because the
   current consumers (account-service, card-issuance-service, context-service) know only parties.
   The guard is lifted only after they skip non-PARTY grants.
+- **Lookup for mcp-service:** `POST /api/v1/delegations/mcp-client/resolve` returns the ACTIVE
+  `MCP_CLIENT` grants for the triple (grantor, client id, DPoP key thumbprint). Only mcp-service's own
+  service-account may call it (OPA `delegation.mcp-client.resolve` plus an in-code client-id check).
+  The answer carries only grant id, resource type and id, capabilities and `validTo`; an empty list
+  is the refusal.
 
 ## `delegation_payment_proposals` (V38, ADR-0383 D6)
 

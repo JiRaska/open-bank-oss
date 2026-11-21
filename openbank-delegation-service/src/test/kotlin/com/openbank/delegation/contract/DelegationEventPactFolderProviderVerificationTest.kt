@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.filter.InteractionFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.databind.SerializationFeature
@@ -89,9 +90,11 @@ import java.util.UUID
  * never serves.
  */
 @Provider("openbank-delegation-service")
-// The HTTP payment-proposal interactions are replayed by DelegationProposalPactFolderProviderVerificationTest;
-// this message target takes the complement, so no interaction is replayed twice or skipped.
-@PactFilter("^(?!" + DelegationProposalPactFolderProviderVerificationTest.PROPOSAL_STATES + "$).*$")
+// Messages only: pact-jvm's @PactFilter defaults to matching provider-STATE names; this filters by
+// interaction TYPE instead, so it does not depend on how states are named. mcp-service's HTTP pact is
+// replayed against the running service by DelegationMcpClientGrantPactFolderProviderVerificationTest, and
+// the HTTP payment-proposal interactions by DelegationProposalPactFolderProviderVerificationTest.
+@PactFilter(value = ["Asynchronous/Messages"], filter = InteractionFilter.ByInteractionType::class)
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class DelegationEventPactFolderProviderVerificationTest {
