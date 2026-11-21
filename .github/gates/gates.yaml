@@ -4088,6 +4088,24 @@ gates:
     selftest_inputs: [".github/scripts/gen-card-capability-matrix.py", "openbank-libs/governance/card-capabilities.yaml"]
     run: python3 .github/scripts/gen-card-capability-matrix.py --check
 
+  # The customers realm template is rewritten by a generator that parses and re-serialises it. A
+  # hand-formatted file makes the first regeneration reflow hundreds of untouched lines, so every
+  # nearby edit on another branch conflicts. One serialisation, enforced, keeps a regeneration of
+  # unchanged content a byte-for-byte no-op.
+  - id: realm-json-canonical
+    name: "generator-written realm templates are in canonical JSON form (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.1s locally
+    # 1 template today. The floor stops a moved file turning the check into a green no-op.
+    min_subjects: 1
+    review_after: "2027-11-21"
+    rationale: "A realm template written in two formats conflicts on content nobody changed, and a conflict resolved by hand in a 500-line JSON file is where a client or redirect URI silently goes missing."
+    selftest: python3 .github/scripts/check-realm-json-canonical.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-realm-json-canonical.py"]
+    run: python3 .github/scripts/check-realm-json-canonical.py
+
   # The regulatory obligations register (ADR-0367) starts from the LAW and maps each duty onto the
   # admin-ui report catalogue. The inventory it replaces was built from the code, so a duty with no
   # code (CEÚ, GSFT) was invisible to it. This gate keeps the two views joined: every catalogue

@@ -28,7 +28,6 @@ import com.openbank.mcp.application.protocol.ServerInfo
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
-import com.openbank.mcp.infrastructure.customer.CustomerChannel
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
@@ -114,16 +113,13 @@ class McpEndpoint(
     lateinit var toolsCatalog: PolicyFilteredToolCatalog
 
     /**
-     * Field-injected for the same reason as [metrics]. The customer MCP channel (ADR-0383/0385);
-     * off unless `mcp.customer.enabled`. Plain unit tests that construct this class leave it unset,
-     * which reads as "off".
+     * Field-injected for the same reason as [metrics]. Every collaborator of the customer MCP channel
+     * (ADR-0383/0385) in one holder, so a slice adds a field to [CustomerChannelDeps] rather than
+     * wiring here; the channel is off unless `mcp.customer.enabled`. Plain unit tests that construct
+     * this class leave it unset, which reads as "off".
      */
     @Inject
-    lateinit var customerChannel: CustomerChannel
-
-    /** Field-injected for the same reason as [metrics]: the subject-less audit key (#16847). */
-    @Inject
-    lateinit var clientAddress: ClientAddressResolver
+    lateinit var customerDeps: CustomerChannelDeps
 
     /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
     @Inject
@@ -136,11 +132,9 @@ class McpEndpoint(
     private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
 
     private val customerBranch by lazy {
-        if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
-        customerChannel.admission?.let { admission ->
-            McpCustomerBranch(admission, auditor, metrics, rateLimiter) {
-                if (::clientAddress.isInitialized) clientAddress.key(httpRequest) else ClientAddressKey.UNKNOWN
-            }
+        if (!::customerDeps.isInitialized || !::httpRequest.isInitialized) return@lazy null
+        customerDeps.channel.admission?.let { admission ->
+            McpCustomerBranch(admission, customerDeps) { customerDeps.clientAddress.key(httpRequest) }
         }
     }
 
