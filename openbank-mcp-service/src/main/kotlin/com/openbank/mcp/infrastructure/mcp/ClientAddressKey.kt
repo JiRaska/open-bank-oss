@@ -29,6 +29,8 @@ object ClientAddressKey {
     private const val IPV4_ALLOCATION_BYTES = 3
     private const val V4_ALLOCATION: Byte = 24
     private const val V6_ALLOCATION: Byte = 48
+    private const val IPV6_REGION_BYTES = 4
+    private const val V6_REGION: Byte = 32
     private const val KEY_BYTES = 32
     private const val ALGORITHM = "HmacSHA256"
     private const val V4: Byte = 4
@@ -58,6 +60,16 @@ object ClientAddressKey {
             byteArrayOf(V4_ALLOCATION) + bytes.copyOf(IPV4_ALLOCATION_BYTES)
         }
         return hash("net:", network)
+    }
+
+    /**
+     * The key of the coarser REGION above an allocation: IPv6 /32 (a typical RIR allocation to one
+     * operator). IPv4 has no tier above its /24 allocation here, so its region is [allocationOf].
+     */
+    fun regionOf(address: String?): String {
+        val bytes = IpLiteral.parse(address) ?: return UNKNOWN
+        if (bytes.size <= V4) return allocationOf(address)
+        return hash("region:", byteArrayOf(V6_REGION) + bytes.copyOf(IPV6_REGION_BYTES))
     }
 
     private fun hash(prefix: String, network: ByteArray): String {
