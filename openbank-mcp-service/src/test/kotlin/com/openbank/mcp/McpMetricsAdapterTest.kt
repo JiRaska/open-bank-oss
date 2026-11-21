@@ -6,8 +6,11 @@ import com.openbank.libs.audit.AuditResult
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.port.out.CallerIdentitySource
 import com.openbank.mcp.application.port.out.McpMetricsPort
+import com.openbank.mcp.infrastructure.observability.McpCustomerClientAllowlist
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.micrometer.prometheusmetrics.PrometheusConfig
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -83,5 +86,92 @@ class McpMetricsAdapterTest {
         noRegistry.toolCallCompleted("ping", McpCallAuditor.Decision.ALLOW, AuditResult.SUCCESS, Duration.ZERO)
         noRegistry.callerIdentityResolved(CallerIdentitySource.TOKEN)
         noRegistry.toolsListCompleted(McpMetricsPort.ToolsListOutcome.OK)
+    }
+
+    // ── ADR-0384 D1: channel tags ──────────────────────────────────────────────────────────
+
+    @Test
+    fun `agent and customer series share one tag-key set in a real Prometheus scrape`() {
+        val prom = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        val a = McpMetricsAdapter(prom, McpCustomerClientAllowlist(listOf("acme")))
+        a.toolCallCompleted("list_accounts", McpCallAuditor.Decision.ALLOW, AuditResult.SUCCESS, Duration.ofMillis(1))
+        a.toolCallCompleted(
+            "list_accounts",
+            McpCallAuditor.Decision.ALLOW,
+            AuditResult.SUCCESS,
+            Duration.ofMillis(1),
+            McpMetricsPort.ChannelTags(McpMetricsPort.McpChannel.CUSTOMER, client = "acme", synthetic = true),
+        )
+        val scrape = prom.scrape().lines().filter { it.startsWith("openbank_mcp_tool_calls_total{") }
+
+        assertThat(scrape).hasSize(2)
+        assertThat(scrape).anyMatch {
+            it.contains("channel=\"agent\"") &&
+                it.contains("client=\"none\"") &&
+                it.contains("synthetic=\"false\"")
+        }
+        assertThat(scrape).anyMatch {
+            it.contains("channel=\"customer\"") &&
+                it.contains("client=\"acme\"") &&
+                it.contains("synthetic=\"true\"")
+        }
+    }
+
+    @Test
+    fun `an operator call is tagged operator with the placeholders`() {
+        adapter.toolCallCompleted(
+            "list_accounts",
+            McpCallAuditor.Decision.ALLOW,
+            AuditResult.SUCCESS,
+            Duration.ZERO,
+            McpMetricsPort.ChannelTags.OPERATOR,
+        )
+        assertThat(
+            registry.get("openbank.mcp.tool_calls").tag("channel", "operator").tag("client", "none").counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `25 allowlisted clients plus an unknown one yield exactly 26 client values`() {
+        val clients = (1..25).map { "client-$it" }
+        val a = McpMetricsAdapter(registry, McpCustomerClientAllowlist(clients))
+        (clients + "rogue-dynamically-registered").forEach {
+            a.customerRejected(McpMetricsPort.CustomerRejectReason.MISSING, it, synthetic = false)
+            a.customerRejected(McpMetricsPort.CustomerRejectReason.MISSING, "$it-again", synthetic = false)
+        }
+        val values = registry.find("openbank.mcp.customer.rejected").counters().map { it.id.getTag("client") }.toSet()
+
+        assertThat(values).hasSize(26).contains("unlisted")
+    }
+
+    @Test
+    fun `every reject reason is tagged with its own layer`() {
+        McpMetricsPort.CustomerRejectReason.entries.forEach { adapter.customerRejected(it, null, synthetic = false) }
+
+        McpMetricsPort.CustomerRejectReason.entries.forEach { reason ->
+            assertThat(
+                registry.get("openbank.mcp.customer.rejected")
+                    .tag("layer", reason.layer.name.lowercase()).tag("reason", reason.name.lowercase())
+                    .tag("client", "unlisted").tag("synthetic", "false")
+                    .counter().count(),
+            ).isEqualTo(1.0)
+        }
+    }
+
+    @Test
+    fun `no customer meter carries a party, grant, key or subject tag`() {
+        adapter.customerRejected(McpMetricsPort.CustomerRejectReason.REPLAY, "x", synthetic = true)
+        adapter.toolCallCompleted(
+            "list_accounts",
+            McpCallAuditor.Decision.ALLOW,
+            AuditResult.SUCCESS,
+            Duration.ZERO,
+            McpMetricsPort.ChannelTags(McpMetricsPort.McpChannel.CUSTOMER, client = "x"),
+        )
+        val forbidden = setOf("party", "party_ref", "jkt", "sub", "grant", "session", "ip")
+        val keys = registry.meters.filter { it.id.name.startsWith("openbank.mcp") }
+            .flatMap { m -> m.id.tags.map { it.key } }.toSet()
+
+        assertThat(keys).doesNotContainAnyElementsOf(forbidden)
     }
 }

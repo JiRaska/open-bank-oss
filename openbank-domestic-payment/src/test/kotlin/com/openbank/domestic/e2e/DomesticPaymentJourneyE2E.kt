@@ -98,7 +98,7 @@ class DomesticPaymentJourneyE2E {
             .isEqualTo(200)
         val path = stored.jsonPath()
         assertThat(path.getString("id")).isEqualTo(paymentId)
-        assertThat(path.getString("creditorAccountNumber")).isEqualTo("9876543210")
+        assertThat(path.getString("creditorAccountNumber")).isEqualTo("9876543211")
         assertThat(path.getString("creditorBankCode")).isEqualTo("0100")
         assertThat(path.getString("creditorName")).isEqualTo("Brno Utility")
         assertThat(path.getString("currency")).isEqualTo("CZK")
@@ -280,10 +280,10 @@ class DomesticPaymentJourneyE2E {
         return """
         {
           "debtorAccountId": "$debtorAccountId",
-          "debtorAccountNumber": " 1234567890 ",
+          "debtorAccountNumber": " 1234567899 ",
           "debtorBankCode": " 0800 ",
           "debtorName": " Alice Example ",
-          "creditorAccountNumber": " 9876543210 ",
+          "creditorAccountNumber": " 9876543211 ",
           "creditorBankCode": " 0100 ",
           "creditorName": " Brno Utility ",
           "amount": $amount,

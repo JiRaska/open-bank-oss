@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.26.0...delegation-service-v0.27.0) (2026-11-21)
+
+
+### Features
+
+* **delegation:** MCP client grant resolve endpoint ([#16793](https://github.com/JiRaska/open-bank-oss/issues/16793)) ([a00aba8](https://github.com/JiRaska/open-bank-oss/commit/a00aba8c0e0f0b39e4db69d3f834bcc57097857a))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.2...delegation-service-v0.26.0) (2026-11-17)
 
 

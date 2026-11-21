@@ -76,7 +76,7 @@ class McpSpecConformanceTest {
             registry = toolRegistry,
             pdp = AllowAll,
             auditor = McpCallAuditor(SinkPublisher),
-            callerResolver = CallerContextResolver(token),
+            callerResolver = CallerContextResolver(token, customerIssuer = java.util.Optional.empty()),
             mapper = mapper,
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",
