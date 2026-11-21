@@ -26,7 +26,9 @@ import org.junit.jupiter.api.Test
  * in-code identity guard, so the pact replay stays meaningful even if authz stopped being enforced.
  * Kept out of the pact class because its `@BeforeEach` takes a `PactVerificationContext`, which only
  * the pact template can supply. Same test profile, so Quarkus reuses the booted application.
- * The mcp-service control proves the 403 comes from the identity guard, not a missing route.
+ * The mcp-service control proves the 403 comes from the identity guard, not a missing route, and
+ * the tokenless case proves the route refuses an unauthenticated caller 401 rather than reaching
+ * the handler (the `@RolesAllowed` on the resource; without it this answered 403).
  */
 @QuarkusTest
 @TestProfile(DelegationMcpClientGrantPactFolderProviderVerificationTest.ResolverDouble::class)
@@ -41,6 +43,24 @@ class McpClientGrantIdentityGuardIT {
         .body("""{"grantorPartyId":"$PARTY","clientId":"$CLIENT","keyThumbprint":"$JKT"}""")
         .post("/api/v1/delegations/mcp-client/resolve")
         .then()
+
+    @Test
+    fun `a request with no token is refused 401`() {
+        resolve().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "preferred_username", value = "service-account-openbank-services"),
+        ],
+    )
+    fun `another service-account holding ROLE_API is still refused 403`() {
+        resolve().statusCode(403)
+    }
 
     @Test
     @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])

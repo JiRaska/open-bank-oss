@@ -246,13 +246,22 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
     (`operator-delegation-write`), `operator-read-any` and other service accounts cannot reach it.
     The handler re-checks the verified client id in code and refuses a request carrying the
     customer-party header, so an advisory PDP does not widen it.
+  - *Spoofing (unauthenticated caller).* The route carries `@RolesAllowed("ROLE_API")`, so Quarkus
+    refuses a tokenless request 401 before the handler runs. Before that, an anonymous call reached
+    the identity guard and got 403, the same answer as a wrong caller, and nothing showed the route
+    rejected it as unauthenticated. Control: `McpClientGrantIdentityGuardIT` drives the real route over
+    HTTP (no token 401; another service-account 403 with ROLE_API and with ROLE_OPERATOR; mcp-service 200).
+    Removing the annotation turned the no-token case red (403), as it did the pact replay below.
   - *Evidence.* `opa test` (must-allow mcp; must-deny shared backend, edge, staff operator, renamed
     machine, marker-less principal; each guard removed went red); `opa eval` on the regenerated
     `delegation-opa-bundle`; `McpClientGrantResourceIT` over real HTTP and a real database (another
     customer's grant never returned; non-mcp client and customer header 403; missing body and bad
     thumbprint 400). The HTTP `@PactFolder` replay
     (`DelegationMcpClientGrantPactFolderProviderVerificationTest`) starts verifying when mcp-service's
-    consumer pact lands with the S4 mcp-service PR; until then it has no pact to replay.
+    consumer pact lands with the S4 mcp-service PR; until then it has no pact to replay. It also
+    verifies the consumer's no-token interaction: an interaction whose expected status is 401 runs
+    with the test identity cleared, so the real security layer has to answer it, while every other
+    interaction stays authenticated as mcp-service.
   - No write path changes: MCP_CLIENT grants stay dormant, so in practice the endpoint answers empty
     until the connect flow ships. Rollback: revert; no schema change.
 

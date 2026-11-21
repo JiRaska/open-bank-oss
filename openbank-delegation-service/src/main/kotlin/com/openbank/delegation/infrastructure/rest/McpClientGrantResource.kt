@@ -11,6 +11,7 @@ import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
@@ -33,6 +34,12 @@ import java.util.UUID
  * other verified client id in code, so an advisory PDP (test profile, a broken bundle) does not
  * widen it. A request carrying the edge's customer-party header is refused too: this is not a
  * customer route and must never be proxied as one.
+ *
+ * `@RolesAllowed` is the authentication half: without it an anonymous request reached the handler
+ * and was refused 403 by the identity guard, so "no token" and "wrong caller" were the same answer
+ * and nothing proved a tokenless call is rejected as unauthenticated. Quarkus now answers 401 before
+ * the handler runs. Both mcp realm templates grant `service-account-openbank-mcp` `ROLE_API`.
+ * Proven over real HTTP by `McpClientGrantIdentityGuardIT` and the mcp-service pact replay.
  */
 @Tag(name = "Delegations")
 @Path("/api/v1/delegations/mcp-client")
@@ -45,6 +52,7 @@ class McpClientGrantResource(private val resolver: ResolveMcpClientGrantUseCase)
     @Operation(summary = "Active MCP_CLIENT grants for (grantor party, client id, DPoP key thumbprint)")
     @POST
     @Path("/resolve")
+    @RolesAllowed("ROLE_API")
     @Authorize(action = "delegation.mcp-client.resolve")
     suspend fun resolve(
         request: ResolveMcpClientGrantRequest?,

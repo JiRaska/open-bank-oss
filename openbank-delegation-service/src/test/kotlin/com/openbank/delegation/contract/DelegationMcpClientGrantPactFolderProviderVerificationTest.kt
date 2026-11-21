@@ -24,11 +24,13 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -48,6 +50,12 @@ import java.util.UUID
  * the only identity the handler admits. The negative half (a non-mcp caller is refused 403) lives
  * in [McpClientGrantIdentityGuardIT]: a plain `@Test` here cannot resolve the
  * [PactVerificationContext] the `@BeforeEach` takes.
+ *
+ * One exception to the authenticated caller: an interaction whose expected response is 401 is, by
+ * definition, the no-credential case, so [configureTarget] clears the test identity for it and the
+ * request reaches the route anonymous — the real security layer, not a stub, must answer 401.
+ * Keyed on the pact's own expected status rather than a hand-kept list of descriptions, so every
+ * other interaction stays authenticated as mcp-service.
  */
 @QuarkusTest
 @TestProfile(DelegationMcpClientGrantPactFolderProviderVerificationTest.ResolverDouble::class)
@@ -70,9 +78,17 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    @Inject
+    lateinit var testIdentity: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
+        // Runs after @TestSecurity installed the class identity; null delegates to the real
+        // (token-derived) identity, which with no Authorization header is anonymous.
+        if (context?.interaction?.asSynchronousRequestResponse()?.response?.status == UNAUTHENTICATED) {
+            testIdentity.setTestIdentity(null)
+        }
     }
 
     @TestTemplate
@@ -136,5 +152,6 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
         val ACCOUNT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000003")
         const val CLIENT = "mcp-local-reference"
         const val JKT = "0000000000000000000000000000000000000000000"
+        private const val UNAUTHENTICATED = 401
     }
 }
