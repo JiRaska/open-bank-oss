@@ -159,6 +159,16 @@ github:
       review_by: 2027-01-31
     - kind: variable
       names:
+        - GATE_BUDGET_MULTIPLIER
+        - FLEET_LINT_TIMEOUT_MINUTES
+        - FLEET_LINT_STEP_TIMEOUT_MINUTES
+        - LIBS_BENCH_TIMEOUT_MINUTES
+        - SERVICE_CI_CONTRACT_TIMEOUT_MINUTES
+      reason: "ADR-0389 runtime tuning knobs; every consumer falls back to today's value, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-02-15
+    - kind: variable
+      names:
         - APICURIO_REGISTRY_URL
       reason: "schema registry apply waits on the registry rollout"
       issue: 1916
