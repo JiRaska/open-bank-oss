@@ -120,3 +120,11 @@ https://mcp.test.example/mcp does not match the request HTTP uri http://localhos
   known callers to `:8150` in the NetworkPolicy.
 - **Symptom of a wrong list:** every real customer call refused 401 `invalid_dpop_proof` at the
   tenant (forwarding not applied), or every tokenless caller sharing one audit key (the gateway's).
+
+## Customer channel metrics and alerts (ADR-0384 slice 1)
+
+`McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
+(per allowlisted client, per tool, with the DPoP/replay-refusal reason where one applies)
+through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
+reads the same series through the delegations MCP-channel view. Alert thresholds for the
+channel live with the fleet alerting rules, not in this service.
