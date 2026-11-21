@@ -437,6 +437,15 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-21 (#16847 follow-up)** — Subject-less audit key budget per allocation.
+  - *Repudiation / audit suppression.* The per-minute cap on distinct subject-less keys could be
+    spent by one party holding one IPv6 allocation (a /48 is 65 536 /64s), pushing every other
+    subject-less caller into the shared overflow key for the rest of the minute. Distinct keys are
+    now also capped per allocation (IPv6 /48, IPv4 /24); past that cap an allocation's further
+    networks share one allocation key and never reach the global budget. Only callers spread over
+    many allocations can reach the global overflow, and its first occurrence per minute is logged.
+    Every refusal remains metered regardless of key.
+
 - **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
   - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
     edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,

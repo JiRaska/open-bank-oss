@@ -155,4 +155,32 @@ class ClientAddressResolverTest {
             r.capped(ClientAddressKey.of("2001:db8:4::1"), now + 60_000L),
         ).isNotEqualTo(ClientAddressResolver.OVERFLOW)
     }
+
+    @Test
+    fun `one 48 cannot exhaust the global key budget - other networks keep their own key`() {
+        val r = ClientAddressResolver(Optional.empty(), Optional.empty()).apply {
+            maxKeysPerMinute = 8
+            maxKeysPerAllocation = 2
+        }
+        val now = 1_000_000L * 60_000L
+        fun call(address: String) = r.capped(ClientAddressKey.of(address), now, ClientAddressKey.allocationOf(address))
+        // one attacker cycles 100 /64s inside 2001:db8:aaaa::/48
+        val flood = (1..100).map { call("2001:db8:aaaa:${it.toString(16)}::1") }.toSet()
+        assertThat(flood).hasSize(3).doesNotContain(ClientAddressResolver.OVERFLOW)
+        assertThat(flood).contains(ClientAddressKey.allocationOf("2001:db8:aaaa::1"))
+        // an unrelated caller still gets its own window, not the shared overflow key
+        assertThat(call("198.51.100.7")).isEqualTo(ClientAddressKey.of("198.51.100.7"))
+        assertThat(call("2001:db8:bbbb:1::1")).isEqualTo(ClientAddressKey.of("2001:db8:bbbb:1::1"))
+    }
+
+    @Test
+    fun `ipv4 allocation is the 24 and differs from the address key`() {
+        assertThat(
+            ClientAddressKey.allocationOf("198.51.100.7"),
+        ).isEqualTo(ClientAddressKey.allocationOf("198.51.100.200"))
+        assertThat(
+            ClientAddressKey.allocationOf("198.51.100.7"),
+        ).isNotEqualTo(ClientAddressKey.allocationOf("198.51.101.7"))
+        assertThat(ClientAddressKey.allocationOf("198.51.100.7")).isNotEqualTo(ClientAddressKey.of("198.51.100.7"))
+    }
 }

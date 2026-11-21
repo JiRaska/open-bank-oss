@@ -25,6 +25,10 @@ import javax.crypto.spec.SecretKeySpec
 object ClientAddressKey {
     const val UNKNOWN = "ip:unknown"
     private const val IPV6_PREFIX_BYTES = 8
+    private const val IPV6_ALLOCATION_BYTES = 6
+    private const val IPV4_ALLOCATION_BYTES = 3
+    private const val V4_ALLOCATION: Byte = 24
+    private const val V6_ALLOCATION: Byte = 48
     private const val KEY_BYTES = 32
     private const val ALGORITHM = "HmacSHA256"
     private const val V4: Byte = 4
@@ -33,14 +37,31 @@ object ClientAddressKey {
 
     fun of(address: String?): String {
         val bytes = IpLiteral.parse(address) ?: return UNKNOWN
-        val network = if (bytes.size >
-            V4
-        ) {
+        val network = if (bytes.size > V4) {
             byteArrayOf(V6) + bytes.copyOf(IPV6_PREFIX_BYTES)
         } else {
             byteArrayOf(V4) + bytes
         }
+        return hash("ip:", network)
+    }
+
+    /**
+     * The key of the ALLOCATION the address sits in — IPv6 /48, IPv4 /24 — which is what one party
+     * can cheaply hold many networks of. [ClientAddressResolver] caps distinct [of] keys per
+     * allocation, so one allocation cannot spend the global per-minute key budget (#16847 follow-up).
+     */
+    fun allocationOf(address: String?): String {
+        val bytes = IpLiteral.parse(address) ?: return UNKNOWN
+        val network = if (bytes.size > V4) {
+            byteArrayOf(V6_ALLOCATION) + bytes.copyOf(IPV6_ALLOCATION_BYTES)
+        } else {
+            byteArrayOf(V4_ALLOCATION) + bytes.copyOf(IPV4_ALLOCATION_BYTES)
+        }
+        return hash("net:", network)
+    }
+
+    private fun hash(prefix: String, network: ByteArray): String {
         val mac = Mac.getInstance(ALGORITHM).apply { init(bootKey) }
-        return "ip:" + HexFormat.of().formatHex(mac.doFinal(network))
+        return prefix + HexFormat.of().formatHex(mac.doFinal(network))
     }
 }
