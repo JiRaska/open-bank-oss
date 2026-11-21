@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.14.0
+  version: 2.16.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -831,10 +831,170 @@ paths:
         '404': { $ref: '#/components/responses/CatalogNotFound' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/passport-grants:
+    post:
+      tags: [Passport grants]
+      operationId: proposePassportGrant
+      summary: Propose an account passport grant for independent staff approval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportGrantProposal' }
+      responses:
+        '201':
+          description: Recorded proposal, unusable until approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grantId]
+                properties:
+                  grantId: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/passport-grants/{grantId}/approve:
+    post:
+      tags: [Passport grants]
+      operationId: approvePassportGrant
+      summary: Approve a passport grant with verified staff authority
+      parameters:
+        - { name: grantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 240 }
+      responses:
+        '204': { description: Decision recorded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Grant cannot accept this decision }
+  /api/v2/passport-grants/{grantId}/revoke:
+    post:
+      tags: [Passport grants]
+      operationId: revokePassportGrant
+      summary: Revoke a passport grant with verified staff authority
+      parameters:
+        - { name: grantId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 240 }
+      responses:
+        '204': { description: Decision recorded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Grant cannot accept this decision }
+  /api/v2/internal/passport-account-admissions:
+    post:
+      tags: [Passport grants]
+      operationId: admitPassportAccount
+      summary: Consume passport admission for a persisted account operation
+      description: Only the named account-service principal can invoke this operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportAccountAdmissionRequest' }
+      responses:
+        '204': { description: Operation admitted or exact receipt replayed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Admission refused }
+  /api/v2/internal/passport-account-admissions/receipt:
+    post:
+      tags: [Passport Grants]
+      summary: Check an exact already-consumed account admission without creating one
+      operationId: getPassportAccountAdmissionReceipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportAccountAdmissionRequest' }
+      responses:
+        '204': { description: Exact consumed receipt exists }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No matching consumed receipt }
+  /api/v2/internal/passport-commitments:
+    post:
+      tags: [Passport grants]
+      operationId: admitPassportCommitment
+      summary: Consume passport admission for a persisted product commitment
+      description: Only the named lending-service principal can invoke this operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportCommitmentRequest' }
+      responses:
+        '204': { description: Operation admitted or exact receipt replayed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Admission refused }
+  /api/v2/internal/passport-commitments/receipt:
+    post:
+      tags: [Passport Grants]
+      summary: Check an exact already-consumed commitment without creating one
+      operationId: getPassportCommitmentReceipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportCommitmentRequest' }
+      responses:
+        '204': { description: Exact consumed receipt exists }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No matching consumed receipt }
+  /api/v2/internal/passport-commitments/route:
+    post:
+      tags: [Passport grants]
+      operationId: resolvePassportCommitmentRoute
+      summary: Read the approved FOS route for a verified subject and pinned revision
+      description: >-
+        Only the named lending-service principal can invoke this lookup. A result is planning
+        evidence, and creates no permit. A new commitment still requires authoritative admission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportRouteRequest' }
+      responses:
+        '200':
+          description: Approved route scope for the exact subject and revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PassportCommitmentRoute' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Route unavailable }
   /api/v2/events:
     get:
       tags: [Catalog Events]
       summary: Read durable catalog changes after a cursor
+      description: >-
+        Passport grant changes have aggregateType PASSPORT_GRANT and eventType
+        com.openbank.catalog.passport-grant.changed. Apply the full snapshot only when its payload version
+        exceeds the locally stored version for that grant.
       operationId: listCatalogEvents
       parameters:
         - name: after
@@ -926,6 +1086,72 @@ components:
       description: Strong optimistic-concurrency token for this product representation.
       schema: { type: string, pattern: '^"[0-9]+"$' }
   schemas:
+    PassportAccountAdmissionRequest:
+      type: object
+      required: [grantId, operation, operationId, partyId, revisionId, binding]
+      properties:
+        grantId: { type: string, format: uuid }
+        operation: { type: string, enum: [OPEN, ACTIVATE] }
+        operationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        binding: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportCommitmentRequest:
+      type: object
+      required: [grantId, operation, operationId, partyId, revisionId, revisionContentHash, binding, hostCountry, bankId,
+        establishmentId, channel, customerSegment, packSetDigest]
+      properties:
+        grantId: { type: string, format: uuid }
+        operation: { type: string, enum: [SIGN, DISBURSE] }
+        operationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        revisionContentHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: The pinned published catalogue revision content hash.
+        binding: { type: string, pattern: '^[a-f0-9]{64}$' }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        channel: { type: string, minLength: 1 }
+        customerSegment: { type: string, minLength: 1 }
+        packSetDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportRouteRequest:
+      type: object
+      required: [grantId, partyId, revisionId, revisionContentHash]
+      properties:
+        grantId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        revisionContentHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportCommitmentRoute:
+      type: object
+      required: [hostCountry, bankId, establishmentId, channel, customerSegment, packSetDigest]
+      properties:
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        channel: { type: string, minLength: 1 }
+        customerSegment: { type: string, minLength: 1 }
+        packSetDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportGrantProposal:
+      type: object
+      additionalProperties: false
+      required: [bankId, establishmentId, hostCountry, mode, offeringId, channel, customerSegment,
+        packSetDigest, evidenceRef, effectiveFrom, effectiveUntil]
+      properties:
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        mode: { type: string, enum: [FOS, BRANCH] }
+        offeringId: { type: string, format: uuid }
+        channel: { type: string, minLength: 1, maxLength: 240 }
+        customerSegment: { type: string, minLength: 1, maxLength: 240 }
+        packSetDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+        evidenceRef: { type: string, minLength: 1, maxLength: 240 }
+        effectiveFrom: { type: string, format: date-time }
+        effectiveUntil: { type: string, format: date-time }
     RevisionApprovalRequest:
       type: object
       additionalProperties: false
