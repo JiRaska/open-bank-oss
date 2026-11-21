@@ -49,6 +49,16 @@ class LegalEntityIdentifierTest {
         assertThat(IdentifierChecksums.nip("5260250994")).isFalse()
         assertThat(IdentifierChecksums.luhn("552081317")).isTrue()
         assertThat(IdentifierChecksums.luhn("552081318")).isFalse()
+        assertThat(IdentifierChecksums.siren("552081317")).isTrue()
+    }
+
+    @Test
+    fun `SIREN 000000000 passes Luhn but is rejected as never assigned (local policy)`() {
+        assertThat(IdentifierChecksums.luhn("000000000")).isTrue()
+        assertThat(IdentifierChecksums.siren("000000000")).isFalse()
+        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, "000 000 000").isFailure).isTrue()
+        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, "000000018").isSuccess).isTrue()
+        assertThat(LegalEntityIdentifier.parse(IdentifierScheme.FR_SIREN, "552081317").isSuccess).isTrue()
     }
 
     @Test

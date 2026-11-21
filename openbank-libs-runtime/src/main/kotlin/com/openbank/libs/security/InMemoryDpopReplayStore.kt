@@ -43,6 +43,12 @@ class InMemoryDpopReplayStore(
     override suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant): ReplayClaim =
         claim(jkt, "$jkt:$jti", ttl, now)
 
+    /** Live = claimed and not past its expiry at [now]; inclusive like [firstUse]. Writes nothing. */
+    override suspend fun isUsed(jkt: String, jti: String, now: Instant): Boolean = peek("$jkt:$jti", now)
+
+    @Synchronized
+    private fun peek(key: String, now: Instant): Boolean = live[key]?.let { !it.expiresAt.isBefore(now) } ?: false
+
     @Synchronized
     private fun claim(jkt: String, key: String, ttl: Duration, now: Instant): ReplayClaim {
         evictExpired(now)

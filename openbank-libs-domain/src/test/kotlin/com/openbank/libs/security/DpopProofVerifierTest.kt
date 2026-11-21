@@ -237,4 +237,60 @@ class DpopProofVerifierTest {
             DpopPolicy(futureSkew = Duration.ofSeconds(-1))
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    @Test
+    fun `check is stateless - a bound proof touches no replay store until claim`() {
+        val store = RecordingStore()
+        val verifier = DpopProofVerifier({ valid }, store)
+        val checked = verifier.check(request, now)
+        assertThat(checked).isEqualTo(DpopCheck.Bound(jkt, checkNotNull(valid.jti)))
+        assertThat(store.calls).isZero()
+        runBlocking {
+            assertThat(verifier.claim(checked as DpopCheck.Bound, now)).isEqualTo(DpopResult.VALID)
+            assertThat(verifier.claim(checked, now)).isEqualTo(DpopResult.REPLAYED)
+        }
+        assertThat(store.calls).isEqualTo(2)
+    }
+
+    @Test
+    fun `check rejects exactly what verify rejects, without a store call`() {
+        val store = RecordingStore()
+        val verifier = DpopProofVerifier({ valid.copy(signatureValid = false) }, store)
+        assertThat(verifier.check(request, now)).isEqualTo(DpopCheck.Rejected(DpopResult.BAD_SIGNATURE))
+        assertThat(verifier.check(request.copy(dpopHeaderValues = emptyList()), now))
+            .isEqualTo(DpopCheck.Rejected(DpopResult.MISSING_PROOF))
+        assertThat(store.calls).isZero()
+    }
+
+    @Test
+    fun `isReplayed peeks without claiming - false before the claim, true after`() {
+        val store = object : DpopReplayStore {
+            val seen = mutableSetOf<String>()
+
+            override suspend fun firstUse(jkt: String, jti: String, ttl: Duration, now: Instant) =
+                if (seen.add("$jkt:$jti")) ReplayClaim.FIRST_USE else ReplayClaim.REPLAYED
+
+            override suspend fun isUsed(jkt: String, jti: String, now: Instant) = "$jkt:$jti" in seen
+        }
+        val verifier = DpopProofVerifier({ valid }, store)
+        val bound = verifier.check(request, now) as DpopCheck.Bound
+        runBlocking {
+            assertThat(verifier.isReplayed(bound, now)).isFalse()
+            assertThat(verifier.isReplayed(bound, now)).isFalse()
+            assertThat(store.seen).isEmpty()
+            assertThat(verifier.claim(bound, now)).isEqualTo(DpopResult.VALID)
+            assertThat(verifier.isReplayed(bound, now)).isTrue()
+        }
+    }
+
+    @Test
+    fun `a store without a peek never reports replayed - claim stays the authority`() {
+        val verifier = DpopProofVerifier({ valid }, RecordingStore())
+        val bound = verifier.check(request, now) as DpopCheck.Bound
+        runBlocking {
+            verifier.claim(bound, now)
+            assertThat(verifier.isReplayed(bound, now)).isFalse()
+            assertThat(verifier.claim(bound, now)).isEqualTo(DpopResult.REPLAYED)
+        }
+    }
 }

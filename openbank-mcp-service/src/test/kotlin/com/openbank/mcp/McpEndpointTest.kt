@@ -58,7 +58,8 @@ class McpEndpointTest {
         val stub = StubReads(mapper)
         val toolRegistry =
             McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
-        val caller = CallerContextResolver(jwt, oboEnabled, fakeSessionRepo())
+        val caller =
+            CallerContextResolver(jwt, oboEnabled, fakeSessionRepo(), customerIssuer = java.util.Optional.empty())
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -155,6 +156,20 @@ class McpEndpointTest {
         )
         assertThat(resp.path("result").path("content").first().path("text").asText())
             .isEqualTo("Authorization unavailable")
+    }
+
+    @Test
+    fun `the tool-call series carries the channel the resolver admitted the caller on (ADR-0384 D1)`() {
+        endpoint(allowAll(), jwt = staffOboJwt(), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val byChannel = registry.find("openbank.mcp.tool_calls").counters()
+            .groupBy { it.id.getTag("channel") }
+            .mapValues { (_, c) -> c.sumOf { it.count() } }
+        assertThat(byChannel).containsEntry("operator", 1.0).containsEntry("agent", 1.0)
     }
 
     @Test

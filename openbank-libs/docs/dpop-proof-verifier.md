@@ -40,6 +40,26 @@ rejected for any other reason never uses up its `jti`.
 
 Anything unparsable, more than one `DPoP` header, or a parser that throws is `MALFORMED`.
 
+## Spending a budget only on bound proofs
+
+`verify` is `check` followed by `claim`. A caller that rate-limits before the replay claim should
+call them separately:
+
+- `check(request, now)` runs every check except the replay claim and touches no state. It returns
+  `DpopCheck.Rejected(result)` or `DpopCheck.Bound(jkt, jti)`, where `jkt` is the verified proof-key
+  thumbprint, equal to the token's `cnf.jkt`.
+- `claim(bound, now)` makes the replay claim and returns the same results `verify` would.
+
+`isReplayed(bound, now)` is a non-mutating peek (`DpopReplayStore.isUsed`, default `false`). Call
+it before spending a budget, so a replayed proof costs nothing; `claim` remains the authority, and
+two concurrent copies of one proof can both pass the peek. Only `check` can create a
+`DpopCheck.Bound`: its constructor and `copy` are internal, so `claim` cannot be handed one that
+skipped the checks.
+
+Run the limiter between the two. A junk proof, or one carrying someone else's public key, is then
+rejected by `check` before it can spend anyone's budget, and the budget is still spent before the
+replay store is written to.
+
 ## Results callers must tell apart
 
 | Result | Meaning | Typical answer |
