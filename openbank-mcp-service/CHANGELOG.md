@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.0...mcp-service-v0.18.1) (2026-11-21)
+
+
+### Security
+
+* **mcp-service:** cap subject-less audit keys per network allocation ([#17022](https://github.com/JiRaska/open-bank-oss/issues/17022)) ([54d3b13](https://github.com/JiRaska/open-bank-oss/commit/54d3b13485c5c80dde182664809845958749f99d))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.11...mcp-service-v0.18.0) (2026-11-21)
 
 
