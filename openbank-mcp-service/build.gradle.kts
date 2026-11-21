@@ -36,6 +36,11 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
     // Stubs the generated account-service client (#13169): it returns raw JAX-RS Responses.
     testImplementation(libs.mockk)
+    // Test-only (ADR-0384 D1): McpMetricsAdapterTest scrapes a real PrometheusMeterRegistry, because
+    // only Prometheus refuses a second tag-key set under one meter name — a SimpleMeterRegistry
+    // accepts it, so it cannot prove the agent placeholders are needed. Same artifact, version and
+    // CVE rationale as openbank-campaign-service's copy (1.17.0, GHSA-g3pr-3p32-fp23).
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
     // Consumer-driven contract tests (ADR-0063, issue #2255 dimension C3). mcp's read ports became
     // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
     // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).

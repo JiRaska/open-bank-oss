@@ -111,8 +111,10 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'eef9500b378c7630aff90490b68686b4f0f02cf8',
     # merge-train.py of #16932's fix (a natively merged carrier member at the verified head continues), reviewed with that PR.
     '0706fa384166e6be506fa7dc5393a3d69906b6ea',
-    # merge-train.py of #16955's diff-only shortcut in build/publish (no verdict change), reviewed with that PR.
-    'd0335b5c8c8a34e3569feedc644dc93c83a828b6',
+    # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
+    '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
+    # merge-train.py of #16972's tick-speed change merged with #16973's claim_evidence(now) fix, reviewed with that PR.
+    'bffe20f4c51c3b6fe3a7d961617d4f484276478e',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
