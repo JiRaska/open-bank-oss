@@ -15,12 +15,19 @@ import io.restassured.RestAssured.given
 import io.restassured.specification.RequestSpecification
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.jose4j.jws.AlgorithmIdentifiers
 import org.jose4j.jws.JsonWebSignature
 import org.jose4j.jwt.JwtClaims
 import org.jose4j.jwt.NumericDate
 import org.junit.jupiter.api.Test
+import java.net.Socket
+import java.nio.file.Files
+import java.security.KeyStore
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 
 /**
  * The edge hop is trusted by its mTLS IDENTITY, never by IP (#16847, owner decision 2026-11-21),
@@ -210,6 +217,57 @@ class McpGatewayMtlsIT {
         publishedProofToolsList(mtls("gateway"), "c0ffee00-0000-0000-0000-000000000032").statusCode(200)
     }
 
+    /** One HTTP/1.1 request written byte-for-byte (no client-side path normalisation); returns the status code. */
+    private fun rawStatus(tls: Boolean, target: String, authorization: String?): Int {
+        val port = ConfigProvider.getConfig()
+            .getValue(if (tls) "quarkus.http.test-ssl-port" else "quarkus.http.test-port", Int::class.java)
+        val socket: Socket = if (tls) {
+            val keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
+                init(pkcs12(GatewayMtlsMaterial.clientStore("gateway")), GatewayMtlsMaterial.password.toCharArray())
+            }
+            val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
+                init(pkcs12(GatewayMtlsMaterial.trustStore()))
+            }
+            SSLContext.getInstance("TLS").apply { init(keys.keyManagers, trust.trustManagers, null) }
+                .socketFactory.createSocket("localhost", port)
+        } else {
+            Socket("localhost", port)
+        }
+        socket.use { s ->
+            s.soTimeout = RAW_TIMEOUT_MS
+            val auth = authorization?.let { "Authorization: $it\r\n" }.orEmpty()
+            val request = "POST $target HTTP/1.1\r\nHost: $PUBLISHED_HOST\r\n$auth" +
+                "Content-Type: application/json\r\nContent-Length: ${TOOLS_LIST.length}\r\n" +
+                "Connection: close\r\n\r\n$TOOLS_LIST"
+            s.getOutputStream().apply {
+                write(request.toByteArray(Charsets.US_ASCII))
+                flush()
+            }
+            val status = s.getInputStream().bufferedReader(Charsets.US_ASCII).readLine()
+            return status.split(' ')[1].toInt()
+        }
+    }
+
+    private fun pkcs12(path: java.nio.file.Path): KeyStore = KeyStore.getInstance("PKCS12").apply {
+        Files.newInputStream(path).use { load(it, GatewayMtlsMaterial.password.toCharArray()) }
+    }
+
+    /**
+     * Raw-socket probe for the spellings an HTTP client library rewrites before sending (`//`, and the
+     * absolute-form request target). Both listeners; the staff control proves the raw client is served.
+     */
+    @Test
+    fun `raw socket - empty segments and absolute-form targets are refused on both listeners`() {
+        listOf(false, true).forEach { tls ->
+            assertThat(rawStatus(tls, "/mcp", "Bearer ${staffToken()}")).describedAs("control tls=$tls").isEqualTo(200)
+            RAW_NON_CANONICAL.forEach { target ->
+                assertThat(rawStatus(tls, target, "Bearer ${staffToken()}"))
+                    .describedAs("staff tls=$tls $target").isEqualTo(400)
+                assertThat(rawStatus(tls, target, null)).describedAs("anon tls=$tls $target").isEqualTo(400)
+            }
+        }
+    }
+
     @Test
     fun `staff - a real staff Bearer token on the staff root still works with the DPoP root beside it`() {
         val tools = given().contentType("application/json")
@@ -275,6 +333,17 @@ class McpGatewayMtlsIT {
         const val EDGE_HEADER = "X-Envoy-External-Address"
         const val PUBLISHED_HOST = "mcp.test.example"
         const val TOOLS_LIST = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"""
+        const val RAW_TIMEOUT_MS = 10_000
+        val RAW_NON_CANONICAL = listOf(
+            "/customer//mcp",
+            "//customer/mcp",
+            "//mcp",
+            "/mcp//",
+            "http://$PUBLISHED_HOST/customer/mcp;a=b",
+            "http://$PUBLISHED_HOST/customer//mcp",
+            "http://$PUBLISHED_HOST/x/../mcp",
+            "/customer\\mcp",
+        )
         val NON_CANONICAL = listOf(
             "/customer/mcp;a=b",
             "/customer;a=b/mcp",
@@ -284,7 +353,7 @@ class McpGatewayMtlsIT {
             "/customer/./mcp",
             "/x/../customer/mcp",
             // "/customer//mcp" is not listed: RestAssured collapses `//` before sending (measured: it
-            // arrived as /customer/mcp and was admitted); McpPathCanonicalFilterTest covers it.
+            // arrived as /customer/mcp and was admitted); RAW_NON_CANONICAL sends it over a raw socket.
             "/mcp;a=b",
             "/%6dcp",
             "/./mcp",
