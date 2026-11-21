@@ -98,6 +98,22 @@ jobs:
             echo "::warning::disarmed stuck deploy PR #$n (#14498)"
           done
 
+      # A deploy PR in conflict with main is a stale derivation nothing will ever resolve; left
+      # open it was re-armed and disarmed on every run (#15411, 5h). Close it: the scheduled
+      # reconcile derives lag from main's pins and re-offers each service from current main.
+      - name: Close conflicted deploy PRs
+        if: steps.pick.outputs.close != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          CLOSE: ${{ steps.pick.outputs.close }}
+        run: |
+          set -euo pipefail
+          for n in $CLOSE; do
+            gh pr close "$n" --repo "$GITHUB_REPOSITORY" --comment \
+              "Closed by the deploy window: this deploy PR conflicts with main and cannot merge. The scheduled reconcile re-offers its services from current main."
+            echo "::warning::closed conflicted deploy PR #$n"
+          done
+
       - name: Install deploy-hold parser
         if: steps.pick.outputs.candidates != ''
         run: |

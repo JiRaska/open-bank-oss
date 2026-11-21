@@ -170,6 +170,9 @@ if args[:2] == ['api', 'graphql']:
     print(json.dumps({'data': {'enablePullRequestAutoMerge': {'pullRequest': {'number': 7}}}}))
 elif args[:3] == ['pr', 'diff', '7']:
     print('')
+elif args[:2] == ['pr', 'view']:
+    # deploy-window-inputs.sh classifies every deploy PR (stuck / conflicted); this one is healthy.
+    print(json.dumps({'mergeStateStatus': 'CLEAN', 'statusCheckRollup': []}))
 elif args[0] == 'api':
     assert '-X' not in args and '--method' not in args
     path = next(arg for arg in args[1:] if arg.startswith('repos/'))
