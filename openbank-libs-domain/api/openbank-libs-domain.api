@@ -2935,7 +2935,9 @@ public final class com/openbank/libs/identity/MatchKey {
 public final class com/openbank/libs/identity/RodneCislo {
 	public static final field INSTANCE Lcom/openbank/libs/identity/RodneCislo;
 	public final fun isValid (Ljava/lang/String;)Z
+	public final fun isValid (Ljava/lang/String;Ljava/time/Clock;)Z
 	public final fun parse (Ljava/lang/String;)Lcom/openbank/libs/identity/RodneCislo$Result;
+	public final fun parse (Ljava/lang/String;Ljava/time/Clock;)Lcom/openbank/libs/identity/RodneCislo$Result;
 }
 
 public final class com/openbank/libs/identity/RodneCislo$Gender : java/lang/Enum {

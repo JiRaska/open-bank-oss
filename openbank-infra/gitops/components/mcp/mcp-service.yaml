@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "23ea8e3141a6f8c1"
+        openbank.tech/policy-checksum: "658d377e9fda83a2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -103,11 +103,6 @@ spec:
               value: http://transaction-service.payments.svc:8102
             - name: QUARKUS_REST_CLIENT_CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
-            # ADR-0383 D3: the customer channel's MCP_CLIENT grant lookup (delegation-service
-            # POST /api/v1/delegations/mcp-client/resolve). Declared so the NetworkPolicy edge exists
-            # ahead of use; inert while mcp.customer.enabled stays off (the default).
-            - name: QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL
-              value: http://delegation-service.delegation.svc:8126
             # openbank-services client secret (shared M2M identity, ADR-0104 D3 — the SAME client
             # transaction-service/lending-service/settlement-service/agent-service already use) —
             # lets RealAccountReadPort's OidcClientRequestReactiveFilter mint a client-credentials
@@ -196,10 +191,6 @@ spec:
             - name: opa-bundle
               mountPath: /bundle/rest.rego
               subPath: rest.rego
-              readOnly: true
-            - name: opa-bundle
-              mountPath: /bundle/mcp_rest_ext.rego
-              subPath: mcp_rest_ext.rego
               readOnly: true
             - name: opa-bundle
               mountPath: /bundle/agents.rego
