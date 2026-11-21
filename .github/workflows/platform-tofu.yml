@@ -142,6 +142,37 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
 
+      # ADR-0389: SAFE operational knobs read from repository variables, so tuning a
+      # runner pool is "set a variable, dispatch the apply" instead of a PR + wait.
+      # Unset/empty => no TF_VAR is exported and the tofu default in variables.tf wins.
+      # Ranges are enforced by `validation` blocks in variables.tf; this step only
+      # rejects non-integers early. The PR plan and the dispatch apply read the same
+      # variables, so the reviewed plan and the applied plan agree.
+      - name: Export SAFE tofu knobs from repository variables
+        env:
+          K_ARC_MIN_RUNNERS: ${{ vars.TF_ARC_MIN_RUNNERS }}
+          K_ARC_MAX_RUNNERS: ${{ vars.TF_ARC_MAX_RUNNERS }}
+          K_ARC_DEPLOY_MAX_RUNNERS: ${{ vars.TF_ARC_DEPLOY_MAX_RUNNERS }}
+          K_ARC_BATCH_MAX_RUNNERS: ${{ vars.TF_ARC_BATCH_MAX_RUNNERS }}
+          K_ARC_DR_MAX_RUNNERS: ${{ vars.TF_ARC_DR_MAX_RUNNERS }}
+        run: |
+          set -euo pipefail
+          for knob in ARC_MIN_RUNNERS ARC_MAX_RUNNERS ARC_DEPLOY_MAX_RUNNERS ARC_BATCH_MAX_RUNNERS ARC_DR_MAX_RUNNERS; do
+            ref="K_${knob}"
+            value="${!ref:-}"
+            if [ -z "$value" ]; then
+              echo "TF_${knob}: unset -> tofu default"
+              continue
+            fi
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::repository variable TF_${knob}='${value}' is not a non-negative integer."
+              exit 1
+            fi
+            name="$(printf '%s' "$knob" | tr '[:upper:]' '[:lower:]')"
+            echo "TF_VAR_${name}=${value}" >> "$GITHUB_ENV"
+            echo "TF_${knob}: ${value} (repository variable override)"
+          done
+
       - name: tofu init
         working-directory: ${{ env.ENV_DIR }}
         run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage initialization -- tofu init -input=false
@@ -308,6 +339,37 @@ jobs:
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
+
+      # ADR-0389: SAFE operational knobs read from repository variables, so tuning a
+      # runner pool is "set a variable, dispatch the apply" instead of a PR + wait.
+      # Unset/empty => no TF_VAR is exported and the tofu default in variables.tf wins.
+      # Ranges are enforced by `validation` blocks in variables.tf; this step only
+      # rejects non-integers early. The PR plan and the dispatch apply read the same
+      # variables, so the reviewed plan and the applied plan agree.
+      - name: Export SAFE tofu knobs from repository variables
+        env:
+          K_ARC_MIN_RUNNERS: ${{ vars.TF_ARC_MIN_RUNNERS }}
+          K_ARC_MAX_RUNNERS: ${{ vars.TF_ARC_MAX_RUNNERS }}
+          K_ARC_DEPLOY_MAX_RUNNERS: ${{ vars.TF_ARC_DEPLOY_MAX_RUNNERS }}
+          K_ARC_BATCH_MAX_RUNNERS: ${{ vars.TF_ARC_BATCH_MAX_RUNNERS }}
+          K_ARC_DR_MAX_RUNNERS: ${{ vars.TF_ARC_DR_MAX_RUNNERS }}
+        run: |
+          set -euo pipefail
+          for knob in ARC_MIN_RUNNERS ARC_MAX_RUNNERS ARC_DEPLOY_MAX_RUNNERS ARC_BATCH_MAX_RUNNERS ARC_DR_MAX_RUNNERS; do
+            ref="K_${knob}"
+            value="${!ref:-}"
+            if [ -z "$value" ]; then
+              echo "TF_${knob}: unset -> tofu default"
+              continue
+            fi
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+              echo "::error::repository variable TF_${knob}='${value}' is not a non-negative integer."
+              exit 1
+            fi
+            name="$(printf '%s' "$knob" | tr '[:upper:]' '[:lower:]')"
+            echo "TF_VAR_${name}=${value}" >> "$GITHUB_ENV"
+            echo "TF_${knob}: ${value} (repository variable override)"
+          done
 
       - name: tofu init
         working-directory: ${{ env.ENV_DIR }}
