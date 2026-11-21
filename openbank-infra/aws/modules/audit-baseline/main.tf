@@ -444,10 +444,10 @@ resource "aws_config_configuration_recorder_status" "audit" {
 # anomalous API callers, known-bad IPs). Enabled features:
 #   - EKS audit-log monitoring: reads the cluster audit feed (independent of the
 #     CloudWatch export above),
-#   - runtime monitoring for EKS is DISABLED (FinOps, 2026-11-21): the managed
-#     agent is billed per monitored vCPU (~$7/day on the sandbox fleet) and
-#     overlaps Falco's runtime rules. Audit-log monitoring, S3 and EBS stay on.
-#     Re-enable by flipping both statuses below to ENABLED,
+#   - runtime monitoring for EKS with the managed agent, OFF by default
+#     (var.runtime_monitoring_enabled): it is billed per monitored vCPU (~$7/day on
+#     the sandbox fleet) and overlaps Falco's runtime rules. One flag switches both
+#     the feature and the managed add-on,
 #   - S3 data events and malware protection for EBS on findings.
 # Findings reach Security Hub below and, from there, EventBridge.
 resource "aws_guardduty_detector" "this" {
@@ -465,11 +465,11 @@ resource "aws_guardduty_detector_feature" "eks_audit" {
 resource "aws_guardduty_detector_feature" "runtime" {
   detector_id = aws_guardduty_detector.this.id
   name        = "RUNTIME_MONITORING"
-  status      = "DISABLED"
+  status      = var.runtime_monitoring_enabled ? "ENABLED" : "DISABLED"
 
   additional_configuration {
     name   = "EKS_ADDON_MANAGEMENT"
-    status = "DISABLED"
+    status = var.runtime_monitoring_enabled ? "ENABLED" : "DISABLED"
   }
 }
 
