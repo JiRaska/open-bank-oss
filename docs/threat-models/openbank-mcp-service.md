@@ -452,6 +452,16 @@ a stub (T-T2/T-D2).
     CA: `McpGatewayMtlsIT` shows another trusted certificate (whose CN even names the gateway) and
     plain HTTP leave the key on the TCP peer. The guard refuses the header without the pin or
     without client-auth REQUIRED (one removal test per element).
+  - *Spoofing (authentication scheme).* Measured: with the listener-parity permission
+    `auth-mechanism: bearer` on the customer path, an `Authorization: DPoP` request was never
+    authenticated by the customers tenant (a proof for a foreign `htu` answered 200, as an
+    anonymous caller). The customer channel therefore has its OWN root, `/customer/mcp`, with an
+    `auth-mechanism: DPoP` permission and `tenant-paths` binding it to the customers tenant; staff
+    `/mcp` keeps `bearer`. `CustomerMcpEndpoint` serves the root (and its RFC 9728 metadata) only on
+    the mTLS listener, `ProxyForwardingGuard` refuses the channel without client-auth REQUIRED, a
+    non-customer token on the customer root is refused (never dispatched), and the staff path
+    refuses a customers-realm token. `McpGatewayMtlsIT` holds the must-reject cases (foreign `htu`,
+    foreign Host, plain HTTP) and staff Bearer on `/mcp`.
   - *Residual.* `openbank-ca` is a ClusterIssuer: whoever can create a cert-manager `Certificate`
     can mint the gateway SAN. Constrain issuance of that SAN (approver policy or a dedicated
     issuer) before go-live. The gateway presents its client certificate to every

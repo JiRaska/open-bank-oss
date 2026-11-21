@@ -147,16 +147,27 @@ class McpEndpoint(
     /**
      * Refusals decided before any method runs, in order: the customer-channel branch (ADR-0383 D1 /
      * ADR-0385 D1), then the RFC 8707 audience refusal (#16622). Null means dispatch normally.
+     *
+     * #16847 (owner decision 2026-11-21): the customer channel has its OWN root, [CUSTOMER_ROOT]
+     * ([CustomerMcpEndpoint], DPoP-only, 8443-only). The branch runs only there, and there a token that
+     * is not a customers-realm token is refused rather than handed to the staff path. On `/mcp` the
+     * branch never runs; [CallerContextResolver] refuses a customers-realm token on the staff path.
      */
     private val preDispatch: (String, JsonNode, JsonNode) -> Response? = { method, id, params ->
-        customerBranch?.handle(
-            callerResolver.token,
-            httpRequest.getHeader(AUTHORIZATION_HEADER),
-            httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
-            method,
-            id,
-            params,
-        ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+        if (::httpRequest.isInitialized && httpRequest.path()?.trimEnd('/') == CUSTOMER_ROOT) {
+            customerBranch?.let { branch ->
+                branch.handle(
+                    callerResolver.token,
+                    httpRequest.getHeader(AUTHORIZATION_HEADER),
+                    httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
+                    method,
+                    id,
+                    params,
+                ) ?: branch.refuseNonCustomerToken()
+            } ?: Response.status(Response.Status.NOT_FOUND).build()
+        } else {
+            audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+        }
     }
 
     @POST
@@ -503,19 +514,22 @@ class McpEndpoint(
     private fun error(id: JsonNode, code: Int, message: String): Response =
         Response.ok(McpResponse(id = id, error = McpError(code, message))).build()
 
-    private companion object {
+    companion object {
+        /** The customer channel's own path root (#16847); literal in [CustomerMcpEndpoint]'s `@Path`. */
+        const val CUSTOMER_ROOT = "/customer/mcp"
+
         /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
-        const val RATE_LIMITED = -32029
+        private const val RATE_LIMITED = -32029
 
-        const val DPOP_HEADER = "DPoP"
-        const val AUTHORIZATION_HEADER = "Authorization"
+        private const val DPOP_HEADER = "DPoP"
+        private const val AUTHORIZATION_HEADER = "Authorization"
 
-        const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
+        private const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 
         /**
          * The JSON-RPC methods this server implements. Used ONLY to bound the `method` metric tag —
          * the dispatch itself is the `when` in [handle], which stays the single source of behaviour.
          */
-        val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
+        private val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
     }
 }

@@ -120,6 +120,15 @@ class ProxyForwardingGuardTest {
         assertThatThrownBy { guard(pinned - removed) }.isInstanceOf(IllegalStateException::class.java)
     }
 
+    @Test
+    fun `the customer channel without client auth REQUIRED refuses to boot`() {
+        val on = mapOf(ProxyForwardingGuard.CUSTOMER_ENABLED to "true")
+        assertThatThrownBy { guard(on) }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy { guard(on + (ProxyForwardingGuard.CLIENT_AUTH to "request")) }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThatCode { guard(on + (ProxyForwardingGuard.CLIENT_AUTH to "required")) }.doesNotThrowAnyException()
+    }
+
     @ParameterizedTest
     @ValueSource(strings = ["none", "request", "NONE", ""])
     fun `the edge header with client auth not REQUIRED refuses to boot`(clientAuth: String) {

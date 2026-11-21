@@ -23,6 +23,8 @@ import org.jboss.logging.Logger
  * 2. The edge client-address header ([EDGE_HEADER]) is honoured only over mTLS, so configuring it
  *    requires `quarkus.http.ssl.client-auth=required` AND a pinned gateway SAN ([GATEWAY_IDENTITY]).
  *    A header with no pin, or a pin with client auth off, refuses to start.
+ * 3. The customer channel ([CUSTOMER_ENABLED]) is served only on the mTLS listener
+ *    ([CustomerMcpEndpoint]), so enabling it with client auth not REQUIRED refuses to start.
  *
  * `@Startup` because `@ApplicationScoped` is lazy and this is a boot gate, not a request check.
  */
@@ -39,6 +41,7 @@ class ProxyForwardingGuard @Inject constructor(config: Config) {
             edgeHeader = str(EDGE_HEADER),
             gatewayIdentity = str(GATEWAY_IDENTITY),
             clientAuth = str(CLIENT_AUTH),
+            customerEnabled = config.getOptionalValue(CUSTOMER_ENABLED, Boolean::class.javaObjectType).orElse(false),
         )
     }
 
@@ -48,6 +51,7 @@ class ProxyForwardingGuard @Inject constructor(config: Config) {
         const val EDGE_HEADER = "mcp.edge.client-address-header"
         const val GATEWAY_IDENTITY = "mcp.edge.gateway-identity"
         const val CLIENT_AUTH = "quarkus.http.ssl.client-auth"
+        const val CUSTOMER_ENABLED = "mcp.customer.enabled"
 
         /** quarkus-vertx-http 3.40 `ProxyConfig` switches that make request data depend on a peer header. */
         val FORWARDING_SWITCHES = listOf(
@@ -67,11 +71,15 @@ class ProxyForwardingGuard @Inject constructor(config: Config) {
             edgeHeader: String,
             gatewayIdentity: String,
             clientAuth: String,
+            customerEnabled: Boolean = false,
         ) {
             check(forwarding.isEmpty()) {
                 "Quarkus proxy forwarding is refused (edge is trusted by mTLS identity, not IP): $forwarding"
             }
             check(trustedProxies.isEmpty()) { "$TRUSTED_PROXIES must stay unset: the edge is trusted by mTLS identity" }
+            check(!customerEnabled || clientAuth.equals("required", ignoreCase = true)) {
+                "$CUSTOMER_ENABLED is on but $CLIENT_AUTH is '$clientAuth': the customer root is served only over mTLS"
+            }
             if (edgeHeader.isEmpty() && gatewayIdentity.isEmpty()) return
             check(edgeHeader.isNotEmpty() && gatewayIdentity.isNotEmpty()) {
                 "$EDGE_HEADER and $GATEWAY_IDENTITY must be configured together"

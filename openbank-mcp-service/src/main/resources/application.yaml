@@ -34,6 +34,8 @@ quarkus:
     resolve-tenants-with-issuer: ${MCP_CUSTOMER_ENABLED:false}
     customers:
       tenant-enabled: ${MCP_CUSTOMER_ENABLED:false}
+      # #16847: the customer root is bound to this tenant by path as well as by `iss`.
+      tenant-paths: /customer/mcp,/customer/mcp/*
       auth-server-url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
       token:
         # Keycloak signs with its frontend URL, not the in-cluster discovery URL.
@@ -220,3 +222,12 @@ openbank:
             paths: /mcp,/mcp/*,/api/v1/mcp/sessions,/api/v1/mcp/sessions/*,/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource/*
             policy: permit
             auth-mechanism: bearer
+          # #16847 (owner decision 2026-11-21, option b): the customer channel's own root takes the
+          # RFC 9449 DPoP scheme ONLY. Measured: under `bearer` an `Authorization: DPoP` request is never
+          # authenticated by the customers tenant (its htu check never runs), and the permission is
+          # global to both listeners, so the two schemes need two roots. CustomerMcpEndpoint also
+          # answers 404 off the mTLS listener.
+          customer-dpop:
+            paths: /customer/mcp,/customer/mcp/*
+            policy: permit
+            auth-mechanism: DPoP

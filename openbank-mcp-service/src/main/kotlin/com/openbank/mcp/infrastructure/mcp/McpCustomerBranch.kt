@@ -71,6 +71,14 @@ internal class McpCustomerBranch(
         }
     }
 
+    /** #16847: on the customer root a staff (or any non-customers-realm) token is refused, never dispatched. */
+    fun refuseNonCustomerToken(): Response {
+        log.info("customer root refused a token that is not a customers-realm token")
+        return Response.status(Response.Status.UNAUTHORIZED)
+            .header(WWW_AUTHENTICATE, admission.missingTokenChallenge())
+            .build()
+    }
+
     /** ADR-0383 D5.3 budgets on the shared limiter; which run before the DPoP check is decided in admission. */
     private val throttles = object : CustomerChannelAdmission.Throttles {
         override fun proofKey(thumbprint: String) =

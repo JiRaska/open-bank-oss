@@ -12,12 +12,9 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.restassured.RestAssured.given
-import io.restassured.config.RestAssuredConfig
-import io.restassured.config.SSLConfig
 import io.restassured.specification.RequestSpecification
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.jose4j.jws.AlgorithmIdentifiers
 import org.jose4j.jws.JsonWebSignature
@@ -31,8 +28,9 @@ import org.junit.jupiter.api.Test
  * (read from application.yaml, not restated). No `quarkus.http.proxy.*` switch is on.
  *
  * - DPoP: quarkus-oidc's own `htu` check (customers tenant) compares with `absoluteURI()`. On the
- *   TLS listener with the external Host passed through, a proof for the published URL is admitted;
- *   the identical request over plain HTTP, or with another Host, is refused AT THE TENANT.
+ *   TLS listener with the external Host passed through, a proof for the published URL is admitted
+ *   on the customer root (`/customer/mcp`, DPoP-only); another Host or htu is refused at the tenant,
+ *   and plain HTTP does not serve the customer root at all. Staff Bearer on `/mcp` is unaffected.
  * - Audit key: the one edge header is honoured only from the pinned gateway SAN; another trusted
  *   fleet certificate, plain HTTP, and `X-Forwarded-For` everywhere leave the key on the TCP peer.
  */
@@ -61,23 +59,11 @@ class McpGatewayMtlsIT {
             )
             ).flatMap { (k, v) -> listOf(k to v, "%test.$k" to v) }.toMap()
 
-        override fun testResources(): List<QuarkusTestProfile.TestResourceEntry> =
-            listOf(QuarkusTestProfile.TestResourceEntry(GatewayMtlsMaterial::class.java))
+        override fun testResources(): List<QuarkusTestProfile.TestResourceEntry> = GatewayTls.resources
     }
-
-    private val sslPort get() = ConfigProvider.getConfig().getValue("quarkus.http.test-ssl-port", Int::class.java)
 
     /** A request over the 8443-shaped listener presenting [identity] ("gateway" / "other"), or no certificate. */
-    private fun mtls(identity: String?): RequestSpecification {
-        var ssl = SSLConfig.sslConfig().allowAllHostnames()
-            .trustStore(GatewayMtlsMaterial.trustStore().toString(), GatewayMtlsMaterial.password)
-        if (identity != null) {
-            ssl = ssl.keyStore(GatewayMtlsMaterial.clientStore(identity).toString(), GatewayMtlsMaterial.password)
-                .keystoreType("PKCS12")
-        }
-        return given().config(RestAssuredConfig.config().sslConfig(ssl.trustStoreType("PKCS12")))
-            .baseUri("https://localhost").port(sslPort)
-    }
+    private fun mtls(identity: String?): RequestSpecification = GatewayTls.spec(identity)
 
     private fun customerToken(sub: String, jkt: String): String {
         val claims = JwtClaims()
@@ -96,61 +82,95 @@ class McpGatewayMtlsIT {
     }
 
     /** tools/list, real customers token, proof for the PUBLISHED resource; [host] is what the edge passes on. */
-    private fun publishedProofToolsList(spec: RequestSpecification, sub: String, host: String = PUBLISHED_HOST) =
-        DpopTestProofs.newKey().let { key ->
-            val token = customerToken(sub, DpopTestProofs.jkt(key))
-            spec.contentType("application/json")
-                .header("Host", host)
-                .header("Authorization", "DPoP $token")
-                .header("DPoP", DpopTestProofs.proof(key, htu = DpopTestProofs.RESOURCE, token = token))
-                // A forged forwarding claim: must change nothing, since no forwarding is configured.
-                .header("X-Forwarded-Proto", "https")
-                .header("X-Forwarded-Host", PUBLISHED_HOST)
-                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
-                .post("/mcp").then()
-        }
+    private fun publishedProofToolsList(
+        spec: RequestSpecification,
+        sub: String,
+        host: String = PUBLISHED_HOST,
+        body: String = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""",
+    ) = DpopTestProofs.newKey().let { key ->
+        val token = customerToken(sub, DpopTestProofs.jkt(key))
+        spec.contentType("application/json")
+            .header("Host", host)
+            .header("Authorization", "DPoP $token")
+            .header("DPoP", DpopTestProofs.proof(key, htu = DpopTestProofs.RESOURCE, token = token))
+            // A forged forwarding claim: must change nothing, since no forwarding is configured.
+            .header("X-Forwarded-Proto", "https")
+            .header("X-Forwarded-Host", PUBLISHED_HOST)
+            .body(body)
+            .post("/customer/mcp").then()
+    }
 
     @Test
     fun `DPoP - a proof for the published URL is ADMITTED over the gateway mTLS hop with the external Host`() {
         publishedProofToolsList(mtls("gateway"), "c0ffee00-0000-0000-0000-000000000021")
             .statusCode(200)
             .body("result.tools.size()", equalTo(0))
+        // Not vacuous: an anonymous caller also lists no tools, but only an ADMITTED customer gets
+        // the customer branch's "Not available on this channel" (an anonymous one reads "Authorization unavailable").
+        publishedProofToolsList(
+            mtls("gateway"),
+            "c0ffee00-0000-0000-0000-000000000025",
+            body = """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"x","arguments":{}}}""",
+        ).statusCode(200).body("result.content[0].text", equalTo("Not available on this channel"))
     }
 
     /**
-     * BLOCKER, measured 2026-11-21 — these two are RED on purpose and keep this PR a draft.
-     * Under the production listener shape (`%prod` bearer-only permission, `auth-mechanism: bearer`,
-     * required by gate mtls-bearer-only) a request with `Authorization: DPoP` is NOT authenticated by
-     * the customers tenant at all: a proof for `https://evil.test.example/mcp` answers 200, as do
-     * plain HTTP and a foreign Host. Measured controls: with the permission removed, and with
-     * `auth-mechanism: DPoP`, all of these are refused with a bare `DPoP` challenge (tenant htu
-     * check) — but `DPoP` then stops authenticating staff `Bearer` tokens on the same paths, and the
-     * permission is global to both listeners. Owner decision needed (see PR body).
+     * Must-reject cases (#16847). Measured 2026-11-21: under a `bearer` permission an
+     * `Authorization: DPoP` request was never authenticated by the customers tenant and all of these
+     * answered 200; the customer root's own `auth-mechanism: DPoP` permission (option b) is what
+     * makes them fail at the tenant. Removing the `customer-dpop` permission from application.yaml
+     * turns both tests red again.
      */
     @Test
     fun `DPoP - a proof for any URL but the published one is refused, even over the gateway hop`() {
-        listOf("https://evil.test.example/mcp", "http://mcp.test.example/mcp", "https://mcp.test.example/other")
-            .forEach { htu ->
-                val key = DpopTestProofs.newKey()
-                val token = customerToken("c0ffee00-0000-0000-0000-000000000022", DpopTestProofs.jkt(key))
-                val status = mtls("gateway").contentType("application/json")
-                    .header("Host", PUBLISHED_HOST)
-                    .header("Authorization", "DPoP $token")
-                    .header("DPoP", DpopTestProofs.proof(key, htu = htu, token = token))
-                    .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
-                    .post("/mcp").then().extract().statusCode()
-                assertThat(status).describedAs(htu).isEqualTo(401)
-            }
+        listOf(
+            "https://evil.test.example/customer/mcp",
+            "http://mcp.test.example/customer/mcp",
+            "https://mcp.test.example/mcp",
+        ).forEach { htu ->
+            val key = DpopTestProofs.newKey()
+            val token = customerToken("c0ffee00-0000-0000-0000-000000000022", DpopTestProofs.jkt(key))
+            val status = mtls("gateway").contentType("application/json")
+                .header("Host", PUBLISHED_HOST)
+                .header("Authorization", "DPoP $token")
+                .header("DPoP", DpopTestProofs.proof(key, htu = htu, token = token))
+                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+                .post("/customer/mcp").then().extract().statusCode()
+            assertThat(status).describedAs(htu).isEqualTo(401)
+        }
     }
 
     @Test
-    fun `DPoP - the published-URL proof over plain HTTP or with a foreign Host is refused at the tenant`() {
-        assertThat(publishedProofToolsList(given(), "c0ffee00-0000-0000-0000-000000000023").extract().statusCode())
-            .describedAs("plain HTTP, forged X-Forwarded-Proto").isEqualTo(401)
+    fun `DPoP - the published-URL proof with a foreign Host is refused, and plain HTTP is refused`() {
         assertThat(
             publishedProofToolsList(mtls("gateway"), "c0ffee00-0000-0000-0000-000000000024", host = "evil.test.example")
                 .extract().statusCode(),
         ).describedAs("foreign Host over the gateway hop").isEqualTo(401)
+        // 8150: the DPoP tenant refuses first (absoluteURI is http://, forged X-Forwarded-Proto ignored);
+        // a proof that matched http:// would then meet CustomerMcpEndpoint's 404 (McpCustomerChannelIT).
+        assertThat(publishedProofToolsList(given(), "c0ffee00-0000-0000-0000-000000000023").extract().statusCode())
+            .describedAs("plain HTTP, forged X-Forwarded-Proto").isEqualTo(401)
+    }
+
+    @Test
+    fun `staff - a real staff Bearer token on the staff root still works with the DPoP root beside it`() {
+        val claims = JwtClaims()
+        claims.issuer = "https://kc.test.example/realms/openbank"
+        claims.subject = "agent:test-agent"
+        claims.setAudience("openbank-mcp-service")
+        claims.setStringClaim("consent_id", "11111111-1111-1111-1111-111111111111")
+        claims.setStringClaim("azp", "mcp-local-test")
+        claims.issuedAt = NumericDate.now()
+        claims.setExpirationTimeMinutesInTheFuture(5f)
+        val jws = JsonWebSignature()
+        jws.payload = claims.toJson()
+        jws.algorithmHeaderValue = AlgorithmIdentifiers.RSA_USING_SHA256
+        jws.key = OidcItKeys.pair("staff").private
+        val tools = given().contentType("application/json")
+            .header("Authorization", "Bearer ${jws.compactSerialization}")
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+            .post("/mcp").then().statusCode(200).extract().jsonPath().getList<String>("result.tools.name")
+        assertThat(tools).isNotEmpty
     }
 
     @Test
