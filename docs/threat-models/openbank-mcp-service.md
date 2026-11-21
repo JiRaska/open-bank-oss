@@ -437,6 +437,26 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
+  IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
+  - *Spoofing (forwarded headers).* `ProxyForwardingGuard` now refuses to boot with ANY
+    `quarkus.http.proxy.*` switch on or ANY trusted-proxies value, so no listener rewrites scheme,
+    host or address from a peer header. The customers tenant's DPoP `htu` check needs none: on the
+    8443 listener (client auth REQUIRED) the request absolute URI is `https://<Host>/mcp` with the Host the
+    edge passes through, and on plain 8150 it is `http://…`, which no published-resource proof
+    matches. Proven by `McpGatewayMtlsIT` over real TLS 1.3: admitted via the gateway certificate;
+    refused at the tenant over plain HTTP (forged `X-Forwarded-Proto` ignored) and with another Host.
+  - *Spoofing (client address).* `ClientAddressResolver` honours the one edge header only over TLS
+    from a verified leaf whose DNS SAN equals `mcp.edge.gateway-identity` (CN never consulted).
+    Every fleet workload holds an `openbank-ca` certificate, so the SAN pin is the control, not the
+    CA: `McpGatewayMtlsIT` shows another trusted certificate (whose CN even names the gateway) and
+    plain HTTP leave the key on the TCP peer. The guard refuses the header without the pin or
+    without client-auth REQUIRED (one removal test per element).
+  - *Residual.* `openbank-ca` is a ClusterIssuer: whoever can create a cert-manager `Certificate`
+    can mint the gateway SAN. Constrain issuance of that SAN (approver policy or a dedicated
+    issuer) before go-live. The gateway presents its client certificate to every
+    BackendTLSPolicy backend (option A, owner decision); that discloses no key.
+
 - **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
   - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
     edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
@@ -444,9 +464,8 @@ a stub (T-T2/T-D2).
     admission compares with the static published resource, but with
     `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
     then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
-    forwarding on and no list (or a trust-all one). Proven by `McpUntrustedProxyForwardingIT`: from
-    an untrusted peer the same request that `McpTrustedProxyForwardingIT` admits is refused (htu
-    mismatch), and a spoofed `X-Forwarded-For` does not change the audit key.
+    forwarding on and no list (or a trust-all one). Superseded the next day by the mTLS-identity
+    entry above (2026-11-21), whose `McpGatewayMtlsIT` replaces the IP-trust ITs.
   - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
     value, so one caller's flood could spend every subject-less caller's audit window. It is now
     keyed by `ClientAddressKey` (HMAC under a per-boot key; IPv4 /32, IPv6 /64 so rotation inside one
