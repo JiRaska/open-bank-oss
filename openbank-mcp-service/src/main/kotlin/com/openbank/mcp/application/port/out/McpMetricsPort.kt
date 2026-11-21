@@ -81,6 +81,15 @@ interface McpMetricsPort {
      */
     fun inputRefused(reason: InputRefusal) = Unit
 
+    /**
+     * Record one refused call whose audit row was SUPPRESSED by the per-source audit window, so a
+     * sampled audit trail still has an exact count beside it. Default no-op for test doubles.
+     */
+    fun auditSuppressed(reason: AuditSuppression) = Unit
+
+    /** Why an audit row was suppressed. A closed enum, so safe as a tag. */
+    enum class AuditSuppression { CUSTOMER_CHANNEL_OFF, }
+
     /** Which MCP channel a call arrived on (ADR-0384 D1), derived from the resolution path, never a client claim. */
     enum class McpChannel { AGENT, OPERATOR, CUSTOMER }
 

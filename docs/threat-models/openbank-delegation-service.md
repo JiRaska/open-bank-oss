@@ -230,6 +230,23 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-21** — **New ingress edge: mcp-service -> delegation-service** (ADR-0383 D3).
+  `delegation-service-ingress-allow-list` now admits the `platform` namespace, where mcp-service
+  runs, so it can call `POST /api/v1/delegations/mcp-client/resolve`. The edge is derived by
+  `gen-network-policies.py` from `QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL` in the mcp-service
+  manifest, never hand-written. The lookup is read-only (`McpClientGrantResolver` queries ACTIVE
+  `MCP_CLIENT` grants for one party/client/key triple and writes nothing) and authenticated: the
+  caller is mcp-service's own `m2m` identity, and a tokenless request must be refused 401. The pact
+  interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json` states that
+  expectation but is NOT proof of it — a consumer mock answers whatever the pact says. Provider-side
+  proof lives with the route itself (#16793): `McpClientGrantIdentityGuardIT` drives it over HTTP
+  with no token (401), and the `@PactFolder` replay verifies the no-token interaction against the
+  real security layer (see the 2026-11-18 entry below).
+  Information disclosure is bounded by the triple: the party id comes from the verified customer
+  token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
+  Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the
+  endpoint's authn, not the NetworkPolicy, is the control that separates callers.
+
 - **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
   the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
   service.

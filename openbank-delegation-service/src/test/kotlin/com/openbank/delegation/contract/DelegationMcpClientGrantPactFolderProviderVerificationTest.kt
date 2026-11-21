@@ -8,7 +8,6 @@ import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.Consumer
-import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
@@ -72,7 +71,6 @@ import java.util.UUID
 @Provider("openbank-delegation-service")
 @Consumer("openbank-mcp-service")
 @PactFolder("../pacts")
-@IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class DelegationMcpClientGrantPactFolderProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
