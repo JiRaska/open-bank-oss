@@ -118,7 +118,7 @@ class PaymentProposalResource(
     @Authorize(action = "delegation.proposal.create", resource = "#request.partyId")
     suspend fun create(
         request: CreatePaymentProposalRequest?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         requireCaller(MCP_PRINCIPAL)
         val body = requireNotNull(request) { "request body is required" }
@@ -180,7 +180,7 @@ class PaymentProposalResource(
         @PathParam("id") id: UUID,
         request: ProposalDecisionRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val party = requireCustomer(body.partyId, customerPartyId)
@@ -201,7 +201,7 @@ class PaymentProposalResource(
         @PathParam("id") id: UUID,
         request: ProposalDecisionRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val party = requireCustomer(body.partyId, customerPartyId)
@@ -218,7 +218,7 @@ class PaymentProposalResource(
         @PathParam("id") id: UUID,
         request: ProposalExecutionRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-        @HeaderParam(IDEMPOTENCY_HEADER) idempotencyKey: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         val body = requireNotNull(request) { "request body is required" }
         val party = requireCustomer(body.partyId, customerPartyId)
@@ -258,7 +258,6 @@ class PaymentProposalResource(
 
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
-        const val IDEMPOTENCY_HEADER = "Idempotency-Key"
         private const val IDEMPOTENCY_KEY_MAX = 255
         const val MCP_PRINCIPAL = "service-account-openbank-mcp"
         const val EDGE_PRINCIPAL = "service-account-openbank-edge"
