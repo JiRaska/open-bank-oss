@@ -131,7 +131,8 @@ class SignatureRecoveryIT {
                 """.trimIndent(),
                 application,
             ),
-        ).isEqualTo(1L)        assertFosEvidenceOutlivesDeleteAttempt(application)
+        ).isEqualTo(1L)
+        assertFosEvidenceOutlivesDeleteAttempt(application)
     }
 
     /** FOS operations are commitment evidence: deleting their route is refused, never cascaded. */
