@@ -68,4 +68,4 @@ spec:
               kubernetes.io/metadata.name: envoy-gateway-system
       ports:
         - protocol: TCP
-          port: 8150
+          port: 8443

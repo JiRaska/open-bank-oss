@@ -37,9 +37,12 @@ the sandbox. Check each against the code, not against this list.
 
 ### Route prerequisites (#16847)
 
-- [ ] Subject-less audit window keyed by IPv6 /64 and IPv4 /32, and the trusted-proxy forwarding
-      guard that refuses to boot with forwarding on and no narrow literal list (#16919).
-- [ ] The trusted-proxy source decided and recorded (see "Open decision" below).
+- [ ] Subject-less audit window keyed by IPv6 /64 and IPv4 /32 (#16919).
+- [ ] The mTLS edge hop on `main` (#17004): mcp-service `:8443` (TLS 1.3, client auth REQUIRED,
+      Certificate `mcp-service-internal-tls`), `MCP_EDGE_GATEWAY_IDENTITY` pinned to the SAN of
+      `envoy-gateway/edge-backend-client-tls.yaml`, and `EnvoyProxy/edge spec.backendTLS.clientCertificateRef`
+      in `envoy-gateway/gateway.yaml`. Both Certificates `Ready=True` in the cluster.
+- [ ] Issuance of the pinned SAN constrained (see "Open decision" below).
 
 ### Observability (#16605, ADR-0384) — no route opens until abuse can be seen
 
@@ -64,23 +67,27 @@ the sandbox. Check each against the code, not against this list.
       `public-workload-ha` findings for it are baselined in `.github/public-workload-ha-baseline.txt`
       only because the route is off. Delete those three lines in the same PR that fixes them.
 
-## Open decision — the trusted-proxy source
+## Open decision — who can mint the pinned client SAN
 
-Quarkus applies forwarded headers only from `quarkus.http.proxy.trusted-proxies`, and the
-forwarding guard (#16919) accepts only IP literals and CIDRs no broader than /8 (IPv4). The Envoy
-pods have no stable address: they take addresses from the VPC like every pod. The two candidates:
+The edge hop is trusted by IDENTITY, not by IP (owner decision 2026-11-21, #16847, #17004): no
+`quarkus.http.proxy.*` forwarding and no trusted-proxy list exist, and the edge client-address
+header is honoured only from a client certificate whose DNS SAN equals `MCP_EDGE_GATEWAY_IDENTITY`.
+`openbank-ca` is a ClusterIssuer and the repo carries no cert-manager approver policy, so any
+namespace that can create a `Certificate` can obtain that SAN. The header only feeds the
+subject-less audit / throttle window key, never authentication, but constrain issuance (an
+approver policy, or a dedicated issuer for the edge client certificate) and record it in the
+threat model (row C-S4) before step 3.
 
-1. **The VPC CIDR already declared in the repo** (`openbank-infra/aws/modules/network/variables.tf`)
-   as the literal, with the NetworkPolicy as the narrowing control: `:8150` admits only
-   `envoy-gateway-system`, `admin-ui` and same-namespace pods (`mcp/network-policies.yaml`).
-   Residual: a compromised pod in `platform` or `admin-ui` could forge `X-Forwarded-Host` (its
-   own DPoP `htu` check then fails, so it gains nothing there) or the edge client-address header
-   (it chooses its own subject-less audit key). #16919's threat-model entry says "not the pod
-   CIDR", so this needs an explicit owner decision.
-2. **A dedicated subnet or static addresses for the Envoy proxies**, so the literal names only them.
-   Infra change; not done anywhere in the repo today.
+### CA bundle for the BackendTLSPolicy
 
-Record the decision in the threat model before step 3.
+There is no trust-manager in the cluster and no CA ConfigMap anywhere in gitops; every in-cluster
+TLS client here reads `ca.crt` from its cert-manager Secret. `mcp-customer-backend` therefore
+names the Secret `mcp-service-internal-tls` (Envoy Gateway accepts `kind: Secret` in
+`caCertificateRefs`). Before step 5 confirm the policy reports `Accepted=True` and
+`ResolvedRefs=True` (`kubectl -n platform get backendtlspolicy mcp-customer-backend -o yaml`). If
+the installed Envoy Gateway rejects the Secret kind, the owner step is a ConfigMap
+`openbank-ca-bundle` in `platform` with key `ca.crt` (the public CA certificate only, copied from
+that Secret) and the ref switched to `kind: ConfigMap`.
 
 ## 1. Go-live steps — one PR each, in order
 
@@ -92,21 +99,26 @@ Record the decision in the threat model before step 3.
    Terminate with `mcp-edge-tls` from namespace `platform`, `allowedRoutes` selecting only
    `kubernetes.io/metadata.name: platform`). A separate sync from step 1: switching a listener in
    the same sync as its grant left langfuse's listener `RefNotPermitted` (2026-10-03).
-3. **Forwarding on in mcp-service.** In `components/mcp/mcp-service.yaml`, together:
-   `MCP_PROXY_FORWARDING=true`, `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES=<the decided literal>`,
-   `MCP_EDGE_CLIENT_ADDRESS_HEADER=X-Envoy-External-Address`. The service refuses to boot if the
-   list is missing or too broad, so a rollout that never becomes Ready is this step failing safe.
+3. **Edge hop check (no change, verify only).** No forwarding switch exists any more. Confirm the
+   rendered NetworkPolicy `mcp-service-ingress-allow-list` admits `envoy-gateway-system` on
+   `:8443` only (generated from this route's backendRef: `openbank-infra/scripts/gen-network-policies.py`),
+   and that mcp-service logs no `ProxyForwardingGuard` refusal after the #17004 rollout. A rollout
+   that never becomes Ready is the guard failing safe.
 4. **Channel on.** `MCP_CUSTOMER_ENABLED=true`, `MCP_CUSTOMER_ISSUER`, and the real client
    allowlist (`MCP_CUSTOMER_ALLOWLIST`). Boot refuses a missing issuer or a malformed allowlist.
-5. **Route.** Add `httproute.yaml` to that `kustomization.yaml`. external-dns publishes
+5. **Route.** Add `httproute.yaml` to that `kustomization.yaml` (it carries the HTTPRoute, the
+   `BackendTLSPolicy` `mcp-customer-backend`, and the edge policies). external-dns publishes
    `mcp.open-bank.tech` once the route is Accepted.
 6. **Verify by effect, from outside the cluster** (each must give the stated answer):
    - `curl -s -o /dev/null -w '%{http_code}' https://mcp.open-bank.tech/anything` -> 404 (only
-     `/mcp` and the metadata route).
-   - `GET /.well-known/oauth-protected-resource/mcp` -> 200, `resource` equals the allowlist's.
-   - `POST /mcp` with no token -> 401 with a `DPoP` challenge carrying `resource_metadata`.
+     `/customer/mcp` and the metadata paths); `POST /mcp` (staff root) -> 404 too.
+   - `GET /.well-known/oauth-protected-resource/customer/mcp` -> 200, `resource` equals the allowlist's.
+   - `POST /customer/mcp` with no token -> 401 with a `DPoP` challenge carrying `resource_metadata`.
    - A body over 64 KiB -> 413 at the edge.
    - 30 requests in one second from one address -> some 429.
+   - Envoy reaches mcp-service over mTLS: the route's backend shows healthy and a direct
+     plain-HTTP or no-client-cert request to `mcp-service.platform.svc:8443` from another pod fails
+     the handshake.
    - A request carrying forged `X-Forwarded-Host`, `X-Forwarded-For` and
      `X-Envoy-External-Address` headers: the audit row's subject-less key and the `htu` check
      behave exactly as without them (the forged values never reach the service).
@@ -125,5 +137,5 @@ Fastest first; each is enough on its own.
 3. `MCP_CUSTOMER_ENABLED=false` on mcp-service: customer tokens are no longer admitted and the
    metadata endpoints answer 404.
 
-Do not disable DPoP replay protection or the forwarding guard to restore service: failing closed
+Do not disable DPoP replay protection, client-auth on `:8443`, or the forwarding guard to restore service: failing closed
 is the control.
