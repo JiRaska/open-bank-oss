@@ -85,3 +85,11 @@ kover {
         }
     }
 }
+
+// The trace-contract IT boots its own Quarkus app under a distinct test profile; at the default
+// heap the test fork died with OutOfMemoryError (Gradle Test Executor failure, measured on this
+// branch). Per-module, as statement-service and kyb-service do: nothing measures test heap
+// fleet-wide.
+tasks.test {
+    maxHeapSize = "2g"
+}
