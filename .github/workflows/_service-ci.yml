@@ -131,7 +131,13 @@ jobs:
     # can never route PR code onto a privileged label: `openbank-mini` carries the train App keys
     # and `openbank-build` is the in-cluster ARC pool. Widening the list is a reviewed code change.
     # Unset (or not allowlisted) = kill switch: every PR build is hosted again.
-    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'openbank-mini' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["openbank-pr"]'), vars.PR_RUNNER_POOL) && vars.PR_RUNNER_POOL) || 'ubuntu-latest') }}
+    # PR_RUNNER_SERVICES (JSON array of service names) narrows the pool to a CHOSEN subset: a PR
+    # build routes there only if its service is listed. Unset or `[]` routes nothing, even with
+    # PR_RUNNER_POOL set. Why: routing every service (2026-11-19) put 53 jobs in queue on a
+    # 3-slot pool within an hour while the hosted runners sat nearly idle -- a self-hosted label
+    # never overflows back to hosted. Sizing rule: list services whose expected concurrent PR
+    # builds fit the pool slots, roughly pool_slots / (pool_slots + 20) of PR build minutes.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'openbank-mini' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["openbank-pr"]'), vars.PR_RUNNER_POOL) && contains(fromJSON(vars.PR_RUNNER_SERVICES || '[]'), inputs.service) && vars.PR_RUNNER_POOL) || 'ubuntu-latest') }}
     timeout-minutes: 45
     # ADR-0363: a push to main enters `gradle-cache-writer` (branch policy: main only), the sole
     # holder of the cache write secret; every other event runs without an environment. The secret
