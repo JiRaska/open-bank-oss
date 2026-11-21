@@ -103,6 +103,15 @@ class CustomerProposePaymentToolTest {
     }
 
     @Test
+    fun `a token without a session cannot propose and the store is never called`() {
+        val out = call(listOf(grant(CustomerCapabilities.PROPOSE_PAYMENT)), who = caller.copy(sessionId = null))
+        assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+        assertThat((out as CustomerReadTools.Outcome.Refused).reason).contains("sid")
+        assertThat(queries).isEmpty()
+        verify(exactly = 0) { store.create(any(), any()) }
+    }
+
+    @Test
     fun `a PDP deny stops the call before the store`() {
         verdict = { AuthzDecision(allow = false, reason = "no") }
         val out = call(listOf(grant(CustomerCapabilities.PROPOSE_PAYMENT)))

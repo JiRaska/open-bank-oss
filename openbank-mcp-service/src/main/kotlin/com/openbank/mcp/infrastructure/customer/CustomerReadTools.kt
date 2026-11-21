@@ -176,10 +176,14 @@ class CustomerReadTools @Inject constructor(
         }
         val key = caller.grantKey
             ?: return Outcome.Refused("no verified grant key for a proposal", capability, unavailable = true)
+        // The token's session is part of the derived Idempotency-Key: without it two sessions of the
+        // same client reusing one clientRequestId would replay each other's proposal. No sid, no write.
+        val session = caller.sessionId
+            ?: return Outcome.Refused("no session (sid) on the customer token", capability)
         val grant = grants.firstOrNull { it.accountId == instruction.debtorAccountId && it.allows(capability) }
             ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
         policy(spec, caller, grant.capabilities)?.let { return it }
-        return when (val result = proposer.propose(instruction, key, caller.sessionId)) {
+        return when (val result = proposer.propose(instruction, key, session)) {
             is CustomerPaymentProposer.Result.Proposed -> Outcome.Allowed(
                 render(result.body),
                 capability,
@@ -209,7 +213,7 @@ class CustomerReadTools @Inject constructor(
             principal = Principal(id = caller.subject, type = HUMAN, roles = emptyList(), serviceAccount = false),
             action = tool.action,
             attributes = mapOf(
-                "channel" to CustomerChannelAdmission.CHANNEL,
+                "channel" to PDP_CHANNEL,
                 "client" to caller.clientId,
                 "tool" to tool.definition.name,
                 "grantedCapabilities" to granted.sorted(),
@@ -312,6 +316,13 @@ class CustomerReadTools @Inject constructor(
 
         /** The staff registry's action name for the same tool (`McpToolRegistry`), on this channel too. */
         const val PROPOSE_ACTION = "propose.payment"
+
+        /**
+         * The PDP's channel attribute, matched LITERALLY by `mcp_rest_ext.rego`. Deliberately not the
+         * metrics enum (`McpChannel.CUSTOMER`): that one serialises as `CUSTOMER`, which the policy
+         * never matches, so the channel's allow rules and its veto would both stop applying.
+         */
+        const val PDP_CHANNEL = "mcp-customer"
         private const val ACCOUNT_ID = "accountId"
         const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     }
