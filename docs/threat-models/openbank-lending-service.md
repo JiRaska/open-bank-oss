@@ -1142,6 +1142,12 @@ with `openbank-libs-market`. Tests cover a foreign-only offering leaving no appl
 catalogue country codes, and the existing unscoped application path. Cross-border origination still
 requires the catalogue commitment fence and verified subject evidence.
 
+Residual: a malformed catalogue country code (like any other malformed catalogue field in
+`toProfile`) raises `IllegalArgumentException`, so the application answers 400 rather than a
+catalogue-unavailable refusal. It fails closed: no application is persisted. Only the status code
+misattributes the fault to the caller. Lending has no catalogue-unavailable outcome yet, and adding
+one belongs with the other `toProfile` validation errors, not with this check alone.
+
 ### Durable catalogue-backed signature (ADR-0380)
 
 The signature endpoint records an intent for the authenticated signer against the application's

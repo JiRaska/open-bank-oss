@@ -10,72 +10,7 @@ MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # Sanctions REST extension (ADR-0034 Phase 5 bootstrap, issue #938 follow-up) — no OPA
 # enforcement infrastructure existed for this service before this bootstrap.
-SANCTIONS_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
-# Sanctions-service REST extension (ADR-0034 Phase 5 bootstrap, issue #938 follow-up).
-# Extends openbank.rest with sanctions-domain allow reasons.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
-#
-# Actions gated (SanctionsResource / SanctionsListResource):
-#   sanctions.list    — listAll / hits / pending
-#   sanctions.read    — get by id (#id)
-#   sanctions.create  — screen (POST /screen); resourceless M2M write, already granted to
-#                       any service-account-* caller by base rest.rego's m2m-sanctions-screening
-#   sanctions.clear   — review (POST /review); decide a screening hit (renamed from
-#                       sanctions.review, issue #938 follow-up). Four-eyes gated (rules.yaml
-#                       four_eyes.verbs) — a wrongly-cleared true positive is a real sanctions
-#                       violation. No ROLE_SERVICE on this endpoint, confirmed no M2M caller.
-#   sanctions.update  — edit a watchlist entry (#listType)
-#   sanctions.trigger — refresh one list (#listType) or all lists
-#
-# Actions gated (ApprovalResource, ADR-0155):
-#   sanctions.approval.decide — a DIFFERENT operator decides a paused sanctions.clear request (#id)
-#
-# Base rest.rego already grants: operator-read-any / compliance-read-any for sanctions.list +
-# sanctions.read, and m2m-sanctions-screening for any service-account-* caller on
-# sanctions.create only (deliberately NOT the whole family — sanctions.clear/.update/.trigger
-# are real operator judgment calls and must stay human-only).
-
-package openbank.rest
-
-import rego.v1
-
-# Operators and admins may perform ANY sanctions write — the ops/compliance console path
-# (run a screen, decide a hit, edit a watchlist entry, refresh a feed).
-allowed_reasons contains "operator-sanctions-write" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	startswith(input.action, "sanctions.")
-}
-
-# #10486 batch 8: agent-service's sanctions_list_checks / sanctions_get_check / sanctions_list_pending
-# tools (SanctionsServiceClient, query.compliance.readonly, held by the compliance-officer charter only;
-# the agent gate refuses every other agent before the call). They used to reach these reads on the
-# shared service-account-openbank-services principal's ROLE_OPERATOR; they now present
-# service-account-openbank-agent (ROLE_API only), and this rule is that principal's whole grant here:
-# the two read verbs, never a screen, a decision or a watchlist edit.
-allowed_reasons contains "service-agent-sanctions-read" if {
-	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-agent")
-	input.action in {"sanctions.list", "sanctions.read"}
-}
-
-# AUTHZ_ENFORCE flip for sanctions: a compliance officer (ROLE_COMPLIANCE + ROLE_VIEWER, the
-# deployed realm's compliance personas) reaches the GET surfaces through @RolesAllowed's
-# ROLE_VIEWER, and base rest.rego grants ROLE_COMPLIANCE only `*.read`. Enforcing without this
-# would 403 the checks / hits / pending lists for the role whose job is reviewing screening hits,
-# while the same person may still read each check by id. Read-only: never a screen, a decision,
-# a watchlist edit or a refresh. Human sessions only: a service-account carrying ROLE_COMPLIANCE
-# (the CI realm's shared client) gets nothing from this rule.
-allowed_reasons contains "compliance-sanctions-list" if {
-	input.principal.type == "HUMAN"
-	not principal_is_machine
-	"ROLE_COMPLIANCE" in input.principal.roles
-	input.action == "sanctions.list"
-}
-REGO
-)
+SANCTIONS_REST_EXT=$(cat "$REPO/openbank-infra/gitops/components/sanctions-service/sanctions_rest_ext.rego")
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \

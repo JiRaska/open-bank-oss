@@ -293,6 +293,9 @@ class AgentChatService {
         val allowedCaps = charterRegistry.allowedCapabilities(identity.agentId)
         val tools = registry.tools
             .filter { allowedCaps.isEmpty() || registry.capabilityOf(it.name) in allowedCaps }
+            // A four-eyes MAKER tool needs a signed-in person driving an MCP session; the chat loop
+            // (and the unattended oversight sweep that runs through it) never offers one (#16455).
+            .filterNot { it.name in McpToolRegistry.INTERACTIVE_ONLY_TOOLS }
             .filter { offeredToolNames == null || it.name in offeredToolNames }
             .map { ToolSpec(it.name, it.description, it.inputSchema) }
         val messages = mutableListOf<ChatMessage>()
@@ -414,7 +417,9 @@ class AgentChatService {
                 val resultText: String
                 val errored: Boolean
                 val allowed: Boolean
-                if (offeredToolNames != null && inv.name !in offeredToolNames) {
+                if (inv.name in McpToolRegistry.INTERACTIVE_ONLY_TOOLS ||
+                    (offeredToolNames != null && inv.name !in offeredToolNames)
+                ) {
                     // Request-level denial happens before policy/registry lookup, including for
                     // empty sets used by no-tools workflows. Do not trust the model to honor the
                     // schemas it was given.

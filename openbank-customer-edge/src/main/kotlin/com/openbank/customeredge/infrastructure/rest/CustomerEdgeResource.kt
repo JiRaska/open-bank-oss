@@ -16,6 +16,7 @@ import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.domain.account.CzechPaymentSymbol
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.web.SyntheticTaintContext
@@ -3255,6 +3256,12 @@ class CustomerEdgeResource(
         val id = runCatching { UUID.fromString(paymentId) }.getOrNull()
             ?: return notFound("Payment not found")
         val resp = upstream.get("$domesticPaymentServiceUrl/api/v1/domestic-payments/$id", customer.partyId.toString())
+        if (resp.status in Response.Status.BAD_GATEWAY.statusCode..Response.Status.GATEWAY_TIMEOUT.statusCode) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(mapOf("error" to "Payment status temporarily unavailable"))
+                .build()
+        }
         if (resp.status != 200) return notFound("Payment not found")
         val payJson = (resp.entity as? String).orEmpty()
         val debtorAccountId = extractTextField(objectMapper, payJson, "debtorAccountId")
@@ -6414,9 +6421,11 @@ class CustomerEdgeResource(
             out.put("creditorName", creditorName)
             out.put("amount", amount)
             out.put("currency", currency)
-            txt("variableSymbol")?.let { out.put("variableSymbol", it) }
-            txt("specificSymbol")?.let { out.put("specificSymbol", it) }
-            txt("constantSymbol")?.let { out.put("constantSymbol", it) }
+            // VS/SS 1-10 digits, KS 1-4 (libs-domain CzechPaymentSymbol). A malformed one throws
+            // inside runCatching, so the body reads as malformed (400) instead of being forwarded.
+            for (kind in CzechPaymentSymbol.entries) {
+                kind.normalise(txt(kind.fieldName))?.let { out.put(kind.fieldName, it) }
+            }
             txt("reference")?.let { out.put("messageForPayee", it) }
             out.put("priority", normalizeDomesticPriority(txt("priority")))
             mapper.writeValueAsString(out)

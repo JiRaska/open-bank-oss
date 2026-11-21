@@ -74,11 +74,20 @@ github:
       variables:
         []
   unprovisioned:
+    - kind: variable
+      names: [PR_RUNNER_POOL]
+      reason: "opt-in PR build pool trial; unset is the kill switch (every PR build hosted) and only allowlisted labels are honoured"
+      issue: 16006
+      review_by: 2026-12-03
+    - kind: secret
+      names: [SECURITY_KPI_DEPENDABOT_READ_TOKEN]
+      reason: "repository-scoped Dependabot alerts read access awaits owner provisioning; only CVE Remediation degrades until then"
+      issue: 16492
+      review_by: 2026-12-16
     - kind: secret
       names:
         - GLITCHTIP_AUTH_TOKEN
         - AGENT_REVIEW_ANTHROPIC_API_KEY
-        - METADATA_REFRESH_PAT
       reason: "optional; each consumer degrades by design without it (see the issue, one line per name)"
       issue: 16206
       review_by: 2027-02-15
@@ -90,6 +99,18 @@ github:
       reason: "standing-critical digest schedule disabled; no read-only Alertmanager path reachable from Actions exists yet"
       issue: 6432
       review_by: 2027-01-15
+    - kind: variable
+      names:
+        - ALERT_DIGEST_READER_ROLE_ARN
+      reason: "ADR-0382 reader role for the in-cluster digest envelopes; the S3 step is skipped until the owner applies alert-digest.tf and sets it"
+      issue: 6432
+      review_by: 2027-01-15
+    - kind: variable
+      names:
+        - DEPLOY_DROPPED_PIN_HOURS
+      reason: "tuning knob for the dropped-pin watch; the workflow falls back to 6 hours, so unset is the intended default"
+      issue: 16701
+      review_by: 2027-02-15
     - kind: variable
       names:
         - CODEQL_JAVA_ON_PR

@@ -1220,10 +1220,18 @@ The network policy now admits the `tax-reporting` namespace, and tax-reporting-s
 
 | Threat | Control | Evidence |
 |---|---|---|
-| A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. | `AccountServiceTest` |
+| A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. A malformed catalogue country code makes the revision `Unavailable` (503), never a caller error. | `ProductRevisionMarketTest`, `ProductCatalogAdapterTest` |
 | A pending account activates after its offering is no longer available on the route | Re-read catalogue scope before activating pinned pending accounts. Refuse catalogue lookup failure, a changed offering or a foreign-only scope before the state transition is persisted. | `AccountServiceLifecycleTest` |
 
 The check uses catalogue distribution metadata. The passport grant registry and atomic permit
-consumption against revocation are pending. Earlier unscoped catalogue responses and unpinned
+consumption against revocation are provided by the catalogue (#16351). This service does not consume them yet. Earlier unscoped catalogue responses and unpinned
 historical pending accounts use the domestic compatibility path. Cross-border activation requires
 the registry, authoritative facts and commitment fence before any FOS or branch launch.
+
+## 2026-11-18 - IBAN check digits from the shared libs-domain generator (#16748)
+
+`IbanGenerator` computed ISO 7064 check digits with its own copy. It now uses
+`IbanCheckDigits.build`, which computes them once for the platform and re-validates the result
+through `Iban`. Generated IBANs are byte-identical (`IbanGeneratorTest` unchanged and green);
+the gain is that a spec fix in libs-domain reaches every account opened. No new caller, grant,
+data class or endpoint. Residual risk: none new. Rollback: revert.

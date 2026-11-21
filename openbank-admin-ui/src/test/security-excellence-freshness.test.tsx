@@ -75,6 +75,49 @@ describe('Security Excellence source freshness', () => {
     expect(screen.getAllByText('Security KPI snapshot is stale')).toHaveLength(6)
   })
 
+  it('reads a bounded audit checkpoint and counts the active cases returned by PID', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      switch (String(input)) {
+        case '/api/svc/audit-service/api/v1/audit/anchors?limit=1':
+          return Response.json([{ chainStatus: 'INTACT', signature: 'fixture', signedAt: new Date().toISOString() }])
+        case '/api/svc/pid-service/api/v1/parties/cases':
+          return Response.json([{ status: 'OPEN' }, { status: 'AWAITING_SECOND_APPROVAL' }])
+        default:
+          return Response.json({}, { status: 503 })
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LanguageProvider initialLanguage="en"><SecurityExcellencePage /></LanguageProvider>)
+
+    expect(await screen.findByText('Latest signed checkpoint reports an intact chain')).toBeInTheDocument()
+    expect(await screen.findByText('2 active identity verification cases')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Identity & KYC — Healthy' })).toHaveAttribute('href', '/identity-cases')
+    expect(screen.getByText('Partial security score')).toBeInTheDocument()
+  })
+
+  it.each([
+    [Response.json({}, { status: 404 }), 'Data endpoint not found'],
+    [Response.json({ error: 'Unknown service: audit-service' }, { status: 404 }), 'Not deployed in this environment'],
+    [Response.json({}, { status: 403 }), 'Role lacks permission'],
+    [Response.json([]), 'Audit service has no checkpoint yet'],
+    [Response.json([{ chainStatus: 'INTACT', signature: 'fixture', signedAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString() }]), 'Latest checkpoint is older than two hours'],
+  ])('shows the audit failure and rejects malformed identity evidence', async (auditResponse, reason) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      switch (String(input)) {
+        case '/api/svc/audit-service/api/v1/audit/anchors?limit=1':
+          return auditResponse.clone()
+        case '/api/svc/pid-service/api/v1/parties/cases':
+          return Response.json({ unexpected: [] })
+        default:
+          return Response.json({}, { status: 503 })
+      }
+    }))
+    render(<LanguageProvider initialLanguage="en"><SecurityExcellencePage /></LanguageProvider>)
+
+    expect(await screen.findByRole('link', { name: 'Audit Trail — Unavailable' })).toHaveTextContent(reason)
+    expect(await screen.findByRole('link', { name: 'Identity & KYC — Unavailable' })).toHaveTextContent('Invalid evidence')
+  })
+
   it('pauses refresh while hidden, refreshes on return, and removes the visibility listener on unmount', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/security/kpis') {

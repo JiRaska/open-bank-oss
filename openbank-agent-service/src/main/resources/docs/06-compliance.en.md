@@ -11,7 +11,7 @@
 | **EU AI Act** | An AI system operating inside a bank — needs human oversight, logging, transparency | deny-by-default policy gate; AI-attributed audit of every model + tool call; HITL via proposal detection (D4); per-agent kill-switch (D7, via `agents.yaml`/OPA) |
 | **DORA** (Reg. (EU) 2022/2554) | ICT/operational resilience of an internal service | health probes, fail-closed PDP, graceful model-outage degradation, audit evidence, SLO/runbooks ([05 — Operations](./05-operations.md)) |
 | **GDPR** | The assistant can read customer data through tools | charter is `pii: masked`; gateway stores only a SHA-256 `prompt_hash`, never raw prompts; no PII persisted at rest (no datastore) |
-| **PSD2 / AML** | The assistant can *read* AML/sanctions/payments surfaces | read-only capabilities only (`query.compliance.readonly`, `query.payments.readonly`); never a write/decision tool; **not** the SAR/screening system of record |
+| **PSD2 / AML** | The assistant can *read* AML/sanctions/payments surfaces | read-only capabilities only (`query.compliance.readonly`, `query.payments.readonly`); never a write/decision tool (`aml_propose_case_decision`, compliance-officer only, queues a HITL proposal and decides nothing); **not** the SAR/screening system of record |
 | **NIS2** | Network & info security | OIDC inbound, least-privilege `openbank-services` Bearer outbound, mTLS in-cluster (Istio), security response headers |
 | **ADR-0030 SSDLC** | Supply-chain / secure SDLC | signed commits, dependency governance, no third-party agent SDK lock-in (open runtime, ADR-0031 D6) |
 

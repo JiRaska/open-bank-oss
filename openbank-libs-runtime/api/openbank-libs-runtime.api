@@ -511,6 +511,7 @@ public final class com/openbank/libs/authz/AuthorizeInterceptor {
 	public final fun getApprovalStore ()Ljakarta/enterprise/inject/Instance;
 	public final fun getClock ()Ljava/time/Clock;
 	public final fun getEnforce ()Z
+	public final fun getFourEyesConsumption ()Ljakarta/enterprise/inject/Instance;
 	public final fun getFourEyesEnforce ()Z
 	public final fun getHttpHeaders ()Ljakarta/enterprise/inject/Instance;
 	public final fun getIdentity ()Ljakarta/enterprise/inject/Instance;
@@ -522,6 +523,7 @@ public final class com/openbank/libs/authz/AuthorizeInterceptor {
 	public final fun setApprovalStore (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setClock (Ljava/time/Clock;)V
 	public final fun setEnforce (Z)V
+	public final fun setFourEyesConsumption (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setFourEyesEnforce (Z)V
 	public final fun setHttpHeaders (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setIdentity (Ljakarta/enterprise/inject/Instance;)V
@@ -530,6 +532,11 @@ public final class com/openbank/libs/authz/AuthorizeInterceptor {
 	public final fun setSecurityContext (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setSecurityTelemetry (Ljakarta/enterprise/inject/Instance;)V
 	public final fun setSummaryRenderer (Ljakarta/enterprise/inject/Instance;)V
+}
+
+public final class com/openbank/libs/authz/FourEyesConsumption {
+	public fun <init> ()V
+	public final fun getConsumedApprovalId ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/authz/OpaPolicyDecisionPointProducer {
@@ -1889,6 +1896,20 @@ public final class com/openbank/libs/security/HoneytokenFilter : jakarta/ws/rs/c
 }
 
 public final class com/openbank/libs/security/HoneytokenFilter$Companion {
+}
+
+public final class com/openbank/libs/security/InMemoryDpopReplayStore : com/openbank/libs/security/DpopReplayStore {
+	public fun <init> ()V
+	public fun <init> (II)V
+	public synthetic fun <init> (IIILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun firstUse (Ljava/lang/String;Ljava/lang/String;Ljava/time/Duration;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public fun isUsed (Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun size ()I
+}
+
+public final class com/openbank/libs/security/Jose4jDpopProofParser : com/openbank/libs/security/DpopProofParser {
+	public fun <init> ()V
+	public fun parse (Ljava/lang/String;)Lcom/openbank/libs/security/DpopProof;
 }
 
 public final class com/openbank/libs/security/OpenBaoKubernetesLogin {

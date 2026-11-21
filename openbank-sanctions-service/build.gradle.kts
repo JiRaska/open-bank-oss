@@ -41,6 +41,8 @@ dependencies {
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
+    // AgentReviewGuardHttpTest: a JWT principal with azp / preferred_username claims (#16381).
+    testImplementation(libs.quarkus.test.security.oidc)
     // RestAssured: SanctionsOutboxAtomicityIT (#8353) drives POST /screen and POST /review over
     // real HTTP, the only way to exercise a reactive Panache write (a bare @QuarkusTest thread
     // carries no Vert.x context). Pact's own provider verification uses HttpTestTarget, so this
@@ -57,9 +59,10 @@ dependencies {
 // fleet-standard block, so nothing service-specific remains here.
 
 // The instrumented Quarkus/HTTP/DB suite exceeds Gradle's default 512 MiB test heap
-// in hosted CI. Preserve the full suite and coverage checks with a bounded 1 GiB worker.
+// in hosted CI. Preserve the full suite and coverage checks with a bounded worker. 1 GiB ran out
+// (OutOfMemoryError) once #16455 added two more @QuarkusTest profiles, each a fresh app boot.
 tasks.withType<Test>().configureEach {
-    maxHeapSize = "1g"
+    maxHeapSize = "1536m"
 }
 
 kover {

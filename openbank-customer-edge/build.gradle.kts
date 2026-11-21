@@ -20,6 +20,11 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     implementation("io.quarkus:quarkus-load-shedding")
+    // OpenTelemetry instrumentation: customer-edge shipped the Quarkus Redis/Kafka/REST client
+    // libs with no tracer, so the service emitted zero spans — every trace-evidence cell in the
+    // test-intelligence matrix read as a gap. This wires the OTLP exporter like the rest of the
+    // fleet (same fix as finrep-service).
+    implementation(libs.quarkus.opentelemetry)
     testImplementation("io.quarkus:quarkus-junit-component")
     // Micrometer + Prometheus registry: customer-edge had no MeterRegistry, so it
     // exposed no /q/metrics surface and the openbank-services PodMonitor scraped a

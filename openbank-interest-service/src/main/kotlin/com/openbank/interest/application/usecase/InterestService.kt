@@ -216,7 +216,7 @@ class InterestService(
         pinRowExists: Boolean,
     ): Uni<InterestRateConfig?> = when {
         pinRowExists -> Uni.createFrom().failure(unresolvable(request))
-        effective == null -> Uni.createFrom().item<InterestRateConfig?>(null)
+        effective == null -> Uni.createFrom().nullItem<InterestRateConfig?>()
         else -> pins.hasCatalogHistory(request.accountId, request.productId, request.currency).flatMap { history ->
             if (history) {
                 // Accrued under a catalog config before but no pin: the backfill missed it. Fail closed -
