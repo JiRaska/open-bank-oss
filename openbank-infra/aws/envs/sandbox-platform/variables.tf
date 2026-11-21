@@ -234,7 +234,11 @@ variable "arc_min_runners" {
   # Warm pool rationale gone; runners-warm NodePool (arc-runners.tf) also set to 0 min.
   # Karpenter cold-start latency (~1-2 min) returns to the merge path — acceptable given
   # the cost saving (~$112/month for 2× c6g.xlarge on-demand).
-  default = 0
+  # TIME-BOXED TRIAL 0 -> 1 (2026-11-21, #16969): queue p90 ~17 min is dominated by a ~13 min
+  # Karpenter reaction to Pending runner pods. One warm runner lands on the `runners` spot pool
+  # (runners-warm stays at limits.cpu = 0), ~$0.057/h = ~$1.36/day. REVERT: set back to 0 on
+  # 2026-11-22 and re-apply, regardless of the evaluation outcome; keep only via a new PR.
+  default = 1
 }
 
 variable "arc_max_runners" {
