@@ -92,6 +92,15 @@ NOT_EVALUATED_LINE = "GATE_VERDICT=NOT_EVALUATED"
 FAILURE_KINDS = ("content", "budget", "not_evaluated", "timeout", "unfalsified", "setup")
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
+# The hard per-gate kill, unless a gate declares `timeout_seconds`. A `budget_seconds` above the
+# effective timeout can never be enforced: the kill lands first and reads as a timeout, not as a
+# budget finding. load() therefore refuses that pairing (#16788).
+DEFAULT_TIMEOUT = 420
+# Headroom warning threshold: a gate at or above this share of its budget or timeout (this run,
+# or the main p95 in gate-runtime-measurements.json) is flagged BEFORE it reddens main.
+HEADROOM_WARN = 0.8
+MAX_TIMEOUT = 1800  # cap on a per-gate `timeout_seconds`
+MEASUREMENTS = ".github/gates/gate-runtime-measurements.json"
 VALID_EXPECT = {"pass", "fail"}
 
 # Variables the Actions runner sets and a laptop does not. A gate reading one of these BARE dies
@@ -230,6 +239,27 @@ def load(root: pathlib.Path, path: str = MANIFEST):
                     f"number\n"
                 )
                 sys.exit(2)
+        tmo = g.get("timeout_seconds")
+        if tmo is not None and (isinstance(tmo, bool) or not isinstance(tmo, (int, float)) or tmo <= 0):
+            sys.stderr.write(
+                f"::error::gate {g['id']}: timeout_seconds `{tmo}` must be a positive number\n"
+            )
+            sys.exit(2)
+        if tmo is not None and tmo > MAX_TIMEOUT:
+            sys.stderr.write(
+                f"::error::gate {g['id']}: timeout_seconds {tmo} exceeds the cap of {MAX_TIMEOUT}s "
+                f"(a gate that needs longer belongs in its own shard or a faster self-test)\n"
+            )
+            sys.exit(2)
+        eff_timeout = tmo if tmo is not None else DEFAULT_TIMEOUT
+        if budget is not None and budget > eff_timeout:
+            sys.stderr.write(
+                f"::error::gate {g['id']}: budget_seconds {budget} exceeds the effective hard "
+                f"timeout {eff_timeout}s ({'timeout_seconds' if tmo is not None else 'the runner default'}). "
+                f"The kill lands first, so that budget is unenforceable. Raise `timeout_seconds` "
+                f"above the budget, or lower the budget.\n"
+            )
+            sys.exit(2)
         # selftest_inputs. The one way this optimisation can HARM: a declared path that
         # matches nothing — a typo, or a file since renamed — makes the gate's self-test skip
         # on every pull request forever, and the skip is silent because "no declared input
@@ -394,6 +424,10 @@ class Result:
         # Wall time over budget while CPU was not: the runner was loaded, or the gate waited
         # on I/O. Reported (annotation + JSON), never a failure.
         self.wall_over_budget = False
+        # The hard timeout this gate ran under (per-gate `timeout_seconds` or the runner's), and the
+        # wall time of a traced self-test (tracer cost, kept out of headroom just as out of budget).
+        self.timeout = None
+        self.traced_wall = 0.0
         # Repo files the traced self-test read without declaring them in `selftest_inputs`
         # (selftest_input_trace.py), baselined ones included. None = not traced this run.
         self.selftest_undeclared_reads = None
@@ -670,6 +704,10 @@ def _judge_trace(gate, root: pathlib.Path, trace_file: str, r, buf) -> bool:
 
 def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None) -> Result:
     r = Result(gate)
+    # A per-gate `timeout_seconds` wins over the runner-wide --timeout, up or down. The traced
+    # multiplier below still applies on top of it.
+    timeout = gate.get("timeout_seconds", timeout)
+    r.timeout = timeout
     if gate["when"] == "pull_request" and not is_pr:
         r.status = "skipped"
         r.output = "skipped: pull_request-only gate, this is not a pull_request event\n"
@@ -736,8 +774,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
                 # this figure. Kept out of the budget comparison below: the budget measures the
                 # gate's work, not the tracer's (a traced run must not redden main on budget).
                 traced_cost = (r.selftest_seconds, cpu)
+                r.traced_wall = r.selftest_seconds
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
-            if trace_file and (rc == 0) == want_pass:
+            if trace_file and rc != 124 and (rc == 0) == want_pass:
                 found = _judge_trace(gate, root, trace_file, r, buf)
                 # Fails on every event, push to main included (#16895): a scanning self-test's
                 # corpus grows with no one touching the gate, and main must go red at the commit
@@ -749,6 +788,19 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
                     os.unlink(trace_file)
                 except OSError:
                     pass
+        if rc == 124:
+            # KILLED by the timeout: the self-test never completed, so it says nothing either way.
+            # Without this, a `selftest_expect: fail` gate read the kill's non-zero exit as "the
+            # known-positive was rejected" and counted as falsified, and a tiny per-gate
+            # timeout_seconds made a broken self-test look healthy.
+            r.status, r.failure_kind = "unfalsified", "timeout"
+            buf.append(
+                "\n[run-gates] the self-test was KILLED by the timeout before it finished, so it "
+                "proves nothing about this gate, whichever way it was expected to exit: unfalsified.\n"
+            )
+            r.output = "".join(buf)
+            r.seconds = time.monotonic() - t0
+            return r
         if (rc == 0) != want_pass:
             r.status, r.failure_kind = "unfalsified", "unfalsified"
             buf.append(
@@ -900,7 +952,37 @@ def only_not_evaluated(failed) -> bool:
     )
 
 
-def report(results, jobs, summary_path=None):
+def load_measurements(root=None):
+    """gate id -> main p95 seconds, from the derived snapshot. Missing or unreadable is NOT an
+    error: the p95 trigger is advisory, and this run's own timing still applies."""
+    f = (pathlib.Path(root) if root else pathlib.Path(__file__).resolve().parents[2]) / MEASUREMENTS
+    try:
+        gates = json.loads(f.read_text()).get("gates", {})
+        return {k: v["p95_seconds"] for k, v in gates.items()
+                if isinstance(v.get("p95_seconds"), (int, float))}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+
+
+def headroom_findings(r, p95=None):
+    """Reasons a passing gate is within HEADROOM_WARN of its budget or hard timeout, as text.
+    Advisory only: callers print a ::warning::, never a failure. A gate that already failed, was
+    skipped, or already carries the wall-over-budget warning is not repeated here."""
+    if r.status != "ok" or r.wall_over_budget:
+        return []
+    budget = r.gate.get("budget_seconds")
+    out = []
+    for label, val in (("this run", r.seconds - r.traced_wall),
+                       ("main p95", p95 if r.seconds > 0 else None)):
+        if val is None:
+            continue
+        for what, cap in (("budget", budget), ("timeout", r.timeout)):
+            if cap and val >= HEADROOM_WARN * cap:
+                out.append(f"{label} {val:.1f}s = {100 * val / cap:.0f}% of {what} {cap}s")
+    return out
+
+
+def report(results, jobs, summary_path=None, measured=None):
     # ZERO GATES IS NOT A PASS (#6068). Without this, report([]) printed "0 gates" and
     # returned 0 — the one line in this file that could answer "everything is fine" about
     # a run that evaluated nothing. Every other vacuity guard here (empty manifest, empty
@@ -953,6 +1035,13 @@ def report(results, jobs, summary_path=None):
         if r.wall_over_budget:
             print(f"::warning title={r.gate['id']}::wall {r.seconds:.1f}s over budget "
                   f"{r.gate.get('budget_seconds')}s, CPU {r.cpu_seconds:.1f}s under it — runner load, not failed")
+    measured = load_measurements() if measured is None else measured
+    for r in results:
+        found = headroom_findings(r, measured.get(r.gate["id"]))
+        if found:
+            print(f"::warning title={r.gate['id']}::headroom, grow before it reddens main: "
+                  f"{'; '.join(found)} (budget {r.gate.get('budget_seconds')}s, "
+                  f"timeout {r.timeout}s). Warning only, not failed")
     for r in warned:
         print(f"::warning title={r.gate['id']}::advisory gate failed: {r.gate['name']}")
     for r in failed:
@@ -1066,7 +1155,8 @@ def main(argv=None):
     ap.add_argument("--all", action="store_true", help="run every gate")
     ap.add_argument("--list", action="store_true", help="print the manifest and exit")
     ap.add_argument("--jobs", type=int, default=0, help="concurrency (default: cpu count)")
-    ap.add_argument("--timeout", type=int, default=420, help="per-gate seconds")
+    ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
+                    help="per-gate seconds (a gate's own `timeout_seconds` overrides it)")
     ap.add_argument("--json", metavar="PATH", help="write a structured per-gate JSON summary "
                      "(ADR-0255) alongside the normal text report; does not change the exit "
                      "code or the text output")
@@ -1272,6 +1362,23 @@ gates:
     group: t
     budget_seconds: 30
     run: "true"
+  - id: timeout-override-raises
+    name: "a per-gate timeout_seconds ABOVE the runner timeout is honoured: 3 s of work passes under --timeout 2"
+    group: t
+    timeout_seconds: 6
+    run: "sleep 3"
+  - id: timeout-override-kills
+    name: "a per-gate timeout_seconds BELOW the runner timeout kills at the override, not the default"
+    group: t
+    timeout_seconds: 1
+    run: "sleep 30"
+  - id: killed-selftest-expect-fail
+    name: "a self-test KILLED by the timeout is never a satisfied must-FAIL"
+    group: t
+    timeout_seconds: 1
+    selftest_expect: fail
+    selftest: "sleep 30"
+    run: "true"
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
@@ -1304,6 +1411,9 @@ EXPECTED = {
     "known-positive-accepted": "unfalsified",
     "pr-only": "skipped",
     "slow": "failed",
+    "killed-selftest-expect-fail": "unfalsified",
+    "timeout-override-raises": "ok",
+    "timeout-override-kills": "failed",
 }
 
 
@@ -1353,7 +1463,7 @@ def self_test():
                 bad.append("wall-over-budget: wall-only overrun not reported as such")
             # failure_kind is the machine-readable WHY that merge-train settle reads (#13400).
             want_kind = {"over-budget": "budget", "not-evaluated": "not_evaluated",
-                         "over-budget-and-finding": "content", "failing": "content", "slow": "timeout",
+                         "over-budget-and-finding": "content", "failing": "content", "slow": "timeout", "killed-selftest-expect-fail": "timeout",
                          "harness-broken": "unfalsified", "passing": None, "not-evaluated-exit-zero": None}
             if r.id in want_kind and r.failure_kind != want_kind[r.id]:
                 bad.append(f"{r.id}: failure_kind want {want_kind[r.id]}, got {r.failure_kind}")
@@ -1413,6 +1523,14 @@ def self_test():
                                f"0.0, got {rec0['selftest_seconds']}")
             if r.id == "floor-unreported" and "printed no" not in r.output:
                 bad.append("floor-unreported: failed, but not for the missing-count reason")
+            if r.id == "timeout-override-raises" and r.timeout != 6:
+                bad.append(f"timeout-override-raises: ran under {r.timeout}s, want the override 6")
+            if r.id == "timeout-override-kills":
+                if r.timeout != 1 or "TIMEOUT after 1s" not in r.output:
+                    bad.append("timeout-override-kills: not killed at the 1 s override")
+                if r.seconds >= 1.9:
+                    bad.append(f"timeout-override-kills: took {r.seconds:.1f}s, the default 2 s "
+                               f"applied instead of the override")
             if r.id == "slow":
                 for stream in ("on-stdout", "on-stderr"):
                     if stream not in r.output:
@@ -1459,6 +1577,53 @@ def self_test():
             "advisory-failing"
         }:
             bad.append("report() advisory-only fixture emitted unexpected annotations")
+
+        # Budget above the effective hard timeout is unenforceable and must abort at load; the
+        # same budget with a raised timeout_seconds, or under the default, must load quietly.
+        for body, want_abort in (
+            ("budget_seconds: 500", True),
+            ("budget_seconds: 421", True),
+            ("budget_seconds: 500\n    timeout_seconds: 400", True),
+            ("budget_seconds: 500\n    timeout_seconds: 600", False),
+            ("budget_seconds: 420", False),
+            ("timeout_seconds: 1800", False),
+            ("timeout_seconds: 1801", True),
+            ("timeout_seconds: 0", True),
+            ('timeout_seconds: "9"', True),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n    run: \"true\"\n"
+            )
+            result, fixture_output = capture_fixture_output(lambda: load(tmp), expect_exit=True)
+            if isinstance(result, SystemExit) != want_abort:
+                bad.append(f"load() {'accepted' if want_abort else 'rejected'}: ({body!r})")
+            if want_abort and "::error::" not in fixture_output:
+                bad.append(f"load() gave no diagnostic for ({body!r})")
+            if not want_abort and fixture_output:
+                bad.append(f"load() emitted output for valid ({body!r})")
+
+        # Headroom warning: 85% warns, 50% does not, p95 alone triggers, failures are not repeated.
+        def fake(seconds, budget=100, timeout=420, status="ok"):
+            fr = Result({"id": "h", "name": "h", "group": "t", "budget_seconds": budget})
+            fr.status, fr.seconds, fr.timeout = status, seconds, timeout
+            return fr
+        for label, fr, p95, want in (
+            ("85% of budget", fake(85), None, True),
+            ("50% of budget", fake(50), None, False),
+            ("85% of timeout, budget 400", fake(357, budget=400), None, True),
+            ("p95 85% of budget, run fast", fake(10), 85, True),
+            ("p95 50% of budget", fake(10), 50, False),
+            ("failed gate", fake(99, status="failed"), None, False),
+        ):
+            got = bool(headroom_findings(fr, p95))
+            if got != want:
+                bad.append(f"headroom_findings({label}): want warn={want}, got {got}")
+        _, hr_out = capture_fixture_output(lambda: report([fake(85)], 1, measured={}))
+        if "::warning title=h::headroom" not in hr_out or "85% of budget 100s" not in hr_out:
+            bad.append("report() did not emit the headroom warning naming gate and numbers")
+        _, hr_out = capture_fixture_output(lambda: report([fake(50)], 1, measured={}))
+        if "headroom" in hr_out:
+            bad.append("report() warned about headroom at 50% of budget")
 
         # An empty manifest must abort, not pass.
         (tmp / ".github" / "gates" / "gates.yaml").write_text("gates: []\n")
