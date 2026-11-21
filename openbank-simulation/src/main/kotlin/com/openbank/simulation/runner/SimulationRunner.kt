@@ -10,6 +10,7 @@ import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.CardAuthorizationScenario
 import com.openbank.simulation.scenario.CardClearingScenario
+import com.openbank.simulation.scenario.CardIssuanceScenario
 import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.DomesticClearingScenario
@@ -17,7 +18,9 @@ import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.FxConversionScenario
 import com.openbank.simulation.scenario.FxScreeningScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
+import com.openbank.simulation.scenario.NostroBreakScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.PensionFundTradingScenario
 import com.openbank.simulation.scenario.PensionLifecycleScenario
 import com.openbank.simulation.scenario.SctInstSettlementScenario
 import com.openbank.simulation.scenario.SddCollectionScenario
@@ -153,9 +156,29 @@ class SimulationRunner(
             // it — every authorization must be terminal before the invariant sweep below.
             CardAuthorizationScenario.step(world)
             context.scheduler.drain()
+            // Test Intelligence simulation gap (money path): the pension-fund unit register —
+            // REAL NavCalculator NAVs under the real four-eyes publish rule, REAL ForwardPricer
+            // settlement (forward pricing, switch legs, fee cancellation, NAV corrections) —
+            // sharing the fault profile and checked by the pensionFundOrderCompleteness /
+            // pensionFundUnitConservation invariants.
+            PensionFundTradingScenario.step(world)
+            context.scheduler.drain()
+            // Test Intelligence simulation gap: the treasury nostro desk — REAL NostroBreak
+            // aging/alert lifecycle and four-eyes resolution — sharing the fault profile and
+            // checked by the nostroBreakHygiene invariant.
+            NostroBreakScenario.step(world)
+            // Test Intelligence simulation gap: the card-issuance lifecycle — REAL Card status
+            // machine, limits/controls, and the DelegatedCardGrant authority link — sharing the
+            // fault profile and checked by the cardIssuanceCompleteness /
+            // delegatedGrantIntegrity invariants. Runs LAST so its expiry sweep sees the final
+            // virtual clock of the step (the pension/nostro scenarios advance it by days).
+            CardIssuanceScenario.step(world)
             // Release card holds the (now final) virtual clock has carried past their expiry — the
             // expiry job's job; see CardClearingScenario.sweepExpired.
             CardClearingScenario.sweepExpired(world)
+            // The nostro desk's alert sweep over the same final clock: a break aged by ANY
+            // scenario's advance must carry its alertedAt before the invariant sweep.
+            NostroBreakScenario.sweepAlerts(world)
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
                 if (violation != null) return SeedResult(seed, violation, step)
