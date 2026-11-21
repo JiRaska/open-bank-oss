@@ -250,10 +250,10 @@ class DelegatedDomesticPaymentServiceTest {
     private fun command() = CreateDomesticPaymentCommand(
         idempotencyKey = "payment-42",
         debtorAccountId = ACCOUNT_ID,
-        debtorAccountNumber = "1234567890",
+        debtorAccountNumber = "1234567899",
         debtorBankCode = "0800",
         debtorName = "Grantor",
-        creditorAccountNumber = "0987654321",
+        creditorAccountNumber = "0987654327",
         creditorBankCode = "0000",
         creditorName = "Grantee",
         amount = Money.of(BigDecimal("1500.00"), "CZK"),
@@ -316,7 +316,7 @@ class DelegatedDomesticPaymentServiceTest {
         val GRANTOR_ID: UUID = UUID.fromString("40000000-0000-4000-8000-000000000003")
         val GRANTEE_ID: UUID = UUID.fromString("40000000-0000-4000-8000-000000000004")
         val ACCOUNT_ID: UUID = UUID.fromString("40000000-0000-4000-8000-000000000005")
-        const val DEBTOR_IBAN = "CZ0708000000001234567890"
+        const val DEBTOR_IBAN = "CZ5508000000001234567899"
         val BOUND_PAYMENT_ID: UUID = UUID.fromString("40000000-0000-4000-8000-000000000006")
     }
 

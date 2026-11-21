@@ -67,4 +67,18 @@ class InMemoryDpopReplayStoreTest {
         assertThat(store.firstUse("k", "j5000", ttl, t0)).isEqualTo(ReplayClaim.QUOTA_EXCEEDED)
         assertThat(store.firstUse("other", "j0", ttl, t0)).isEqualTo(ReplayClaim.FIRST_USE)
     }
+
+    @Test
+    fun `isUsed is a non-mutating peek over live entries`(): Unit = runBlocking {
+        val store = InMemoryDpopReplayStore()
+        val t0 = Instant.parse("2026-11-18T10:00:00Z")
+        val ttl = Duration.ofSeconds(10)
+        assertThat(store.isUsed("k", "j", t0)).isFalse()
+        assertThat(store.size()).isZero()
+        store.firstUse("k", "j", ttl, t0)
+        assertThat(store.isUsed("k", "j", t0.plus(ttl))).isTrue()
+        assertThat(store.isUsed("k", "other", t0)).isFalse()
+        assertThat(store.isUsed("k", "j", t0.plus(ttl).plusSeconds(1))).isFalse()
+        assertThat(store.size()).isEqualTo(1)
+    }
 }

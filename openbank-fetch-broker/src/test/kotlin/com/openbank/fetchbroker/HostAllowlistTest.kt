@@ -65,4 +65,28 @@ class HostAllowlistTest {
         assertThat(AgentsYamlCharterHosts(null).grantsFor("web-reader")).isEmpty()
         assertThat(AgentsYamlCharterHosts(": : not yaml [").grantsFor("web-reader")).isEmpty()
     }
+
+    @Test
+    fun `an object-shaped tier grant counts, and a read grant of another resource does not`() {
+        val yaml = """
+            agents:
+              - id: object-reader
+                enabled: true
+                tools:
+                  allow:
+                    - {tier: read, resources: [read.governance]}
+                    - {tier: read, resources: [read.public_web]}
+                data_scope: {public_web: {hosts: [www.cnb.cz]}}
+              - id: other-reader
+                enabled: true
+                tools:
+                  allow:
+                    - {tier: read, resources: [read.governance]}
+                    - {tier: write_proposal, resources: [read.public_web]}
+                data_scope: {public_web: {hosts: [www.cnb.cz]}}
+        """.trimIndent()
+        val hosts = AgentsYamlCharterHosts(yaml)
+        assertThat(hosts.grantsFor("agent:object-reader").keys).containsExactly("www.cnb.cz")
+        assertThat(hosts.grantsFor("agent:other-reader")).isEmpty()
+    }
 }

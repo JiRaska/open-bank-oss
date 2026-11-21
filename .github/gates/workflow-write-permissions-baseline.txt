@@ -130,6 +130,7 @@ services-ci.yml|job:build_other_openbank_docs_truth_agent|id-token
 services-ci.yml|job:build_other_openbank_document_service|id-token
 services-ci.yml|job:build_other_openbank_domestic_payment|id-token
 services-ci.yml|job:build_other_openbank_engagement_service|id-token
+services-ci.yml|job:build_other_openbank_fetch_broker|id-token
 services-ci.yml|job:build_other_openbank_finops_agent|id-token
 services-ci.yml|job:build_other_openbank_finrep_service|id-token
 services-ci.yml|job:build_other_openbank_flaky_test_hunter|id-token
@@ -216,6 +217,7 @@ services-ci.yml|job:build_pr_openbank_docs_truth_agent|id-token
 services-ci.yml|job:build_pr_openbank_document_service|id-token
 services-ci.yml|job:build_pr_openbank_domestic_payment|id-token
 services-ci.yml|job:build_pr_openbank_engagement_service|id-token
+services-ci.yml|job:build_pr_openbank_fetch_broker|id-token
 services-ci.yml|job:build_pr_openbank_finops_agent|id-token
 services-ci.yml|job:build_pr_openbank_finrep_service|id-token
 services-ci.yml|job:build_pr_openbank_flaky_test_hunter|id-token

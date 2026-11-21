@@ -22,6 +22,18 @@ quarkus:
     # deny, not a framework-level 401. A PRESENT-but-invalid/expired token IS rejected by Quarkus
     # OIDC itself before reaching the endpoint (fail-closed either way).
     tenant-enabled: true
+    # ADR-0383 D1: the customers realm is a SEPARATE tenant selected by the token's `iss`. Both the
+    # tenant and issuer-based resolution stay OFF unless the customer channel is enabled, so the staff
+    # tenant's behaviour is unchanged by default. Not yet verified against a live Keycloak (ADR-0383 P3).
+    resolve-tenants-with-issuer: ${MCP_CUSTOMER_ENABLED:false}
+    customers:
+      tenant-enabled: ${MCP_CUSTOMER_ENABLED:false}
+      auth-server-url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      token:
+        # Keycloak signs with its frontend URL, not the in-cluster discovery URL.
+        issuer: ${mcp.customer.issuer}
+        # RFC 9449: customer tokens arrive as `Authorization: DPoP <token>`.
+        authorization-scheme: DPoP
   # Outbound M2M client-credentials auth (ADR-0195 step 3) — mirrors agent-service's oidc-client
   # exactly: DownstreamClients / ConsentValidateClient (@RegisterProvider
   # OidcClientRequestReactiveFilter) mint an `openbank-services` token and attach it as a Bearer, so
@@ -130,6 +142,13 @@ mcp:
     name: openbank-mcp
     version: "0.1.0"
     protocol-version: "2025-06-18"
+  # Customer MCP channel (ADR-0383 / ADR-0385, #16590). OFF by default. With it on, the service
+  # refuses to boot unless the issuer is set and the client allowlist exists and parses
+  # (CustomerChannel is @Startup).
+  customer:
+    enabled: ${MCP_CUSTOMER_ENABLED:false}
+    issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
+    allowlist: ${MCP_CUSTOMER_ALLOWLIST:classpath:mcp-client-allowlist.yaml}
 
 # Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`

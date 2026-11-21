@@ -68,12 +68,13 @@ class PartyServiceTest {
 
     // A fixed test pepper (32 bytes, hex-encoded) that matches the one in IdentityResolutionServiceTest.
     private val testPepperHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    private val testClock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
     private val identityResolutionService = IdentityResolutionService(
         mockk(relaxed = true), // repo not called during blind-index compute
         mockk(relaxed = true), // adjudication not called during blind-index compute
         java.util.Optional.of(testPepperHex),
+        testClock,
     )
-    private val testClock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
     private val service = PartyService(
         partyRepository,
         relationshipRepository,
