@@ -54,12 +54,15 @@ silences every ratio alert above.
 
 ## SLO burn alerts (openbank-mcp-customer-availability / -latency)
 
-Pyrra burn-rate alerts from `pyrra-slo-mcp-customer.yaml`. Availability counts completed customer
-tool calls with `result="FAILURE"` against all completed customer tool calls (real traffic only).
+Pyrra burn-rate alerts from `pyrra-slo-mcp-customer.yaml`. Availability counts SERVER-SIDE failures
+(`openbank_mcp_tool_call_failures_total{kind="error"}`: a tool or downstream fault, or a PDP outage)
+against completed customer tool calls that policy did not refuse (real traffic only). A client's
+invalid params (`kind="invalid_params"`) and a tool that is not wired yet (`kind="unavailable"`) are
+not failures here.
 Latency is the share of those calls that finish within the 1.073741824 s histogram bucket.
 
-1. Availability burn: split `openbank_mcp_tool_calls_total{channel="customer",result="FAILURE"}` by
-   `tool`. One tool points at its downstream service; all tools at once points at the PDP or the
+1. Availability burn: split `openbank_mcp_tool_call_failures_total{channel="customer",kind="error"}`
+   by `tool`. One tool points at its downstream service; all tools at once points at the PDP or the
    delegation lookup.
 2. Latency burn: compare `openbank_mcp_tool_call_duration_seconds` by `tool`; the PDP round trip is
    included in every call.

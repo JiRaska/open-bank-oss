@@ -8,12 +8,14 @@
 # the app knows which calls came in on the customer channel and which were synthetic. Real traffic
 # only (synthetic="false"), so the ADR-0252 canary and its deliberate negative twin spend no budget.
 #
-# Availability: a completed tool call whose result is FAILURE. FAILURE also covers "invalid params"
-# and no label tells it apart from "tool error", so a client sending bad arguments spends budget;
-# accepted for a first SLO, revisit once the series carries a reason.
-# DENIED is a policy outcome, not unavailability. Requests refused before a tool ran (DPoP, grant,
-# throttle, replay store) are outside this SLI by construction; the replay-store outage is paged by
-# McpCustomerReplayStoreUnavailable in prometheus-rules-mcp-customer.yaml.
+# Availability: SERVER-SIDE failures only. Errors are openbank_mcp_tool_call_failures_total{kind="error"}
+# (a tool or downstream fault, or a PDP outage); a client's invalid params (kind="invalid_params")
+# and a tool not wired yet (kind="unavailable", today propose_payment) spend no budget. The tool-call
+# counter alone cannot make that cut: result="FAILURE" carries no reason. The total is every call that
+# was not refused by policy (decision ALLOW, or UNAVAILABLE for a PDP outage); a DENY is a policy or
+# throttle outcome, not unavailability, and would only dilute the ratio. Requests refused before a
+# tool ran (DPoP, grant, replay store) are outside this SLI by construction; the replay-store outage
+# is paged by McpCustomerReplayStoreUnavailable in prometheus-rules-mcp-customer.yaml.
 #
 # Latency: openbank_mcp_tool_call_duration is published with publishPercentileHistogram
 # (libs-runtime standardPercentiles), whose Micrometer bucket grid has no 1s boundary; the nearest
@@ -40,13 +42,13 @@ spec:
   window: 30d
   alerting:
     absent: false
-  description: "Customer MCP channel availability: completed real customer tool calls that did not fail (ADR-0384, #16605)."
+  description: "Customer MCP channel availability: real customer tool calls that did not fail server-side; client errors are not failures (ADR-0384, #16605)."
   indicator:
     ratio:
       errors:
-        metric: openbank_mcp_tool_calls_total{channel="customer",synthetic="false",result="FAILURE"}
+        metric: openbank_mcp_tool_call_failures_total{channel="customer",synthetic="false",kind="error"}
       total:
-        metric: openbank_mcp_tool_calls_total{channel="customer",synthetic="false"}
+        metric: openbank_mcp_tool_calls_total{channel="customer",synthetic="false",decision=~"ALLOW|UNAVAILABLE"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective

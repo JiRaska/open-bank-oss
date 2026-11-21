@@ -331,6 +331,15 @@ class McpEndpoint(
                 // ADR-0384 D1: the channel the resolver's admitting branch recorded, never a claim.
                 McpMetricsPort.ChannelTags(ctx.channel),
             )
+            // A PDP outage is DENIED + UNAVAILABLE: the platform failed to answer, so it is a server fault
+            // for an availability indicator even though no tool ran.
+            if (result == AuditResult.FAILURE || decision == McpCallAuditor.Decision.UNAVAILABLE) {
+                metrics.toolCallFailed(
+                    toolTag,
+                    McpMetricsPort.ToolFailureKind.of(reason, decision),
+                    McpMetricsPort.ChannelTags(ctx.channel),
+                )
+            }
         }
 
         // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
