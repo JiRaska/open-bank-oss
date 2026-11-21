@@ -70,6 +70,16 @@ class ReleasedPaymentValidatorTest {
         assertThat(ReleasedPaymentValidator.isAccount("acct with spaces")).isFalse()
     }
 
+    @Test
+    fun `an IBAN with a passing mod-97 but impossible for its country is refused`() {
+        // Both pass the bare mod-97 that used to live here. CZ IBANs are 24 characters in the SWIFT
+        // registry, and QQ is not an IBAN country at all — only the shared Iban validator knows that.
+        assertThat(ReleasedPaymentValidator.isAccount("CZ60080000001920001453")).isFalse()
+        assertThat(ReleasedPaymentValidator.isAccount("QQ6308000000192000145399")).isFalse()
+        // Boundary: the same BBAN at the registry length stays valid.
+        assertThat(ReleasedPaymentValidator.isAccount("CZ6508000000192000145399")).isTrue()
+    }
+
     private fun code(m: Map<String, Any?>): String? = (validate(m) as? ReleaseValidation.Invalid)?.rejection?.reasonCode
 
     companion object {

@@ -141,3 +141,7 @@ Post-booking monitoring records booked money movement and counts it per party. N
 - The pack, its two vocabularies and its count features are **data** (`openbank.aml.monitoring.pack.*`). The shipped files are synthetic. A feature is pinned by a hash over its currency, band, direction, rail and window, so editing a window invalidates the pack's pin and the service does not start.
 - SHADOW is the default: a hit is recorded and nothing else happens. With `openbank.aml.monitoring.evaluation.open-cases=true` a hit opens an `AmlCase` of type `TRANSACTION_MONITORING` keyed by party, scenario and window.
 - Shipped scenarios: repeated movements in a below-mark band (three currency/direction variants). Rapid pass-through and activity after long inactivity are **not** shipped: a pack rule compares one count with a minimum, and those two need a conjunction of counts and an absence respectively.
+
+## Monitoring currencies (#16748)
+
+Booked movements, amount bands and count features accept only an active ISO 4217 code in canonical upper case (`CurrencyCode.isCanonical`). A definition in a non-currency or a withdrawn code is refused when it is built; a ledger event carrying one takes the rejected path to the DLQ.
