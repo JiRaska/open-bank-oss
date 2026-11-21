@@ -46,6 +46,7 @@ KNOWN_UNCOVERED = {
     "infra-vuln-scanner": "scanner job, no inbound traffic",
     "ingress-nginx": "controller ConfigMaps only (the Helm app owns the workload), no pods of its own",
     "keycloak-realm-drift": "drift detector job, no inbound traffic",
+    "mcp-customer-route": "route-only (HTTPRoute + edge policies, ADR-0383), no workload; mcp-service's policy is generated into components/mcp",
     "kyverno": "admission controller — policy covered by its own helm chart",
     "openbao": "secrets backend, hand-authored policies (runbook 0005/0006)",
     "platform": "umbrella dir, hosts no single workload",
