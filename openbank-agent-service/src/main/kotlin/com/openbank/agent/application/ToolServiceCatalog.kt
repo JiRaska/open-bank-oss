@@ -34,9 +34,12 @@ object ToolServiceCatalog {
         "get_trial_balance" to "ledger-service",
         "aml_list_cases" to "aml-service",
         "aml_get_case" to "aml-service",
+        // A proposal the agent queues locally, but the case it concerns lives in aml-service.
+        "aml_propose_case_decision" to "aml-service",
         "sanctions_list_checks" to "sanctions-service",
         "sanctions_get_check" to "sanctions-service",
         "sanctions_list_pending" to "sanctions-service",
+        "sanctions_review_check" to "sanctions-service",
         "fx_list_rates" to "fx-service",
         "fx_get_rate" to "fx-service",
         "clearing_list_batches" to "clearing-service",

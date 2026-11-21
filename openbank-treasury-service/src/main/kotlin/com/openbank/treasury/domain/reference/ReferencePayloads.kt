@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.reference
 
+import com.openbank.treasury.domain.model.Isin
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -85,7 +86,6 @@ private val CURRENCY = Regex("^[A-Z]{3}$")
 private val COUNTRY = Regex("^[A-Z]{2}$")
 private val LEI = Regex("^[A-Z0-9]{20}$")
 private val BIC = Regex("^[A-Z0-9]{8}([A-Z0-9]{3})?$")
-private val ISIN = Regex("^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 private val CODE = Regex("^[A-Z0-9][A-Z0-9_.-]{0,63}$")
 private val TENOR = Regex("^(ON|[0-9]+[DWMY])$")
 private const val MAX_TEXT = 200
@@ -270,7 +270,7 @@ data class SecurityPayload(
     override fun key() = isin
 
     override fun validate() {
-        require(ISIN.matches(isin) && isinCheckDigitValid(isin)) { "isin '$isin' is not a valid ISIN" }
+        require(Isin.isValid(isin)) { "isin '$isin' is not a valid ISIN" }
         requireText(name, "name")
         requireCode(issuerId, "issuerId")
         requireCurrency(currency)
@@ -295,22 +295,6 @@ data class SecurityPayload(
     companion object {
         val CONVENTIONS = setOf("UNADJUSTED", "FOLLOWING", "MODIFIED_FOLLOWING", "PRECEDING", "MODIFIED_PRECEDING")
         val FREQUENCIES = setOf("MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL")
-        private const val ISIN_LETTER_OFFSET = 55
-        private const val LUHN_DOUBLE_ABOVE = 9
-        private const val DECIMAL = 10
-
-        /** ISO 6166 check digit: letters to numbers (A=10 ... Z=35), then Luhn over the digits. */
-        fun isinCheckDigitValid(isin: String): Boolean {
-            val digits = isin.dropLast(1).map { c ->
-                if (c.isDigit()) c.toString() else (c.code - ISIN_LETTER_OFFSET).toString()
-            }
-                .joinToString("")
-            val sum = digits.reversed().mapIndexed { i, ch ->
-                val d = ch - '0'
-                if (i % 2 == 0) (d * 2).let { if (it > LUHN_DOUBLE_ABOVE) it - LUHN_DOUBLE_ABOVE else it } else d
-            }.sum()
-            return (DECIMAL - sum % DECIMAL) % DECIMAL == isin.last() - '0'
-        }
     }
 }
 

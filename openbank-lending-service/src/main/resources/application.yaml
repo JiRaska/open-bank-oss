@@ -352,6 +352,8 @@ lending:
     # speak plain HTTP, so this stays under %prod: the client cert only exists in the cluster.
     tls:
       catalog-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -362,6 +364,8 @@ lending:
             certs: /mnt/catalog-tls/ca.crt
         protocols: TLSv1.3
       consent-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:
@@ -373,6 +377,8 @@ lending:
         protocols: TLSv1.3
       # #11900: audit-service's 8443 mTLS listener, same private CA and client identity as above.
       audit-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

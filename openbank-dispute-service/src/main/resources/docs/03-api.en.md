@@ -25,6 +25,21 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (OpenAPI **3
 | `POST` | `/api/v1/disputes/{id}/withdraw?actor=` | OPERATOR/ADMIN/SERVICE | Withdraw a dispute |
 | `POST` | `/api/v1/disputes/{id}/escalate?actor=` | OPERATOR/ADMIN/SERVICE | Escalate a dispute |
 | `GET` | `/api/v1/disputes/{id}/timeline` | any role | Get the dispute timeline |
+| `GET` | `/api/v1/disputes/{id}/evidence/verify` | OPERATOR/ADMIN/API | Verify the tamper-evident evidence hash chain |
+
+## Evidence chain verification
+
+Every evidence row carries `prevHash` and `recordHash`. New rows are stamped `hashVersion = 3`; the hash covers the version (first field), the evidence id and the microsecond `submittedAt`, so neither the version nor the id can change without breaking the row's own hash.
+
+Rows written before `hash_version` existed (migration V12) have `hashVersion = null` and are **legacy**: their hash form included values Postgres does not round-trip, so their content cannot be recomputed. They are never re-hashed.
+
+`GET …/evidence/verify` returns `EvidenceChainVerification`:
+
+- `itemsChecked` — versioned rows whose content was fully recomputed.
+- `legacyItems` — legacy rows counted but not recomputed.
+- `intact` — linkage across the whole chain (each `prevHash` equals the previous row's stored `recordHash`, legacy rows included) plus every versioned row's content.
+
+Legacy rows may only form a prefix of the chain; a legacy row after a versioned one is reported as a downgrade (broken). Limits: an edit to a legacy row's content that leaves its stored `recordHash` untouched is not detectable, and a dispute whose whole chain is legacy reads `itemsChecked=0, legacyItems=N` — read `legacyItems` before treating `intact=true` as proof.
 
 ## Request — open a dispute
 

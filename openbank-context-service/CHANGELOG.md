@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.5.0...context-service-v0.5.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **clearing,context,copilot:** reload outbound mTLS client certificates ([#16412](https://github.com/JiRaska/open-bank-oss/issues/16412)) ([1bb10d2](https://github.com/JiRaska/open-bank-oss/commit/1bb10d207000311e6fd1a73b9cc0346be958f754))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.4.4...context-service-v0.5.0) (2026-11-14)
 
 

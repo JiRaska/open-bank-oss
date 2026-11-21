@@ -31,26 +31,39 @@ on:
       - ".github/scripts/check-bench-alloc-baseline.py"
       - ".github/scripts/test_bench_ratchet.py"
 
+  # The same paths on main. Without this the baseline was compared only on pull requests, so a
+  # change that moved an allocation landed green-or-lucky and the red surfaced on the NEXT
+  # unrelated PR that touched a libs path, which could do nothing about it. A main run makes the
+  # breach the merging commit's, where main-red-watch and the train already look.
+  push:
+    branches: [main]
+    paths:
+      # Benchmark inputs only: the shared libs it measures, the harness and its gate.
+      - "openbank-libs*/**"
+      - ".github/workflows/libs-bench.yml"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
 concurrency:
-  group: libs-bench-${{ github.ref }}
-  cancel-in-progress: true
+  # Per commit on main and never cancelled there: each main result belongs to one commit.
+  group: libs-bench-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   jmh:
     name: JMH allocation baseline (enforced)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           java-version: "25"
           distribution: temurin
@@ -62,7 +75,7 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      # -f 1 -wi 3 -i 3 -prof gc -rf json, -XX:+UseSerialGC -Xmx512m: set in the module's
+      # -f 3 -wi 3 -i 3 -prof gc -rf json, -XX:+UseSerialGC -Xmx512m: set in the module's
       # build.gradle.kts `jmh {}` block, so a local run and this one are the same run.
       - name: Run JMH (:openbank-libs-benchmarks:jmh)
         run: ./gradlew :openbank-libs-benchmarks:jmh --console=plain

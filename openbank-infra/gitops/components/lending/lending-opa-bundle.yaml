@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "4801869c1c90a334"
+    openbank.tech/policy-checksum: "5b9ff74c70413ae4"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -745,6 +745,22 @@ data:
     # to the interceptor (like four_eyes_required); no allow reason ever fires for such an
     # action, so default-deny also blocks it.
     # ---------------------------------------------------------------------------------------
+    # A customer approves (or reads) an MCP client's payment proposal only from the bank's own
+    # app session — never with a token issued to the MCP client that made the proposal, nor with
+    # an exchanged/delegated one (ADR-0383 D6, #16848). `customer-self-action` admits every
+    # `customer.*` action for any customers-realm HUMAN token, so without this the edge's
+    # `appSessionCustomer()` check was the only control. AuthorizeInterceptor supplies
+    # `token_azp` / `token_act` for every `customer.*` action; an absent value is not the app.
+    customer_app_session if {
+    	input.attributes.token_azp == "openbank-app"
+    	input.attributes.token_act == false
+    }
+
+    prohibited if {
+    	startswith(input.action, "customer.mcp-proposals.")
+    	not customer_app_session
+    }
+
     prohibited if {
     	input.action == "featureflag.flip"
     	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
@@ -1415,6 +1431,8 @@ data:
       - product.explain
       write_proposal:
       - draft.ticket
+      - propose.aml.decision
+      - sanctions.review.maker
       - gh.pr.open
       - draft.adr
       - git.branch
@@ -1444,6 +1462,8 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
         - flags.write
+        - propose.aml.decision
+        - sanctions.review.maker
         deny:
         - money.*
         - gh.pr.*
@@ -2051,8 +2071,12 @@ data:
                                              # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
         - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                              # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
-                                             # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
-                                             # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+                                             # separation. ONE documented M2M caller, deliberately paused (#16381/#16455):
+                                             # service-account-openbank-agent on POST /api/v3/sanctions/review, CLEAR only, as the
+                                             # four-eyes MAKER. Being paused is the point for that caller, so the GUARDRAIL below
+                                             # (no automated caller may be stalled) does not apply to it; it never holds
+                                             # sanctions.approval.decide. Every other caller is ROLE_OPERATOR/ROLE_ADMIN (no
+                                             # ROLE_SERVICE); /api/v1/sanctions/review stays human-only.
         # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
         # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
         # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world

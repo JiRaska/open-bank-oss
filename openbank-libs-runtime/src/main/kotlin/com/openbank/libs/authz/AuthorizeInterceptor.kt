@@ -129,6 +129,10 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var httpHeaders: Instance<HttpHeaders>
 
+    /** Records which approval this request consumed, for a resource that binds to it. */
+    @Inject
+    var fourEyesConsumption: Instance<FourEyesConsumption>? = null
+
     @Inject
     lateinit var clock: Clock
 
@@ -373,7 +377,7 @@ class AuthorizeInterceptor {
             val approval = store.find(approvalId)
             if (
                 approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint) &&
-                store.markExecuted(approvalId) != null
+                store.markExecuted(approvalId)?.also { fourEyesConsumption.record(approvalId) } != null
             ) {
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return
@@ -428,7 +432,7 @@ class AuthorizeInterceptor {
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
             extractResource(ctx, annotation, expr)
         }
-        val attrs = resolveAttributes(annotation)
+        val attrs = resolveAttributes(annotation) + customerTokenAttributes(annotation.action, identity.get().principal)
         return AuthzQuery(principal = principal, action = annotation.action, resource = resource, attributes = attrs)
     }
 
@@ -499,6 +503,31 @@ class AuthorizeInterceptor {
     private companion object {
         const val APPROVAL_ID_HEADER = "X-Approval-Id"
         const val PENDING_APPROVAL_STATUS = 202
+    }
+}
+
+private const val CUSTOMER_ACTION_PREFIX = "customer."
+private const val TOKEN_AZP_ATTRIBUTE = "token_azp"
+private const val TOKEN_ACT_ATTRIBUTE = "token_act"
+private val UNREADABLE_CLAIM = Any()
+
+/**
+ * For every `customer.*` action, the issuing client (`token_azp`) and whether the token was
+ * exchanged or delegated (`token_act`, presence of an `act` claim) — added unconditionally so
+ * `rest.rego` can tell the customer's own app session from any other customer-realm token
+ * (e.g. one issued to a connected MCP client) without each endpoint having to opt in (#16848).
+ * Additive: no other action gains a key, and a policy that does not read them is unaffected.
+ * An unreadable `azp` is simply absent, which the policy treats as "not the app" (fail closed);
+ * an unreadable `act` counts as present, because it can never prove "not delegated".
+ */
+internal fun customerTokenAttributes(action: String, principal: java.security.Principal?): Map<String, Any?> {
+    if (!action.startsWith(CUSTOMER_ACTION_PREFIX)) return emptyMap()
+    val jwt = principal as? JsonWebToken ?: return emptyMap()
+    val azp = runCatching { jwt.getClaim<Any?>("azp") }.getOrNull() as? String
+    val act = runCatching { jwt.getClaim<Any?>("act") }.getOrElse { UNREADABLE_CLAIM }
+    return buildMap {
+        azp?.let { put(TOKEN_AZP_ATTRIBUTE, it) }
+        put(TOKEN_ACT_ATTRIBUTE, act != null)
     }
 }
 

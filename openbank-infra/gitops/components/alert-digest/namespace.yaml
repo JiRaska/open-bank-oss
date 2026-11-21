@@ -1,0 +1,10 @@
+# Own namespace on purpose (ADR-0382): Alertmanager admits every pod in `observability`, so a
+# digest running there could POST /api/v2/silences. This namespace is NOT in
+# alertmanager-ingress-allow-list; its only path to Alertmanager is the GET-only relay.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: alert-digest
+  labels:
+    app.kubernetes.io/part-of: openbank
+    open-bank.tech/component: alert-digest

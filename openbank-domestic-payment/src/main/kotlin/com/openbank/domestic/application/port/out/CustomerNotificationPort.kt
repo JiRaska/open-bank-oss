@@ -49,7 +49,7 @@ interface CustomerNotificationPort {
 fun customerSafeReason(reason: DomesticRejectReason?): String = when (reason) {
     DomesticRejectReason.INSUFFICIENT_FUNDS -> "there was not enough money in the account"
     DomesticRejectReason.BENEFICIARY_ACCOUNT_CLOSED -> "the recipient's account is closed"
-    DomesticRejectReason.INVALID_ACCOUNT_NUMBER -> "the recipient's account number was not accepted"
+    DomesticRejectReason.INVALID_ACCOUNT_NUMBER -> "an account number in the payment was not accepted"
     DomesticRejectReason.INVALID_BANK_CODE -> "the recipient's bank code was not accepted"
     DomesticRejectReason.AMOUNT_LIMIT_EXCEEDED -> "the amount is above the limit for this payment"
     DomesticRejectReason.TECHNICAL_ERROR -> "of a technical problem"

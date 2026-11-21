@@ -437,6 +437,53 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
+  default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
+  - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`
+    (`quarkus.oidc.customers`, issuer resolution enabled only with the channel). A customers-realm
+    token is decided ONLY by `CustomerChannelAdmission`; `CallerContextResolver` returns null for it
+    before the `agent:` prefix or OBO path is inspected, so a customer token shaped like an agent
+    token cannot reach a staff charter's tools (unit + IT, both proven red with the guard removed).
+    A staff-realm token is never admitted as a customer, whatever its `azp`/`cnf`.
+  - *Token theft / replay.* Admission requires `aud` = this server, an `azp` declared AND enabled in
+    the MCP client allowlist (tier from the allowlist, never from the token), `cnf.jkt`, the `DPoP`
+    authorization scheme, and an RFC 9449 proof verified by the ADR-0320 P2 primitive (`htm`, `htu`
+    against the allowlist's published resource rather than the request's `Host`, `iat` window,
+    `ath`, `cnf.jkt`, `jti` replay). Tier H bearer tokens are NOT admitted in this slice.
+  - *Discovery.* RFC 9728 metadata at `/.well-known/oauth-protected-resource[/mcp]`, 404 while off;
+    an unauthenticated call gets 401 with `resource_metadata`. Values come from config, never the request.
+  - *Boot gate.* `CustomerChannel` is `@Startup`: with the channel on, a missing issuer or a
+    missing/malformed allowlist stops the service from starting.
+  - *Review hardening (same PR).* The fleet NUL guard now runs before the customer branch and the
+    audience check, so no path echoes a U+0000 id. Admission order (re-review of #16721): token
+    and structural checks, then the STATELESS proof check (`DpopProofVerifier.check`: signature over
+    the header key, `htm`, `htu` against the published resource, `iat`, `ath`, proof key == `cnf.jkt`),
+    then a non-mutating replay peek (a captured proof replayed on a victim's token is refused
+    REPLAYED before any budget, so replays cannot drain the victim's proof-key bucket; two
+    CONCURRENT copies of one proof can both pass the peek and both spend, and the claim still
+    admits only one), then — only for a proof signed by the token's own key — the proof-key bucket and a coarse
+    per-client cap (minute-only), then the replay claim, then the per-(subject, client) window. A
+    missing, duplicate or unparseable proof, a proof from another key, or a junk proof carrying a
+    victim's PUBLIC key therefore spends no one's budget and writes nothing; raw volume before that
+    point is the edge's per-IP limit (D5.1), since nothing stateful has happened yet. Refused customer calls write at most one audit row per
+    subject per minute, and that audit-window check also prunes closed windows, at most one full scan per minute. Boot also refuses an allowlist whose `audience` differs from the staff path's, and
+    any parser failure (including a YAML syntax error). Measured with real signed tokens: Quarkus's
+    issuer resolver returns no tenant for an unknown `iss` and the request FALLS BACK to the default
+    (staff) tenant, so a foreign or forged issuer is stopped by that tenant's signature and issuer
+    checks — with the issuer check off (`token.issuer=any`) a third-issuer token signed by the staff
+    key is accepted. Production relies on the discovered issuer for that check.
+  - **Residual, and why the channel must stay off:** the replay store is the single-pod
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
+    D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
+    by all of a client's customers and is spent only by proofs signed by a key some token of that
+    client is bound to, so exhausting it needs many valid tokens (a coarse cap by design, sized well
+    above one customer's budget); the tenant-level DPoP check compares `htu` with the request URL,
+    so the edge must forward the external scheme and host (proved end to end in
+    `McpCustomerTenantResolutionIT` with `X-Forwarded-*`); an admitted customer reaches NO
+    tool (empty `tools/list`, refused `tools/call`), because the `MCP_CLIENT` grant lookup (P2/D3)
+    and downstream party enforcement (P5) do not exist; the customers tenant config is not yet
+    verified against a live Keycloak (P3).
+
 - **2026-09-03** — Doc correction, no behavior change: the ADR-0181 phase-2 entry said
   "`propose_payment` / `StubProposalPort` were deliberately left untouched". `StubProposalPort` no
   longer exists — `git grep -n "class StubProposalPort" -- '*.kt'` returns nothing, and the four
@@ -494,3 +541,7 @@ a stub (T-T2/T-D2).
 - **2026-09-21** — **Own machine identity for the charter-gated read ports (#10486 batch 7).** `TransactionServiceClient`, `SepaPaymentServiceClient` and `DomesticPaymentServiceClient` now mint from a NAMED oidc-client `m2m`, Keycloak client `openbank-mcp` (`ROLE_API` only). transaction-service grants it `transaction.list` (mcp-anonymous holds `query.transaction.readonly`). The payment-confirmation reads get **no** grant: no charter holds `query.payment_confirmation.readonly`, so the tool was already refused at the MCP gate. `McpMachineGrantCharterAlignmentTest` pins both facts. **STRIDE-S:** a new credential at Vault KV `keycloak/mcp-service`, projected by `mcp-service-m2m-oidc`, env ref `optional: false`. The account, balance, statement and consent clients stay on the shared client. Rollback: revert the commit.
 
 - **2026-10-31** — **account-service reads now use the generated client (#13169, ADR-0319).** The hand-written `GET /api/v1/accounts/iban/{iban}` and `GET /api/v1/accounts/{accountId}` interface is replaced by `AccountServiceClient : AccountsApi`, generated from account-service's own `openapi.yaml` (`openbank-client-account`), read through the shared `AccountClient` facade in `AccountDirectory`. **No trust-boundary change:** same routes, same `account-service` config key and URL, same M2M OIDC filter, same synthetic-taint filter, no new header; the consent gate still runs before any account read and its scope intersection is untouched. A 404 still denies the tool call (`NotFoundException`), any other status or failed call still propagates as an error, and nothing in the seam swallows an exception (a cancellation passes through unchanged). **Residual risk:** `id` and `partyId` now bind as UUIDs, so a non-UUID value from account-service fails the read instead of being passed along as text. `list_accounts` now serialises the typed account, so its output carries exactly the fields account-service's spec declares (null-valued ones included) rather than the raw upstream document; a field the spec does not declare no longer reaches the MCP client. Rollback: revert the commit.
+
+- **2026-11-17** — **Token audience enforced on `/mcp` (#16622, ADR-0383 D1).** Before this change only the OBO path checked `aud`; an agent token that Quarkus OIDC accepted for the realm reached `CallerContextResolver` whatever resource it was issued for, which is token passthrough. `McpEndpoint` now answers 401 (`invalid_token`) on every method when a presented token's `aud` does not contain `openbank-mcp-service`, and `CallerContextResolver` refuses such a token on the agent path as well, so a call reaching the resolver by another route still fails closed. Refused tool calls are audited as DENIED. Anonymous calls keep their existing tool-less answer. Not done with `quarkus.oidc.token.audience`, because the tenant also serves `/api/v1/mcp/sessions`, which receives the operator's own token. **Residual risk:** no realm client mints `agent:` tokens yet, so the agent branch has no live caller; a future issuer must add an `openbank-mcp-service` audience mapper. An unreachable issuer still yields 500 for a presented token (fail-closed). Rollback: revert the commit.
+
+- **2026-11-17** — **JSON-RPC input hardening (#16628).** Five input bounds the MCP fuzz suite marked as deviations now hold at the endpoint. **STRIDE-T/D/I:** (1) a request whose decoded body carries U+0000 anywhere (keys, values, method, tool name, at any depth) is refused with HTTP 400 and JSON-RPC `-32602` before dispatch, so no tool, consent call or audit write sees it (only the bounded counter `openbank.mcp.input_refused{reason="nul"}` ticks); the fleet NUL guard (#5913) hooks the String deserializer, which a `JsonNode`-bound body never uses, hence a tree scan in `McpInputBounds`. The refusal is logged without the payload and is deliberately not audited (an unauthenticated flood must not become audit writes). (2) The tool name, unknown method and invalid `paymentId` are no longer reflected beyond 64 characters, so a response cannot grow with the input. (3) `list_transactions.limit` must be an integer in 1..200 (parity with transaction-service) (default 50 when absent) or the call is `-32602`. (4) Audit `argument_keys` is bounded to 32 keys of 64 characters each. (5) `get_balance`, `list_transactions` and `get_statement` require the `accountId` in canonical form (uppercase, no spaces; refused, never normalised, because consent compares the exact IBAN) and pass libs-domain `Iban.isValid` (mod-97) before the consent-service call. Rollback: revert the commit.

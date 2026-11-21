@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.links, .summary { display: flex; flex-wrap: wrap; gap: 8px; }
+.summary button[aria-pressed='true'] { outline: 2px solid var(--ob-accent); outline-offset: 2px; }
+.context { color: var(--text-secondary); font-size: 14px; }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+.filters label { display: grid; gap: 6px; font-size: 13px; min-width: 0; }
+.filters input, .filters select { width: 100%; min-width: 0; }
+.tableScroll { overflow-x: auto; max-width: 100%; }
+.table { min-width: 800px; width: 100%; }
+.table th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
+.table td { vertical-align: top; white-space: normal; }
+.table td:first-child { width: 30%; }
+.table td:nth-child(4) { width: 25%; }
+.detail { margin-top: 6px; font-size: 13px; overflow-wrap: anywhere; }
+.detail summary { cursor: pointer; color: var(--text-secondary); }
+.detail p { margin: 6px 0; }
+.coverage { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; }
+.confidence { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }

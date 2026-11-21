@@ -25,6 +25,21 @@ REST kontrakt je popsán v [`openapi.yaml`](../openapi.yaml) (OpenAPI **3.1.0**,
 | `POST` | `/api/v1/disputes/{id}/withdraw?actor=` | OPERATOR/ADMIN/SERVICE | Stáhnout reklamaci |
 | `POST` | `/api/v1/disputes/{id}/escalate?actor=` | OPERATOR/ADMIN/SERVICE | Eskalovat reklamaci |
 | `GET` | `/api/v1/disputes/{id}/timeline` | jakákoli role | Získat časovou osu reklamace |
+| `GET` | `/api/v1/disputes/{id}/evidence/verify` | OPERATOR/ADMIN/API | Ověřit řetězec hashů důkazů chránící proti manipulaci |
+
+## Ověření řetězce důkazů
+
+Každý záznam důkazu nese `prevHash` a `recordHash`. Nové záznamy dostávají `hashVersion = 3`; hash zahrnuje verzi (jako první pole), ID důkazu a `submittedAt` s mikrosekundovou přesností, takže verzi ani ID nelze změnit, aniž by se rozbil vlastní hash záznamu.
+
+Záznamy vzniklé před zavedením `hash_version` (migrace V12) mají `hashVersion = null` a jsou **legacy**: jejich podoba hashe obsahovala hodnoty, které Postgres nezachová beze změny, proto jejich obsah nelze přepočítat. Nikdy se nepřehashovávají.
+
+`GET …/evidence/verify` vrací `EvidenceChainVerification`:
+
+- `itemsChecked` — verzované záznamy, jejichž obsah byl plně přepočten.
+- `legacyItems` — legacy záznamy, které jsou započteny, ale nepřepočítávají se.
+- `intact` — návaznost celého řetězce (každý `prevHash` se rovná uloženému `recordHash` předchozího záznamu, včetně legacy záznamů) a obsah všech verzovaných záznamů.
+
+Legacy záznamy smějí tvořit pouze počáteční část řetězce; legacy záznam za verzovaným je hlášen jako downgrade (porušení). Omezení: úpravu obsahu legacy záznamu, která ponechá uložený `recordHash`, nelze odhalit, a reklamace, jejíž celý řetězec je legacy, vrací `itemsChecked=0, legacyItems=N` — než budete `intact=true` považovat za důkaz, zkontrolujte `legacyItems`.
 
 ## Požadavek — otevřít reklamaci
 

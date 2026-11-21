@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.27.0...consent-service-v0.27.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **consent:** cover only explicitly listed accounts ([#16613](https://github.com/JiRaska/open-bank-oss/issues/16613)) ([5c1c2f6](https://github.com/JiRaska/open-bank-oss/commit/5c1c2f6dda0eb0a5fe7bd255769b2e72dfa48740))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.26.3...consent-service-v0.27.0) (2026-10-16)
 
 

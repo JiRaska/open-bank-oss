@@ -162,9 +162,12 @@ group = "com.openbank"
 version = "0.1.0-SNAPSHOT"
 repositories {{ maven {{ url = uri(rootProject.file("fake-repo")) }} }}
 dependencies {{ runtimeOnly("{GROUP}:{CHILD}:{VERSION}") }}
-tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {{
-    setIncludeConfigs(listOf("runtimeClasspath"))
-    setOutputFormat("all")
+tasks.named<org.cyclonedx.gradle.CyclonedxDirectTask>("cyclonedxDirectBom") {{
+    includeConfigs.set(listOf("runtimeClasspath"))
+}}
+tasks.named<org.cyclonedx.gradle.CyclonedxAggregateTask>("cyclonedxBom") {{
+    jsonOutput.set(layout.buildDirectory.file("reports/bom.json"))
+    xmlOutput.set(layout.buildDirectory.file("reports/bom.xml"))
 }}
 ''')
     return verification, parent_pom_file
@@ -258,12 +261,23 @@ def main() -> int:
             print("repository verification metadata changed during the isolated fixture")
             return 1
         output = second.stdout.lower()
+        # CycloneDX 3.x declares the resolved POMs (parents included) as task inputs, so
+        # Gradle verification now refuses the unpinned parent while determining the task's
+        # inputs, before the POM preflight runs. Either boundary is fail-closed; accept the
+        # 3.x input boundary or the preflight boundary, and nothing weaker.
+        input_boundary = (
+            "could not determine the dependencies of task ':probe:cyclonedxdirectbom'" in output
+            and "dependency verification failed for configuration ':probe:runtimeclasspath'" in output
+            and "pom_preflight" not in output
+        )
+        preflight_boundary = (
+            "> task :probe:cyclonedxdirectbom failed" in output
+            and "pom_preflight external_components=1" in output
+            and "pom_preflight resolved_models=" not in output
+            and "dependency verification failed for org.example.fixture:licensed-child:1.0" in output
+        )
         if (
-            "> task :probe:cyclonedxbom failed" not in output
-            or "pom_preflight external_components=" not in output
-            or "pom_preflight external_components=1" not in output
-            or "pom_preflight resolved_models=" in output
-            or "dependency verification failed for org.example.fixture:licensed-child:1.0" not in output
+            not (input_boundary or preflight_boundary)
             or "license-parent-1.0.pom" not in output
             or PARENT.lower() not in output
         ):
