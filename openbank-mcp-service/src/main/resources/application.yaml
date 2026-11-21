@@ -7,18 +7,12 @@ quarkus:
       # ADR-0383 D5: bound a request body before it is parsed. Global to this service, which only
       # serves small JSON-RPC and session-control bodies; oversize requests get HTTP 413.
       max-body-size: ${MCP_MAX_BODY_SIZE:64K}
-    # ADR-0383 D5 / #16847: behind the edge, quarkus-oidc's own DPoP check (enabled for the
-    # customers tenant by `token.authorization-scheme: DPoP`, BearerAuthenticationMechanism) compares
-    # the proof `htu` with HttpServerRequest.absoluteURI() — measured: "DPoP proof HTTP request uri
-    # claim https://… does not match the request HTTP uri http://localhost:…". This service's own
-    # admission checks `htu` against the static published resource; it is the TENANT that needs the
-    # external scheme/host. Off by default. Quarkus applies these headers ONLY from
-    # `quarkus.http.proxy.trusted-proxies` (deliberately not defined here: set it in the deployment);
-    # ProxyForwardingGuard refuses to boot with any forwarding switch on and no narrow literal list.
-    proxy:
-      proxy-address-forwarding: ${MCP_PROXY_FORWARDING:false}
-      allow-x-forwarded: ${MCP_PROXY_FORWARDING:false}
-      enable-forwarded-host: ${MCP_PROXY_FORWARDING:false}
+    # ADR-0383 D5 / #16847 (owner decision 2026-11-21): the edge hop is trusted by its mTLS IDENTITY,
+    # never by IP. NO `quarkus.http.proxy.*` switch and NO trusted-proxies: ProxyForwardingGuard refuses
+    # to boot with any of them. quarkus-oidc's DPoP check for the customers tenant compares the proof
+    # `htu` with HttpServerRequest.absoluteURI(); on the TLS listener (8443) that is `https://<Host>/…`
+    # with the Host the edge passes through unchanged, so the external URL matches with no forwarding,
+    # and on plain 8150 it is `http://…`, which no published-resource proof can match.
   management:
     enabled: true
     port: 8085
@@ -158,8 +152,11 @@ mcp:
   # refuses to boot unless the issuer is set and the client allowlist exists and parses
   # (CustomerChannel is @Startup).
   # #16847: `mcp.edge.client-address-header` (env MCP_EDGE_CLIENT_ADDRESS_HEADER) names the ONE
-  # edge-set header carrying the client address (e.g. X-Envoy-External-Address), read only from a peer
-  # in quarkus.http.proxy.trusted-proxies. Deliberately not defined here: unset = never read.
+  # edge-set header carrying the client address (e.g. X-Envoy-External-Address), read only over the
+  # mTLS listener from a peer whose verified certificate carries the DNS SAN in
+  # `mcp.edge.gateway-identity` (env MCP_EDGE_GATEWAY_IDENTITY). Both deliberately not defined here:
+  # unset = never read. ProxyForwardingGuard refuses one without the other, or either without
+  # client-auth required.
   # ClientAddressResolver never uses Quarkus' leftmost X-Forwarded-For for the audit key.
   customer:
     enabled: ${MCP_CUSTOMER_ENABLED:false}
@@ -198,3 +195,28 @@ openbank:
       tenant-enabled: false
     oidc-client:
       enabled: false
+
+"%prod":
+  quarkus:
+    http:
+      # ADR-0383 D5 / #16847 (owner decision 2026-11-21): the customer route reaches this service ONLY
+      # on the TLS listener (8443, QUARKUS_HTTP_SSL_PORT in gitops), and the edge proves itself there by
+      # its client certificate (EnvoyProxy/edge backendTLS.clientCertificateRef). `client-auth` is a
+      # BUILD-TIME property (see ap2-service), so it is baked here, under %prod only: with no certificate
+      # configured, dev runs and @QuarkusTest would refuse to start.
+      ssl:
+        client-auth: required
+      # Keep plain 8150 for the in-cluster callers and the readiness probe; with client-auth REQUIRED
+      # Quarkus otherwise drops the HTTP listener.
+      insecure-requests: enabled
+      # #12511 listener parity: with client-auth on, Quarkus also registers its mTLS mechanism, which
+      # would turn any fleet-CA certificate into an authenticated identity on 8443. Every served root
+      # authenticates by bearer only; the certificate stays transport authentication (and the edge's
+      # SAN only decides which header ClientAddressResolver reads). `permit` keeps the anonymous
+      # paths (protected-resource metadata, token-less /mcp refusals) exactly as on 8150.
+      auth:
+        permission:
+          bearer-only:
+            paths: /mcp,/mcp/*,/api/v1/mcp/sessions,/api/v1/mcp/sessions/*,/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource/*
+            policy: permit
+            auth-mechanism: bearer

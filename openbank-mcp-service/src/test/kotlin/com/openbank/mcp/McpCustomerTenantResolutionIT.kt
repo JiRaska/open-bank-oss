@@ -51,13 +51,6 @@ class McpCustomerTenantResolutionIT {
             "quarkus.oidc.resolve-tenants-with-issuer" to "true",
             "quarkus.oidc.customers.tenant-enabled" to "true",
             "quarkus.oidc.customers.public-key" to OidcItKeys.publicKeyConfig("customers"),
-            // The edge forwards the external scheme and host, so the tenant's own DPoP check sees the
-            // published resource URL; this is the deployment shape the two htu checks need to agree.
-            "quarkus.http.proxy.proxy-address-forwarding" to "true",
-            "quarkus.http.proxy.allow-x-forwarded" to "true",
-            "quarkus.http.proxy.enable-forwarded-host" to "true",
-            // Only the test client's own loopback hop is a trusted proxy (ProxyForwardingGuard).
-            "quarkus.http.proxy.trusted-proxies" to TRUSTED_LOOPBACK,
             "mcp.customer.enabled" to "true",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
@@ -134,30 +127,12 @@ class McpCustomerTenantResolutionIT {
         assertThat(challenge).startsWith("DPoP").contains("invalid_dpop_proof").contains("resource_metadata=")
     }
 
-    @Test
-    fun `a real customers token with a proof for the published resource is ADMITTED end to end`() {
-        val dpopKey = DpopTestProofs.newKey()
-        val token = sign(
-            OidcItKeys.pair("customers").private,
-            CUSTOMERS,
-            sub = "c0ffee00-0000-0000-0000-000000000005",
-            cnfJkt = DpopTestProofs.jkt(dpopKey),
-        )
-        given().contentType(ContentType.JSON)
-            .header("Authorization", "DPoP $token")
-            .header("DPoP", DpopTestProofs.proof(dpopKey, htu = DpopTestProofs.RESOURCE, token = token))
-            .header("X-Forwarded-Proto", "https")
-            .header("X-Forwarded-Host", "mcp.test.example")
-            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
-            .post("/mcp").then()
-            .statusCode(200)
-            .body("result.tools.size()", org.hamcrest.Matchers.equalTo(0))
-    }
+    // The ADMITTED-end-to-end case needs the published https URL, which only the mTLS listener
+    // yields without proxy forwarding (owner decision 2026-11-21): McpGatewayMtlsIT holds it.
 
     private companion object {
         const val STAFF = "https://kc.test.example/realms/openbank"
         const val CUSTOMERS = "https://kc.test.example/realms/openbank-customers"
         const val THIRD = "https://idp.attacker.example/realms/openbank"
-        const val TRUSTED_LOOPBACK = "127.0.0.1,0:0:0:0:0:0:0:1"
     }
 }

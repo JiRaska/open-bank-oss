@@ -8,36 +8,50 @@ import io.vertx.core.http.HttpServerRequest
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.security.cert.X509Certificate
 import java.util.Optional
 
 /**
  * Which client address keys the subject-less audit window (#16847) — deliberately NOT the address
- * Quarkus derives from `X-Forwarded-For`.
+ * Quarkus derives from `X-Forwarded-For`, and never decided by the peer's IP.
  *
- * Quarkus' `proxy-address-forwarding` takes the LEFTMOST `X-Forwarded-For` entry, and an edge that
- * APPENDS (rather than overwrites) leaves that entry under the client's control. So this reads:
- * - the raw TCP peer (`connection().remoteAddress()`, which forwarding never rewrites), unless
+ * Owner decision 2026-11-21: the edge hop is trusted by its mTLS IDENTITY, not by address
+ * (`quarkus.http.proxy.trusted-proxies` stays unset, [ProxyForwardingGuard] refuses it). So this reads:
+ * - the raw TCP peer (`connection().remoteAddress()`), unless
  * - `mcp.edge.client-address-header` names ONE edge-set header (e.g. Envoy's
- *   `X-Envoy-External-Address`) AND the peer is in `quarkus.http.proxy.trusted-proxies` AND the
- *   header occurs exactly once holding exactly one strict IP literal. Then that value.
+ *   `X-Envoy-External-Address`) AND the request arrived on the TLS listener (client auth REQUIRED)
+ *   AND the verified leaf certificate carries the DNS SAN pinned in `mcp.edge.gateway-identity`
+ *   AND the header occurs exactly once holding exactly one strict IP literal. Then that value.
  *
- * Unset header ⇒ no header is ever read. Trusted-proxy entries are parsed by [IpLiteral.Cidr];
- * a hostname entry never matches (and [ProxyForwardingGuard] refuses to boot on one).
+ * Any other fleet-CA certificate (every workload holds one) is a different SAN and is ignored, as
+ * is every plain-HTTP request whatever it claims.
  */
 @ApplicationScoped
 class ClientAddressResolver @Inject constructor(
     @ConfigProperty(name = "mcp.edge.client-address-header") private val edgeHeader: Optional<String>,
-    @ConfigProperty(name = "quarkus.http.proxy.trusted-proxies") trustedProxies: Optional<String>,
+    @ConfigProperty(name = "mcp.edge.gateway-identity") gatewayIdentity: Optional<String>,
 ) {
-    private val trusted: List<IpLiteral.Cidr> =
-        trustedProxies.orElse("").split(',').mapNotNull { IpLiteral.Cidr.parse(it) }
+    private val identity: String? = gatewayIdentity.orElse("").trim().lowercase().takeIf { it.isNotEmpty() }
 
     private val header: String? = edgeHeader.orElse("").trim().takeIf { it.isNotEmpty() }
 
     fun key(request: HttpServerRequest): String {
         val peer = runCatching { request.connection()?.remoteAddress()?.hostAddress() }.getOrNull()
         val values = header?.let { name -> runCatching { request.headers().getAll(name).orEmpty() }.getOrNull() }
-        return capped(ClientAddressKey.of(resolve(peer, values)), System.currentTimeMillis())
+        return capped(ClientAddressKey.of(resolve(peer, values, fromGateway(request))), System.currentTimeMillis())
+    }
+
+    /** True only for a TLS request whose verified peer leaf carries the pinned gateway DNS SAN. */
+    fun fromGateway(request: HttpServerRequest): Boolean {
+        if (identity == null || !request.isSSL) return false
+        val leaf = runCatching { request.connection()?.peerCertificates()?.firstOrNull() }.getOrNull()
+        return (leaf as? X509Certificate)?.let { isGateway(it) } ?: false
+    }
+
+    /** Visible for the unit test. Only DNS SANs (type 2) count; the CN is never consulted. */
+    fun isGateway(leaf: X509Certificate): Boolean {
+        val sans = runCatching { leaf.subjectAlternativeNames }.getOrNull() ?: return false
+        return sans.any { it.size >= 2 && it[0] == DNS_SAN && (it[1] as? String)?.lowercase() == identity }
     }
 
     /** Distinct subject-less keys admitted in the current minute; above the cap they share [OVERFLOW]. */
@@ -68,13 +82,12 @@ class ClientAddressResolver @Inject constructor(
         const val OVERFLOW = "ip:overflow"
         const val MAX_KEYS_PER_MINUTE = 4096
         private const val MILLIS_PER_MINUTE = 60_000L
+        private const val DNS_SAN = 2
     }
 
     /** Visible for the unit test: [headerValues] is every occurrence of the edge header. */
-    fun resolve(peer: String?, headerValues: List<String>?): String? {
-        if (header == null || headerValues.isNullOrEmpty()) return peer
-        val peerIp = IpLiteral.parse(peer) ?: return peer
-        if (trusted.none { it.contains(peerIp) }) return peer
+    fun resolve(peer: String?, headerValues: List<String>?, fromGateway: Boolean): String? {
+        if (header == null || !fromGateway || headerValues.isNullOrEmpty()) return peer
         val only = headerValues.singleOrNull()?.trim() ?: return peer
         return if (IpLiteral.parse(only) != null) only else peer
     }
