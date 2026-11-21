@@ -105,7 +105,8 @@ env:
   # Urgent strict path (ADR-0343 amendment 2026-11-19): distinct PRs the OWNER may label
   # merge-priority:urgent per UTC day; each takes the strict reservation at the next tick.
   MERGE_TRAIN_URGENT_DAILY_CAP: "${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '5' }}"
-  # Strict-lane aging: a green armed strict PR unserved this long (s) holds NEW fast/expedite carriers.
+  # Strict-lane aging: a green armed strict PR unserved this long (s) takes back the train's/fast lane's turn
+  # and holds NEW fast/expedite carriers. ON by default; "0" is the rollback (off).
   MERGE_TRAIN_STRICT_AGING_S: "${{ vars.MERGE_TRAIN_STRICT_AGING_S || '1800' }}"
   # Per-head budget for that hold (s): past it the head is released and the fast lane proceeds.
   MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S: "${{ vars.MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S || '3600' }}"

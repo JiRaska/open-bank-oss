@@ -86,11 +86,13 @@ from dataclasses import dataclass, field
 # without a PR. A variable is operator input, not reviewed code: a value that is not a plain int in
 # the knob's reviewed range falls back to the reviewed default with a `::warning::` naming the
 # variable — never a crash of the tick, never an unbounded value. Defaults equal the previous
-# hard-coded values, so an unset variable changes nothing. name -> (default, lo, hi).
+# hard-coded values, so an unset variable changes nothing — with ONE deliberate exception:
+# MERGE_TRAIN_STRICT_AGING_S defaults to 1800, which turns strict-lane aging ON (0 = off, the rollback;
+# 1..599 is refused like any out-of-range value). name -> (default, lo, hi).
 KNOBS: dict[str, tuple[int, int, int]] = {
     "MERGE_TRAIN_EXPEDITE_DAILY_CAP": (6, 0, 20),
     "MERGE_TRAIN_URGENT_DAILY_CAP": (5, 0, 20),
-    "MERGE_TRAIN_STRICT_AGING_S": (1800, 600, 14400),
+    "MERGE_TRAIN_STRICT_AGING_S": (1800, 0, 14400),   # 0 = off; 1..599 refused (aging_knob)
     "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S": (3600, 600, 14400),
     "MERGE_TRAIN_STRICT_BATCH_CAP": (8, 1, 16),
     "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP": (4, 1, 16),
@@ -120,9 +122,19 @@ def knob(raw: str | None, name: str, log=None, default: int | None = None) -> in
     text = (raw or "").strip()
     if re.fullmatch(r"[0-9]{1,6}", text) and lo <= int(text) <= hi:
         return int(text)
-    if text:
+    if text or (raw or ""):   # whitespace-only is a set-but-blank variable: say so, never silently default
         (log or _warn)(f"merge-train: {name}={knob_text(text)!r} is not an integer in [{lo}, {hi}]; using default {d}")
     return d
+
+
+def aging_knob(raw: str | None, log=None) -> int:
+    """MERGE_TRAIN_STRICT_AGING_S: 0 (off) or an int in [600, 14400]; anything else -> 1800 + one warning."""
+    v = knob(raw, "MERGE_TRAIN_STRICT_AGING_S", log)
+    if 0 < v < 600:
+        (log or _warn)(f"merge-train: MERGE_TRAIN_STRICT_AGING_S={v} is neither 0 (off) nor in [600, 14400]; "
+                       "using default 1800")
+        return 1800
+    return v
 
 
 def env_knob(name: str, env_name: str | None = None) -> int:
@@ -134,7 +146,7 @@ def knob_bool(raw: str | None, name: str, default: bool, log=None) -> str:
     text = (raw or "").strip().lower()
     if text in ("true", "false"):
         return text
-    if text:
+    if text or (raw or ""):
         (log or _warn)(f"merge-train: {name}={knob_text(text)!r} is not true/false; using default {str(default).lower()}")
     return "true" if default else "false"
 
@@ -194,7 +206,8 @@ LANE_CAP_MAX = 20
 
 
 def lane_cap(raw: str | None, default: int, name: str, log=None) -> int:
-    """Validated lane cap: int in [0, LANE_CAP_MAX], else `default` with one logged line."""
+    """KNOBS[name] (a daily lane cap) validated: int in that knob's range, else `default` with one logged line.
+    `name` must be a KNOBS entry; any other name is a programming error and raises."""
     if name not in KNOBS:
         raise ValueError(f"lane_cap: unknown knob {name!r} (programming error)")
     return knob(raw, name, log, default)
@@ -3463,7 +3476,16 @@ class GitHub:
         return None   # more than 1000 events: cannot be read whole, so it is not read at all
 
     def green_since(self, sha: str) -> float | None:
-        """When the last required context (merge-train aside) went green on `sha`; None = unknowable."""
+        """When the last required context (merge-train aside) went green on `sha`; None = unknowable. Advisory
+        only: ANY read failure (a non-200 SystemExit, an API outage) is None — no aging hold — never a tick
+        abort. A skipped/neutral required context is not "green" here: None too (aging fails open)."""
+        try:
+            return self._green_since(sha)
+        except (SystemExit, ApiAbort, KeyError, TypeError, ValueError) as exc:
+            log(f"::notice::aging: green time of {sha[:12]} unreadable ({type(exc).__name__}) — no aging hold")
+            return None
+
+    def _green_since(self, sha: str) -> float | None:
         latest: dict[str, dict] = {}
         for c in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
             if c["name"] not in latest or c["id"] > latest[c["name"]]["id"]:
@@ -3485,9 +3507,14 @@ class GitHub:
         return max(times) if times and None not in times else None
 
     def armed_since(self, n: int) -> float | None:
-        """created_at of #n's latest auto_merge_enabled timeline item; None = unknowable."""
+        """created_at of #n's latest auto_merge_enabled timeline item; None = unknowable (any read failure)."""
         at = None
-        for e in self.pr_timeline(n) or []:
+        try:
+            timeline = self.pr_timeline(n)
+        except (SystemExit, ApiAbort) as exc:
+            log(f"::notice::aging: armed time of #{n} unreadable ({type(exc).__name__}) — no aging hold")
+            return None
+        for e in timeline or []:
             if e.get("event") == "auto_merge_enabled":
                 at = e.get("created_at")
         return iso_epoch(at) if at else None
@@ -4296,12 +4323,14 @@ def strict_unserved_since(gh, view: dict) -> float | None:
 
 
 def strict_aging_candidate(gh, strict: list, exempt: set, now: float, threshold: int,
-                           max_hold: int = 3600) -> tuple[int, int] | None:
+                           max_hold: int = 3600, last_carrier_merge=None) -> tuple[int, int] | None:
     """(PR, waited s) of the longest-waiting green strict PR at or past `threshold`; None = no hold. Per-head
     budget: a head holds carriers for at most `max_hold` s past its threshold (stateless: unserved-since +
     threshold + max_hold), after which it is released and logged, so one unservable head cannot stall the
-    fast lane for ever."""
-    best = None
+    fast lane for ever. Global budget: the hold, counted from the later of its earliest start and the last
+    train carrier merge (`last_carrier_merge()`, epoch or None, read only when a hold would apply), lasts at
+    most `max_hold` s in total, so a rotation of aged heads cannot starve the fast lane either."""
+    best, starts = None, []
     for st, v in strict:
         if st != "green" or v["number"] in exempt:
             continue
@@ -4311,12 +4340,35 @@ def strict_aging_candidate(gh, strict: list, exempt: set, now: float, threshold:
             continue
         waited = int(now - since)
         if waited >= threshold + max_hold:
+            starts.append(since + threshold)   # a released head still counts toward the global budget
             log(f"#{v['number']:>6} strict    aging: held carriers for its {max_hold}s budget on this head — "
                 "released, the fast lane proceeds")
             continue
-        if waited >= threshold and (best is None or waited > best[1]):
-            best = (v["number"], waited)
+        if waited >= threshold:
+            starts.append(since + threshold)
+            if best is None or waited > best[1]:
+                best = (v["number"], waited)
+    if best is not None and last_carrier_merge is not None:
+        start = max(min(starts), last_carrier_merge() or 0)
+        if now - start > max_hold:
+            log(f"strict aging: carriers held {int(now - start)}s since the last carrier merge (budget {max_hold}s) — "
+                "released, the fast lane proceeds")
+            return None
     return best
+
+
+AGING_YIELDABLE = ("train's turn after a strict-lane merge", "fast lane's turn after a reservation ended")
+
+
+def last_carrier_merge_at(gh, git, base: str, horizon_s: int, now: float) -> float | None:
+    """Committer time of the newest train-carrier merge on main's first-parent chain within `horizon_s`
+    (older ones cannot change the global budget), or None. Lazy: called only when a hold would apply."""
+    out = git("log", "--first-parent", f"--since={int(now - horizon_s)}", "--format=%H %ct", base, check=False)
+    for line in (out.stdout or "").splitlines():
+        sha, _, ct = line.partition(" ")
+        if merge_lane(gh, git, sha) == "train":
+            return float(ct)
+    return None
 
 
 def apply_strict_aging(gh, summary: dict, strict: list, exempt: set, holder, strict_carrier_open: bool,
@@ -4742,6 +4794,20 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         yield_why = fast_turn(gh, git, base,
                               [m for m in fast if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success"],
                               bool(timed_out), shadow)
+    # Strict-lane aging (review of #17009): an aged green strict PR takes back a TURN owed to the train or the
+    # fast lane, so the strict lane serves it in THIS tick. Holding the carrier while the strict lane yields
+    # would leave both idle until the turn expired. An open carrier keeps its turn (nothing is cancelled).
+    now_t = time.time()
+    last_merge = (lambda: last_carrier_merge_at(gh, git, base, aging_max_hold_s + aging_s, now_t))
+    aged = None
+    if (aging_s > 0 and not shadow and holder is None and not strict_carrier_open and not main_red
+            and urgent_now is None and yield_why and yield_why.startswith(AGING_YIELDABLE)):
+        aged = strict_aging_candidate(gh, strict, set(urgent), now_t, aging_s, aging_max_hold_s, last_merge)
+        if aged is not None:
+            log(f"strict-aging: #{aged[0]} waited {aged[1]}s — the turn ({yield_why}) is taken back; "
+                "the strict lane serves it this tick")
+            summary["strict_aging_hold"] = f"strict-aging hold: #{aged[0]} waited {aged[1]}s"
+            yield_why = None
     if timed_out:
         summary["timed_out"] = timed_out
         # Released: never reserving again on that head (RELEASED_CONTEXT, read back by
@@ -4831,8 +4897,13 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         summary["deferral_window"] = n
     # Strict aging, decided BEFORE the expedite window so a held tick never opens (and records) a window it
     # would then have to close: 0 (the default for direct callers) = off; main() passes the validated knob.
-    aged = (strict_aging_candidate(gh, strict, set(urgent), time.time(), aging_s, aging_max_hold_s)
-            if aging_s > 0 and not shadow and holder is None and not strict_carrier_open and not main_red else None)
+    if aged is not None and (summary["updated"] or summary["strict"]):
+        aged = None   # the strict lane took the reservation (or merged) this tick: the hold has done its job
+    elif (aged is None and aging_s > 0 and not shadow and holder is None and not strict_carrier_open and not main_red
+            and not summary["updated"] and not summary["strict"]
+            and (not summary["in_flight"] or (expedite and pending_carrier is not None))):
+        # Only when this tick would otherwise publish a carrier or open an expedite window (cost, review).
+        aged = strict_aging_candidate(gh, strict, set(urgent), now_t, aging_s, aging_max_hold_s, last_merge)
     if (expedite and not shadow and pending_carrier is not None and summary["in_flight"] and aged is None
             and holder is None and not strict_carrier_open and not main_red
             and not summary["updated"] and not summary["strict"] and not summary["merged"]
@@ -8067,7 +8138,7 @@ def check_declaration() -> int:
     if not re.search(r'^\s*MERGE_TRAIN_SHADOW: "(true|false)"\s*$', code, re.MULTILINE):
         fails.append('MERGE_TRAIN_SHADOW must be declared as "true" or "false"')
     # The strict batch cap is the rollback switch of the strict carrier: declared, a positive integer.
-    if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "\$\{\{ vars\.MERGE_TRAIN_STRICT_BATCH_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+    if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "\$\{\{ vars\.MERGE_TRAIN_STRICT_BATCH_CAP \|\| \'(?:[1-9]|1[0-6])\' \}\}"\s*$',
                      code, re.MULTILINE):
         fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as "${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || \'<n>\' }}" ("1" = no strict carrier)')
     # Speculative stacking's rollback switch: declared outright, carried by settle, its window handed to publish.
@@ -9250,9 +9321,46 @@ def strict_aging_self_test(check) -> None:
     s = {"in_flight": False}
     apply_strict_aging(GH(now - 3000, now - 3000), s, strict, set(), None, False, now, thr, 3600, main_red=True)
     check("strict aging: red main (fix and deploy-fix lanes) is never held", s == {"in_flight": False}, repr(s))
-    check("strict aging: knob default 1800, range 600..14400",
-          knob(None, "MERGE_TRAIN_STRICT_AGING_S") == 1800 and knob("599", "MERGE_TRAIN_STRICT_AGING_S", lambda _m: None) == 1800
-          and knob("600", "MERGE_TRAIN_STRICT_AGING_S") == 600)
+    # Global budget: total held since the last carrier merge, not per head only.
+    s = {"in_flight": False}
+    got = strict_aging_candidate(GH(now - thr - 600, now - 99999), strict, set(), now, thr, 3600,
+                                 lambda: now - 4000)
+    check("strict aging: within the global budget since the last carrier merge -> holds", got is not None, repr(got))
+    got = strict_aging_candidate(GH(now - thr - 600, now - 99999), [*strict, ("green", {"number": 17004, "head_sha": "b" * 40})],
+                                 set(), now, thr, 3600, lambda: None)
+    check("strict aging: no carrier merge in the horizon -> earliest hold start counts", got is not None, repr(got))
+
+    class Rot(GH):   # a rotation of heads: each young for its own budget, but the hold has run for 2 h overall
+        def green_since(self, sha): return {"a" * 40: now - thr - 100, "b" * 40: now - thr - 7300}[sha]
+    got = strict_aging_candidate(Rot(0, now - 99999), [("green", {"number": 1, "head_sha": "a" * 40})], set(), now, thr,
+                                 3600, lambda: now - 7200)
+    check("strict aging must-FAIL: the hold has run > budget since the last carrier merge -> released (global cap)",
+          got is not None and strict_aging_candidate(Rot(0, now - 99999), [("green", {"number": 1, "head_sha": "a" * 40}),
+                                                                           ("green", {"number": 2, "head_sha": "b" * 40})],
+                                                     set(), now, thr, 3600, lambda: now - 7200) is None, repr(got))
+    # Reads that fail are "unknowable" (no hold), never a tick abort (#17009 review MEDIUM).
+    real_api = api
+    try:
+        for code in (403, 500):
+            globals()["api"] = lambda *a, _c=code, **k: (_c, {"message": "x"})
+            g = GitHub("o/r", "main", "")
+            g.required = lambda: ["CI", STATUS_CONTEXT]
+            check(f"strict aging must-FAIL: green_since on HTTP {code} -> None, no exception",
+                  g.green_since("a" * 40) is None)
+            check(f"strict aging must-FAIL: armed_since on HTTP {code} -> None, no exception", g.armed_since(5) is None)
+    finally:
+        globals()["api"] = real_api
+    logged: list[str] = []
+    check("aging knob: 0 = off", aging_knob("0", logged.append) == 0 and not logged, repr(logged))
+    check("aging knob must-FAIL: 599 -> 1800 with a warning", aging_knob("599", logged.append) == 1800 and logged, repr(logged))
+    logged.clear()
+    check("knob must-FAIL: a whitespace-only variable warns and defaults",
+          knob("   ", "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S", logged.append) == 3600 and len(logged) == 1
+          and knob_bool("  ", "MERGE_TRAIN_SPECULATIVE_STACK", False, logged.append) == "false" and len(logged) == 2,
+          repr(logged))
+    check("strict aging: knob default 1800, range 0..14400 (0 off, 1..599 refused by aging_knob)",
+          aging_knob(None) == 1800 and aging_knob("599", lambda _m: None) == 1800
+          and aging_knob("600") == 600 and aging_knob("14401", lambda _m: None) == 1800)
 
 
 def self_test() -> int:
@@ -11053,11 +11161,14 @@ def self_test() -> int:
                          "STRICT_BATCH_CAP", "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", "EXPEDITE_LANE", "EXPEDITE_DAILY_CAP",
                          "URGENT_DAILY_CAP")
 
-            def e2e_args():
+            def e2e_args(**env):
                 saved_env = {k: os.environ.pop(k, None) for k in knob_envs}   # unset = the reviewed defaults
+                os.environ.update(env)
                 try:
                     return build_parser().parse_args(["settle", "--repo", "o/r"])
                 finally:
+                    for k in env:
+                        os.environ.pop(k, None)
                     os.environ.update({k: v for k, v in saved_env.items() if v is not None})
 
             args = e2e_args()
@@ -11065,12 +11176,14 @@ def self_test() -> int:
                   (args.strict_aging_s, args.strict_aging_max_hold_s, args.speculative_stack) == (1800, 3600, "false"),
                   repr((args.strict_aging_s, args.strict_aging_max_hold_s, args.speculative_stack)))
             t0 = time.time()
-            # (b) an aged green strict candidate + a fast candidate while the strict lane yields to the train:
-            # settle publishes no new carrier and says so. Control: the same state, not aged, publishes.
+            # (b) an aged green strict candidate + a fast candidate while the strict lane yields to the TRAIN'S
+            # TURN (the deadlock of the #17009 review): the aged PR takes the turn back and the strict lane serves
+            # it in the same tick (update-branch = reservation). Control: not aged, the turn stands and the
+            # carrier publishes. (c): MERGE_TRAIN_STRICT_AGING_S=0 on the aged state is exactly main's settle.
             real_turn = train_turn
-            globals()["train_turn"] = lambda *a, **k: "train's turn (e2e fixture)"
+            globals()["train_turn"] = lambda *a, **k: "train's turn after a strict-lane merge (e2e fixture)"
             try:
-                def aging_state(age):
+                def aging_state(age, run_args=None, plain=False):
                     reset()
                     gh.g("checkout", "-q", "main")
                     pathlib.Path(origin, "moved.txt").write_text("m\n")
@@ -11080,21 +11193,34 @@ def self_test() -> int:
                     hw = gh.prs[numbers["pW"]]["head"]["sha"]
                     gh.__dict__["green_at"] = {hw: t0 - age}
                     gh.__dict__["armed_at"] = {numbers["pW"]: t0 - age}
-                    return settle_from_args(gh, Git(clone("settle")), args)
+                    if plain:
+                        return mode_settle(gh, Git(clone("settle")), "o/r", False, strict_cap=args.strict_batch_cap,
+                                           judge_cap=args.strict_judge_batch_cap, stack=False,
+                                           expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
+                                           urgent_cap=args.urgent_cap)
+                    return settle_from_args(gh, Git(clone("settle")), run_args or args)
                 young = aging_state(60)
                 aged = aging_state(1800)
+                updates_aged = list(gh.updates)
+                off_args = e2e_args(MERGE_TRAIN_STRICT_AGING_S="0")
+                off = aging_state(1800, off_args)
+                off.pop("speculative_stack", None)
+                plain = aging_state(1800, plain=True)
             finally:
                 globals()["train_turn"] = real_turn
                 gh.__dict__.pop("green_at", None)
                 gh.__dict__.pop("armed_at", None)
-            check("e2e (b) control: a young strict candidate does not hold carriers", young["in_flight"] is False
-                  and "strict_aging_hold" not in young, repr(young))
-            check("e2e (b): an aged strict candidate -> settle publishes NO new carrier and logs strict-aging hold",
-                  aged["in_flight"] is True
-                  and aged.get("strict_aging_hold") == f"strict-aging hold: #{numbers['pW']} waited 1800s", repr(aged))
+            check("e2e (b) control: a young strict candidate keeps the train's turn (carrier publishes, no update)",
+                  young["in_flight"] is False and "strict_aging_hold" not in young and not young["updated"], repr(young))
+            check("e2e (b) must-FAIL: an aged strict candidate under the train's turn -> the strict lane takes the "
+                  "reservation THIS tick (update-branch) and logs strict-aging hold",
+                  aged.get("strict_aging_hold") == f"strict-aging hold: #{numbers['pW']} waited 1800s"
+                  and numbers["pW"] in aged["updated"] and numbers["pW"] in updates_aged, f"{aged} updates={updates_aged}")
+            check("e2e (c): MERGE_TRAIN_STRICT_AGING_S=0 parses as off", off_args.strict_aging_s == 0, repr(off_args.strict_aging_s))
+            check("e2e (c): aging off (=0) on an aged state -> identical to main's settle", off == plain, f"{off} != {plain}")
             reset()
 
-            # (c) knobs unset, times unknowable: identical to the pre-change settle.
+            # (c') knobs unset, times unknowable (no aged candidate): identical to the pre-change settle.
             open_only("pF", "pX")
             sc_new = settle_from_args(gh, Git(clone("settle")), args)
             sc_new.pop("speculative_stack", None)
@@ -14486,8 +14612,8 @@ def build_parser() -> argparse.ArgumentParser:
                     default=lane_cap(os.environ.get("URGENT_DAILY_CAP"), URGENT_DAILY_CAP_DEFAULT,
                                      "MERGE_TRAIN_URGENT_DAILY_CAP"),
                     help="settle: distinct PRs the owner may label merge-priority:urgent per UTC day")
-    ap.add_argument("--strict-aging-s", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_AGING_S"),
-                    default=env_knob("MERGE_TRAIN_STRICT_AGING_S"),
+    ap.add_argument("--strict-aging-s", type=aging_knob,
+                    default=aging_knob(os.environ.get("MERGE_TRAIN_STRICT_AGING_S")),
                     help="settle: a green armed strict PR unserved this long holds new fast/expedite carriers")
     ap.add_argument("--strict-aging-max-hold-s", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S"),
                     default=env_knob("MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S"),
