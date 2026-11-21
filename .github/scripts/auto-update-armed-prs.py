@@ -27,6 +27,9 @@ alone, with one log line per decision:
     "missing" and the old code kept skipping — the chicken-and-egg case this rule exists for;
   * `dirty` (conflicts)                    -> skip, a human has to resolve those;
   * not armed                              -> skip, the author has not asked for a merge;
+  * member of an open merge-train carrier  -> excluded (ordinary or strict; read from the carrier's
+    own `merge-train: member #N` commits, unreadable = no update at all): the carrier already
+    verifies it over main, and updating it re-runs full CI on the tree just verified;
   * head committed < --debounce-minutes ago -> skip, so CI is not restarted repeatedly;
   * more than --max-updates in this run    -> skip, capped;
   * branch-update budget exhausted         -> skip until the author pushes; listed in the summary.
@@ -104,6 +107,17 @@ OK_CONCLUSIONS = {"success", "neutral", "skipped"}
 # never qualify — feature PRs are never touched.
 BOT_DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
 BOT_AUTHOR = "app/openbank-gitops-bot"
+
+# Merge-train carriers (merge-train.py: is_carrier / is_strict_carrier / OWN_MEMBER_RE). A PR riding an
+# open carrier is already being verified, as part of the carrier's tree, over current main; the train
+# merges it pinned to its head. Updating such a member restarts a full CI on a head the carrier has
+# just verified — measured 2026-11-18T22:26Z: #16715, sole member of strict carrier #16806, was
+# update-branched and its head tree became byte-identical to the carrier tree, so a second Services
+# CI (~770 job-minutes) ran on the same tree while the hosted queue was 333 runs deep. Members are
+# read from the carrier's OWN commit chain (the train's source of truth), never from its body.
+TRAIN_BOT_LOGIN = "openbank-gitops-bot[bot]"
+TRAIN_BRANCH_RES = (re.compile(r"^train/[0-9]+-[0-9]+$"), re.compile(r"^train/strict-[0-9]+-[0-9]+$"))
+OWN_MEMBER_RE = re.compile(r"^merge-train: member #([0-9]+)\n\nPR-Number: #\1\nPR-Head: ([0-9a-f]{40})\n$")
 
 
 def is_bot_deploy_pr(p: dict) -> bool:
@@ -401,6 +415,46 @@ def self_test() -> int:
         ok = result == want and (("::error::FAILED" in out) == bool(want))
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  HTTP 422 {label} -> exit {result}")
+    # Merge-train members are never updated (#16715 on strict carrier #16806, 2026-11-18). The
+    # update-branch call answers 500 here, so a member that WERE updated fails the run: must-FAIL
+    # without the exclusion. The carrier is identified exactly as merge-train.py does.
+    carrier = {"number": 99, "user": {"login": TRAIN_BOT_LOGIN}, "auto_merge": None, "draft": False,
+               "head": {"sha": "e" * 40, "ref": "train/strict-123-1", "repo": {"full_name": "example/repo"}}}
+    member_msg = f"merge-train: member #42\n\nPR-Number: #42\nPR-Head: {fixture_head}"
+    def train_get(carrier_commits):
+        def reader(path: str) -> object:
+            if "/pulls?" in path:
+                return [carrier, *fixture_get(path)]
+            if path.endswith("/pulls/99/commits?per_page=100"):
+                if isinstance(carrier_commits, Exception):
+                    raise carrier_commits
+                return [{"commit": {"message": m}} for m in carrier_commits]
+            return fixture_get(path)
+        return reader
+    for label, commits, code, want_out in [
+        ("strict-carrier member is not updated", [member_msg], 500, "rides open merge-train carrier #99"),
+        ("ordinary-carrier member is not updated", [member_msg], 500, "rides open merge-train carrier #99"),
+        ("unreadable carrier membership fails closed", OSError("boom"), 500, "membership unreadable"),
+        ("carrier without this PR still allows the update", [member_msg.replace("#42", "#7")], 202, "UPDATE #42"),
+        ("a forged member line in prose is not membership", ["see merge-train: member #42"], 202, "UPDATE #42"),
+    ]:
+        if label.startswith("ordinary"):
+            carrier["head"]["ref"] = "train/123-1"
+        with patch.dict(globals(), {"fixture_get": fixture_get}):
+            with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                        "get": train_get(commits), "head_checks": lambda *_: {"Gitleaks": "success"},
+                                        "api": graph_api(fresh, code)}):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = run("example/repo", "main", 5, 0, False, 20)
+        out = output.getvalue()
+        ok = result == 0 and want_out in out and "::error::" not in out
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {label}, exit {result}" + ("" if ok else f"\n{out}"))
+    carrier["user"] = {"login": "someone"}
+    ok = train_members("example/repo", [carrier], reader=lambda p: (_ for _ in ()).throw(AssertionError(p))) == {}
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  a train-named branch from a non-App author is not a carrier")
     fixture_head, spent = graph(3, 5)
     result, out = run_fixture(spent, 500)  # 500 would fail the run if update-branch were called
     ok = (result == 0 and "update budget exhausted (4/4" in out and "push to the branch" in out
@@ -819,6 +873,30 @@ def open_pulls(repo: str, branch: str) -> list[dict]:
         page += 1
 
 
+def is_train_carrier(pr: dict, repo: str) -> bool:
+    return ((pr.get("user") or {}).get("login") == TRAIN_BOT_LOGIN
+            and any(r.fullmatch((pr.get("head") or {}).get("ref") or "") for r in TRAIN_BRANCH_RES)
+            and ((pr.get("head") or {}).get("repo") or {}).get("full_name") == repo)
+
+
+def train_members(repo: str, pulls: list[dict], reader=None) -> dict[int, int] | None:
+    """{member PR: carrier PR} over every open ordinary/strict carrier; None = unreadable (fail closed)."""
+    reader = reader or get
+    members: dict[int, int] = {}
+    try:
+        for carrier in (p for p in pulls if is_train_carrier(p, repo)):
+            commits = reader(f"/repos/{repo}/pulls/{carrier['number']}/commits?per_page=100")
+            if not isinstance(commits, list) or len(commits) >= 100:
+                return None  # a carrier holds at most a few members; a full page is not ours to trust
+            for commit in commits:
+                m = OWN_MEMBER_RE.fullmatch(commit["commit"]["message"].rstrip("\n") + "\n")
+                if m:
+                    members[int(m.group(1))] = carrier["number"]
+    except (KeyError, TypeError, ValueError, RuntimeError, OSError, SystemExit):
+        return None
+    return members
+
+
 def explicit_hold(pr: dict) -> bool:
     return pr["draft"] or any(label["name"] == "blocked" for label in pr["labels"])
 
@@ -901,8 +979,19 @@ def observe_update(repo: str, number: int, old_sha: str, branch: str,
 def admission_entries(repo: str, branch: str, main_sha: str, required: list[str],
                       now: dt.datetime, debounce: int, fleet_threshold: int, cap: int) -> list[dict]:
     entries = []
-    for summary in open_pulls(repo, branch):
+    pulls = open_pulls(repo, branch)
+    riding = train_members(repo, pulls)
+    for summary in pulls:
         if not (summary.get("auto_merge") or is_bot_deploy_pr(summary)):
+            continue
+        if riding is None or summary["number"] in riding:
+            # Excluded outright (held), not merely "not ok": a train member must neither be
+            # updated nor block the global lane — the carrier, not this PR, holds its CI.
+            why = ("train carrier membership unreadable — no update (fail closed)" if riding is None
+                   else f"rides open merge-train carrier #{riding[summary['number']]} — the train verifies it")
+            entries.append({"number": summary["number"], "head": (summary.get("head") or {}).get("sha"), "held": True,
+                            "ok": False, "why": why, "kind": "unknown", "building": False,
+                            "waiting_since": "", "budget": None, "reservation": "none"})
             continue
         full = get(f"/repos/{repo}/pulls/{summary['number']}")
         entry = evaluate_current(repo, branch, full, required, now, debounce, fleet_threshold, cap)

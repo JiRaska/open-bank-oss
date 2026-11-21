@@ -118,8 +118,6 @@ DEPLOYED_BASELINE: dict[str, str] = {
         "#9167 — bounded context, not yet modelled",
     "openbank-pid-service":
         "#9167 — bounded context, not yet modelled",
-    "openbank-product-catalog":
-        "#9167 — bounded context, not yet modelled",
     "openbank-pyroscope-agent":
         "#9167 — third-party image; a model here is about its CONFIGURATION, not code this repo ships",
     "openbank-referral-service":
