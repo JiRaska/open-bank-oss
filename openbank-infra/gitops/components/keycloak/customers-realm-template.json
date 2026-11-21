@@ -1,7 +1,9 @@
 {
   "realm": "openbank-customers",
   "eventsEnabled": true,
-  "eventsListeners": ["jboss-logging"],
+  "eventsListeners": [
+    "jboss-logging"
+  ],
   "eventsExpiration": 2592000,
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": false,
@@ -383,10 +385,42 @@
     }
   ],
   "scopeMappings": [
-    { "client": "openbank-app", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
-    { "client": "customer-edge-admin", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
-    { "client": "openbank-edge-webauthn", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
-    { "client": "openbank-synthetic-retail", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] }
+    {
+      "client": "openbank-app",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "customer-edge-admin",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "openbank-edge-webauthn",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    },
+    {
+      "client": "openbank-synthetic-retail",
+      "roles": [
+        "ROLE_CUSTOMER",
+        "offline_access",
+        "uma_authorization",
+        "default-roles-openbank-customers"
+      ]
+    }
   ],
   "roles": {
     "realm": [
@@ -407,8 +441,17 @@
         "description": "${role_default-roles}",
         "composite": true,
         "composites": {
-          "realm": ["ROLE_CUSTOMER", "offline_access", "uma_authorization"],
-          "client": { "account": ["view-profile", "manage-account"] }
+          "realm": [
+            "ROLE_CUSTOMER",
+            "offline_access",
+            "uma_authorization"
+          ],
+          "client": {
+            "account": [
+              "view-profile",
+              "manage-account"
+            ]
+          }
         }
       }
     ]
@@ -534,13 +577,17 @@
   "browserFlow": "openbank-passkey-browser",
   "registrationFlow": "openbank-passkey-registration",
   "webAuthnPolicyRpEntityName": "OpenBank",
-  "webAuthnPolicySignatureAlgorithms": ["ES256"],
+  "webAuthnPolicySignatureAlgorithms": [
+    "ES256"
+  ],
   "webAuthnPolicyRpId": "open-bank.tech",
   "webAuthnPolicyAttestationConveyancePreference": "none",
   "webAuthnPolicyAuthenticatorAttachment": "platform",
   "webAuthnPolicyRequireResidentKey": "Yes",
   "webAuthnPolicyUserVerificationRequirement": "required",
-  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256"],
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": [
+    "ES256"
+  ],
   "webAuthnPolicyPasswordlessRpEntityName": "OpenBank",
   "webAuthnPolicyPasswordlessRpId": "open-bank.tech",
   "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",

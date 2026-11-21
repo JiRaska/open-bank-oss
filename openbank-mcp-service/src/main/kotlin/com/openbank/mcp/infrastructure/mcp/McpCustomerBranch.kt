@@ -41,12 +41,15 @@ import org.jboss.logging.Logger
  */
 internal class McpCustomerBranch(
     private val admission: CustomerChannelAdmission,
-    private val auditor: McpCallAuditor,
-    private val metrics: McpMetricsPort,
-    private val limiter: McpRateLimiter,
+    /** Collaborators; a new one is a field on [CustomerChannelDeps], never a parameter here. */
+    private val deps: CustomerChannelDeps,
     /** The subject-less window key for this request ([ClientAddressResolver]). */
     private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
 ) {
+    private val auditor: McpCallAuditor get() = deps.auditor
+    private val metrics: McpMetricsPort get() = deps.metrics
+    private val limiter: McpRateLimiter get() = deps.limiter
+
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
     @Suppress("ReturnCount")
