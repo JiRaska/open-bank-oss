@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Balance Service events
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Balance facts are emitted from the transactional balance outbox. Customer-opted-in low-balance
     notification requests use the same outbox but are routed to the notification request topic;
@@ -21,6 +21,7 @@ channels:
             eventId: {type: string, format: uuid}
             eventType: {type: string, enum: [BALANCE_UPDATED, HOLD_PLACED, HOLD_RELEASED, HOLD_EXPIRED]}
             accountId: {type: string, format: uuid}
+            branchBookId: {type: [string, "null"], format: uuid}
             currency: {type: string}
             bookedAmount: {type: number}
             availableAmount: {type: number}

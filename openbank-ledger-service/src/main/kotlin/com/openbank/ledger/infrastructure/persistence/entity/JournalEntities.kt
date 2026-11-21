@@ -85,6 +85,9 @@ class JournalEntryEntity : PanacheEntityBase {
 
     @Column(name = "origin_reversal_of_transaction_id")
     var originReversalOfTransactionId: UUID? = null
+
+    @Column(name = "branch_book_id", updatable = false)
+    var branchBookId: UUID? = null
 }
 
 data class JournalEntryEntityId(val id: UUID = UUID.randomUUID(), val entryDate: LocalDate = LocalDate.EPOCH) :
