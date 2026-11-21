@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
@@ -88,6 +89,9 @@ import java.util.UUID
  * never serves.
  */
 @Provider("openbank-delegation-service")
+// The HTTP payment-proposal interactions are replayed by DelegationProposalPactFolderProviderVerificationTest;
+// this message target takes the complement, so no interaction is replayed twice or skipped.
+@PactFilter("^(?!" + DelegationProposalPactFolderProviderVerificationTest.PROPOSAL_STATES + "$).*$")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class DelegationEventPactFolderProviderVerificationTest {

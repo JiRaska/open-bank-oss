@@ -12,6 +12,7 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -69,6 +70,9 @@ import java.util.UUID
  * former delegate must cross the equivalent of a 403 boundary instead of retaining access.
  */
 @Provider("openbank-delegation-service")
+// The HTTP payment-proposal interactions are replayed by DelegationProposalPactFolderProviderVerificationTest;
+// this message target takes the complement, so no interaction is replayed twice or skipped.
+@PactFilter("^(?!" + DelegationProposalPactFolderProviderVerificationTest.PROPOSAL_STATES + "$).*$")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
