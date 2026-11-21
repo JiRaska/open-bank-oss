@@ -74,6 +74,11 @@ github:
       variables:
         []
   unprovisioned:
+    - kind: secret
+      names: [BREAK_GLASS_APP_ID, BREAK_GLASS_APP_PRIVATE_KEY]
+      reason: "environment-scoped merge-train break-glass credential awaits owner setup; the workflow fails closed until then"
+      issue: 17006
+      review_by: 2026-12-21
     - kind: variable
       names: [PR_RUNNER_POOL]
       reason: "opt-in PR build pool trial; unset is the kill switch (every PR build hosted) and only allowlisted labels are honoured"

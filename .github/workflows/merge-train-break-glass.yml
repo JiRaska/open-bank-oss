@@ -4,9 +4,12 @@
 # actor and no --admin. The status is posted by the same App the ruleset pins `merge-train` to, only
 # after break_glass_check.py re-derives live that every OTHER required context is green on that head.
 #
-# Owner setup (once): create the environment `merge-train-break-glass` with required reviewer = the
-# owner and deployment branches = main only. If it does not exist, GitHub creates it unprotected on
-# first use, so the job ALSO asserts its protection rules live and fails closed without them.
+# Owner setup (before the workflow is usable): create the environment `merge-train-break-glass`
+# with required reviewer = exactly the owner and deployment branches = exactly `main`, and store
+# environment-scoped secrets BREAK_GLASS_APP_ID / BREAK_GLASS_APP_PRIVATE_KEY for the App the
+# ruleset pins `merge-train` to. Token isolation requires an environment-scoped dedicated
+# credential; see owner setup. The job never reads repo-level GITOPS_APP_* and fails closed when
+# the environment secrets are absent or the environment protection is not exactly as above.
 name: Merge train break-glass
 
 on:
@@ -64,33 +67,26 @@ jobs:
           ref: main
           fetch-depth: 1
           persist-credentials: false
+      - name: Assert the environment is protected (BEFORE any App credential, with github.token)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BG_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          python3 -I .github/scripts/break_glass_check.py assert-env --repo "$GITHUB_REPOSITORY" --owner "$BG_OWNER"
+      - name: Require the environment-scoped break-glass credential (never repo-level GITOPS_APP_*)
+        env:
+          BG_APP_ID: ${{ secrets.BREAK_GLASS_APP_ID }}
+          BG_APP_KEY_SET: ${{ secrets.BREAK_GLASS_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          [[ -n "$BG_APP_ID" && "$BG_APP_KEY_SET" == true ]] || { echo "::error::BREAK_GLASS_APP_ID / BREAK_GLASS_APP_PRIVATE_KEY environment secrets are not set — owner setup incomplete"; exit 1; }
       - name: Mint the GitHub App installation token (the App the ruleset pins merge-train to)
         id: app_token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
-          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
-      - name: Assert the environment is protected (required reviewer + main-only)
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        run: |
-          set -euo pipefail
-          env_json="$RUNNER_TEMP/env.json"
-          gh api "repos/$GITHUB_REPOSITORY/environments/merge-train-break-glass" > "$env_json"
-          python3 -I - "$env_json" <<'PY'
-          import json, sys
-          e = json.load(open(sys.argv[1]))
-          kinds = {r.get("type") for r in e.get("protection_rules") or []}
-          pol = e.get("deployment_branch_policy") or {}
-          bad = []
-          if "required_reviewers" not in kinds:
-              bad.append("no required reviewer")
-          if not (pol.get("protected_branches") or pol.get("custom_branch_policies")):
-              bad.append("no deployment-branch restriction")
-          if bad:
-              sys.exit("::error::environment merge-train-break-glass is unprotected: " + ", ".join(bad))
-          print("environment protected:", sorted(kinds))
-          PY
+          app-id: ${{ secrets.BREAK_GLASS_APP_ID }}
+          private-key: ${{ secrets.BREAK_GLASS_APP_PRIVATE_KEY }}
       - name: Evaluate live and post merge-train (no PR code is executed)
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}

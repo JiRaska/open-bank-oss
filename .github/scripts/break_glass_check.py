@@ -47,6 +47,10 @@ TRACKING_LABEL = "governance"
 PR_RE = re.compile(r"^[0-9]{1,6}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REASON_MAX = 500
+ENVIRONMENT = "merge-train-break-glass"
+# The break-glass must not be able to widen itself: a PR editing these is refused, so the version
+# that judges a PR is always the one already reviewed onto main.
+SELF_PATHS = (".github/scripts/break_glass_check.py", ".github/workflows/merge-train-break-glass.yml")
 
 
 # ----------------------------------------------------------------------------- pure logic
@@ -151,8 +155,15 @@ def evaluate(f: dict) -> list[str]:
     if not others:
         why.append("no other required contexts resolved — refusing to judge green")
     runs = f.get("check_runs") or []
+    # Only CHECK RUNS are read. A required context produced as a commit STATUS (POST /statuses) is
+    # never found here, so it reads as "never reported" and refuses — fail closed, deliberately:
+    # statuses carry no integration pin we could verify. A context with no integration_id pin
+    # is refused outright, since any app could then satisfy it under the same name.
     for ctx, integ in sorted(others.items()):
-        mine = [r for r in runs if r.get("name") == ctx and (integ is None or r.get("app_id") == integ)]
+        if type(integ) is not int:
+            why.append(f"required context has no integration pin: {ctx}")
+            continue
+        mine = [r for r in runs if r.get("name") == ctx and r.get("app_id") == integ]
         if not mine:
             why.append(f"required context never reported on head: {ctx}")
             continue
@@ -164,6 +175,21 @@ def evaluate(f: dict) -> list[str]:
     if f.get("files_truncated") is not False:
         why.append("PR file list is at the API cap (or unknown) — cannot see the whole diff")
     why += rules_refusals(f.get("rules_base"), f.get("rules_head"))
+    files = f.get("files")
+    if not isinstance(files, list):
+        why.append("PR file list unknown")
+        files = []
+    for path in files:
+        if path in SELF_PATHS:
+            why.append(f"PR edits the break-glass itself ({path}) — no self-widening")
+    base_doc, _ = load_rules(f.get("rules_base"))
+    money = (base_doc or {}).get("money_path_services") or []
+    if not isinstance(money, list) or not money:
+        why.append("money_path_services unreadable on main — cannot exclude money-path paths")
+    else:
+        hit = sorted({m for m in money if isinstance(m, str) for path in files if path.startswith(m.rstrip("/") + "/")})
+        if hit:
+            why.append(f"PR touches money-path service(s) {', '.join(hit)} — never break-glassed")
     reason = f.get("reason") or ""
     if not reason.strip():
         why.append("reason is empty")
@@ -231,6 +257,11 @@ def gather(api: Api, pr_number: int, actor: str, owner: str, reason: str) -> dic
     # rules.yaml is fetched at main and at head ALWAYS: the files list is capped and a rename
     # need not show the path, so it can never decide whether the protected keys are judged.
     nfiles = p.get("changed_files")
+    files = []
+    for x in api.pages(f"{r}/pulls/{pr_number}/files"):
+        files.append(x["filename"])
+        if x.get("previous_filename"):
+            files.append(x["previous_filename"])
     main_sha = api.get(f"{r}/commits/main")["sha"]
     q = urllib.parse.quote(RULES_PATH)
     rules_base = api.get(f"{r}/contents/{q}?ref={main_sha}", raw=True)
@@ -239,34 +270,85 @@ def gather(api: Api, pr_number: int, actor: str, owner: str, reason: str) -> dic
         rules_head = None            # deleted/unreadable at head: refused by rules_refusals
     return {"actor": actor, "owner": owner, "pr": pr, "behind_by": cmp.get("behind_by"),
             "required": required, "check_runs": runs, "rules_base": rules_base,
-            "rules_head": rules_head, "reason": reason,
+            "rules_head": rules_head, "reason": reason, "files": files,
             "files_truncated": not (type(nfiles) is int and nfiles < 3000)}
 
 
-def audit(api: Api, pr_number: int, head: str, actor: str, reason: str, run_url: str) -> None:
+def audit(api: Api, pr_number: int, head: str, actor: str, reason: str, run_url: str) -> list[str]:
+    """Summary FIRST (cannot be lost to an API failure), then each API write with its rc checked.
+    Returns the list of audit writes that failed."""
     r = f"/repos/{api.repo}"
     text = (f"**merge-train break-glass** used by @{actor} on #{pr_number} at `{head}`.\n\n"
             f"Reason (verbatim, untrusted text):\n\n```text\n{reason.replace('```', '` ` `')}\n```\n\n"
             f"Run: {run_url}\n\nPost-use review: confirm the train was genuinely unable to post, "
             f"and that the fix landed (ADR-0343, break-glass amendment).")
-    api.call("POST", f"{r}/issues/{pr_number}/comments", {"body": text})
+    write_summary(text)
+    failed = []
+    code, _ = api.call("POST", f"{r}/issues/{pr_number}/comments", {"body": text})
+    if code != 201:
+        failed.append(f"PR comment -> {code}")
     q = urllib.parse.quote(f'repo:{api.repo} is:issue is:open in:title "{TRACKING_TITLE}"')
-    hits = [i for i in api.get(f"/search/issues?q={q}")["items"] if i["title"] == TRACKING_TITLE]
-    if hits:
-        n = hits[0]["number"]
+    code, data = api.call("GET", f"/search/issues?q={q}")
+    n = None
+    if code != 200:
+        failed.append(f"tracking-issue search -> {code}")
     else:
-        code, data = api.call("POST", f"{r}/issues", {
-            "title": TRACKING_TITLE, "labels": [TRACKING_LABEL],
-            "body": "Every use of the merge-train break-glass workflow is appended here for after-the-fact "
-                    "review (ADR-0343 amendment). Close an entry's review by replying under it."})
+        hits = [i for i in data.get("items", []) if i.get("title") == TRACKING_TITLE]
+        if hits:
+            n = hits[0]["number"]
+        else:
+            code, data = api.call("POST", f"{r}/issues", {
+                "title": TRACKING_TITLE, "labels": [TRACKING_LABEL],
+                "body": "Every use of the merge-train break-glass workflow is appended here for after-the-fact "
+                        "review (ADR-0343 amendment). Close an entry's review by replying under it."})
+            if code != 201:
+                failed.append(f"tracking-issue create -> {code}")
+            else:
+                n = data["number"]
+    if n is not None:
+        code, _ = api.call("POST", f"{r}/issues/{n}/comments", {"body": text})
         if code != 201:
-            raise SystemExit(f"::error::could not open tracking issue -> {code}: {str(data)[:300]}")
-        n = data["number"]
-    api.call("POST", f"{r}/issues/{n}/comments", {"body": text})
+            failed.append(f"tracking-issue comment -> {code}")
+        write_summary(f"Tracking issue: #{n}")
+    return failed
+
+
+def write_summary(text: str) -> None:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(text + f"\n\nTracking issue: #{n}\n")
+            fh.write(text + "\n\n")
+
+
+def env_refusals(env: dict, policies: list, owner: str) -> list[str]:
+    """The environment must gate the run: required reviewers EXACTLY the owner, deployment
+    branches EXACTLY `main`. prevent_self_review is reported, not required (the owner is the
+    sole reviewer and also the dispatcher)."""
+    why = []
+    rules = env.get("protection_rules") or []
+    rev = [x for x in rules if x.get("type") == "required_reviewers"]
+    reviewers = [(y.get("type"), (y.get("reviewer") or {}).get("login")) for x in rev for y in x.get("reviewers") or []]
+    if reviewers != [("User", owner)]:
+        why.append(f"required reviewers must be exactly the owner, got {reviewers}")
+    pol = env.get("deployment_branch_policy") or {}
+    if not pol.get("custom_branch_policies") or pol.get("protected_branches"):
+        why.append("deployment branches must be a custom policy (main only)")
+    names = sorted((x.get("type", "branch"), x.get("name")) for x in policies)
+    if names != [("branch", "main")]:
+        why.append(f"deployment-branch policies must be exactly branch main, got {names}")
+    return why
+
+
+def cmd_assert_env(a) -> int:
+    api = Api(a.repo, os.environ["GH_TOKEN"])
+    env = api.get(f"/repos/{a.repo}/environments/{ENVIRONMENT}")
+    pols = api.get(f"/repos/{a.repo}/environments/{ENVIRONMENT}/deployment-branch-policies").get("branch_policies", [])
+    why = env_refusals(env, pols, a.owner)
+    psr = [x.get("prevent_self_review") for x in env.get("protection_rules") or [] if x.get("type") == "required_reviewers"]
+    write_summary(f"Environment `{ENVIRONMENT}`: prevent_self_review={psr}")
+    for w in why:
+        print(f"::error::environment refused: {w}")
+    return 1 if why else 0
 
 
 def cmd_run(a) -> int:
@@ -291,7 +373,16 @@ def cmd_run(a) -> int:
     if code != 201:
         raise SystemExit(f"::error::POST status -> {code}: {str(data)[:300]}")
     print(f"posted {STATUS_CONTEXT_NAME}=success on {head}")
-    audit(api, int(a.pr), head, a.actor, reason, a.run_url)
+    failed = audit(api, int(a.pr), head, a.actor, reason, a.run_url)
+    if failed:
+        # The status is already live; leave a visible note that its audit trail is incomplete.
+        api.call("POST", f"/repos/{a.repo}/statuses/{head}", {
+            "state": "failure", "context": f"{STATUS_CONTEXT_NAME}/break-glass-audit-incomplete",
+            "description": ("audit write failed: " + "; ".join(failed))[:140], "target_url": a.run_url})
+        write_summary("AUDIT INCOMPLETE: " + "; ".join(failed))
+        for w in failed:
+            print(f"::error::audit write failed: {w}")
+        return 1
     return 0
 
 
@@ -304,7 +395,7 @@ def _good() -> dict:
     rules = "x: 1\ndeploy_holds:\n  - service: a\n    until: z\nmoney_path_services:\n  - ledger\ny: 2\n"
     return {"actor": "own", "owner": "own", "reason": "train broken, fix in this PR",
             "pr": {"state": "open", "draft": False, "base": "main", "head": h, "auto_merge": True},
-            "behind_by": 0, "files_truncated": False, "required": req, "check_runs": runs, "rules_base": rules, "rules_head": rules}
+            "behind_by": 0, "files_truncated": False, "files": [".github/scripts/merge-train.py"], "required": req, "check_runs": runs, "rules_base": rules, "rules_head": rules}
 
 
 def self_test(sabotage_context_check: bool = False) -> int:
@@ -362,9 +453,37 @@ def self_test(sabotage_context_check: bool = False) -> int:
     case("rules.yaml unreadable at head refused", lambda f: f.update(rules_head=None), False, "absent")
     case("truncated file list refused", lambda f: f.update(files_truncated=True), False, "API cap")
     case("unknown file count refused", lambda f: f.pop("files_truncated"), False, "API cap")
+    case("unpinned required context refused",
+         lambda f: f["required"].update({"Gitleaks": None}), False, "no integration pin")
+    case("money-path service path refused",
+         lambda f: f["files"].append("ledger/src/main/x.kt"), False, "money-path service")
+    case("money-path prefix lookalike allowed",
+         lambda f: f["files"].append("ledger-ui/x"), True)
+    case("rename out of a money-path dir refused",
+         lambda f: f["files"].extend(["docs/x.kt", "ledger/y.kt"]), False, "money-path service")
+    case("self-edit of the validator refused",
+         lambda f: f["files"].append(".github/scripts/break_glass_check.py"), False, "no self-widening")
+    case("self-edit of the workflow refused",
+         lambda f: f["files"].append(".github/workflows/merge-train-break-glass.yml"), False, "no self-widening")
+    case("unknown file list refused", lambda f: f.pop("files"), False, "file list unknown")
     case("no required contexts refused", lambda f: f.update(required={"merge-train": 1}), False, "no other required")
     case("empty reason refused", lambda f: f.update(reason="  "), False, "reason is empty")
     case("long reason refused", lambda f: f.update(reason="x" * 501), False, "longer than")
+    good_env = {"protection_rules": [{"type": "required_reviewers", "prevent_self_review": False,
+                                      "reviewers": [{"type": "User", "reviewer": {"login": "own"}}]}],
+                "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+    main_only = [{"type": "branch", "name": "main"}]
+    for name, env, pols, want in (
+            ("env: owner reviewer + main only accepted", good_env, main_only, True),
+            ("env: no reviewer refused", dict(good_env, protection_rules=[]), main_only, False),
+            ("env: extra reviewer refused", dict(good_env, protection_rules=[dict(good_env["protection_rules"][0], reviewers=[
+                {"type": "User", "reviewer": {"login": "own"}}, {"type": "Team", "reviewer": {"slug": "t"}}])]), main_only, False),
+            ("env: other branch policy refused", good_env, main_only + [{"type": "branch", "name": "dev"}], False),
+            ("env: protected_branches policy refused", dict(good_env, deployment_branch_policy={"protected_branches": True}), [], False),
+            ("env: tag policy named main refused", good_env, [{"type": "tag", "name": "main"}], False)):
+        ok = (not env_refusals(env, pols, "own")) == want
+        print(f"{'PASS' if ok else 'FAIL'}: {name}")
+        fails += 0 if ok else 1
     d = description("own", "line one\nline two " + "y" * 100)
     ok = d.startswith("break-glass by own: line one line two") and "\n" not in d and len(d) <= 140
     print(f"{'PASS' if ok else 'FAIL'}: description is single-line and bounded")
@@ -382,10 +501,16 @@ def main() -> int:
         return self_test("--sabotage-context-check" in sys.argv)
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+    e = sub.add_parser("assert-env")
+    e.add_argument("--repo", required=True)
+    e.add_argument("--owner", required=True)
+    e.set_defaults(fn=cmd_assert_env)
     r = sub.add_parser("run")
+    r.set_defaults(fn=cmd_run)
     for k in ("--repo", "--pr", "--actor", "--owner", "--reason-env", "--run-url"):
         r.add_argument(k, required=True)
-    return cmd_run(ap.parse_args())
+    a = ap.parse_args()
+    return a.fn(a)
 
 
 if __name__ == "__main__":
