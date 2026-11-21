@@ -371,6 +371,7 @@ class PanacheJournalRepository(
         it.version = version
         it.reversalOf = reversalOf
         it.synthetic = synthetic
+        it.branchBookId = branchBookId
         it.originKind = origin?.kind?.name
         it.originRecordId = origin?.sourceRecordId
         it.originSubmitter = origin?.authenticatedSubmitter
@@ -407,6 +408,7 @@ class PanacheJournalRepository(
         version = version,
         reversalOf = reversalOf,
         synthetic = synthetic,
+        branchBookId = branchBookId,
         origin = originKind?.let { kind ->
             com.openbank.ledger.domain.model.JournalOrigin(
                 com.openbank.ledger.domain.model.JournalOriginKind.valueOf(kind),
