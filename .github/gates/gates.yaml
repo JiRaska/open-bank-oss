@@ -7314,6 +7314,22 @@ gates:
     run: |
       python3 .github/scripts/check-workflow-gh-token.py
 
+  - id: merge-train-break-glass
+    selftest_exempt: "is-a-test-suite — the break-glass validator's own must-pass/must-FAIL cases"
+    name: "merge-train break-glass refuses non-owner, red/missing/pending context, stale, draft, unarmed and hold-lifting PRs (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The break-glass posts the one required status the train owns; if its validator stopped checking the other required contexts it would be a review bypass that still prints green. The suite includes the cases that must refuse, and --sabotage-context-check proves they detect a disabled context check (#17006)."
+    review_after: "2027-05-21"
+    budget_seconds: 10
+    min_subjects: 40   # 42 PASS cases today (2026-11-21)
+    run: |
+      rc=0
+      out=$(python3 .github/scripts/break_glass_check.py --self-test 2>&1) || rc=$?
+      printf '%s\n' "$out"
+      echo "SUBJECTS=$(printf '%s\n' "$out" | grep -c '^PASS')"
+      exit "$rc"
+
   - id: agent-pr-guard
     name: "agent PR guard (autonomous agents may not land protected paths, enforced)"
     group: lint

@@ -74,6 +74,21 @@ github:
       variables:
         []
   unprovisioned:
+    - kind: secret
+      names: [BREAK_GLASS_APP_ID, BREAK_GLASS_APP_PRIVATE_KEY]
+      reason: "environment-scoped merge-train break-glass credential awaits owner setup; the workflow fails closed until then"
+      issue: 17006
+      review_by: 2026-12-21
+    - kind: variable
+      names:
+        - TF_ARC_MIN_RUNNERS
+        - TF_ARC_MAX_RUNNERS
+        - TF_ARC_DEPLOY_MAX_RUNNERS
+        - TF_ARC_BATCH_MAX_RUNNERS
+        - TF_ARC_DR_MAX_RUNNERS
+      reason: "optional ADR-0389 runner-pool overrides for platform-tofu; unset by design means the variables.tf default applies, ranges enforced by tofu validation"
+      issue: 17006
+      review_by: 2027-02-21
     - kind: variable
       names: [PR_RUNNER_POOL]
       reason: "opt-in PR build pool trial; unset is the kill switch (every PR build hosted) and only allowlisted labels are honoured"
@@ -147,6 +162,16 @@ github:
       reason: "least-privilege read identity for the perf baseline; created with the perf targets"
       issue: 7311
       review_by: 2027-01-31
+    - kind: variable
+      names:
+        - GATE_BUDGET_MULTIPLIER
+        - FLEET_LINT_TIMEOUT_MINUTES
+        - FLEET_LINT_STEP_TIMEOUT_MINUTES
+        - LIBS_BENCH_TIMEOUT_MINUTES
+        - SERVICE_CI_CONTRACT_TIMEOUT_MINUTES
+      reason: "ADR-0389 runtime tuning knobs; every consumer falls back to today's value, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-02-15
     - kind: variable
       names:
         - APICURIO_REGISTRY_URL
