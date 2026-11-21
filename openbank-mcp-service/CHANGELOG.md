@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.11...mcp-service-v0.18.0) (2026-11-21)
+
+
+### Features
+
+* **mcp-service:** ADR-0384 slice 1 — customer MCP channel metrics, alerts and admin view ([#16779](https://github.com/JiRaska/open-bank-oss/issues/16779)) ([c421931](https://github.com/JiRaska/open-bank-oss/commit/c4219319f7fa372e8899c4a775ce3fa99c626299))
+
+## [0.17.11](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.10...mcp-service-v0.17.11) (2026-11-20)
+
+
+### Security
+
+* **mcp-service:** admit customer-realm tokens on a DPoP-bound channel ([#16721](https://github.com/JiRaska/open-bank-oss/issues/16721)) ([1223f79](https://github.com/JiRaska/open-bank-oss/commit/1223f7981e477f48e1c57c911a597c4645009c37))
+
 ## [0.17.10](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.9...mcp-service-v0.17.10) (2026-11-18)
 
 
