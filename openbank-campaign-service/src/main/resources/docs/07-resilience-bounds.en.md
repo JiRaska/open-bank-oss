@@ -35,3 +35,15 @@ Configured values:
 - `max-size: 20`
 
 
+
+## Test JVM heap budget
+
+`CampaignTraceContractIT` boots a second Quarkus application (the trace contract's own
+instance, with its own span recorder), so the module's test fork carries two augmentations. The
+Gradle default 512 MiB test heap measured as `OutOfMemoryError` for that shape in other modules
+(ADR-0388), so `build.gradle.kts` declares `tasks.test { maxHeapSize = "2g" }`. This is a build-time
+bound on the test JVM only; it does not change the service's runtime memory.
+
+To re-measure: run the full `:openbank-campaign-service:test` suite, not a single class, because
+single-class runs stay green and only the full suite reproduces the exhaustion. The
+`trace-contract-heap` gate keeps the declaration in place.

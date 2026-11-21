@@ -525,6 +525,43 @@ a stub (T-T2/T-D2).
     verifier's 360 s acceptance span (`maxAge` 300 s + `futureSkew` 60 s) leaves a 5 s margin that
     any realistic drift stays far inside. No per-key replay quota in Valkey (memory is bounded by the
     proof-key bucket that runs first).
+
+- **2026-11-21 (#16847 follow-up)** — Subject-less audit key budget per allocation and region.
+  - *Repudiation / audit suppression.* The per-minute cap of 4096 distinct subject-less keys could
+    be spent by one party holding one IPv6 allocation (a /48 is 65 536 /64s), pushing every other
+    subject-less caller into the shared overflow key for the rest of the minute. Distinct keys are
+    now capped per allocation (IPv6 /48, IPv4 /24: 64 keys, then one shared allocation key) and per
+    IPv6 region (/32: 256 keys including allocation keys, then one shared region key). One
+    allocation therefore admits at most 65 keys a minute and one /32 at most 257, so filling the
+    global budget needs at least 16 distinct /32s (RIR scale) or a spread of IPv4 /24s. The first
+    global overflow per minute is logged; every refusal remains metered regardless of key.
+  - *Tradeoff.* Once an allocation (or region) has spent its slots, a new neighbour inside it
+    shares that allocation's (region's) key, and so its one-row-per-minute refusal audit window,
+    for at most 60 s. Neighbours admitted earlier in the minute keep their own key. The key feeds
+    only that audit window, not a rate limit.
+
+- **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
+  - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
+    edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
+    `authorization-scheme: DPoP`) compares `htu` with the request's absolute URI — measured; this service's own
+    admission compares with the static published resource, but with
+    `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
+    then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
+    forwarding on and no list (or a trust-all one). Proven by `McpUntrustedProxyForwardingIT`: from
+    an untrusted peer the same request that `McpTrustedProxyForwardingIT` admits is refused (htu
+    mismatch), and a spoofed `X-Forwarded-For` does not change the audit key.
+  - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
+    value, so one caller's flood could spend every subject-less caller's audit window. It is now
+    keyed by `ClientAddressKey` (HMAC under a per-boot key; IPv4 /32, IPv6 /64 so rotation inside one
+    /64 shares a window; strict literal parse; distinct keys capped per minute) over
+    the address `ClientAddressResolver` picks: the raw TCP peer, or one edge-set header from a
+    trusted peer — never Quarkus' leftmost `X-Forwarded-For`, which an appending edge leaves under
+    the client's control (IT: an appended forged entry does not become the key).
+  - *Residual / route prerequisite.* Forwarding stays OFF in the deployment until the route PR, which
+    must narrow `trusted-proxies` to the gateway's source (not the pod CIDR), make the edge overwrite
+    client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
+    NetworkPolicy on `:8150` to the gateway and known callers.
+
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`

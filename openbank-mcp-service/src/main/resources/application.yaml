@@ -7,6 +7,18 @@ quarkus:
       # ADR-0383 D5: bound a request body before it is parsed. Global to this service, which only
       # serves small JSON-RPC and session-control bodies; oversize requests get HTTP 413.
       max-body-size: ${MCP_MAX_BODY_SIZE:64K}
+    # ADR-0383 D5 / #16847: behind the edge, quarkus-oidc's own DPoP check (enabled for the
+    # customers tenant by `token.authorization-scheme: DPoP`, BearerAuthenticationMechanism) compares
+    # the proof `htu` with HttpServerRequest.absoluteURI() — measured: "DPoP proof HTTP request uri
+    # claim https://… does not match the request HTTP uri http://localhost:…". This service's own
+    # admission checks `htu` against the static published resource; it is the TENANT that needs the
+    # external scheme/host. Off by default. Quarkus applies these headers ONLY from
+    # `quarkus.http.proxy.trusted-proxies` (deliberately not defined here: set it in the deployment);
+    # ProxyForwardingGuard refuses to boot with any forwarding switch on and no narrow literal list.
+    proxy:
+      proxy-address-forwarding: ${MCP_PROXY_FORWARDING:false}
+      allow-x-forwarded: ${MCP_PROXY_FORWARDING:false}
+      enable-forwarded-host: ${MCP_PROXY_FORWARDING:false}
   management:
     enabled: true
     port: 8085
@@ -154,6 +166,10 @@ mcp:
   # Customer MCP channel (ADR-0383 / ADR-0385, #16590). OFF by default. With it on, the service
   # refuses to boot unless the issuer is set and the client allowlist exists and parses
   # (CustomerChannel is @Startup).
+  # #16847: `mcp.edge.client-address-header` (env MCP_EDGE_CLIENT_ADDRESS_HEADER) names the ONE
+  # edge-set header carrying the client address (e.g. X-Envoy-External-Address), read only from a peer
+  # in quarkus.http.proxy.trusted-proxies. Deliberately not defined here: unset = never read.
+  # ClientAddressResolver never uses Quarkus' leftmost X-Forwarded-For for the audit key.
   customer:
     enabled: ${MCP_CUSTOMER_ENABLED:false}
     issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
