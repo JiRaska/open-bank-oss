@@ -24,12 +24,34 @@ val cyclonedxBomTask = tasks.named<CyclonedxAggregateTask>("cyclonedxBom") {
     xmlOutput.set(layout.buildDirectory.file("reports/cyclonedx/bom.xml"))
 }
 
+// CycloneDX 3.x resolves artifact files through an EXTERNAL-only artifact view
+// (DependencyUtils.configureExternalArtifactView: componentFilter = ModuleComponentIdentifier),
+// so in-build project dependencies (:openbank-libs-*) are listed without any hashes. 2.x hashed
+// them. Restore that here from the same resolved runtimeClasspath artifact bytes, using the
+// algorithm set the plugin emits for external components. Inventory is never added or removed:
+// only an existing component whose purl project_path names a resolved project artifact gains
+// hashes, so verifyPackagedLibrarySbom still fails on a library missing from the SBOM.
+val sbomHashAlgorithms = linkedMapOf(
+    "MD5" to "MD5", "SHA-1" to "SHA-1", "SHA-256" to "SHA-256", "SHA-512" to "SHA-512",
+    "SHA3-256" to "SHA3-256", "SHA3-512" to "SHA3-512", "SHA-384" to "SHA-384", "SHA3-384" to "SHA3-384",
+)
+val sbomRuntimeArtifacts = configurations.named("runtimeClasspath")
+val projectArtifactFiles = providers.provider {
+    sbomRuntimeArtifacts.get().incoming.artifacts.artifacts.mapNotNull { artifact ->
+        val component = artifact.id.componentIdentifier as? ProjectComponentIdentifier
+        component?.let { it.projectPath to artifact.file }
+    }.groupBy({ it.first }, { it.second })
+}
+
 // Existing image/release consumers use reports/bom.{json,xml}. Export only those
 // exact files; a Copy task targeting reports/ would reintroduce directory ownership.
 val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     dependsOn(cyclonedxBomTask)
     inputs.files(cyclonedxBomTask.map { listOfNotNull(it.jsonOutput.orNull, it.xmlOutput.orNull) })
         .withPropertyName("sbomFiles")
+    inputs.files(sbomRuntimeArtifacts.map { cfg ->
+        cfg.incoming.artifactView { componentFilter { it is ProjectComponentIdentifier } }.files
+    }).withPropertyName("projectRuntimeArtifacts")
     outputs.files(layout.buildDirectory.file("reports/bom.json"), layout.buildDirectory.file("reports/bom.xml"))
     onlyIf {
         val producer = cyclonedxBomTask.get()
@@ -45,7 +67,11 @@ val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
                 val file = source.asFile
                 check(file.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
                 target.parentFile.mkdirs()
-                file.copyTo(target, overwrite = true)
+                if (format == "json") {
+                    target.writeText(withProjectLibraryHashes(file.readText(), projectArtifactFiles.get()))
+                } else {
+                    file.copyTo(target, overwrite = true)
+                }
             } else {
                 target.delete()
             }
@@ -53,6 +79,30 @@ val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     }
 }
 cyclonedxBomTask.configure { finalizedBy(exportCycloneDxBom) }
+
+fun withProjectLibraryHashes(json: String, artifacts: Map<String, List<File>>): String {
+    @Suppress("UNCHECKED_CAST")
+    val bom = groovy.json.JsonSlurper().parseText(json) as MutableMap<String, Any?>
+    @Suppress("UNCHECKED_CAST")
+    val components = (bom["components"] as? List<MutableMap<String, Any?>>).orEmpty()
+    for (component in components) {
+        val purl = component["purl"] as? String ?: continue
+        val query = purl.substringAfter('?', "")
+        val projectPath = query.split('&').firstOrNull { it.startsWith("project_path=") }
+            ?.let { java.net.URLDecoder.decode(it.removePrefix("project_path="), Charsets.UTF_8) } ?: continue
+        val files = artifacts[projectPath] ?: continue
+        check(files.size == 1) { "Project $projectPath resolved to ${files.size} runtime artifacts; cannot hash the SBOM component" }
+        check(component["hashes"] == null) {
+            "CycloneDX already hashed project component $projectPath; drop withProjectLibraryHashes"
+        }
+        val bytes = files.single().readBytes()
+        component["hashes"] = sbomHashAlgorithms.map { (alg, jca) ->
+            linkedMapOf("alg" to alg, "content" to java.security.MessageDigest.getInstance(jca).digest(bytes)
+                .joinToString("") { "%02x".format(it) })
+        }
+    }
+    return JsonOutput.prettyPrint(JsonOutput.toJson(bom))
+}
 
 // Explicit deploy-build proof. Never attach to sbomAll: resolution-only inventory
 // must not assemble the fleet. This receipt covers original dependency JARs only;

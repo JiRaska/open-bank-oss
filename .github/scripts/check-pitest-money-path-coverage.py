@@ -48,13 +48,11 @@ EXCLUDED = {
     "openbank-billing-service": "domain layer does not branch; fee logic lives in application/usecase, outside domain.* (ADR-0143)",
     "openbank-settlement-service": "single data-model domain file, 0 branch sites",
     "openbank-psd2-service": "single domain file, 0 branch sites",
-    "openbank-card-processing-service": "10 branch sites over 7 domain files, input validation and state legality, no arithmetic",
-    "openbank-swift-service": "branches are message validation and state legality, not money arithmetic",
-    "openbank-lending-service": "recorded exclusion pending its own measurement (28 branch sites over 7 files on 2026-11-10)",
 }
-# Exclusions that already exceed the thin bar and are tracked as debt instead of failing the build.
-# Shrink-only: delete an entry when the service enters the matrix.
-OVER_THIN_BASELINE = {"openbank-swift-service", "openbank-lending-service", "openbank-card-processing-service"}
+# Exclusions that exceeded the thin bar were tracked here as debt until they entered the
+# pitest.yml matrix (2026-11-18: swift, lending, card-processing). Keep this set empty;
+# a new over-thin exclusion lands here with its measurement and an issue, shrink-only.
+OVER_THIN_BASELINE: set[str] = set()
 
 
 def matrix(workflow: str) -> set[str]:
