@@ -280,6 +280,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-1",job="regwatcher-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-2",job="regwatcher-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
@@ -423,6 +427,8 @@ tests:
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="regulatory-obligations-watcher"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
@@ -742,6 +748,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-1",job="regwatcher-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-2",job="regwatcher-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
@@ -885,6 +895,8 @@ tests:
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="regulatory-obligations-watcher"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
@@ -1181,6 +1193,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-1",job="regwatcher-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-2",job="regwatcher-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
@@ -1326,6 +1342,8 @@ tests:
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="regulatory-obligations-watcher"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
@@ -1626,6 +1644,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-1",job="regwatcher-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-2",job="regwatcher-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
@@ -1769,6 +1791,8 @@ tests:
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="regulatory-obligations-watcher"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
@@ -2074,6 +2098,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-1",job="regwatcher-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-2",job="regwatcher-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
@@ -2215,6 +2243,8 @@ tests:
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="regulatory-obligations-watcher"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"
@@ -2513,6 +2543,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-1",job="regwatcher-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="regulatory-obligations-watcher",pod="regwatcher-db-2",job="regwatcher-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
@@ -2654,6 +2688,8 @@ tests:
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="regulatory-obligations-watcher"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
         values: "1600000000+0x40"

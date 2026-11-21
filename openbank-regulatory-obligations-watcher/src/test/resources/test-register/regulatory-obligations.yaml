@@ -1,0 +1,27 @@
+# Test fixture for the watcher's @QuarkusTest runs — a 3-row stand-in for
+# openbank-libs/governance/regulatory-obligations.yaml with the same field names.
+schema_version: 1
+obligations:
+  - id: test-law-row
+    name: { cs: Testovací povinnost, en: Test obligation A }
+    legal_basis: zákon č. 300/2016 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2016-300
+      spec: null
+    cadence: Každý pracovní den do 12:00.
+    cadence_confidence: verified
+  - id: test-unverified-row
+    name: { cs: Neověřená povinnost, en: Test obligation B }
+    legal_basis: vyhláška č. 30/2017 Sb.
+    sources:
+      law: https://www.zakonyprolidi.cz/cs/2016-300
+      spec: https://www.cnb.cz/cs/statistika/test-spec/
+    cadence: Měsíčně do 15. dne.
+    cadence_confidence: unverified
+  - id: test-unreadable-row
+    name: { cs: Nečitelný zdroj, en: Test obligation C }
+    legal_basis: nařízení (EU) 2016/867
+    sources:
+      law: https://eur-lex.europa.eu/eli/reg/2016/867/oj
+    cadence: Měsíčně.
+    cadence_confidence: known-eu

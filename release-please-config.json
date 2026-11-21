@@ -254,6 +254,12 @@
         "openbank-finrep-service/src/test"
       ]
     },
+    "openbank-fetch-broker": {
+      "component": "fetch-broker",
+      "exclude-paths": [
+        "openbank-fetch-broker/src/test"
+      ]
+    },
     "openbank-flaky-test-hunter": {
       "component": "flaky-test-hunter",
       "exclude-paths": [
@@ -486,6 +492,12 @@
       "component": "products",
       "exclude-paths": [
         "openbank-products/src/test"
+      ]
+    },
+    "openbank-regulatory-obligations-watcher": {
+      "component": "regulatory-obligations-watcher",
+      "exclude-paths": [
+        "openbank-regulatory-obligations-watcher/src/test"
       ]
     }
   }

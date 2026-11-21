@@ -1434,6 +1434,52 @@
       "secret": "__TAX_REPORTING_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-regulatory-obligations-watcher",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Regulatory Obligations Watcher",
+      "description": "Agent identity for regulatory-obligations-watcher (ADR-0367 D6, ADR-0387): client_credentials only, sub agent:regulatory-obligations-watcher, aud openbank-fetch-broker. Holds no realm role.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "secret": "__REGULATORY_WATCHER_CLIENT_SECRET__",
+      "protocolMappers": [
+        {
+          "name": "agent-subject",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "sub",
+            "claim.value": "agent:regulatory-obligations-watcher",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "fetch-broker-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "openbank-fetch-broker",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "openbank-ledger-pension-co",
       "fullScopeAllowed": false,
       "name": "OpenBank Ledger (pension company)",

@@ -190,7 +190,7 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "63833f6061b86205",
+      "sha256": "c4f7e4cbbfc3b07f",
       "count": 23,
       "ids": [
         "compliance-officer",
@@ -230,12 +230,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "28d88f1e5a5575b3",
+      "sha256": "ea9dd2dccd251100",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 7,
-        "registered": 12
+        "pending": 6,
+        "registered": 13
       },
       "idsByStatus": {
         "external": [
@@ -250,7 +250,6 @@
           "product-author",
           "card-scheme-bulletin-agent",
           "card-dispute-evidence-agent",
-          "regulatory-obligations-watcher",
           "treasury-dealing-assistant",
           "kyb-analyst",
           "business-copilot"
@@ -261,6 +260,7 @@
           "customer-copilot",
           "devops-agent",
           "control-liveness-sentinel",
+          "regulatory-obligations-watcher",
           "finops-agent",
           "governance-auditor",
           "release-steward",
@@ -299,7 +299,9 @@
         "ledger-domain-engineer": [],
         "card-scheme-bulletin-agent": [],
         "card-dispute-evidence-agent": [],
-        "regulatory-obligations-watcher": [],
+        "regulatory-obligations-watcher": [
+          "system.v1"
+        ],
         "treasury-dealing-assistant": [],
         "mcp-anonymous": [],
         "ap2-anonymous": [],
@@ -341,6 +343,7 @@
         "control-liveness-sentinel",
         "customer-copilot",
         "devops-agent",
+        "regulatory-obligations-watcher",
         "ui-assistant"
       ],
       "recordedCharters": [
@@ -359,7 +362,9 @@
         "governance-auditor",
         "release-steward"
       ],
-      "missingRecordingCharters": []
+      "missingRecordingCharters": [
+        "regulatory-obligations-watcher"
+      ]
     },
     "registryPromptLoaders": {
       "services": [
@@ -435,6 +440,13 @@
           "buildFile": "openbank-governance-auditor/build.gradle.kts"
         },
         {
+          "module": "openbank-regulatory-obligations-watcher",
+          "charters": [
+            "regulatory-obligations-watcher"
+          ],
+          "buildFile": "openbank-regulatory-obligations-watcher/build.gradle.kts"
+        },
+        {
           "module": "openbank-release-steward",
           "charters": [
             "release-steward"
@@ -442,7 +454,7 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 11,
+      "serviceCount": 12,
       "registeredChartersLoadedFromRegistry": [
         "authz-policy-auditor",
         "case-coordinator",
@@ -454,6 +466,7 @@
         "finops-agent",
         "flaky-test-hunter",
         "governance-auditor",
+        "regulatory-obligations-watcher",
         "release-steward",
         "ui-assistant"
       ],

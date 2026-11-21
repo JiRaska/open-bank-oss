@@ -37,9 +37,10 @@
 #     It is the edge the admin-ui compliance hub joins on; gate `compliance-trace` fails on an
 #     unknown id. An obligation with no control is shown as a gap, not rejected.
 #
-# A watcher charter (`regulatory-obligations-watcher`) is PROPOSED separately and lands disabled
-# until a source fetcher is wired; nothing watches the cited sources today. Changes to this file
-# happen only through a reviewed PR.
+# The `regulatory-obligations-watcher` agent (ADR-0367 decision 6, ADR-0387 S4) re-reads every
+# cited source weekly through the fetch broker and files governance issues; it never writes this
+# file. Its host allowlist (agents.yaml data_scope.public_web.hosts) must cover every host cited
+# under `sources:`. Changes to this file happen only through a reviewed PR.
 # `personal_data` values are QUOTED on purpose: unquoted yes/no are YAML 1.1 booleans to PyYAML
 # and would render as True/False (the checker rejects a non-string value).
 

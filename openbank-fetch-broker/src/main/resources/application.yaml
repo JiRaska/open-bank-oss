@@ -1,0 +1,79 @@
+quarkus:
+  application:
+    name: fetch-broker
+  http:
+    port: 8172
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    token:
+      # RFC 8707 / ADR-0383 D1: only tokens issued FOR this broker are accepted (the endpoint
+      # re-checks it, so the 401 does not depend on this key alone); the caller is the `sub`.
+      audience: openbank-fetch-broker
+      principal-claim: sub
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      tls:
+        verification: none
+      enabled: false
+
+"%test":
+  quarkus:
+    oidc:
+      tenant-enabled: false
+    management:
+      enabled: false
+    http:
+      test-port: 0
+  openbank:
+    fetch-broker:
+      # A fixture with enabled charters, so the allow path is reachable without editing agents.yaml.
+      charters-resource: test-charters/agents.yaml
+      per-host-min-interval: PT0S
+
+# OPA PDP (ADR-0034): every tools/call is authorized as an AI_AGENT on read.public_web. With no
+# sidecar the default localhost:8181 fails closed.
+opa:
+  url: ${OPA_URL:http://localhost:8181}
+  path: ${OPA_PATH:/v1/data/openbank/rest/allow}
+  timeout-ms: 500
+
+openbank:
+  authz:
+    opa-pdp-producer:
+      enabled: true
+  fetch-broker:
+    # Packaged from openbank-libs/governance/agents.yaml by build.gradle.kts (ADR-0387 D1).
+    charters-resource: governance-charters/agents.yaml
+    # Generic, descriptive, no contact data of a person (ADR-0387 D6).
+    user-agent: "OpenBankFetchBroker/0.1 (+https://github.com/JiRaska/open-bank-oss)"
+    max-response-bytes: 5242880
+    max-content-chars: 200000
+    per-host-min-interval: PT2S
+    pdf:
+      # OFF until PDF parsing runs in a separate memory-limited, killable process (#16754):
+      # in-process PDFBox cannot be bounded against a decompression bomb.
+      enabled: false
+    # The JS renderer's base-url and api-token are deliberately NOT declared here: both are
+    # supplied by the deployment (OPENBANK_FETCH_BROKER_KITESURF_BASE_URL, and
+    # OPENBANK_FETCH_BROKER_KITESURF_API_TOKEN from the browser-run-api-token secret). Absent, every
+    # `render: js` host answers NOT_RENDERABLE.

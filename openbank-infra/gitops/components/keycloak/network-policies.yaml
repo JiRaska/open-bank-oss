@@ -107,6 +107,9 @@ spec:
               kubernetes.io/metadata.name: engagement
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: fetch-broker
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: finops-agent
         - namespaceSelector:
             matchLabels:
@@ -177,6 +180,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: referral
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: regulatory-obligations-watcher
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: release-steward

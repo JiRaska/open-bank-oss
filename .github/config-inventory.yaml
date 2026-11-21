@@ -234,6 +234,17 @@ openbao:
     - pricing-console
     - pricing-service
     - temporal/db
+  unprovisioned:
+    - kind: openbao
+      names: [fetch-broker/browser-run]
+      reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
+      issue: 16754
+      review_by: 2027-02-18
+    - kind: openbao
+      names: [keycloak/regulatory-obligations-watcher, regulatory-obligations-watcher]
+      reason: "regulatory-obligations-watcher (ADR-0387 S4) is new: its Keycloak client secret and its issues-only GitHub token are seeded by the owner when the agent is first deployed; every consuming env ref is optional, so the pod runs and reports every source UNVERIFIED / files nothing until then"
+      issue: 16754
+      review_by: 2027-02-19
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:

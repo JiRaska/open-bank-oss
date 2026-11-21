@@ -123,6 +123,11 @@ spec:
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
+            namespace: fetch-broker
+            workload: openbank-fetch-broker
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
             namespace: finops-agent
             workload: finops-agent
         - record: openbank:expected_service:info
@@ -320,6 +325,11 @@ spec:
           labels:
             namespace: referral
             workload: referral-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
+            namespace: regulatory-obligations-watcher
+            workload: regulatory-obligations-watcher
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:

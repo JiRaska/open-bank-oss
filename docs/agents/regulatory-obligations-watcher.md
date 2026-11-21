@@ -29,38 +29,53 @@ flipping the row to `verified`.
 - `any_legal_interpretation`: whether a changed paragraph changes our duty is a legal
   judgement. Every finding is a proposal that a human confirms or rejects.
 - `every: proposal`: every finding is an issue for a human to act on.
-- `any_register_change`: the agent never writes to the register. Its charter lists the write and
-  execute tiers under `tools.deny`, but `agents.rego` only evaluates that deny when the caller
-  sends `input.tier`, which the MCP and REST paths do not. Today the real protection is
-  deny-by-default: nothing outside the allow list is granted. The PR that enables the agent must
-  include an `opa eval` against the served bundle with a must-DENY control (write, execute) and a
-  must-ALLOW control (read, `draft.ticket`).
+- `any_register_change`: the agent never writes to the register. It holds a read grant and one
+  `write_proposal` grant (`draft.ticket`) and nothing else; deny-by-default does the rest. Before
+  every issue the runtime asks its OPA sidecar for `draft.ticket` and files nothing on a deny. The
+  enabling change was checked with `opa eval` against the served bundles: `read.public_web` is
+  allowed on a listed host and denied off-list, `draft.ticket` is allowed, and a PR, a write and an
+  execute are denied.
 - `requires_human` is declarative: `agents.rego` notes that no code path reads it. It records
   intent; the controls above are what enforce it.
 - `runs_per_day: 1` and `tokens_per_run: 60000`: a weekly read of a few dozen sources needs no
   more than that.
 
-## Why it ships disabled
+## How it reads its sources
 
-`enabled: false`. No fetcher for the cited sources is wired yet. An agent that cannot read its
-input reports nothing, and that silence would read as "the register is current". The flag flips in
-the PR that wires the fetcher, so "it runs" and "it can see anything" become true together.
+Through `openbank-fetch-broker` only (ADR-0387), as resource `read.public_web`, on the hosts its
+charter lists. The list is the set of hosts the register's `sources:` cite. Fetched pages are
+untrusted: they go only into the data section of the prompt, and the model's answer is parsed as
+a closed schema with the quote checked against the page. The runtime is
+`openbank-regulatory-obligations-watcher`; its README describes one run.
 
-## Preconditions for enabling
+## Dedupe and cap
 
-- **Dedupe.** Each finding carries the key `obligation id + source URL + SHA-256 of the fetched
-  source content`. An issue whose key matches an open or previously closed issue is not filed
-  again, so an unchanged `unverified` row produces one issue, not one per week. A changed source
-  hash is a new finding.
-- **Per-run cap.** At most 10 issues per run; anything beyond is summarised in the last issue
-  instead of filed separately, so a fetcher fault cannot flood the tracker.
+- **Dedupe.** Each finding has a stable fingerprint (finding kind, source URL, content SHA-256 —
+  or the read outcome for an unreadable source — and the obligation ids). A fingerprint already
+  filed, open or closed, is not filed again, so an unchanged `unverified` row produces one issue,
+  not one per week. A changed source hash is a new finding.
+- **Per-run cap.** At most 5 new issues per run. The rest are deferred, not summarised: their
+  baseline does not advance, so the next run files them. A broker or credential fault therefore
+  produces at most 5 issues a week, and the liveness gauge records no success for a run that read
+  nothing.
 
-Both must exist and be tested in the PR that sets `enabled: true`.
+## Owner steps before it can run
+
+- Seed OpenBao: `keycloak/regulatory-obligations-watcher` (`client_secret`, also added to the
+  realm import artifact per runbook 0009), `litellm` property `KEY_REGULATORY_OBLIGATIONS_WATCHER`
+  (the agent's budgeted virtual key), and `regulatory-obligations-watcher` property `GITHUB_TOKEN`
+  (fine-grained, issues:write on this repository only).
+- Create the Keycloak client in the live realm (the template change applies only on cold start).
+- Record the first eval run (`run-evals.py --record regulatory-obligations-watcher`).
 
 ## Known gaps
 
-- No source fetcher, as above.
-- Many sources are consolidated legal texts in HTML or PDF with no change feed. Detecting a change
-  means comparing against the last read, not subscribing to a notification.
+- Many sources are consolidated legal texts in HTML or PDF with no change feed. A change is a
+  different content hash, which also fires on cosmetic page changes; the model's
+  `NO_MATERIAL_CHANGE` absorbs those. PDF sources answer NOT_RENDERABLE while the broker's PDF
+  extraction is off.
+- The pod has no egress NetworkPolicy, like the other control-plane agents that write GitHub
+  issues: GitHub is on the internet, and the public-web gate forbids internet egress from any
+  agent-plane NetworkPolicy. The code reaches the web only through the broker.
 - It proposes corrections and does not track whether anyone acted on them. An open, ignored
   proposal is covered by the governance follow-up rule (ADR-0052), not by this agent.

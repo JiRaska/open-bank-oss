@@ -30,7 +30,7 @@ spec:
   template:
     metadata:
       annotations:
-        openbank.tech/policy-checksum: "ba4f72dd0583f944"
+        openbank.tech/policy-checksum: "150f31dc1a154cda"
       labels:
         app.kubernetes.io/name: finrep-service
         app.kubernetes.io/part-of: finrep
