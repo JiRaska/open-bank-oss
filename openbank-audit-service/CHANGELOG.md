@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.32.0...audit-service-v0.32.1) (2026-11-21)
+
+
+### Security
+
+* **audit:** subscribe the audit trail to MCP payment-proposal events ([#16849](https://github.com/JiRaska/open-bank-oss/issues/16849)) ([e08401b](https://github.com/JiRaska/open-bank-oss/commit/e08401bb9cf3b9be088907b0433948e0b4813339))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.31.1...audit-service-v0.32.0) (2026-11-12)
 
 
