@@ -437,6 +437,15 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+New entries are one file each in the openbank-mcp-service.d directory beside this document, named
+YYYY-MM-DD-slug.md and starting with a bold date. The block below is assembled from them by the
+change-log fragment generator (run the repo's regen-derived entrypoint), so never edit between the
+markers. Entries recorded before this section adopted fragments follow the block.
+
+<!-- changelog-fragments:begin (generated from openbank-mcp-service.d/ — do not edit between markers) -->
+
+<!-- changelog-fragments:end -->
+
 - **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
   - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
     edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
