@@ -94,7 +94,7 @@ env:
   MERGE_TRAIN_EXPEDITE_DAILY_CAP: "6"
   # Urgent strict path (ADR-0343 amendment 2026-11-19): distinct PRs the OWNER may label
   # merge-priority:urgent per UTC day; each takes the strict reservation at the next tick.
-  MERGE_TRAIN_URGENT_DAILY_CAP: "2"
+  MERGE_TRAIN_URGENT_DAILY_CAP: "5"
 
 jobs:
   settle:
