@@ -178,6 +178,15 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   its rail. Neither has an owner to ask, so both remain refused at the writer until those pairs
   leave `CAPABILITY_MATRIX`.
 
+### Statutory KYB authority client
+
+The statutory KYB client sends its named Delegation workload token over the private mTLS listener.
+The TLS client verifies the server hostname against the configured private CA and presents the
+existing Delegation certificate. Connection and read each have a two-second timeout. The
+consumer and provider replay expect 204 only for the current revision, 404 for a stale revision,
+and 403 for the shared workload on the same resource. The JOINT signing flow requires successful
+authority evidence before proceeding.
+
 ## Out of scope (tracked as follow-ups)
 
 - D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
