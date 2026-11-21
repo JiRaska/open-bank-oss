@@ -1,12 +1,13 @@
 ---
 date: 2026-11-17
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: [openbank-app]
 tags: [ai-agents, authn, security]
+followup: "#16590 — realm tier admission and its parity gate are built; the authorize-endpoint passkey + in-app SCA flow is not yet"
 summary: "Amends ADR-0383: MCP clients are admitted by allowlist tier — hosted ones only as authenticated confidential clients, local ones only with DPoP; authorize = fresh passkey in the starting browser plus a context-linked SCA in the app."
 ---
 

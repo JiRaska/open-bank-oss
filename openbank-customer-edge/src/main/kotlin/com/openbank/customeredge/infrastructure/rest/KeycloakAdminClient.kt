@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -104,12 +105,26 @@ class KeycloakAdminClient {
             return@runCatching false
         }
         val url = "$adminUrl/admin/realms/$adminRealm/users/$keycloakSub"
-        // Merge only the party_id attribute — other attributes are left intact.
-        val requestBody = """{"attributes":{"party_id":["$partyId"]}}"""
+        val token = adminToken()
+        // Keycloak 26 validates an admin PUT against the realm's user profile and treats an
+        // omitted root attribute as removed: a body of only {"attributes":{"party_id":…}} is
+        // refused 400 `error-user-attribute-required` (email). So read the user, merge party_id
+        // into its own representation, and write that back.
+        val current = http.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer $token")
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+        check(current.statusCode() == 200) { "Keycloak GET /users/$keycloakSub returned ${current.statusCode()}" }
+        val requestBody = withPartyId(current.body(), partyId)
         val resp = http.send(
             HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("Authorization", "Bearer ${adminToken()}")
+                .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(5))
                 .PUT(HttpRequest.BodyPublishers.ofString(requestBody))
@@ -128,5 +143,13 @@ class KeycloakAdminClient {
     }.getOrElse { e ->
         Log.warnf("setPartyIdAttribute failed for sub=%s: %s", keycloakSub, e.message)
         false
+    }
+
+    /** The user representation [userJson] with `attributes.party_id` set to exactly [partyId]; nothing else changes. */
+    internal fun withPartyId(userJson: String, partyId: String): String {
+        val user = json.readTree(userJson) as ObjectNode
+        val attributes = (user.get("attributes") as? ObjectNode) ?: user.putObject("attributes")
+        attributes.putArray("party_id").add(partyId)
+        return json.writeValueAsString(user)
     }
 }

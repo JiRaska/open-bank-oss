@@ -21,6 +21,7 @@ import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
 import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
 import com.openbank.sca.domain.model.ScaMethod
+import com.openbank.sca.domain.model.ScaStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -117,6 +118,18 @@ class ScaExceptionMapperTest {
         val response = ScaNotApprovedMapper().toResponse(ScaChallengeNotApprovedException(id))
         assertThat(response.status).isEqualTo(ErrorCode.VALIDATION_ERROR.httpStatus)
         assertThat(bodyOf(response).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+    }
+
+    /** ADR-0385 D3: only a still-PENDING challenge carries the "keep waiting" code; a denial is final. */
+    @Test
+    fun `not-approved distinguishes pending from a final refusal`() {
+        val pending = ScaNotApprovedMapper().toResponse(ScaChallengeNotApprovedException(id, ScaStatus.PENDING))
+        assertThat(pending.status).isEqualTo(400)
+        assertThat(bodyOf(pending).code).isEqualTo(SCA_CHALLENGE_PENDING)
+        listOf(ScaStatus.FAILED, ScaStatus.CANCELLED, ScaStatus.EXPIRED).forEach { st ->
+            val final = ScaNotApprovedMapper().toResponse(ScaChallengeNotApprovedException(id, st))
+            assertThat(bodyOf(final).code).`as`(st.name).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+        }
     }
 
     @Test

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "9ecf0bd0466caa0d"
+    openbank.tech/policy-checksum: "a878fe1d412ac056"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -953,7 +953,13 @@ data:
     allowed_reasons contains "service-sca-scoped-consumer" if {
     	input.principal.type == "HUMAN"
     	some consumer in data.rules.scoped_sca_consumers
-    	input.principal.id == consumer.principal
+    	# The VERIFIED machine identity, never the display name: machine_named requires the PEP's
+    	# service_account == true marker AND client_id bound to the fixed name, so a person (or an
+    	# input without the marker) whose name happens to equal the principal gets nothing. The
+    	# explicit marker check also closes machine_named's phase-1 (marker-absent) fallback here: a
+    	# scoped consumer spends customer approvals, so it requires the current PEP ABI.
+    	input.principal.service_account == true
+    	machine_named(consumer.principal)
     	input.action in consumer.actions
     }
 
@@ -2077,6 +2083,7 @@ data:
           - service-account-openbank-edge                              # scaGate before every money-path forward
           - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
           - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
+          - service-account-openbank-keycloak-mcp                      # ADR-0385 D3: connect ceremony only, see scoped_sca_consumers
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
@@ -2448,6 +2455,15 @@ data:
         purposes: [APPROVAL]
         approval_request_prefix: "pension-"
         adr: ADR-0335
+      # ADR-0385 D3 — the authorization server's withheld-code authenticator (Keycloak extension,
+      # openbank realm client `openbank-keycloak-mcp`, ROLE_API only). It raises AND spends connect
+      # challenges; sca-service refuses it any purpose but MCP_CLIENT_CONNECT at initiate
+      # (requireInitiateScope) and any challenge outside `mcp-connect:` at consume (ConsumerScope).
+      - principal: service-account-openbank-keycloak-mcp
+        actions: [scaChallenge.initiate, scaChallenge.consume]
+        purposes: [MCP_CLIENT_CONNECT]
+        approval_request_prefix: "mcp-connect:"
+        adr: ADR-0385
 
     scoped_payment_initiators:
       - principal: service-account-openbank-pension
