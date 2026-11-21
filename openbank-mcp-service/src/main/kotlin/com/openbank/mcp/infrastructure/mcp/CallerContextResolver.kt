@@ -6,6 +6,7 @@ package com.openbank.mcp.infrastructure.mcp
 
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.McpMetricsPort
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -86,6 +87,7 @@ class CallerContextResolver @Inject constructor(
                 grantedAccounts = emptyList(),
                 actChain = actChain(jwt.getClaim(CLAIM_ACT)),
                 sessionId = jwt.getClaim<String?>(CLAIM_SESSION_ID)?.takeIf { it.isNotBlank() },
+                channel = McpMetricsPort.McpChannel.AGENT,
             )
         }
         if (!oboEnabled) return null
@@ -152,6 +154,7 @@ class CallerContextResolver @Inject constructor(
             principalType = "HUMAN",
             roles = bounded,
             serviceAccount = false,
+            channel = McpMetricsPort.McpChannel.OPERATOR,
         )
     }
 

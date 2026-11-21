@@ -105,3 +105,11 @@ With the customer channel on, an admitted customer sees only the read tools its 
 - **Token exchange.** Each read exchanges the customer's own token at the customers realm (RFC 8693) for a token with one audience (`openbank-balance-service` or `openbank-transaction-service`) and one read scope, living at most 60 s. The requester client is `mcp.customer.exchange.client-id` (default `openbank-mcp-service`); its secret is read only from `MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET` (OpenBao `keycloak/mcp-service-customer-exchange`). With no secret set, every customer read is refused. The realm side (requester, audience clients, scopes) is derived from the allowlist's `exchange:` block by `gen-mcp-realm-clients.py` and held to it by the `mcp-client-realm-parity` gate.
 - **Audit.** Every customer call is audited under the customer's subject; an allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 drops the cached grant.
 - **Not yet working end to end:** the downstream services accept only the staff realm today, so exchanged customer tokens are refused there until ADR-0383 P5 lands. Every failure on this path is a refusal.
+
+## Customer channel metrics and alerts (ADR-0384 slice 1)
+
+`McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
+(per allowlisted client, per tool, with the DPoP/replay-refusal reason where one applies)
+through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
+reads the same series through the delegations MCP-channel view. Alert thresholds for the
+channel live with the fleet alerting rules, not in this service.

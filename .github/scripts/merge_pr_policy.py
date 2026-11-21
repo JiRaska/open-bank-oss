@@ -105,6 +105,16 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '287818084655bc5e34d0a700430e354b1ffb4c97',
     # merge-train.py of #16832 after merging main at 7ac3c508dc (#16856 urgent strict path), reviewed with that PR.
     '0c35ce9601da83a44dd580d42b451e95a6bd1f6a',
+    # merge-train.py of #16943's fix (deploy fix claim for auto-deploy gitops PRs), reviewed with that PR.
+    '1a4024d26828985dd9a620c49b7deac393bc70ed',
+    # Independently reviewed canonical first-parent source: #16947.
+    'eef9500b378c7630aff90490b68686b4f0f02cf8',
+    # merge-train.py of #16932's fix (a natively merged carrier member at the verified head continues), reviewed with that PR.
+    '0706fa384166e6be506fa7dc5393a3d69906b6ea',
+    # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
+    '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
+    # merge-train.py of #16972's tick-speed change merged with #16973's claim_evidence(now) fix, reviewed with that PR.
+    'bffe20f4c51c3b6fe3a7d961617d4f484276478e',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
