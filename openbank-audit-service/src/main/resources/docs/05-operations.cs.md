@@ -109,6 +109,12 @@ Consumer odebírá také `openbank.tpp.registry.event` (`TPP_REGISTERED` / `TPP_
 tpp-registry-service). Auditní KafkaUser má na topiku oprávnění Read. Nové odebírání nemá uložený offset,
 takže poprvé čte topik od začátku retence (#13177).
 
+## Životní cyklus platebních návrhů v auditním proudu
+
+Consumer odebírá také `openbank.delegation.payment-proposal-events` (životní cyklus platebních návrhů zákaznického
+MCP, ADR-0383 D6, připsané delegation-service). Nové odebírání nemá uložený offset, takže poprvé čte topik od začátku
+retence.
+
 ## Proud provenience agentů (D5)
 
 Kanál `agent-audit-events-in` odebírá téma `openbank.agent.audit.events` s AI-atribučními událostmi z agent-service a připisuje je do auditního úložiště. Nasazený Deployment nastavuje `AUDIT_AGENT_AUDIT_KAFKA_ENABLED=true`; výchozí hodnota v `application.yaml` zůstává `false`, takže lokální běh a testy bez brokeru zůstávají fail-closed. Consumer group je `audit-service-agent-provenance` a offset reset `earliest`, obojí z override ConfigMapy.
