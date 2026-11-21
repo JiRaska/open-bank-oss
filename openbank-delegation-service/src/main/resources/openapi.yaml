@@ -13,7 +13,9 @@ info:
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
-  version: 1.32.0
+  # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes.
+  # 1.33.0 is claimed by open PR #16793; whichever lands second re-reads live main and re-bumps.
+  version: 1.34.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -24,6 +26,7 @@ tags:
   - name: Delegation lifecycle approvals
   - name: External disclosures
   - name: Business signing
+  - name: Payment proposals
 paths:
   /api/v1/external-disclosures/{id}/verify-otp:
     post:
@@ -59,6 +62,133 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '404': { description: External disclosure unavailable }
+  /api/v1/payment-proposals:
+    post:
+      tags: [Payment proposals]
+      summary: Record a customer MCP client's payment proposal (mcp-service only)
+      description: >-
+        ADR-0383 D6. Creates an immutable PENDING proposal under the ACTIVE MCP_CLIENT grant found
+        from (partyId, mcpClientId, keyThumbprint). Moves no money. An identical open proposal is
+        returned instead (200, deduplicated). Callable only by mcp-service's own service account.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePaymentProposalRequest' }
+      responses:
+        '201':
+          description: Proposal created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpProposalReceipt' }
+        '200':
+          description: Identical open proposal already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpProposalReceipt' }
+        '400': { description: Invalid instruction }
+        '403': { description: Caller is not mcp-service, or no active grant permits it }
+        '409': { description: Idempotency-Key reused for a different request, or in progress }
+        '429': { description: Per-customer proposal limit reached }
+    get:
+      tags: [Payment proposals]
+      summary: List the customer's open proposals (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/ProposalPartyId'
+      responses:
+        '200':
+          description: Open proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+  /api/v1/payment-proposals/{id}:
+    get:
+      tags: [Payment proposals]
+      summary: Read one of the customer's proposals with its exact canonical instruction
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/ProposalPartyId'
+      responses:
+        '200':
+          description: The proposal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+  /api/v1/payment-proposals/{id}/approve:
+    post:
+      tags: [Payment proposals]
+      summary: Record the customer's SCA-consumed approval (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposalApproveRequest' }
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Hash mismatch, or not PENDING (expired, replayed, rejected, grant inactive) }
+  /api/v1/payment-proposals/{id}/reject:
+    post:
+      tags: [Payment proposals]
+      summary: Record the customer's rejection (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposalDecisionRequest' }
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Not PENDING }
+  /api/v1/payment-proposals/{id}/execution:
+    post:
+      tags: [Payment proposals]
+      summary: Record the outcome of the customer's own payment for an APPROVED proposal (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposalExecutionRequest' }
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Hash mismatch or not APPROVED }
   /api/v1/delegation-portfolios:
     post:
       tags: [Delegation portfolios]
@@ -1056,6 +1186,16 @@ paths:
 
 components:
   parameters:
+    PaymentProposalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ProposalPartyId:
+      name: partyId
+      in: query
+      required: true
+      schema: { type: string, format: uuid }
     EntityId:
       name: entityId
       in: path
@@ -1160,6 +1300,68 @@ components:
               message: { type: string }
               timestamp: { type: string, format: date-time }
   schemas:
+    CreatePaymentProposalRequest:
+      type: object
+      required: [partyId, mcpClientId, keyThumbprint, operationType, debtorAccountId, creditorIban, creditorName, amount, currency]
+      properties:
+        partyId: { type: string, format: uuid }
+        mcpClientId: { type: string, maxLength: 255 }
+        keyThumbprint: { type: string, maxLength: 43 }
+        operationType: { type: string, enum: [DOMESTIC_PAYMENT, SEPA_PAYMENT] }
+        debtorAccountId: { type: string, format: uuid }
+        creditorIban: { type: string, maxLength: 42 }
+        creditorName: { type: string, maxLength: 70 }
+        amount: { type: string, description: 'Positive decimal, at most two fractional digits' }
+        currency: { type: string, enum: [CZK, EUR] }
+        reference: { type: string, maxLength: 140 }
+    McpProposalReceipt:
+      type: object
+      required: [proposalId, status, deduplicated, expiresAt, summary]
+      properties:
+        proposalId: { type: string, format: uuid }
+        status: { type: string }
+        deduplicated: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+        summary: { type: string }
+    ProposalDecisionRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    ProposalApproveRequest:
+      type: object
+      required: [partyId, payloadSha256]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$', description: 'Must equal the stored hash the device signed' }
+    ProposalExecutionRequest:
+      type: object
+      required: [partyId, payloadSha256]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        paymentId: { type: [string, 'null'], format: uuid, description: 'Null records EXECUTION_FAILED' }
+    PaymentProposalView:
+      type: object
+      required: [id, status, mcpClientId, operationType, debtorAccountId, creditorIban, creditorName, amount, currency, payloadSha256, approvalRequestId, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXPIRED, EXECUTED, EXECUTION_FAILED] }
+        mcpClientId: { type: string }
+        operationType: { type: string, enum: [DOMESTIC_PAYMENT, SEPA_PAYMENT] }
+        debtorAccountId: { type: string, format: uuid }
+        creditorIban: { type: string }
+        creditorName: { type: string }
+        amount: { type: string }
+        currency: { type: string }
+        reference: { type: [string, 'null'] }
+        payloadSha256: { type: string }
+        approvalRequestId: { type: string, description: 'mcp-proposal:<id>; the SCA APPROVAL challenge must link it' }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        executedPaymentId: { type: [string, 'null'], format: uuid }
     ExternalDisclosureOtpRequest:
       type: object
       additionalProperties: false

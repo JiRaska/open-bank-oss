@@ -101,3 +101,14 @@ V34) or `MCP_CLIENT`, a customer-admitted third-party MCP client.
   (`400 MCP_CLIENT_GRANTEE_DORMANT`) and no lifecycle event can be built for one, because the
   current consumers (account-service, card-issuance-service, context-service) know only parties.
   The guard is lifted only after they skip non-PARTY grants.
+
+## `delegation_payment_proposals` (V38, ADR-0383 D6)
+
+Payment **proposals** made by a customer-connected MCP client under an ACTIVE `MCP_CLIENT` grant.
+A row moves no money. It holds the immutable instruction (operation type, debtor account, payee
+IBAN and name, amount, currency, reference), `payload_sha256` over its canonical form (domain tag,
+proposal id, party, every instruction field), the grant and client it was made under, and a
+one-way status: `PENDING → APPROVED | REJECTED | EXPIRED`, `APPROVED → EXECUTED | EXECUTION_FAILED`.
+A trigger pins the instruction columns and the state graph; DELETE raises. Proposals expire after
+24 h; at most 10 are open and 20 created per customer per 24 h. Lifecycle events go to
+`openbank.delegation.payment-proposal-events` (no payee IBAN, name or reference on the wire).

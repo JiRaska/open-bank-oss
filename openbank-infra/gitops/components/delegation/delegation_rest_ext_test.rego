@@ -277,3 +277,42 @@ test_operator_gets_no_write_reason_for_signing if {
 test_operator_is_prohibited_from_business_signing if {
 	prohibited with input as {"principal": operator, "action": "delegation.signing.approval.sign"}
 }
+
+# --- ADR-0383 D6 customer MCP payment proposals ---
+
+mcp := {"service_account": true, "client_id": "openbank-mcp", "type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+proposal_decisions := {
+	"delegation.proposal.read",
+	"delegation.proposal.approve",
+	"delegation.proposal.reject",
+	"delegation.proposal.execution",
+}
+
+test_mcp_may_create_a_proposal if {
+	allow with input as {"principal": mcp, "action": "delegation.proposal.create"}
+}
+
+test_mcp_may_not_read_approve_reject_or_record_execution if {
+	every action in proposal_decisions {
+		not allow with input as {"principal": mcp, "action": action}
+	}
+}
+
+test_edge_may_read_and_decide_its_customer_proposals if {
+	every action in proposal_decisions {
+		allow with input as {"principal": edge, "action": action}
+	}
+}
+
+test_edge_may_not_create_a_proposal if {
+	not allow with input as {"principal": edge, "action": "delegation.proposal.create"}
+}
+
+test_staff_and_shared_backend_may_not_touch_proposals if {
+	every principal in [operator, admin, services_m2m] {
+		every action in proposal_decisions | {"delegation.proposal.create"} {
+			not allow with input as {"principal": principal, "action": action}
+		}
+	}
+}
