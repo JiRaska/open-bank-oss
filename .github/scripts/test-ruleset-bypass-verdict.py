@@ -199,7 +199,7 @@ print(json.dumps(value))
         self.assertEqual(gate['env']['RULESET_BYPASS_SNAPSHOT'],
                          '${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}')
         self.assertNotIn('continue-on-error', json.dumps(rerun))
-        self.assertEqual(workflow['jobs']['gates']['timeout-minutes'], 15)
+        self.assertEqual(workflow['jobs']['gates']['timeout-minutes'], 25)
         self.assertEqual(download['with']['artifact-ids'], '${{ steps.locate.outputs.artifact-id }}')
         self.assertEqual(download['with']['run-id'], '${{ steps.locate.outputs.run-id }}')
         harness = r'''
