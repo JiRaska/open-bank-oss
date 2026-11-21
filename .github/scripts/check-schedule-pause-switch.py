@@ -47,6 +47,13 @@ STATUS_FN = re.compile(r"\b(always|failure|cancelled)\s*\(\s*\)")
 
 # filename -> reason pausing must stay a reviewed PR.
 EXCLUDED: dict[str, str] = {
+    "auto-deploy.yml": "money-path stranded-service reconcile tick",
+    "admin-ui-deploy.yml": "deploy lane; its schedule recovers missed deploys",
+    "pact-verification-reconcile.yml": "keeps can-i-deploy unblocked by dispatching provider verification",
+    "deploy-window-flush.yml": "only arms deferred deploy PRs; pausing strands the deploy lane",
+    "pitest.yml": "pitest-authz produces enforced mutation evidence",
+    "perf-baseline.yml": "produces the admin-ui perf evidence dataset",
+    "ghcr-publish.yml": "publishes images with provenance attestations",
     "admin-ui-browser-synthetic.yml": "deployed SSO-boundary / security synthetic probe",
     "admin-ui-deployed-auth-gate.yml": "verifies the deployed admin-ui auth gate (security control)",
     "admin-ui-evidence.yml": "publishes compliance evidence datasets",
@@ -117,13 +124,42 @@ def entry_jobs(doc: dict) -> list[tuple[str, str]]:
     return out
 
 
+def switch_expr(filename: str) -> str:
+    return (f"github.event_name != 'schedule' || (vars.{var_name(filename)} != 'true' && "
+            f"vars.{GLOBAL_VAR} != 'true')")
+
+
+def _wraps(expr: str) -> bool:
+    """True when expr is `( ... )` with the first paren closing at the very end."""
+    if not (expr.startswith("(") and expr.endswith(")")):
+        return False
+    depth, quote = 0, False
+    for i, ch in enumerate(expr):
+        if ch == "'":
+            quote = not quote
+        elif not quote and ch == "(":
+            depth += 1
+        elif not quote and ch == ")":
+            depth -= 1
+            if depth == 0 and i != len(expr) - 1:
+                return False
+    return depth == 0 and not quote
+
+
 def has_switch(cond: str, filename: str) -> bool:
-    c = re.sub(r"\s+", " ", cond)
-    return (
-        "github.event_name != 'schedule'" in c
-        and f"vars.{var_name(filename)} != 'true'" in c
-        and f"vars.{GLOBAL_VAR} != 'true'" in c
-    )
+    """Exact structural form only: `<switch>` alone, or `(<switch>) && (<original>)`.
+
+    A substring match would accept `<switch> || always()`, where operator precedence lets
+    the job run on a paused schedule anyway."""
+    c = re.sub(r"\s+", " ", cond).strip()
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", c)
+    if m:
+        c = m.group(1).strip()
+    sw = switch_expr(filename)
+    if c == sw:
+        return True
+    head = f"({sw}) && "
+    return c.startswith(head) and _wraps(c[len(head):])
 
 
 def check(wf_dir: Path, excluded: dict[str, str]) -> tuple[int, list[str]]:
@@ -173,6 +209,16 @@ def self_test() -> int:
         ("always() dependent without switch fails",
          {"good.yml": good.replace("    needs: a\n", "    needs: a\n    if: always()\n")},
          {}, "good.yml: job `b` lacks the pause switch"),
+        ("loose switch OR-ed with always() fails",
+         {"good.yml": good.replace("(vars.GOOD_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')",
+                                   "vars.GOOD_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true' || always()")},
+         {}, "good.yml: job `a` lacks the pause switch"),
+        ("switch && unwrapped original fails",
+         {"good.yml": good.replace("    if: github", "    if: (github").replace("'true')\n    runs-on", "'true')) && (always()) || x\n    runs-on", 1)},
+         {}, "good.yml: job `a` lacks the pause switch"),
+        ("combined structural form passes",
+         {"good.yml": good.replace("    needs: a\n", "    needs: a\n    if: (github.event_name != 'schedule' || (vars.GOOD_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) && (always() && x == ')')\n")},
+         {}, None),
         ("switch for the wrong workflow id fails",
          {"other.yml": good}, {}, "other.yml: job `a` lacks the pause switch"),
         ("excluded workflow passes",

@@ -34,7 +34,6 @@ concurrency:
 
 jobs:
   flush:
-    if: github.event_name != 'schedule' || (vars.DEPLOY_WINDOW_FLUSH_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: Arm the oldest deferred deploy PR
     runs-on: ubuntu-latest
     timeout-minutes: 10

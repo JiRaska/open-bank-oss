@@ -980,7 +980,7 @@ gates:
     mode: advisory
     budget_seconds: 15
     min_subjects: 40    # 63 scheduled workflows on 2026-11-21
-    verified: "2026-11-21 — 0 findings; 23 switched, 40 excluded with reasons"
+    verified: "2026-11-21 — 0 findings; 16 switched, 47 excluded with reasons"
     rationale: "A pause that needs a PR waits in the queue the runaway cron may be flooding; the gate makes a new scheduled workflow either carry the switch or state why pausing it must stay reviewed (#17006)."
     review_after: "2027-05-21"
     selftest: python3 .github/scripts/check-schedule-pause-switch.py --self-test

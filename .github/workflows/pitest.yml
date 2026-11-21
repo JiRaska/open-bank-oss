@@ -33,7 +33,6 @@ env:
 
 jobs:
   pitest:
-    if: github.event_name != 'schedule' || (vars.PITEST_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: pitest / ${{ matrix.service }}
     runs-on: ubuntu-latest
     timeout-minutes: 30  # measured max 414s (ledger); mutation runs are the likeliest to hang
@@ -216,7 +215,6 @@ jobs:
   # in openbank-libs-runtime's plugins{} block splits the classloaders and kordamp jandex
   # loads twice (Banner$Inject_ ClassCastException) — see the init script header.
   pitest-authz:
-    if: github.event_name != 'schedule' || (vars.PITEST_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: pitest / authz decision path (enforced)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -301,7 +299,6 @@ jobs:
   # module without splitting the jandex classloaders). Domain stays advisory; runtime's shared
   # init script enforces 70% and is also run by the PR library quality lane.
   pitest-libs:
-    if: github.event_name != 'schedule' || (vars.PITEST_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: pitest / libs (${{ matrix.module }}, ${{ matrix.module == 'openbank-libs-runtime' && 'enforced' || 'advisory' }})
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -41,7 +41,6 @@ concurrency:
 
 jobs:
   discover:
-    if: github.event_name != 'schedule' || (vars.GHCR_PUBLISH_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: Discover released services
     runs-on: ubuntu-latest
     timeout-minutes: 5
