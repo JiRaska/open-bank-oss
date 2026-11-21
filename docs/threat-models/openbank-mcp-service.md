@@ -439,8 +439,8 @@ a stub (T-T2/T-D2).
 
 - **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
   - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
-    edge because quarkus-oidc's `BearerAuthenticationMechanism` (customers tenant,
-    `authorization-scheme: DPoP`) compares `htu` with `absoluteURI()` — measured; this service's own
+    edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
+    `authorization-scheme: DPoP`) compares `htu` with the request's absolute URI — measured; this service's own
     admission compares with the static published resource, but with
     `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
     then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
