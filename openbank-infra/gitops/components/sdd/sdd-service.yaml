@@ -110,6 +110,10 @@ spec:
                   key: ca.password
             - name: QUARKUS_HTTP_PORT
               value: "8129"
+            # ADR-0036 §B idle-expiry sweep kill switch. application.yaml defaults it to false;
+            # this environment opts in. Set "false" here to stop the sweep without a code revert.
+            - name: OPENBANK_SDD_EXPIRY_ENABLED
+              value: "true"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET

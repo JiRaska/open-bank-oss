@@ -186,20 +186,8 @@ class SddMandateService(
         AmendableField.SEQUENCE_TYPE -> m.copy(sequenceType = SequenceType.valueOf(cmd.newValue))
     }
 
-    private fun mandateEvent(m: SddMandate, eventType: String): OutboxMessage {
-        val payload = """
-            {"eventType":"$eventType",
-            "mandateId":"${m.id}",
-            "accountId":"${m.accountId}",
-            "creditorIdentifier":"${m.creditorIdentifier}",
-            "umr":"${m.umr}",
-            "scheme":"${m.scheme}",
-            "status":"${m.status}",
-            "sequenceType":"${m.sequenceType}",
-            "occurredAt":"${clock()}"}
-        """.trimIndent().replace("\n", "")
-        return OutboxMessage(UUID.randomUUID(), m.id, eventType, payload)
-    }
+    private fun mandateEvent(m: SddMandate, eventType: String): OutboxMessage =
+        mandateEventMessage(m, eventType, clock())
 
     private fun collectionAuthorisedEvent(m: SddMandate, i: CollectionInstruction): OutboxMessage {
         val eventType = "sdd.collection.authorised.v1"
@@ -227,3 +215,22 @@ class SddMandateService(
 
 /** Raised when a mandate id does not resolve. */
 class MandateNotFoundException(val mandateId: UUID) : RuntimeException("No SDD mandate $mandateId")
+
+/**
+ * The `sdd.mandate.*.v1` envelope on `openbank.sdd.event`. Shared by every mandate transition,
+ * including the idle-expiry sweep, so all mandate events keep one shape.
+ */
+internal fun mandateEventMessage(m: SddMandate, eventType: String, occurredAt: Instant): OutboxMessage {
+    val payload = """
+        {"eventType":"$eventType",
+        "mandateId":"${m.id}",
+        "accountId":"${m.accountId}",
+        "creditorIdentifier":"${m.creditorIdentifier}",
+        "umr":"${m.umr}",
+        "scheme":"${m.scheme}",
+        "status":"${m.status}",
+        "sequenceType":"${m.sequenceType}",
+        "occurredAt":"$occurredAt"}
+    """.trimIndent().replace("\n", "")
+    return OutboxMessage(UUID.randomUUID(), m.id, eventType, payload)
+}
