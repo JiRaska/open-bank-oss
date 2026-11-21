@@ -109,47 +109,30 @@ VALID_EXPECT = {"pass", "fail"}
 # money-path and authorization/policy gates are NEVER scaled (ADR-0389 tie-break: the stricter
 # class wins): their budgets are part of the control, not a performance hint.
 BUDGET_MULTIPLIER_ENV = "GATE_BUDGET_MULTIPLIER"
-BUDGET_MULTIPLIER_MIN, BUDGET_MULTIPLIER_MAX = 0.5, 4.0
-# Derivation rule (kept explicit so a reviewer sees the set): group `security`, or an id naming
-# a money-path / authz / OPA / rego / policy / secret / threat-model / ledger / idempotency
-# control. budget_multiplier_exempt() ALSO applies the rule itself, so a NEW gate matching it is
-# exempt even before it is added here (fail towards the stricter class); the self-test fails if
-# this list and the rule disagree about the current manifest.
-BUDGET_EXEMPT_ID_RE = re.compile(
-    r"money|authz|opa|rego|policy|secret|threat|ledger|idempoten|four-eyes|realm|oidc|pdp|principal|pci"
+# Floor 1.0: below it, 17 enforced gates would redden on their CPU budget, i.e. a "speed-up"
+# knob that manufactures findings. The knob only ever buys headroom.
+BUDGET_MULTIPLIER_MIN, BUDGET_MULTIPLIER_MAX = 1.0, 4.0
+# ALLOW-list, not a deny-list: a gate is scaled ONLY if its group is explicitly SAFE AND its id
+# names no security / money-path / policy / evidence control. Everything else — every gate in
+# `security`, `supplychain`, `gitops`, any group added later, and any denied id — is exempt by
+# default (ADR-0389 tie-break: the stricter class wins). Widening either list is a reviewed change,
+# and the self-test pins a set of real gates that must stay unscaled.
+BUDGET_SCALED_GROUPS = frozenset({"lint", "kotlin", "registry", "data", "api"})
+BUDGET_DENY_ID_RE = re.compile(
+    r"money|authz|opa|rego|policy|secret|threat|ledger|idempoten|four-eyes|realm|oidc|pdp|principal"
+    r"|pci|ruleset|agent-merge|agent-review|mtls|tls|credential|outbox|card|provenance|attest|cosign"
+    r"|honeytoken|dlq|deploy-hold|release-evidence|approval|supply|security|audit|sanction|payment"
 )
-BUDGET_EXEMPT_GROUPS = frozenset({"security"})
-BUDGET_EXEMPT_IDS = frozenset({
-    # group: security
-    "pdp-flag-rollout-probe-self-test", "audit-anchor-offline-verifier-unit-test",
-    "xml-factory-hardened", "principal-name-trust", "security-txt-policy-reachable",
-    "adversarial-contract-test", "critical-alert-egress", "threat-model-coverage",
-    "threat-model-updated-on-trust-boundary-change", "security-checklist-money-path",
-    "security-sensitive-paths-coverage", "security-checklist-append-helper",
-    "threat-model-claims-resolve", "threat-model-test-evidence", "scheduler-exercised-in-tests",
-    "feature-flag-governance", "no-dead-code-service-principal-rego-rule",
-    "no-allow-all-pdp-in-main", "psd2-anonymous-grant-stays-behind-eidas-mtls",
-    "mcp-real-port-requires-caller-auth-first", "authz-enforce-pdp-sidecar-parity",
-    "authz-enforce-money-path", "four-eyes-enforce-deployed", "rolesallowed-realm-parity",
-    "rego-service-account-profile-scope", "oidc-client-configured",
-    "oidc-tls-verification-profile-scoped", "pr-build-cloud-credentials",
-    "realm-template-importable", "realm-import-secret-sources", "synthetic-customer-identity",
-    "ops-cli-client-contract", "realm-devci-artifact-parity", "mcp-customer-channel-propose-only",
-    "pdp-flag-rollout-complete",
-    # other groups, by id
-    "pitest-money-path-coverage", "alert-rca-ledger-guards", "oidc-secret-convention",
-    "oidc-client-secret-wiring", "journey-money-path-accountability", "opa-sidecar-bundle-shape",
-    "appyaml-secret-literals", "agent-merge-pr-policy-selftest", "money-rounding-inline-ratchet",
-    "idempotency-coverage-money-path", "money-path-pact-coverage",
-    "audit-money-path-subscription", "ledger-instance-switches-off", "opa-bundle-parses",
-    "opa-bundle-apply-size", "four-eyes-verb-grantable", "idempotency-contract-parity",
-    "network-policy-code-edges",
-})
+# The `gates` job in ci.yml runs under `timeout-minutes: 15`; a scaled per-gate kill above that
+# (minus a margin for setup/report) could never fire — the job would be cancelled first, which
+# reads as "not a verdict" rather than a timeout finding. The self-test pins this to ci.yml.
+GATES_JOB_TIMEOUT_SECONDS = 15 * 60
+GATES_JOB_TIMEOUT_MARGIN = 60
 
 
 def budget_multiplier_exempt(gate) -> bool:
-    return (gate["id"] in BUDGET_EXEMPT_IDS or gate.get("group") in BUDGET_EXEMPT_GROUPS
-            or bool(BUDGET_EXEMPT_ID_RE.search(gate["id"])))
+    return (gate.get("group") not in BUDGET_SCALED_GROUPS
+            or bool(BUDGET_DENY_ID_RE.search(gate["id"])))
 
 
 def parse_budget_multiplier(raw):
@@ -167,19 +150,24 @@ def parse_budget_multiplier(raw):
 
 
 def apply_budget_multiplier(gates, m: float, default_timeout: int):
-    """Scale budget_seconds and the hard timeout of every non-exempt gate in place. Returns the
-    exempt ids actually seen. The kill must stay above the budget, so both scale together."""
+    """Scale budget_seconds and the hard timeout of every SAFE gate in place; return exempt ids.
+    The scaled timeout is clamped to MAX_TIMEOUT and to the gates job's own limit minus a margin,
+    and the budget is clamped to that timeout so the pairing load() enforces stays enforceable."""
     exempt = []
+    cap = min(MAX_TIMEOUT, GATES_JOB_TIMEOUT_SECONDS - GATES_JOB_TIMEOUT_MARGIN)
     for g in gates:
         if budget_multiplier_exempt(g):
             exempt.append(g["id"])
             continue
         if m == 1.0:
             continue
+        base_tmo = g.get("timeout_seconds", default_timeout)
+        tmo = max(base_tmo, min(cap, int(round(base_tmo * m))))  # never BELOW the declared value
+        g["timeout_seconds"] = tmo
         if g.get("budget_seconds") is not None:
-            g["budget_seconds"] = round(g["budget_seconds"] * m, 3)
-        g["timeout_seconds"] = max(1, int(round(g.get("timeout_seconds", default_timeout) * m)))
+            g["budget_seconds"] = max(g["budget_seconds"], min(round(g["budget_seconds"] * m, 3), tmo))
     return exempt
+
 
 # Variables the Actions runner sets and a laptop does not. A gate reading one of these BARE dies
 # under `bash -euo pipefail` with `unbound variable`, which is the same failure the PR_DIFF_BASE
@@ -1687,11 +1675,11 @@ def self_test():
             if not want_abort and fixture_output:
                 bad.append(f"load() emitted output for valid ({body!r})")
 
-        # ADR-0389 budget multiplier: parsing, scaling, and the exempt set.
+        # ADR-0389 budget multiplier: parsing, scaling, clamping and the allow-list.
         for raw, want_m, want_warn in (
-            (None, 1.0, False), ("", 1.0, False), ("2", 2.0, False), ("0.5", 0.5, False),
-            ("4.0", 4.0, False), ("4.5", 1.0, True), ("0.1", 1.0, True), ("-1", 1.0, True),
-            ("abc", 1.0, True), ("nan", 1.0, True), ("inf", 1.0, True),
+            (None, 1.0, False), ("", 1.0, False), ("2", 2.0, False), ("1.0", 1.0, False),
+            ("4.0", 4.0, False), ("4.5", 1.0, True), ("0.5", 1.0, True), ("0.99", 1.0, True),
+            ("-1", 1.0, True), ("abc", 1.0, True), ("nan", 1.0, True), ("inf", 1.0, True),
         ):
             got_m, got_w = parse_budget_multiplier(raw)
             if got_m != want_m or bool(got_w) != want_warn:
@@ -1699,29 +1687,55 @@ def self_test():
                            f"got ({got_m}, {got_w!r})")
         scaled = [{"id": "plain", "group": "lint", "budget_seconds": 30},
                   {"id": "plain-tmo", "group": "lint", "budget_seconds": 100, "timeout_seconds": 600},
+                  {"id": "big", "group": "kotlin", "budget_seconds": 400, "timeout_seconds": 1800},
                   {"id": "sec", "group": "security", "budget_seconds": 30},
+                  {"id": "gitops-plain", "group": "gitops", "budget_seconds": 30},
                   {"id": "x-money-path-y", "group": "lint", "budget_seconds": 30},
-                  {"id": "security-checklist-money-path", "group": "lint", "budget_seconds": 60}]
+                  {"id": "new-group-gate", "group": "brand-new", "budget_seconds": 30}]
         ex = apply_budget_multiplier(scaled, 2.0, 420)
-        want = {"plain": (60, 840), "plain-tmo": (200, 1200), "sec": (30, None),
-                "x-money-path-y": (30, None), "security-checklist-money-path": (60, None)}
+        # 840 = min(MAX_TIMEOUT, 15 min job - 60 s margin); "big" keeps its declared 1800 (never lowered)
+        want = {"plain": (60, 840), "plain-tmo": (200, 840), "big": (800, 1800),
+                "sec": (30, None), "gitops-plain": (30, None), "x-money-path-y": (30, None),
+                "new-group-gate": (30, None)}
         for g in scaled:
             if (g["budget_seconds"], g.get("timeout_seconds")) != want[g["id"]]:
-                # must-FAIL direction: an exempt gate that WAS multiplied lands here
                 bad.append(f"apply_budget_multiplier: {g['id']} -> budget {g['budget_seconds']}, "
                            f"timeout {g.get('timeout_seconds')}; want {want[g['id']]}")
-        if sorted(ex) != sorted(["security-checklist-money-path", "sec", "x-money-path-y"]):
-            bad.append(f"apply_budget_multiplier exempt set wrong: {ex}")
-        # The explicit list and the derivation rule must agree about the REAL manifest.
+        if sorted(ex) != sorted(["sec", "gitops-plain", "x-money-path-y", "new-group-gate"]):
+            bad.append(f"apply_budget_multiplier exempt set wrong: {sorted(ex)}")
+        # must-FAIL if the allow-list is widened: these REAL gates must never be scaled.
+        must_stay_exempt = (
+            "deploy-hold-image-pins", "ruleset-bypass-actors", "ruleset-context-parity",
+            "release-evidence-coverage", "agent-merge-authorization-selftest",
+            "agent-review-proof-falsifiable", "agent-review-scope-falsifiable", "no-handrolled-cosign",
+            "workflow-supply-chain", "fleet-attestation-classifier", "test-provenance-cache",
+            "approval-store-redis-host", "honeytoken-wiring", "card-capability-matrix-drift",
+            "mtls-bearer-only", "mtls-keeps-http-port", "tls-certificate-reload",
+            "credential-expiry-watch-coverage", "credential-deadline-ratchet", "incoming-dlq-wiring",
+            "outbox-conformance-it-present", "outbox-sent-retention", "outbox-claim-sql-ratchet",
+            "outbox-dispatch-enabled-guard", "outbox-has-writer", "outbox-v2-cutover-quiesced",
+            "provenance", "security-checklist-money-path", "authz-enforce-money-path",
+        )
         real = pathlib.Path(__file__).resolve().parents[2]
         if (real / MANIFEST).exists():
             with open(real / MANIFEST, encoding="utf-8") as fh:
-                real_gates = (yaml.safe_load(fh) or {}).get("gates") or []
-            derived = {g["id"] for g in real_gates if g.get("group") in BUDGET_EXEMPT_GROUPS
-                       or BUDGET_EXEMPT_ID_RE.search(g["id"])}
-            if derived != set(BUDGET_EXEMPT_IDS):
-                bad.append(f"BUDGET_EXEMPT_IDS drifted from the rule: missing "
-                           f"{sorted(derived - BUDGET_EXEMPT_IDS)}, stale {sorted(BUDGET_EXEMPT_IDS - derived)}")
+                real_gates = {g["id"]: g for g in (yaml.safe_load(fh) or {}).get("gates") or []}
+            for gid in must_stay_exempt:
+                if gid not in real_gates:
+                    bad.append(f"must-stay-exempt gate `{gid}` is not in {MANIFEST} (renamed? update the pin)")
+                    continue
+                probe = [dict(real_gates[gid], budget_seconds=10)]
+                apply_budget_multiplier(probe, 4.0, 420)
+                if probe[0]["budget_seconds"] != 10 or "timeout_seconds" in probe[0] and \
+                        probe[0]["timeout_seconds"] != real_gates[gid].get("timeout_seconds"):
+                    bad.append(f"gate `{gid}` was SCALED by the budget multiplier; it must stay exempt")
+        ci_yml = real / ".github" / "workflows" / "ci.yml"
+        if ci_yml.exists():
+            with open(ci_yml, encoding="utf-8") as fh:
+                job_tmo = (yaml.safe_load(fh) or {}).get("jobs", {}).get("gates", {}).get("timeout-minutes")
+            if job_tmo != GATES_JOB_TIMEOUT_SECONDS // 60:
+                bad.append(f"GATES_JOB_TIMEOUT_SECONDS ({GATES_JOB_TIMEOUT_SECONDS}s) disagrees with "
+                           f"ci.yml jobs.gates.timeout-minutes ({job_tmo})")
 
         # Headroom warning: 85% warns, 50% does not, p95 alone triggers, failures are not repeated.
         def fake(seconds, budget=100, timeout=420, status="ok"):
