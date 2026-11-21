@@ -119,8 +119,10 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
     '1e5e9f5b334f640d8102054b8155a9526d035e79',
-    # merge-train.py of #16885 after merging main at 82b34e5d09 (ruff B007 + stale-ref fix), reviewed with that PR.
-    'f3c6eeaec5143a623b96a3a9dccddb6f7111d8d2',
+    # merge-train.py of #16972's tick-speed change merged with #16973's claim_evidence(now) fix, reviewed with that PR.
+    'bffe20f4c51c3b6fe3a7d961617d4f484276478e',
+    # merge-train.py of #16885 after merging main with #16972 (ruff B007 + stale-ref fix kept), reviewed with that PR.
+    'cc5af4b46128de5bf8f51283c1d9f02f8a50f46f',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
