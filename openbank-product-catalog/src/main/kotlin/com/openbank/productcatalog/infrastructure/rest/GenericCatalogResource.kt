@@ -296,10 +296,13 @@ class GenericCatalogResource(
 
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#offeringId")
-    override suspend fun getPublishedProductV2(offeringId: UUID, effectiveAt: java.time.OffsetDateTime?): Response =
-        Response.ok(
-            revisionResponse(service.findPublished(offeringId, effectiveAt?.toInstant() ?: Instant.now(clock))),
+    override suspend fun getPublishedProductV2(offeringId: UUID, effectiveAt: java.time.OffsetDateTime?): Response {
+        val revision = service.findPublished(offeringId, effectiveAt?.toInstant() ?: Instant.now(clock))
+        val countries = service.findOffering(offeringId).market.countries
+        return Response.ok(
+            revisionResponse(revision).copy(marketCountries = countries.sorted().takeIf { it.isNotEmpty() }),
         ).build()
+    }
 
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#productId")
