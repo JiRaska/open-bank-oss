@@ -117,23 +117,40 @@ class McpGatewayMtlsIT {
             .body("result.tools.size()", equalTo(0))
     }
 
+    /**
+     * BLOCKER, measured 2026-11-21 — these two are RED on purpose and keep this PR a draft.
+     * Under the production listener shape (`%prod` bearer-only permission, `auth-mechanism: bearer`,
+     * required by gate mtls-bearer-only) a request with `Authorization: DPoP` is NOT authenticated by
+     * the customers tenant at all: a proof for `https://evil.test.example/mcp` answers 200, as do
+     * plain HTTP and a foreign Host. Measured controls: with the permission removed, and with
+     * `auth-mechanism: DPoP`, all of these are refused with a bare `DPoP` challenge (tenant htu
+     * check) — but `DPoP` then stops authenticating staff `Bearer` tokens on the same paths, and the
+     * permission is global to both listeners. Owner decision needed (see PR body).
+     */
     @Test
-    fun `DPoP - the same proof over plain HTTP is refused by the tenant htu check, forged X-Forwarded-Proto ignored`() {
-        val challenge = publishedProofToolsList(given(), "c0ffee00-0000-0000-0000-000000000022")
-            .statusCode(401).extract().header("WWW-Authenticate")
-        // Bare `DPoP`: refused by quarkus-oidc (absoluteURI http://… != htu https://…), not by the
-        // customer branch, whose refusals always carry resource_metadata.
-        assertThat(challenge).isEqualTo("DPoP")
+    fun `DPoP - a proof for any URL but the published one is refused, even over the gateway hop`() {
+        listOf("https://evil.test.example/mcp", "http://mcp.test.example/mcp", "https://mcp.test.example/other")
+            .forEach { htu ->
+                val key = DpopTestProofs.newKey()
+                val token = customerToken("c0ffee00-0000-0000-0000-000000000022", DpopTestProofs.jkt(key))
+                val status = mtls("gateway").contentType("application/json")
+                    .header("Host", PUBLISHED_HOST)
+                    .header("Authorization", "DPoP $token")
+                    .header("DPoP", DpopTestProofs.proof(key, htu = htu, token = token))
+                    .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+                    .post("/mcp").then().extract().statusCode()
+                assertThat(status).describedAs(htu).isEqualTo(401)
+            }
     }
 
     @Test
-    fun `DPoP - a Host other than the published one is refused even over the gateway mTLS hop`() {
-        val challenge = publishedProofToolsList(
-            mtls("gateway"),
-            "c0ffee00-0000-0000-0000-000000000023",
-            host = "evil.test.example",
-        ).statusCode(401).extract().header("WWW-Authenticate")
-        assertThat(challenge).isEqualTo("DPoP")
+    fun `DPoP - the published-URL proof over plain HTTP or with a foreign Host is refused at the tenant`() {
+        assertThat(publishedProofToolsList(given(), "c0ffee00-0000-0000-0000-000000000023").extract().statusCode())
+            .describedAs("plain HTTP, forged X-Forwarded-Proto").isEqualTo(401)
+        assertThat(
+            publishedProofToolsList(mtls("gateway"), "c0ffee00-0000-0000-0000-000000000024", host = "evil.test.example")
+                .extract().statusCode(),
+        ).describedAs("foreign Host over the gateway hop").isEqualTo(401)
     }
 
     @Test
