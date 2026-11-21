@@ -50,34 +50,76 @@ REASON_MAX = 500
 
 
 # ----------------------------------------------------------------------------- pure logic
-def top_level_block(text: str | None, key: str) -> list[str]:
-    """Lines of the top-level YAML mapping `key:` (up to the next top-level key), comments dropped."""
-    if text is None:
-        return []
-    out, inside = [], False
-    for line in text.splitlines():
-        if re.match(rf"^{re.escape(key)}\s*:", line):
-            inside = True
-            out.append(line.split("#", 1)[0].rstrip())
-            continue
-        if inside:
-            if line and not line[0].isspace() and not line.startswith("#"):
-                break
-            s = line.split("#", 1)[0].rstrip()
-            if s.strip():
-                out.append(s)
-    return out
+class _DupKey(Exception):
+    pass
+
+
+def load_rules(text: str | None):
+    """Parse rules.yaml rejecting duplicate keys at ANY depth (SnakeYAML/safe_load keep the last
+    one silently, so a second empty `deploy_holds:` would otherwise erase every hold).
+    Returns (doc, error). Anchors/aliases/flow style resolve to the same data, so the semantic
+    comparison below is indifferent to how the YAML is spelled."""
+    try:
+        import yaml  # system PyYAML on the runner; absent = fail closed via the error path
+    except ImportError:
+        return None, "PyYAML unavailable — cannot judge rules.yaml"
+    if text is None or not text.strip():
+        return None, "rules.yaml absent or empty"
+
+    class L(yaml.SafeLoader):
+        pass
+
+    def construct(loader, node, deep=False):
+        keys = set()
+        for k, _ in node.value:
+            kv = loader.construct_object(k, deep=True)
+            if kv in keys:
+                raise _DupKey(f"duplicate key {kv!r} at line {k.start_mark.line + 1}")
+            keys.add(kv)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep=True)
+
+    L.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct)
+    try:
+        doc = yaml.load(text, Loader=L)
+    except _DupKey as e:
+        return None, str(e)
+    except Exception as e:  # noqa: BLE001 — any parse failure refuses
+        return None, f"unparseable: {type(e).__name__}"
+    if not isinstance(doc, dict):
+        return None, "top level is not a mapping"
+    return doc, None
+
+
+def _canon(x) -> str:
+    return json.dumps(x, sort_keys=True, default=str)
 
 
 def rules_refusals(base_text: str | None, head_text: str | None) -> list[str]:
+    base, err = load_rules(base_text)
+    if err:
+        return [f"rules.yaml on main cannot be judged ({err})"]
+    head, err = load_rules(head_text)
+    if err:
+        return [f"rules.yaml at head refused ({err})"]
     why = []
     for key in PROTECTED_BLOCKS_NO_REMOVAL:
-        base, head = top_level_block(base_text, key), top_level_block(head_text, key)
-        gone = [ln for ln in base if ln not in head]
+        b, h = base.get(key), head.get(key)
+        if b is None:
+            continue
+        if not isinstance(h, type(b)):
+            why.append(f"rules.yaml `{key}` changes shape — a hold is lifted by review, never by break-glass")
+            continue
+        if isinstance(b, dict):
+            gone = [k for k in b if k not in h or _canon(h[k]) != _canon(b[k])]
+        elif isinstance(b, list):
+            hs = {_canon(x) for x in h}
+            gone = [x for x in b if _canon(x) not in hs]
+        else:
+            gone = [] if _canon(b) == _canon(h) else [b]
         if gone:
-            why.append(f"rules.yaml `{key}` loses {len(gone)} line(s) — a hold is lifted by review, never by break-glass")
+            why.append(f"rules.yaml `{key}` loses or weakens {len(gone)} entr(y/ies) — a hold is lifted by review, never by break-glass")
     for key in PROTECTED_BLOCKS_NO_CHANGE:
-        if top_level_block(base_text, key) != top_level_block(head_text, key):
+        if _canon(base.get(key)) != _canon(head.get(key)):
             why.append(f"rules.yaml `{key}` changes — money-path classification is never break-glassed")
     return why
 
@@ -119,6 +161,8 @@ def evaluate(f: dict) -> list[str]:
             why.append(f"required context pending: {ctx}")
         elif latest.get("conclusion") != "success":
             why.append(f"required context {latest.get('conclusion')}: {ctx}")
+    if f.get("files_truncated") is not False:
+        why.append("PR file list is at the API cap (or unknown) — cannot see the whole diff")
     why += rules_refusals(f.get("rules_base"), f.get("rules_head"))
     reason = f.get("reason") or ""
     if not reason.strip():
@@ -184,18 +228,19 @@ def gather(api: Api, pr_number: int, actor: str, owner: str, reason: str) -> dic
     runs = [{"id": x["id"], "name": x["name"], "status": x["status"], "conclusion": x["conclusion"],
              "app_id": (x.get("app") or {}).get("id")}
             for x in api.pages(f"{r}/commits/{head}/check-runs?filter=latest", key="check_runs")]
-    files = {x["filename"] for x in api.pages(f"{r}/pulls/{pr_number}/files")}
-    rules_base = rules_head = None
-    if RULES_PATH in files:
-        main_sha = api.get(f"{r}/commits/main")["sha"]
-        q = urllib.parse.quote(RULES_PATH)
-        rules_base = api.get(f"{r}/contents/{q}?ref={main_sha}", raw=True)
-        code, rules_head = api.call("GET", f"{r}/contents/{q}?ref={head}", raw=True)
-        if code != 200:
-            rules_head = ""          # deleted at head: every protected line is gone
+    # rules.yaml is fetched at main and at head ALWAYS: the files list is capped and a rename
+    # need not show the path, so it can never decide whether the protected keys are judged.
+    nfiles = p.get("changed_files")
+    main_sha = api.get(f"{r}/commits/main")["sha"]
+    q = urllib.parse.quote(RULES_PATH)
+    rules_base = api.get(f"{r}/contents/{q}?ref={main_sha}", raw=True)
+    code, rules_head = api.call("GET", f"{r}/contents/{q}?ref={head}", raw=True)
+    if code != 200:
+        rules_head = None            # deleted/unreadable at head: refused by rules_refusals
     return {"actor": actor, "owner": owner, "pr": pr, "behind_by": cmp.get("behind_by"),
             "required": required, "check_runs": runs, "rules_base": rules_base,
-            "rules_head": rules_head, "reason": reason}
+            "rules_head": rules_head, "reason": reason,
+            "files_truncated": not (type(nfiles) is int and nfiles < 3000)}
 
 
 def audit(api: Api, pr_number: int, head: str, actor: str, reason: str, run_url: str) -> None:
@@ -259,7 +304,7 @@ def _good() -> dict:
     rules = "x: 1\ndeploy_holds:\n  - service: a\n    until: z\nmoney_path_services:\n  - ledger\ny: 2\n"
     return {"actor": "own", "owner": "own", "reason": "train broken, fix in this PR",
             "pr": {"state": "open", "draft": False, "base": "main", "head": h, "auto_merge": True},
-            "behind_by": 0, "required": req, "check_runs": runs, "rules_base": rules, "rules_head": rules}
+            "behind_by": 0, "files_truncated": False, "required": req, "check_runs": runs, "rules_base": rules, "rules_head": rules}
 
 
 def self_test(sabotage_context_check: bool = False) -> int:
@@ -302,8 +347,21 @@ def self_test(sabotage_context_check: bool = False) -> int:
     case("non-main base refused", lambda f: f["pr"].update(base="feature"), False, "not main")
     case("not armed refused", lambda f: f["pr"].update(auto_merge=False), False, "auto-merge")
     case("deploy_holds removal refused", hold_removed, False, "deploy_holds")
-    case("rules.yaml deleted refused", lambda f: f.update(rules_head=""), False, "deploy_holds")
+    case("rules.yaml deleted refused", lambda f: f.update(rules_head=""), False, "absent")
     case("money_path_services change refused", money, False, "money_path_services")
+    case("dup top-level deploy_holds (empty second) refused",
+         lambda f: f.update(rules_head=f["rules_base"] + "deploy_holds: []\n"), False, "duplicate key")
+    case("hold removed via reorder+anchor refused",
+         lambda f: f.update(rules_head="tmpl: &h {service: b, until: z}\ny: 2\nmoney_path_services: [ledger]\nx: 1\ndeploy_holds:\n  - *h\n"),
+         False, "deploy_holds")
+    case("same data via flow style + anchor accepted",
+         lambda f: f.update(rules_head="t: &h {service: a, until: z}\ny: 2\nmoney_path_services: [ledger]\nx: 1\ndeploy_holds: [*h]\n"), True)
+    case("hold weakened (field changed) refused",
+         lambda f: f.update(rules_head=f["rules_base"].replace("until: z", "until: a")), False, "deploy_holds")
+    case("unparseable head refused", lambda f: f.update(rules_head="deploy_holds: [\n"), False, "unparseable")
+    case("rules.yaml unreadable at head refused", lambda f: f.update(rules_head=None), False, "absent")
+    case("truncated file list refused", lambda f: f.update(files_truncated=True), False, "API cap")
+    case("unknown file count refused", lambda f: f.pop("files_truncated"), False, "API cap")
     case("no required contexts refused", lambda f: f.update(required={"merge-train": 1}), False, "no other required")
     case("empty reason refused", lambda f: f.update(reason="  "), False, "reason is empty")
     case("long reason refused", lambda f: f.update(reason="x" * 501), False, "longer than")

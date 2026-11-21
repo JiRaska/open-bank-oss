@@ -101,5 +101,5 @@ jobs:
           BG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          python3 -I -S .github/scripts/break_glass_check.py run --repo "$GITHUB_REPOSITORY" \
+          python3 -I .github/scripts/break_glass_check.py run --repo "$GITHUB_REPOSITORY" \
             --pr "$BG_PR" --actor "$BG_ACTOR" --owner "$BG_OWNER" --reason-env BG_REASON --run-url "$BG_RUN_URL"
