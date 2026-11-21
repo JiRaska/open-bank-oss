@@ -204,7 +204,7 @@ class BusinessOnboardingCaseRepositoryImpl(
 
     private fun BusinessOnboardingCaseEntity.toDomain(findings: List<MonitoringFinding>) = BusinessOnboardingCase(
         id = caseId,
-        identifier = LegalEntityIdentifier.of(IdentifierScheme.valueOf(identifierScheme), identifierValue),
+        identifier = LegalEntityIdentifier.restore(IdentifierScheme.valueOf(identifierScheme), identifierValue),
         initiatorPartyId = initiatorPartyId,
         status = CaseStatus.valueOf(status),
         extract = extractJson?.let { KybJson.readExtract(it) },

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
-
 package com.openbank.libs.domain.account
 
 import org.assertj.core.api.Assertions.assertThat
@@ -10,24 +9,37 @@ import org.junit.jupiter.api.Test
 
 class CzechPaymentSymbolTest {
     @Test
-    fun `accepts one to ten digits`() {
-        assertThat(CzechPaymentSymbol.isValid("0")).isTrue()
-        assertThat(CzechPaymentSymbol.isValid("0308")).isTrue()
-        assertThat(CzechPaymentSymbol.isValid("1234567890")).isTrue()
+    fun `variable and specific symbols take one to ten digits`() {
+        listOf(CzechPaymentSymbol.VARIABLE, CzechPaymentSymbol.SPECIFIC).forEach { kind ->
+            assertThat(kind.isValid("0")).describedAs(kind.name).isTrue()
+            assertThat(kind.isValid("1234567890")).describedAs(kind.name).isTrue()
+            assertThat(kind.isValid("12345678901")).describedAs(kind.name).isFalse()
+        }
     }
 
     @Test
-    fun `rejects empty, eleven digits, signs, spaces and non-ASCII digits`() {
-        assertThat(CzechPaymentSymbol.isValid("")).isFalse()
-        assertThat(CzechPaymentSymbol.isValid("12345678901")).isFalse()
-        assertThat(CzechPaymentSymbol.isValid("-1")).isFalse()
-        assertThat(CzechPaymentSymbol.isValid("12 34")).isFalse()
-        assertThat(CzechPaymentSymbol.isValid("١٢٣")).isFalse()
+    fun `the constant symbol stops at four digits, as the domestic-payment column does`() {
+        assertThat(CzechPaymentSymbol.CONSTANT.isValid("0308")).isTrue()
+        assertThat(CzechPaymentSymbol.CONSTANT.isValid("9999")).isTrue()
+        assertThat(CzechPaymentSymbol.CONSTANT.isValid("12345")).isFalse()
+        assertThat(CzechPaymentSymbol.CONSTANT.isValid("1234567890")).isFalse()
     }
 
     @Test
-    fun `requireValid passes null and names the field`() {
-        assertThat(CzechPaymentSymbol.requireValid("ks", null)).isNull()
-        assertThatThrownBy { CzechPaymentSymbol.requireValid("ks", "12345678901") }.hasMessageContaining("ks")
+    fun `rejects empty, signs, spaces and non-ASCII digits`() {
+        CzechPaymentSymbol.entries.forEach { kind ->
+            listOf("", "-1", "12 3", "١٢٣").forEach {
+                assertThat(kind.isValid(it)).describedAs("$kind '$it'").isFalse()
+            }
+        }
+    }
+
+    @Test
+    fun `normalise treats null and blank as absent and names the field on a bad value`() {
+        assertThat(CzechPaymentSymbol.CONSTANT.normalise(null)).isNull()
+        assertThat(CzechPaymentSymbol.CONSTANT.normalise("  ")).isNull()
+        assertThat(CzechPaymentSymbol.CONSTANT.normalise(" 0308 ")).isEqualTo("0308")
+        assertThatThrownBy { CzechPaymentSymbol.CONSTANT.normalise("12345") }
+            .hasMessageContaining("constantSymbol").hasMessageContaining("1-4")
     }
 }
