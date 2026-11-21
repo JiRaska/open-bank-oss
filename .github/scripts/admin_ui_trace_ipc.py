@@ -12,6 +12,7 @@ import signal
 import socket
 import socketserver
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -442,6 +443,7 @@ def finish(stage: str, auth: str) -> int:
             client.sendall(frame)
             response = client.makefile("rb").readline(257)
             if json.loads(response.decode("utf-8")).get("ok") is not True:
+                print(f"trace finish: supervisor rejected finish for stage {stage!r}", file=sys.stderr)
                 return 1
         deadline = time.monotonic() + EOF_GRACE_SECONDS + 1.0
         while time.monotonic() < deadline:
@@ -453,8 +455,14 @@ def finish(stage: str, auth: str) -> int:
                     time.sleep(0.01)
                 return result
             time.sleep(0.01)
+        print(
+            f"trace finish: no report at {report_path} within {EOF_GRACE_SECONDS + 1.0:.1f}s for stage {stage!r}"
+            " (supervisor still flushing, or it died before writing the report)",
+            file=sys.stderr,
+        )
         return 1
-    except Exception:
+    except Exception as exc:
+        print(f"trace finish: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

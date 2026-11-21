@@ -1249,3 +1249,11 @@ its complete bank/establishment/host/mode tuple in SQL and preserve it through o
 An activation with different context fails before status change. Existing null history is not silently assigned.
 No raw identity evidence or national identifier is added. Branch opening remains TEST-only pending wider B2 and
 country launch evidence. The lower catalogue migration prerequisites must be deployed before V22.
+
+## 2026-11-18 - IBAN check digits from the shared libs-domain generator (#16748)
+
+`IbanGenerator` computed ISO 7064 check digits with its own copy. It now uses
+`IbanCheckDigits.build`, which computes them once for the platform and re-validates the result
+through `Iban`. Generated IBANs are byte-identical (`IbanGeneratorTest` unchanged and green);
+the gain is that a spec fix in libs-domain reaches every account opened. No new caller, grant,
+data class or endpoint. Residual risk: none new. Rollback: revert.

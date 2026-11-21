@@ -245,3 +245,7 @@ This PR integrates #16353/#16351 and the exact Catalogue C3 schema prerequisites
 Deploy context readers before account writers. Branch admission remains restricted to LaunchMode.TEST until
 branch launch approval; this change performs no live activation. Rollback stops new writers and retains columns,
 receipts and outbox evidence. The shared type is framework-free; SQL immutability remains the owner's rule.
+
+## IBAN generation (#16748)
+
+Generated IBANs take their ISO 7064 check digits from the shared libs-domain `IbanCheckDigits.build`, which also re-validates the result through `Iban`. Output is unchanged; a spec fix in libs-domain now reaches every account opened.
