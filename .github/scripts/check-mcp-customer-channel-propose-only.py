@@ -60,19 +60,20 @@ import gatelib  # noqa: E402
 REPO = pathlib.Path(__file__).resolve().parents[2]
 MCP_SRC = pathlib.Path("openbank-mcp-service/src/main")
 
-# (interface FQCN, method name, HTTP verb) -> reason. Every entry is a reviewed decision. The verb is
-# part of the key, so changing it is a finding; an entry matching more than one method (an overload)
+# (interface FQCN, method name, HTTP verb, full resolved path) -> reason. Every entry is a reviewed
+# decision. The verb AND the resolved path are part of the key, so changing either is a finding —
+# retargeting an allow-listed method's @Path to a mutating route cannot inherit its review; an entry matching more than one method (an overload)
 # is a finding too.
-ALLOWLIST: dict[tuple[str, str, str], str] = {
-    ("com.openbank.mcp.infrastructure.read.ConsentValidateClient", "validate", "POST"):
+ALLOWLIST: dict[tuple[str, str, str, str], str] = {
+    ("com.openbank.mcp.infrastructure.read.ConsentValidateClient", "validate", "POST", "/api/v1/consents/{id}/validate"):
         "ADR-0195 consent validation: a POST that READS (consent-service answers whether a consent "
         "covers an action, and changes no state). It predates this gate. ADR-0383 D3 replaces it "
         "with a server-side grant lookup on the customer channel.",
-    ("com.openbank.mcp.infrastructure.customer.DelegationGrantClient", "resolve", "POST"):
+    ("com.openbank.mcp.infrastructure.customer.DelegationGrantClient", "resolve", "POST", "/api/v1/delegations/mcp-client/resolve"):
         "ADR-0383 D3 grant lookup: a POST that READS. delegation-service's McpClientGrantResolver "
         "only queries ACTIVE MCP_CLIENT grants for the (party, client, key) triple and writes "
         "nothing; POST keeps the party id and key thumbprint out of the URL and access logs.",
-    ("com.openbank.mcp.infrastructure.customer.CustomerTokenEndpointClient", "exchange", "POST"):
+    ("com.openbank.mcp.infrastructure.customer.CustomerTokenEndpointClient", "exchange", "POST", "/protocol/openid-connect/token"):
         "ADR-0383 D4 RFC 8693 token exchange at the customers realm: the token endpoint is POST by "
         "specification and mints a short-lived, single-audience READ-scoped token. It changes no "
         "banking state and cannot authorise a write.",
@@ -576,7 +577,8 @@ def _walk_client(root: pathlib.Path, rel: pathlib.Path, client: Iface, resolver:
             for verb in meth.verbs:
                 if verb in SAFE_VERBS:
                     continue
-                key = (cur.fqcn, meth.name, verb)
+                path = join_path(client.class_path, cur.class_path if cur is not client else "", meth.path)
+                key = (cur.fqcn, meth.name, verb, path)
                 if key in allowlist:
                     if key in used_allow:
                         findings.append(
@@ -585,7 +587,6 @@ def _walk_client(root: pathlib.Path, rel: pathlib.Path, client: Iface, resolver:
                         )
                     used_allow.add(key)
                     continue
-                path = join_path(client.class_path, cur.class_path if cur is not client else "", meth.path)
                 findings.append(
                     f"{rel}: {client.name} -> {cur.fqcn}.{meth.name} declares {verb} {path}. Only GET is "
                     "permitted on the customer MCP channel (ADR-0383 D6) unless allow-listed"
@@ -855,24 +856,32 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, allow_src)
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={})
     report(not findings, "allow-listed POST is clean", findings)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, {"kotlin/x/A.kt": _kt("x", '@RegisterRestClient(configKey = "x")\ninterface A {\n    @PUT\n    fun ok(): String\n}\n')})
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={})
     report(len(findings) == 2, "allow-listed method whose verb changed POST->PUT is a finding (+ stale entry)", findings)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        _materialise(root, {"kotlin/x/A.kt": _kt(
+            "x", '@RegisterRestClient(configKey = "x")\n@Path("/api/v1/things")\ninterface A {\n'
+                 '    @POST\n    @Path("/{id}/delete")\n    fun ok(): String\n}\n')})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/api/v1/things/{id}/read"): "reason"}, baseline={})
+    report(len(findings) == 2 and any("/api/v1/things/{id}/delete" in f for f in findings),
+           "allow-listed method whose @Path was retargeted to another route is a finding (+ stale entry)", findings)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, {"kotlin/x/A.kt": _kt(
             "x", '@RegisterRestClient(configKey = "x")\ninterface A {\n    @POST\n    fun ok(): String\n\n'
                  '    @POST\n    fun ok(body: String): String\n}\n')})
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={})
     report(any("overload" in f for f in findings), "an overload of an allow-listed method is a finding", findings)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, {"kotlin/x/Reads.kt": GET_ONLY_KT})
-        findings, _ = check(root, allowlist={("x.Gone", "m", "POST"): "r"}, baseline={("x.Gone", "POST", "/p"): "r"})
+        findings, _ = check(root, allowlist={("x.Gone", "m", "POST", "/p"): "r"}, baseline={("x.Gone", "POST", "/p"): "r"})
     report(sum("stale" in f for f in findings) == 2, "stale allow-list and baseline entries are findings", findings)
 
     for write_tag, must_flag in (("Cards", True), ("Other", False)):

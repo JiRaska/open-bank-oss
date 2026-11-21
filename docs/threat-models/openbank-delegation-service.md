@@ -236,8 +236,11 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   `gen-network-policies.py` from `QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL` in the mcp-service
   manifest, never hand-written. The lookup is read-only (`McpClientGrantResolver` queries ACTIVE
   `MCP_CLIENT` grants for one party/client/key triple and writes nothing) and authenticated: the
-  caller is mcp-service's own `m2m` identity, and a tokenless request is refused 401 — pinned by the
-  adversarial interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json`.
+  caller is mcp-service's own `m2m` identity, and a tokenless request must be refused 401. The pact
+  interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json` states that
+  expectation but is NOT proof of it — a consumer mock answers whatever the pact says. Provider-side
+  proof belongs with the route itself (#16793, which carries `McpClientGrantResource`); until a
+  provider test drives the route over HTTP with no token, the 401 is an unverified expectation.
   Information disclosure is bounded by the triple: the party id comes from the verified customer
   token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
   Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the

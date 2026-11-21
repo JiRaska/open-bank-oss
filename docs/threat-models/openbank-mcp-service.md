@@ -437,6 +437,13 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-21 (ADR-0383 D4) — residual: the exchanged token's `act` claim is not asserted.**
+  `KeycloakCustomerTokenExchange.validated` checks `sub` (the customer), `aud` (one downstream),
+  `azp` (mcp-service's exchange client), the scope set and the lifetime, but not an RFC 8693 `act`
+  claim naming mcp-service as the actor. Keycloak's standard token exchange (V2) does not emit `act`,
+  so requiring it would refuse every real exchange; `azp` is today's actor binding. Revisit if the
+  realm gains actor-token support or a downstream starts reading `act`.
+
 - **2026-11-18 (ADR-0383 D3/D4, #16590) — customer grant lookup, exchanged downstream tokens, read
   tools. Still behind `mcp.customer.enabled` (off).** An admitted customer now sees only the read
   tools its active `MCP_CLIENT` grants allow, and every read runs on the customer's own exchanged
