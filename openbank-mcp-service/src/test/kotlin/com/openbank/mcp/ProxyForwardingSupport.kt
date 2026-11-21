@@ -30,6 +30,7 @@ object ProxyForwardingSupport {
         "quarkus.http.proxy.trusted-proxies" to trustedProxies,
         "mcp.edge.client-address-header" to EDGE_HEADER,
         "mcp.customer.enabled" to "true",
+        "mcp.customer.shared-store" to "memory",
         "mcp.customer.issuer" to CUSTOMERS,
         "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
     )
