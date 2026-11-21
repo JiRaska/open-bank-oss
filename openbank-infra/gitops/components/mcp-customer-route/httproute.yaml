@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# mcp.open-bank.tech on the shared Gateway: the customer MCP channel (ADR-0383 / ADR-0384 /
+# ADR-0385, #16590). Same shape as customer-edge/httproute.yaml and copilot/httproute.yaml.
+#
+# DISABLED BY DEFAULT. Merging this directory exposes nothing, for two independent reasons:
+#   1. No ArgoCD Application points at this directory (apps/ has none), and its kustomization
+#      lists only grants.yaml, so this file is applied by nothing. Argo applies components/mcp
+#      non-recursively, and this is a sibling directory.
+#   2. Even if it were applied, the route names listener `https-mcp`, which the Gateway in
+#      envoy-gateway/gateway.yaml does not declare, so the route is never Accepted and
+#      external-dns publishes no record for it.
+# The NetworkPolicy generator DOES read this file (it globs every component), so
+# mcp/network-policies.yaml admits envoy-gateway-system on :8150 already. That admits a peer
+# which has no route to the service; the edge forwards only what a route attaches.
+#
+# Going live is docs/runbooks/mcp-customer-channel-go-live.md, in order. Never collapse its
+# steps into one sync: a listener switched in the same sync as its grant was left
+# RefNotPermitted (2026-10-03), because the two are different Argo apps with no ordering.
+#
+# FORWARDED HEADERS. mcp-service's customers tenant compares the DPoP proof `htu` with the
+# request's absolute URI, so behind the edge it needs the external scheme and host, and the
+# subject-less audit key needs the client address (#16847). Quarkus applies forwarded headers
+# only from `quarkus.http.proxy.trusted-proxies`. This route makes the edge authoritative for
+# every forwarded header the service may read, with STATIC values wherever the value is known:
+#   X-Forwarded-Proto  -> set to `https` (this listener is HTTPS only)
+#   X-Forwarded-Host   -> set to `mcp.open-bank.tech` (the only hostname on this route)
+#   X-Forwarded-For, Forwarded, X-Forwarded-Port, X-Forwarded-Prefix, X-Forwarded-Server,
+#   X-Real-IP          -> removed, so nothing a client sends survives; the service must not
+#                         read a client address from them, and with these gone it cannot
+#   X-Envoy-External-Address -> written by Envoy itself from the TCP peer (externalTrafficPolicy
+#                         Local keeps the device address), numTrustedHops 0 below; this is the
+#                         one header MCP_EDGE_CLIENT_ADDRESS_HEADER names. Verify on go-live
+#                         that a client-supplied value is overwritten (runbook step 6).
+#
+# Edge controls (ADR-0383 D5.1, before any token is parsed):
+#   body cap 64Ki           -> requestBuffer, same as the service's quarkus.http.limits
+#   per-IP rate 10/s        -> local rate limit per distinct client address, per proxy replica
+#   request timeout 30s     -> JSON-RPC calls are short; nothing on this host streams
+#   paths                   -> exactly `/mcp` and the RFC 9728 metadata; nothing else routes here
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-customer
+  namespace: platform
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-mcp
+  hostnames:
+    - mcp.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /mcp
+        - path:
+            type: PathPrefix
+            value: /.well-known/oauth-protected-resource
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Forwarded-Proto
+                value: https
+              - name: X-Forwarded-Host
+                value: mcp.open-bank.tech
+            remove:
+              - X-Forwarded-For
+              - Forwarded
+              - X-Forwarded-Port
+              - X-Forwarded-Prefix
+              - X-Forwarded-Server
+              - X-Real-IP
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: mcp-service
+          port: 8150
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: mcp-customer
+  namespace: platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: mcp-customer
+  requestBuffer:
+    limit: 64Ki
+  timeout:
+    http:
+      requestTimeout: 30s
+  rateLimit:
+    local:
+      rules:
+        # One bucket per distinct client address. No rule without clientSelectors, so there is
+        # no route-wide ceiling: a shared bucket would let one noisy client starve every other.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 10
+            unit: Second
+---
+# Listener-scoped client policy for https-mcp. A listener-scoped ClientTrafficPolicy REPLACES the
+# Gateway-scoped edge-security-headers one for that listener (no merge), so it repeats the TLS
+# groups and late response headers, as api-edge does in envoy-gateway/gateway.yaml.
+# numTrustedHops 0: no client-supplied X-Forwarded-For hop is ever trusted for the client address;
+# the NLB preserves the source address (externalTrafficPolicy: Local).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: mcp-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: edge
+      sectionName: https-mcp
+  clientIPDetection:
+    xForwardedFor:
+      numTrustedHops: 0
+  connection:
+    connectionLimit:
+      value: 500
+  tls:
+    ecdhCurves: [X25519MLKEM768, X25519, P-256]
+  headers:
+    lateResponseHeaders:
+      set:
+        - name: Strict-Transport-Security
+          value: "max-age=63072000; includeSubDomains; preload"
+        - name: X-Content-Type-Options
+          value: nosniff
