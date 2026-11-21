@@ -122,9 +122,38 @@ EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is
 # On a red main every fix still comes first; a non-fix urgent PR waits for green main like any other.
 URGENT_LABEL = "merge-priority:urgent"
 URGENT_PREEMPT_CONTEXT = "merge-train/urgent-preempted"   # App marker: this head yielded main to an urgent PR once
-URGENT_DAILY_CAP_DEFAULT = 2       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
+URGENT_DAILY_CAP_DEFAULT = 5       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
 URGENT_CLOCK_CONTEXT = "merge-train/urgent-since"     # App marker: first tick this head outranked the other lanes
 URGENT_DROPPED_CONTEXT = "merge-train/urgent-dropped"  # App marker: this head's urgent priority was dropped
+# Lane caps come from repo variables (`vars.X || 'default'`) so the owner can tune them without a PR.
+# A variable is operator input, not reviewed code: anything but a plain int in [0, LANE_CAP_MAX] falls
+# back to the reviewed default and says so, rather than crashing the tick or opening an unbounded lane.
+LANE_CAP_MAX = 20
+
+
+def lane_cap(raw: str | None, default: int, name: str, log=None) -> int:
+    """Validated lane cap: int in [0, LANE_CAP_MAX], else `default` with one logged line."""
+    text = (raw or "").strip()
+    if re.fullmatch(r"[0-9]{1,3}", text) and 0 <= int(text) <= LANE_CAP_MAX:
+        return int(text)
+    if text:
+        (log or (lambda m: print(m, file=sys.stderr)))(
+            f"merge-train: {name}={text!r} is not an integer in [0, {LANE_CAP_MAX}]; using default {default}")
+    return default
+
+
+def lane_cap_self_test(check) -> None:
+    logged: list[str] = []
+    for raw, want in (("5", 5), ("0", 0), ("20", 20), (" 7 ", 7), (None, 6), ("", 6)):
+        check(f"lane cap: {raw!r} -> {want}", lane_cap(raw, 6, "T", logged.append) == want, repr(raw))
+    check("lane cap: valid values log nothing", logged == [], repr(logged))
+    for raw in ("21", "-1", "abc", "5.0", "1e3", "999", "0x5", "６"):
+        logged.clear()
+        got = lane_cap(raw, 6, "MERGE_TRAIN_X_DAILY_CAP", logged.append)
+        check(f"lane cap must-FAIL: {raw!r} falls back to default", got == 6, f"got {got}")
+        check(f"lane cap must-FAIL: {raw!r} is logged", len(logged) == 1 and "using default 6" in logged[0], repr(logged))
+
+
 # Deploy fix claim (#16943). A main red on a provider CONTRACT job can be fixed only by deploying the
 # consumer pair whose pact it verifies: the auto-deploy gitops PR changes image pins under
 # openbank-infra/gitops/, so path-scoped CI never re-runs the contract job on its head and
@@ -7544,15 +7573,17 @@ def check_declaration() -> int:
     # Expedite lane's rollback switch and cap: declared outright, carried by settle, its window handed on.
     if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "(true|false)"\s*$', code, re.MULTILINE):
         fails.append('MERGE_TRAIN_EXPEDITE_LANE must be declared as "true" or "false" ("false" = no expedite lane)')
-    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as a positive integer")
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_DAILY_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_EXPEDITE_DAILY_CAP || '<1-99>' }}\"")
     if "EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_EXPEDITE_LANE")
     for job in ("build", "publish"):
         if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
             fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
-    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as a positive integer")
+    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_URGENT_DAILY_CAP \|\| \'[1-9][0-9]?\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '<1-99>' }}\"")
     if "URGENT_DAILY_CAP: ${{ env.MERGE_TRAIN_URGENT_DAILY_CAP }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_URGENT_DAILY_CAP")
     if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
@@ -8675,6 +8706,7 @@ def self_test() -> int:
     urgent_strict_self_test(check)
     selftest_skip_fix_self_test(check)
     selftest_deploy_fix(check)
+    lane_cap_self_test(check)
     gate_level_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
@@ -13708,10 +13740,12 @@ def main() -> int:
                     default=os.environ.get("EXPEDITE_LANE", "true" if EXPEDITE_LANE_DEFAULT else "false"),
                     help="settle: open an expedite window beside one running carrier (ADR-0343 amendment 2026-11-13)")
     ap.add_argument("--expedite-cap", type=int,
-                    default=int(os.environ.get("EXPEDITE_DAILY_CAP", str(EXPEDITE_DAILY_CAP_DEFAULT))),
+                    default=lane_cap(os.environ.get("EXPEDITE_DAILY_CAP"), EXPEDITE_DAILY_CAP_DEFAULT,
+                                     "MERGE_TRAIN_EXPEDITE_DAILY_CAP"),
                     help="settle/publish: expedite carriers per UTC day")
     ap.add_argument("--urgent-cap", type=int,
-                    default=int(os.environ.get("URGENT_DAILY_CAP", str(URGENT_DAILY_CAP_DEFAULT))),
+                    default=lane_cap(os.environ.get("URGENT_DAILY_CAP"), URGENT_DAILY_CAP_DEFAULT,
+                                     "MERGE_TRAIN_URGENT_DAILY_CAP"),
                     help="settle: distinct PRs the owner may label merge-priority:urgent per UTC day")
     ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
                     help="build/publish: settle's expedite window, the one PR number (re-validated live)")
