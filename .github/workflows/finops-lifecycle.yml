@@ -26,9 +26,7 @@ concurrency:
 jobs:
   gate:
     name: Version lifecycle gate
-    if: >-
-      (github.event_name != 'schedule' || (vars.FINOPS_LIFECYCLE_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
-      (github.event_name == 'pull_request')
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 5
     steps:
@@ -45,9 +43,7 @@ jobs:
 
   audit:
     name: Weekly lifecycle audit
-    if: >-
-      (github.event_name != 'schedule' || (vars.FINOPS_LIFECYCLE_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
-      (github.event_name != 'pull_request')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 5
     permissions:

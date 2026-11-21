@@ -47,6 +47,7 @@ STATUS_FN = re.compile(r"\b(always|failure|cancelled)\s*\(\s*\)")
 
 # filename -> reason pausing must stay a reviewed PR.
 EXCLUDED: dict[str, str] = {
+    "finops-lifecycle.yml": "weekly re-check of managed-service end-of-support pins (ADR-0054 cost guard)",
     "auto-deploy.yml": "money-path stranded-service reconcile tick",
     "admin-ui-deploy.yml": "deploy lane; its schedule recovers missed deploys",
     "pact-verification-reconcile.yml": "keeps can-i-deploy unblocked by dispatching provider verification",
