@@ -245,6 +245,10 @@ variable "arc_min_runners" {
     condition     = var.arc_min_runners == floor(var.arc_min_runners) && var.arc_min_runners >= 0 && var.arc_min_runners <= 2
     error_message = "arc_min_runners must be an integer in [0, 2]."
   }
+  validation {
+    condition     = var.arc_min_runners <= var.arc_max_runners
+    error_message = "arc_min_runners must not exceed arc_max_runners."
+  }
 }
 
 variable "arc_max_runners" {
@@ -363,6 +367,7 @@ variable "keda_http_add_on_version" {
 }
 
 variable "arc_batch_max_runners" {
+  # 0 parks the lane: its jobs queue with no error. Intended kill switch.
   description = "Max concurrent runner pods in the openbank-batch scale set (weekly scans/fuzz/perf; ADR-0277)."
   type        = number
   default     = 4
@@ -375,6 +380,7 @@ variable "arc_batch_max_runners" {
 }
 
 variable "arc_dr_max_runners" {
+  # 0 parks the lane: its jobs queue with no error. Intended kill switch.
   description = "Max concurrent runner pods in the openbank-dr scale set (quarterly DR/chaos lanes; ADR-0277)."
   type        = number
   default     = 1

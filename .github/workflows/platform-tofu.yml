@@ -147,7 +147,8 @@ jobs:
       # Unset/empty => no TF_VAR is exported and the tofu default in variables.tf wins.
       # Ranges are enforced by `validation` blocks in variables.tf; this step only
       # rejects non-integers early. The PR plan and the dispatch apply read the same
-      # variables, so the reviewed plan and the applied plan agree.
+      # variables, but the apply RE-PLANS: what is applied reflects the variable
+      # values at dispatch time, not whatever the PR plan showed.
       - name: Export SAFE tofu knobs from repository variables
         env:
           K_ARC_MIN_RUNNERS: ${{ vars.TF_ARC_MIN_RUNNERS }}
@@ -345,7 +346,8 @@ jobs:
       # Unset/empty => no TF_VAR is exported and the tofu default in variables.tf wins.
       # Ranges are enforced by `validation` blocks in variables.tf; this step only
       # rejects non-integers early. The PR plan and the dispatch apply read the same
-      # variables, so the reviewed plan and the applied plan agree.
+      # variables, but the apply RE-PLANS: what is applied reflects the variable
+      # values at dispatch time, not whatever the PR plan showed.
       - name: Export SAFE tofu knobs from repository variables
         env:
           K_ARC_MIN_RUNNERS: ${{ vars.TF_ARC_MIN_RUNNERS }}
