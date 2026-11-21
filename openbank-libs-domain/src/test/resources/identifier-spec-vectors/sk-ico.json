@@ -1,0 +1,50 @@
+{
+  "identifier": "sk-ico",
+  "reference": "stdnum.cz.dic 8-digit form (SK IČO shares the CZ algorithm)",
+  "sources": [
+    "https://www.slov-lex.sk/pravne-predpisy/SK/ZZ/2001/540/",
+    "https://www.statistics.sk"
+  ],
+  "cases": [
+    {
+      "value": "73051829",
+      "valid": true,
+      "rule": "synthetic Slovak IČO (same mod-11 rule)",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "31333532",
+      "valid": true,
+      "rule": "generated valid",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "73051820",
+      "valid": false,
+      "rule": "checksum mismatch",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "3133353X",
+      "valid": false,
+      "rule": "non-digit",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(SK_ICO)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}
