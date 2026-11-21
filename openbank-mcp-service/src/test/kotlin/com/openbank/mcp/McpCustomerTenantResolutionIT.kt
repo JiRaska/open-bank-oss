@@ -59,6 +59,7 @@ class McpCustomerTenantResolutionIT {
             // Only the test client's own loopback hop is a trusted proxy (ProxyForwardingGuard).
             "quarkus.http.proxy.trusted-proxies" to TRUSTED_LOOPBACK,
             "mcp.customer.enabled" to "true",
+            "mcp.customer.shared-store" to "memory",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
         )

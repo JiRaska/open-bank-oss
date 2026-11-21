@@ -237,6 +237,18 @@ openbao:
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
+  - secret: platform/mcp-customer-store-valkey
+    generator: Password mcp-customer-store-valkey-password (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-valkey requirepass and mcp-service QUARKUS_REDIS_PASSWORD, both read from this Secret; no copy outside the cluster"
+  - secret: platform/mcp-customer-store-metrics
+    generator: Password mcp-customer-store-metrics-password (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-valkey `metrics` ACL user and its redis_exporter sidecar, both read from this Secret; no copy outside the cluster"
+  - secret: platform/mcp-customer-store-hmac
+    generator: Password mcp-customer-store-key-hmac (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-service MCP_CUSTOMER_KEY_HMAC_SECRET only; no copy outside the cluster"
   - secret: observability/ci-metrics-ingest
     generator: Password ci-metrics-ingest-token (refreshPolicy CreatedOnce)
     holders:

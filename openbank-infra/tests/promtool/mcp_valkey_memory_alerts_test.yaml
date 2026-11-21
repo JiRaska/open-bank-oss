@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# What MCPValkeyMemoryNearMax / MCPValkeyMemoryFull PREVENT: a noeviction store silently filling to
+# a channel-wide 503. Must-fire, must-not-fire and the t=0 cold value of a fresh pod.
+rule_files:
+  - prometheus-rules-mcp-valkey.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "cold pod (t=0): an empty store is silent, now and after the for-window"
+    input_series:
+      - series: 'redis_memory_used_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "1048576+0x30"
+      - series: 'redis_memory_max_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "134217728+0x30"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: MCPValkeyMemoryNearMax
+        exp_alerts: []
+      - eval_time: 0m
+        alertname: MCPValkeyMemoryFull
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MCPValkeyMemoryNearMax
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a store at 85% fires the warning after 5m, not the critical"
+    input_series:
+      - series: 'redis_memory_used_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "114085068+0x20"
+      - series: 'redis_memory_max_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "134217728+0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MCPValkeyMemoryNearMax
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MCPValkeyMemoryNearMax
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: platform
+              pod: mcp-valkey-7d9f-abcde
+            exp_annotations:
+              summary: "mcp-valkey is above 80% of maxmemory"
+              description: "mcp-valkey (mcp-valkey-7d9f-abcde) uses 85% of maxmemory. It runs noeviction, so at 100% every customer-channel request answers 503 replay_store_unavailable. Check for a proof-key or subject flood (the D5.3 buckets bound it) before raising maxmemory; never switch to an evicting policy."
+              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
+      - eval_time: 10m
+        alertname: MCPValkeyMemoryFull
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a store at 97% fires the critical"
+    input_series:
+      - series: 'redis_memory_used_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "130191196+0x20"
+      - series: 'redis_memory_max_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "134217728+0x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MCPValkeyMemoryFull
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+              namespace: platform
+              pod: mcp-valkey-7d9f-abcde
+            exp_annotations:
+              summary: "mcp-valkey is at maxmemory: the customer MCP channel is refusing requests"
+              description: "mcp-valkey (mcp-valkey-7d9f-abcde) uses 97% of maxmemory with noeviction; new DPoP claims and budget counters fail, so the customer channel answers 503 for everyone."
+              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
+
+  - interval: 1m
+    name: "maxmemory unset (0) never fires on a healthy store; another Valkey is out of scope"
+    input_series:
+      - series: 'redis_memory_used_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "1048576+0x20"
+      - series: 'redis_memory_max_bytes{namespace="platform",pod="mcp-valkey-7d9f-abcde"}'
+        values: "0+0x20"
+      - series: 'redis_memory_used_bytes{namespace="platform",pod="copilot-redis-55c8-xyz12"}'
+        values: "130191196+0x20"
+      - series: 'redis_memory_max_bytes{namespace="platform",pod="copilot-redis-55c8-xyz12"}'
+        values: "134217728+0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MCPValkeyMemoryNearMax
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MCPValkeyMemoryFull
+        exp_alerts: []

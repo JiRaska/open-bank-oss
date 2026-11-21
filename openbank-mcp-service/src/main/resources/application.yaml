@@ -23,6 +23,15 @@ quarkus:
     enabled: true
     port: 8085
     host: 0.0.0.0
+  # ADR-0383 P4 (#16590): the Valkey client exists only for the customer channel's shared store
+  # (mcp.customer.shared-store=valkey). No Dev Services container for every test/dev boot, and no
+  # readiness check: the staff path must not go unready because the customer store is down — the
+  # customer channel fails closed (503) on its own.
+  redis:
+    devservices:
+      enabled: false
+    health:
+      enabled: false
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
     # ADR-0195 step 4: resource-server mode enabled. Quarkus now validates any presented Bearer
@@ -165,6 +174,16 @@ mcp:
     enabled: ${MCP_CUSTOMER_ENABLED:false}
     issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
     allowlist: ${MCP_CUSTOMER_ALLOWLIST:classpath:mcp-client-allowlist.yaml}
+    # ADR-0383 P4 (#16590): where DPoP replay claims and the D5.3 budgets live — `valkey` (shared by
+    # every replica) or `memory` (one pod; tests/dev). Unset while the channel is on refuses to boot,
+    # and a production launch refuses anything but `valkey`. The Valkey itself is quarkus.redis.hosts
+    # (QUARKUS_REDIS_HOSTS), supplied by the deployment; no host is defaulted here.
+    shared-store: ${MCP_CUSTOMER_SHARED_STORE:}
+    # 1..2000; a slower store is a down store (503).
+    shared-store-timeout-ms: ${MCP_CUSTOMER_SHARED_STORE_TIMEOUT_MS:250}
+    # Deployment secret (>= 32 bytes) that HMACs the customer subject and proof key in Valkey key
+    # names, so no key names a customer in clear. Required with shared-store=valkey; never defaulted.
+    key-hmac-secret: ${MCP_CUSTOMER_KEY_HMAC_SECRET:}
 
 # Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`
