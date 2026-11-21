@@ -46,6 +46,8 @@ internal class McpCustomerBranch(
     private val limiter: McpRateLimiter,
     /** The shared (Valkey) D5.3 budgets when configured; null = the in-process [limiter]. */
     private val shared: CustomerChannelAdmission.Throttles? = null,
+    /** The subject-less window key for this request ([ClientAddressResolver]). */
+    private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
 ) {
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
@@ -120,7 +122,7 @@ internal class McpCustomerBranch(
      */
     private fun refuse(outcome: Outcome.Refused, subject: String?, method: String, params: JsonNode): Response {
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
-        val auditable = limiter.shouldAuditThrottle(REFUSAL_KEY_PREFIX + (subject ?: UNKNOWN))
+        val auditable = limiter.shouldAuditThrottle(REFUSAL_KEY_PREFIX + refusalSource(subject))
         if (auditable) log.warnf("customer channel refused %s: %s", McpInputBounds.logSafe(method), outcome.reason)
         if (auditable && method == TOOLS_CALL && !McpInputBounds.containsNul(params)) {
             audit(UNKNOWN, McpInputBounds.echo(params.path("name").asText("")), params, outcome.reason, emptyList())
@@ -129,6 +131,14 @@ internal class McpCustomerBranch(
         outcome.challenge?.let { builder.header(WWW_AUTHENTICATE, it) }
         return builder.build()
     }
+
+    /**
+     * The refusal window key: the token subject when there is one, otherwise the client NETWORK
+     * ([ClientAddressKey], IPv6 /64, #16847) — never one shared key, which would let one caller's
+     * flood suppress every other subject-less caller's audit row.
+     */
+    private fun refusalSource(subject: String?): String =
+        subject?.let { "sub:$it" } ?: runCatching(clientKey).getOrDefault(ClientAddressKey.UNKNOWN)
 
     private fun admitted(outcome: Outcome.Admitted, method: String, id: JsonNode, params: JsonNode): Response? {
         val ctx = outcome.context
