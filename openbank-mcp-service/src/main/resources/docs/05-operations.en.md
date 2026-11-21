@@ -76,6 +76,17 @@ If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with 
 - **Config keys** (env override in parentheses): `openbank.mcp.rate-limit.enabled` (`MCP_RATE_LIMIT_ENABLED`), `calls-per-minute` (`MCP_RATE_LIMIT_PER_MINUTE`), `calls-per-day` (`MCP_RATE_LIMIT_PER_DAY`), `anonymous-calls-per-minute` (`MCP_RATE_LIMIT_ANON_PER_MINUTE`), `max-in-flight` (`MCP_RATE_LIMIT_MAX_IN_FLIGHT`).
 - **State is in-process** (replicas: 1), so the caps multiply by the replica count and reset on a pod roll until the shared-store slice lands.
 
+## MCP client allowlist (ADR-0385 D1)
+
+`src/main/resources/mcp-client-allowlist.yaml` is the one declaration of which third-party MCP clients may connect, and in which tier. The tier is assigned by how the client registers, never by product name, and never from a token claim or client-supplied metadata.
+
+- **Tier H (hosted):** a confidential client with a fixed HTTPS redirect and client authentication at the token and refresh endpoints. The default is `private_key_jwt`, whose key set is committed under `mcp-clients/` and pinned by its sha256 in the declaration. Keycloak receives it inline, so it never fetches keys. A client secret is allowed only under a recorded `secret_exception` of at most six months, and it fails CI after its `expires` date.
+- **Tier L (local):** a public client with loopback redirects (`http://127.0.0.1/…`, `http://[::1]/…`, any port; `localhost` is not accepted). Its tokens must be DPoP-bound.
+
+The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow. The `mcp-client-realm-parity` gate fails CI on any mismatch between the declaration and the realm.
+
+While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order.
+
 ## Customer channel admission (ADR-0385)
 
 The customer MCP channel is admitted only when `openbank.mcp.customer.enabled` is on and an
@@ -85,6 +96,15 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 `authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
+
+## Customer reads: grant lookup and token exchange (ADR-0383 D3/D4)
+
+With the customer channel on, an admitted customer sees only the read tools its active `MCP_CLIENT` grants allow: `list_accounts` (accounts shared with this client), `get_balance` (`ACCOUNT_READ_BALANCES`) and `list_transactions` (`ACCOUNT_READ_TRANSACTIONS`). There are no write tools on this channel.
+
+- **Grant lookup.** On every `tools/list` and `tools/call`, mcp-service asks delegation-service `POST /api/v1/delegations/mcp-client/resolve` for the grants of the triple (the token's `party_id`, its `azp`, its `cnf.jkt`), on its own `m2m` identity. Only positive answers are cached, for `mcp.customer.grant-cache-ttl` (`MCP_CUSTOMER_GRANT_CACHE_TTL`, default `PT15S`, at most `PT30S`), so a revoked grant stops working within that bound. A lookup failure is a refusal (`Authorization unavailable`), never a stale or empty answer reused.
+- **Token exchange.** Each read exchanges the customer's own token at the customers realm (RFC 8693) for a token with one audience (`openbank-balance-service` or `openbank-transaction-service`) and one read scope, living at most 60 s. The requester client is `mcp.customer.exchange.client-id` (default `openbank-mcp-service`); its secret is read only from `MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET` (OpenBao `keycloak/mcp-service-customer-exchange`). With no secret set, every customer read is refused. The realm side (requester, audience clients, scopes) is derived from the allowlist's `exchange:` block by `gen-mcp-realm-clients.py` and held to it by the `mcp-client-realm-parity` gate.
+- **Audit.** Every customer call is audited under the customer's subject; an allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 drops the cached grant.
+- **Not yet working end to end:** the downstream services accept only the staff realm today, so exchanged customer tokens are refused there until ADR-0383 P5 lands. Every failure on this path is a refusal.
 
 ## Customer channel metrics and alerts (ADR-0384 slice 1)
 

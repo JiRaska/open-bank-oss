@@ -6855,6 +6855,31 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # ADR-0385 D1: one MCP client allowlist drives BOTH mcp-service's tier admission and the
+  # customers-realm client config. This reads the two independently of the generator that writes
+  # the realm entries, so a hand edit of the template, a generator bug, or a declaration that
+  # drifts from the realm all fail: Tier H must be confidential with a pinned private_key_jwt key
+  # set (a client secret only under an unexpired, <= 6-month exception), Tier L must be DPoP-bound
+  # with loopback-only redirects, and every MCP client must be PAR + PKCE S256 + exact redirects,
+  # no direct/implicit/device grant or service account, bound to the cookie-free fresh-passkey
+  # flow. The live behaviour of the same config is proven by
+  # openbank-infra/e2e/keycloak_mcp_client_admission_test.py against Keycloak 26.8.1.
+  - id: mcp-client-realm-parity
+    name: "MCP client allowlist and customers realm agree on every tier (ADR-0385 D1, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 15
+    rationale: "ADR-0385 makes the tier a property of one server-side declaration, never a token claim; a realm client that drifted from it (a public hosted client, a local client without DPoP, a cookie alternative in the flow, an expired secret exception) would admit exactly the clients the ADR rejects, and nothing at runtime would say so."
+    review_after: "2027-05-17"
+    # One subject per declared MCP client (two reference clients today).
+    min_subjects: 2
+    selftest: python3 .github/scripts/check-mcp-client-realm-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-client-realm-parity.py", "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml", "openbank-infra/gitops/components/keycloak/customers-realm-template.json", "openbank-mcp-service/src/main/resources/mcp-clients/"]
+    run: |
+      python3 .github/scripts/gen-mcp-realm-clients.py --check
+      python3 .github/scripts/check-mcp-client-realm-parity.py
+
   # Keycloak client secrets must name their OpenBao source (issue #3246). The import artifact
   # Keycloak rebuilds from lives in OpenBao and is not derived from the template, so a client
   # added to realm-template.json merges green and the nightly keycloak-realm-drift job goes red

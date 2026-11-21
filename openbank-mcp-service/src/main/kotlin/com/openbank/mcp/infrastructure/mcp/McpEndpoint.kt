@@ -29,6 +29,8 @@ import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
 import com.openbank.mcp.infrastructure.customer.CustomerChannel
+import com.openbank.mcp.infrastructure.customer.CustomerGrantCache
+import com.openbank.mcp.infrastructure.customer.CustomerReadTools
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
@@ -121,6 +123,14 @@ class McpEndpoint(
     @Inject
     lateinit var customerChannel: CustomerChannel
 
+    /** ADR-0383 D3: the customer's MCP_CLIENT grant lookup (positive answers cached briefly). */
+    @Inject
+    lateinit var customerGrants: CustomerGrantCache
+
+    /** ADR-0383 D3/D4: the customer channel's read tools on exchanged customer tokens. */
+    @Inject
+    lateinit var customerTools: CustomerReadTools
+
     /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
     @Inject
     lateinit var httpRequest: HttpServerRequest
@@ -132,13 +142,19 @@ class McpEndpoint(
     private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
 
     private val customerBranch by lazy {
-        if (!::customerChannel.isInitialized || !::httpRequest.isInitialized) return@lazy null
-        customerChannel.admission?.let { McpCustomerBranch(it, auditor, metrics, rateLimiter) }
+        if (!::customerChannel.isInitialized || !::httpRequest.isInitialized || !::customerGrants.isInitialized) {
+            return@lazy null
+        }
+        customerChannel.admission?.let {
+            McpCustomerBranch(it, auditor, metrics, rateLimiter, customerGrants, customerTools)
+        }
     }
 
     /**
      * Refusals decided before any method runs, in order: the customer-channel branch (ADR-0383 D1 /
-     * ADR-0385 D1), then the RFC 8707 audience refusal (#16622). Null means dispatch normally.
+     * ADR-0385 D1); with that channel off, the refusal of any customer credential
+     * ([presentsCustomerCredential]); then the RFC 8707 audience refusal (#16622). Null means
+     * dispatch normally.
      */
     private val preDispatch: (String, JsonNode, JsonNode) -> Response? = { method, id, params ->
         customerBranch?.handle(
@@ -148,8 +164,40 @@ class McpEndpoint(
             method,
             id,
             params,
-        ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+        )
+            // ADR-0383 D1: with the channel OFF no branch admits a customers-realm token, and it must
+            // never fall through to the anonymous path either: refused 401 invalid_token. That covers
+            // a `DPoP`-scheme credential too: the staff tenant only reads `Bearer`, so such a request
+            // reaches here with NO identity and would otherwise be served as anonymous
+            // (McpCustomerChannelOffTenantIT, measured with real tenants).
+            ?: audienceRefusal.takeIf { customerBranch == null && presentsCustomerCredential }
+                ?.respond(method, params, McpAudienceRefusal.Reason.CUSTOMER_CHANNEL_OFF, refusalSource)
+            ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
     }
+
+    /**
+     * True when the request presents a customer credential: a customers-realm token, or any
+     * `DPoP`-scheme Authorization header (RFC 7235: the scheme is case-insensitive and followed by
+     * whitespace). FAIL CLOSED: a request whose headers cannot be read counts as presenting one.
+     */
+    @Suppress("TooGenericExceptionCaught") // any failure to read the header must refuse, never admit
+    private val presentsCustomerCredential: Boolean
+        get() {
+            if (callerResolver.presentsCustomerRealmToken()) return true
+            if (!::httpRequest.isInitialized) return true
+            val authorization = try {
+                httpRequest.getHeader(AUTHORIZATION_HEADER)
+            } catch (e: Exception) {
+                log.warnf("refusing: Authorization header unreadable (%s)", e.javaClass.simpleName)
+                return true
+            } ?: return false
+            return DPOP_SCHEME.containsMatchIn(authorization)
+        }
+
+    /** The channel-off audit window key: the token subject if any, else a hash of the client address. */
+    private val refusalSource: String
+        get() = callerResolver.token.subject?.let { "sub:" + sha256(it) }
+            ?: runCatching { "ip:" + sha256(httpRequest.remoteAddress().hostAddress()) }.getOrDefault("unknown")
 
     @POST
     @Suppress("ReturnCount")
@@ -501,6 +549,13 @@ class McpEndpoint(
 
         const val DPOP_HEADER = "DPoP"
         const val AUTHORIZATION_HEADER = "Authorization"
+        val DPOP_SCHEME = Regex("^\\s*DPoP\\s", RegexOption.IGNORE_CASE)
+
+        private fun sha256(value: String): String = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8)).take(SOURCE_HASH_BYTES)
+            .joinToString("") { "%02x".format(it) }
+
+        private const val SOURCE_HASH_BYTES = 8
 
         const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 
