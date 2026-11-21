@@ -111,6 +111,8 @@ class BusinessSigningOpenApiTest {
     fun `wrong identity and foreign resources are documented refusals`() {
         val mutating = listOf(
             "/api/v1/entities/{entityId}/approval-requests" to "post",
+            "/api/v1/entities/{entityId}/approval-requests/submissions/claim" to "post",
+            "/api/v1/entities/{entityId}/approval-requests/{approvalId}/domestic-release-claim" to "post",
             "/api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures" to "post",
             "/api/v1/entities/{entityId}/approval-requests/{approvalId}/rejection" to "post",
             "/api/v1/entities/{entityId}/signing-policy" to "put",
@@ -120,7 +122,14 @@ class BusinessSigningOpenApiTest {
             val responses = (paths.getValue(path)[verb] as Map<String, Any?>)["responses"] as Map<String, Any?>
             assertThat(responses.keys).describedAs("$verb $path").contains("403")
         }
-        listOf("signatures", "rejection", "release-claim", "release-result").forEach { action ->
+        val approvalActions = listOf(
+            "signatures",
+            "rejection",
+            "release-claim",
+            "domestic-release-claim",
+            "release-result",
+        )
+        approvalActions.forEach { action ->
             val op = paths.getValue(
                 "/api/v1/entities/{entityId}/approval-requests/{approvalId}/$action",
             )["post"] as Map<String, Any?>
@@ -129,6 +138,6 @@ class BusinessSigningOpenApiTest {
     }
 
     private companion object {
-        const val EXPECTED_OPERATIONS = 16
+        const val EXPECTED_OPERATIONS = 19
     }
 }
