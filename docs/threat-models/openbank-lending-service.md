@@ -1164,3 +1164,12 @@ distinct catalogue operation and checks permission before writing the signature 
 The application database blocks concurrent withdrawal or expiry while a matching commitment can
 still succeed. Recovery keeps the operation ID, audit actor, destination and economic date.
 The catalogue preserves exact refusals and the ledger and borrower credit use stable references.
+
+Residual (durable signature recovery): a `lending_signature_intent` row whose application has left
+`AWAITING_SIGNATURE` without the intent's signature being applied (withdrawn, expired or declined)
+stays pending. `finishSignatureIntent` refuses it on every claim, and `SignatureRecoveryScheduler`
+reclaims it each lease, logging a warning. An intent whose signature is already recorded is left
+pending in the same way. Neither path writes a signature or emits a transition, so this fails
+closed; the cost is retry noise and a pending backlog. Closing an intent as abandoned needs its own
+terminal state. `completed_at` means the signature was applied and is evidence, so it must not be
+reused for that.
