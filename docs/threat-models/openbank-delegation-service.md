@@ -230,6 +230,15 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+New entries are one file each in the openbank-delegation-service.d directory beside this document, named
+YYYY-MM-DD-slug.md and starting with a bold date. The block below is assembled from them by the
+change-log fragment generator (run the repo's regen-derived entrypoint), so never edit between the
+markers. Entries recorded before this section adopted fragments follow the block.
+
+<!-- changelog-fragments:begin (generated from openbank-delegation-service.d/ — do not edit between markers) -->
+
+<!-- changelog-fragments:end -->
+
 - **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
   the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
   service.
