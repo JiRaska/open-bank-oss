@@ -239,12 +239,48 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   caller is mcp-service's own `m2m` identity, and a tokenless request must be refused 401. The pact
   interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json` states that
   expectation but is NOT proof of it — a consumer mock answers whatever the pact says. Provider-side
-  proof belongs with the route itself (#16793, which carries `McpClientGrantResource`); until a
-  provider test drives the route over HTTP with no token, the 401 is an unverified expectation.
+  proof lives with the route itself (#16793): `McpClientGrantIdentityGuardIT` drives it over HTTP
+  with no token (401), and the `@PactFolder` replay verifies the no-token interaction against the
+  real security layer (see the 2026-11-18 entry below).
   Information disclosure is bounded by the triple: the party id comes from the verified customer
   token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
   Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the
   endpoint's authn, not the NetworkPolicy, is the control that separates callers.
+
+- **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
+  the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
+  service.
+  - *Information disclosure.* The query filters in SQL on grantor party, client id, key thumbprint,
+    `grantee_type = 'MCP_CLIENT'` and `ACTIVE` (V34 partial index `idx_delegation_mcp_client_binding`),
+    so another customer's grant to the same client is never loaded; the resolver repeats every check
+    in code (thumbprint compared in constant time, in-window, non-exposure). The answer carries only
+    grant id, resource type/id, capabilities and `validTo` — no names, limits, approval policy,
+    thumbprint or other PII. An empty list is the refusal, so it cannot enumerate.
+  - *Elevation of privilege.* OPA admits only `service-account-openbank-mcp` (reason
+    `mcp-client-grant-resolve`), with `service_account == true` pinned explicitly — `machine_named`'s
+    legacy branch would otherwise admit a principal with no marker by name alone — and `client_id ==
+    openbank-mcp`. Every other principal is VETOED, so a staff ROLE_OPERATOR/ROLE_ADMIN token
+    (`operator-delegation-write`), `operator-read-any` and other service accounts cannot reach it.
+    The handler re-checks the verified client id in code and refuses a request carrying the
+    customer-party header, so an advisory PDP does not widen it.
+  - *Spoofing (unauthenticated caller).* The route carries `@RolesAllowed("ROLE_API")`, so Quarkus
+    refuses a tokenless request 401 before the handler runs. Before that, an anonymous call reached
+    the identity guard and got 403, the same answer as a wrong caller, and nothing showed the route
+    rejected it as unauthenticated. Control: `McpClientGrantIdentityGuardIT` drives the real route over
+    HTTP (no token 401; another service-account 403 with ROLE_API and with ROLE_OPERATOR; mcp-service 200).
+    Removing the annotation turned the no-token case red (403), as it did the pact replay below.
+  - *Evidence.* `opa test` (must-allow mcp; must-deny shared backend, edge, staff operator, renamed
+    machine, marker-less principal; each guard removed went red); `opa eval` on the regenerated
+    `delegation-opa-bundle`; `McpClientGrantResourceIT` over real HTTP and a real database (another
+    customer's grant never returned; non-mcp client and customer header 403; missing body and bad
+    thumbprint 400). The HTTP `@PactFolder` replay
+    (`DelegationMcpClientGrantPactFolderProviderVerificationTest`) starts verifying when mcp-service's
+    consumer pact lands with the S4 mcp-service PR; until then it has no pact to replay. It also
+    verifies the consumer's no-token interaction: an interaction whose expected status is 401 runs
+    with the test identity cleared, so the real security layer has to answer it, while every other
+    interaction stays authenticated as mcp-service.
+  - No write path changes: MCP_CLIENT grants stay dormant, so in practice the endpoint answers empty
+    until the connect flow ships. Rollback: revert; no schema change.
 
 - **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
   customer-admitted third-party MCP client as grantee instead of a party. Existing grants are

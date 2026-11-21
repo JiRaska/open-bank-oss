@@ -146,7 +146,7 @@ class CustomerReadTools @Inject constructor(
             principal = Principal(id = caller.subject, type = HUMAN, roles = emptyList(), serviceAccount = false),
             action = tool.action,
             attributes = mapOf(
-                "channel" to CustomerChannelAdmission.CHANNEL,
+                "channel" to CustomerChannelAdmission.PDP_CHANNEL,
                 "client" to caller.clientId,
                 "tool" to tool.definition.name,
                 "grantedCapabilities" to granted.sorted(),

@@ -189,6 +189,13 @@ class CustomerChannelAdmission(
 
     companion object {
         val CHANNEL = McpMetricsPort.McpChannel.CUSTOMER
+
+        /**
+         * The channel as the PDP sees it. `mcp_rest_ext.rego` matches the literal string
+         * `"mcp-customer"`; [CHANNEL] is the metrics enum and would serialise as `CUSTOMER`, which
+         * the rule never matches, so every customer tool call would fall through to the default.
+         */
+        const val PDP_CHANNEL = "mcp-customer"
         private const val PRINCIPAL_HUMAN = "HUMAN"
         private const val HTTP_METHOD = "POST"
         private const val CLAIM_AZP = "azp"
