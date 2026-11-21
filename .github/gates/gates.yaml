@@ -6142,6 +6142,30 @@ gates:
     run: |
       python3 .github/scripts/check-ledger-instance-switches.py --root .
 
+  # Recurred 3x on 2026-11-17 (#15663 transaction, #15665 domestic-payment, #15643 ledger): each
+  # outbox v2 PR needs dispatch paused through GitOps BEFORE its migration deploys, and that was
+  # only a runbook step, so an armed PR could merge into a mixed v1/v2 dispatcher window.
+  - id: outbox-v2-cutover-quiesced
+    name: "outbox v2 migration merges only while dispatch is paused on main (enforced)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 45   # gate 0.6s; self-test builds ~37 git fixtures in parallel, 26s measured on a loaded laptop
+    min_subjects: 20   # services carrying an outbox dispatch-enabled switch at HEAD (corpus, not PRs)
+    rationale: >-
+      A PR that adds the claim-fenced outbox v2 migration (claim_token on an outbox table) is safe
+      only if no pre-v2 dispatcher is live when it deploys. The pause is a GitOps change that must
+      already be on the base; a pause in the same PR is not live yet. Fails closed with no label
+      escape — the escape is merging the pause first. A re-enable PR adds no such migration, so it
+      is never a subject.
+    review_after: '2027-05-17'
+    selftest: python3 .github/scripts/check-outbox-v2-cutover-quiesced.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-v2-cutover-quiesced.py"]
+    run: |
+      python3 .github/scripts/check-outbox-v2-cutover-quiesced.py --base "${PR_DIFF_BASE}"
+
   - id: quoted-sequence-name-ratchet
     name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
     group: data
