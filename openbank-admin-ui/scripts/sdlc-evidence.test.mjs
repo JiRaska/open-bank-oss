@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { stringify } from 'yaml'
-import { deriveSdlcEvidence, SDLC_SOURCES } from './lib/sdlc-evidence.mjs'
+import { deriveSdlcEvidence, knobDefault, SDLC_SOURCES } from './lib/sdlc-evidence.mjs'
 
 function fixture({ replicas = 1, routing = false, weights = [10, 30, 100] } = {}) {
   return {
@@ -63,4 +63,15 @@ test('respects explicit disable of automated sync instead of its object presence
   assert.equal(derive(data).ledger.automaticSync, true)
   data[SDLC_SOURCES.application].spec.syncPolicy.automated.enabled = false
   assert.equal(derive(data).ledger.automaticSync, false)
+})
+test('reads the strict batch cap from a literal and from a repo-variable expression default', () => {
+  const literal = fixture()
+  assert.equal(derive(literal).train.strictBatchCap, 8)
+  const expr = fixture()
+  expr[SDLC_SOURCES.train].env.MERGE_TRAIN_STRICT_BATCH_CAP = "${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || '4' }}"
+  assert.equal(derive(expr).train.strictBatchCap, 4)
+  assert.equal(knobDefault("${{vars.X||'12'}}"), '12')
+  const noDefault = fixture()
+  noDefault[SDLC_SOURCES.train].env.MERGE_TRAIN_STRICT_BATCH_CAP = '${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP }}'
+  assert.throws(() => derive(noDefault), /missing train batch limits/)
 })
