@@ -122,6 +122,9 @@ BUDGET_DENY_ID_RE = re.compile(
     r"money|authz|opa|rego|policy|secret|threat|ledger|idempoten|four-eyes|realm|oidc|pdp|principal"
     r"|pci|ruleset|agent-merge|agent-review|mtls|tls|credential|outbox|card|provenance|attest|cosign"
     r"|honeytoken|dlq|deploy-hold|release-evidence|approval|supply|security|audit|sanction|payment"
+    r"|matrix|acl|delegation|value-movement|screening|treasury|asvs|crypto|dast|enforcement|write"
+    r"|scope|evidence|compliance|regulatory|high-risk|merge-train|merged-past-red|deregistered"
+    r"|gate-runner|agent-pr-guard|lock-integrity"
 )
 # The `gates` job in ci.yml runs under `timeout-minutes: 15`; a scaled per-gate kill above that
 # (minus a margin for setup/report) could never fire — the job would be cancelled first, which
@@ -1715,6 +1718,10 @@ def self_test():
             "outbox-conformance-it-present", "outbox-sent-retention", "outbox-claim-sql-ratchet",
             "outbox-dispatch-enabled-guard", "outbox-has-writer", "outbox-v2-cutover-quiesced",
             "provenance", "security-checklist-money-path", "authz-enforce-money-path",
+            "matrix-write-grants", "kafka-acl-coverage", "value-movement-admission-coverage",
+            "delegation-capability-enforcement", "asvs-l3-mechanical-subset", "openssf-gold-evidence",
+            "merge-train-declaration", "gates-not-deregistered", "agent-pr-guard",
+            "ci-artifact-lock-integrity",
         )
         real = pathlib.Path(__file__).resolve().parents[2]
         if (real / MANIFEST).exists():
