@@ -230,6 +230,32 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
+  the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
+  service.
+  - *Information disclosure.* The query filters in SQL on grantor party, client id, key thumbprint,
+    `grantee_type = 'MCP_CLIENT'` and `ACTIVE` (V34 partial index `idx_delegation_mcp_client_binding`),
+    so another customer's grant to the same client is never loaded; the resolver repeats every check
+    in code (thumbprint compared in constant time, in-window, non-exposure). The answer carries only
+    grant id, resource type/id, capabilities and `validTo` — no names, limits, approval policy,
+    thumbprint or other PII. An empty list is the refusal, so it cannot enumerate.
+  - *Elevation of privilege.* OPA admits only `service-account-openbank-mcp` (reason
+    `mcp-client-grant-resolve`), with `service_account == true` pinned explicitly — `machine_named`'s
+    legacy branch would otherwise admit a principal with no marker by name alone — and `client_id ==
+    openbank-mcp`. Every other principal is VETOED, so a staff ROLE_OPERATOR/ROLE_ADMIN token
+    (`operator-delegation-write`), `operator-read-any` and other service accounts cannot reach it.
+    The handler re-checks the verified client id in code and refuses a request carrying the
+    customer-party header, so an advisory PDP does not widen it.
+  - *Evidence.* `opa test` (must-allow mcp; must-deny shared backend, edge, staff operator, renamed
+    machine, marker-less principal; each guard removed went red); `opa eval` on the regenerated
+    `delegation-opa-bundle`; `McpClientGrantResourceIT` over real HTTP and a real database (another
+    customer's grant never returned; non-mcp client and customer header 403; missing body and bad
+    thumbprint 400). The HTTP `@PactFolder` replay
+    (`DelegationMcpClientGrantPactFolderProviderVerificationTest`) starts verifying when mcp-service's
+    consumer pact lands with the S4 mcp-service PR; until then it has no pact to replay.
+  - No write path changes: MCP_CLIENT grants stay dormant, so in practice the endpoint answers empty
+    until the connect flow ships. Rollback: revert; no schema change.
+
 - **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
   customer-admitted third-party MCP client as grantee instead of a party. Existing grants are
   `PARTY` (V34 defaults the column), and their behaviour is unchanged. Elevation of privilege is
