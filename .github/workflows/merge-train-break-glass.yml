@@ -1,0 +1,105 @@
+# Owner break-glass for the required `merge-train` status (ADR-0343 break-glass amendment, #17006).
+# For the case where the merge train ITSELF is broken and cannot post `merge-train`, so even the PR
+# that fixes it cannot merge. The ruleset and its required contexts are unchanged; there is no bypass
+# actor and no --admin. The status is posted by the same App the ruleset pins `merge-train` to, only
+# after break_glass_check.py re-derives live that every OTHER required context is green on that head.
+#
+# Owner setup (once): create the environment `merge-train-break-glass` with required reviewer = the
+# owner and deployment branches = main only. If it does not exist, GitHub creates it unprotected on
+# first use, so the job ALSO asserts its protection rules live and fails closed without them.
+name: Merge train break-glass
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number whose head gets merge-train=success"
+        required: true
+        type: string
+      reason:
+        description: "Why the train cannot post (recorded in the audit trail; max 500 chars)"
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/merge-train-break-glass.yml
+      - .github/scripts/break_glass_check.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-train-break-glass-${{ github.event_name }}-${{ github.actor }}-${{ inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -I .github/scripts/break_glass_check.py --self-test
+
+  break-glass:
+    # Both actors are the owner, from main only, first attempt only (a rerun never re-applies).
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: merge-train-break-glass
+    steps:
+      - name: Validate inputs (fail closed, before any credential)
+        env:
+          BG_PR: ${{ inputs.pr }}
+          BG_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          [[ "$BG_PR" =~ ^[0-9]{1,6}$ ]] || { echo "::error::pr must match ^[0-9]{1,6}$"; exit 1; }
+          [[ -n "${BG_REASON//[[:space:]]/}" ]] || { echo "::error::reason is required"; exit 1; }
+          (( ${#BG_REASON} <= 500 )) || { echo "::error::reason longer than 500 characters"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Mint the GitHub App installation token (the App the ruleset pins merge-train to)
+        id: app_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+      - name: Assert the environment is protected (required reviewer + main-only)
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          env_json="$RUNNER_TEMP/env.json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/merge-train-break-glass" > "$env_json"
+          python3 -I - "$env_json" <<'PY'
+          import json, sys
+          e = json.load(open(sys.argv[1]))
+          kinds = {r.get("type") for r in e.get("protection_rules") or []}
+          pol = e.get("deployment_branch_policy") or {}
+          bad = []
+          if "required_reviewers" not in kinds:
+              bad.append("no required reviewer")
+          if not (pol.get("protected_branches") or pol.get("custom_branch_policies")):
+              bad.append("no deployment-branch restriction")
+          if bad:
+              sys.exit("::error::environment merge-train-break-glass is unprotected: " + ", ".join(bad))
+          print("environment protected:", sorted(kinds))
+          PY
+      - name: Evaluate live and post merge-train (no PR code is executed)
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          BG_PR: ${{ inputs.pr }}
+          BG_REASON: ${{ inputs.reason }}
+          BG_ACTOR: ${{ github.actor }}
+          BG_OWNER: ${{ github.repository_owner }}
+          BG_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 -I -S .github/scripts/break_glass_check.py run --repo "$GITHUB_REPOSITORY" \
+            --pr "$BG_PR" --actor "$BG_ACTOR" --owner "$BG_OWNER" --reason-env BG_REASON --run-url "$BG_RUN_URL"

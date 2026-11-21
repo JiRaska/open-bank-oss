@@ -1018,3 +1018,27 @@ authenticity, required and extra checks, lane routing and the exact-head merge A
 After a strict-lane update, review the combined head and its fresh CI before recording a new
 owner decision. A closed PR cannot receive a retroactive approval, and this change does not
 alter historical merge execution or recorder evidence.
+
+## Amendment: owner break-glass for the `merge-train` status (#17006)
+
+**When.** Only when the merge train itself cannot post `merge-train` — the train is broken, and
+the PR that would fix it is therefore unmergeable too. It is not a fast lane and not a way past a
+red check.
+
+**Who.** The repository owner, dispatching `.github/workflows/merge-train-break-glass.yml` from
+`main`, through the `merge-train-break-glass` environment (required reviewer = owner, main-only).
+The job asserts that protection live and fails closed without it. The ruleset, its required
+contexts and its (empty) bypass list are unchanged; no `--admin` is involved.
+
+**What it checks.** `break_glass_check.py` re-derives live, on the PR's current head: owner actor;
+PR open, not draft, base `main`, native auto-merge armed; head not behind `main`; every OTHER
+context required on `main` (read from the rules API, pinned to its integration) `success`; and no
+removal from `deploy_holds` nor any change to `money_path_services` in `rules.yaml`. `.github/`
+paths are allowed on purpose — fixing the train is the use case. A deploy hold or the money-path
+list are controls the train does not own, so lifting them waits for a working train. It then posts
+`merge-train=success` with the same App the ruleset pins the context to; native auto-merge does
+the rest. Any later push invalidates the status, as for the train's own.
+
+**Audit and post-use review.** Every use writes the job summary, a comment on the PR, and a
+comment on the standing `merge-train break-glass log` issue (label `governance`). Each entry is
+reviewed after the fact: was the train genuinely unable to post, and did the fix land.
