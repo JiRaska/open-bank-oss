@@ -75,8 +75,8 @@ github:
         []
   unprovisioned:
     - kind: variable
-      names: [MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
-      reason: "optional owner-tunable merge-train lane caps; unset means the reviewed workflow default applies, and merge-train.py range-validates any value"
+      names: [AUTO_DEPLOY_MAX_PARALLEL, MERGE_TRAIN_API_RETRY_ATTEMPTS, MERGE_TRAIN_BATCH_SIZE, MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP, MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_EXPEDITE_LANE, MERGE_TRAIN_PREFETCH_BATCH, MERGE_TRAIN_RESERVATION_CEILING_S, MERGE_TRAIN_STALE_RED_CAP, MERGE_TRAIN_STRICT_BATCH_CAP, MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
+      reason: "optional owner-tunable merge-train and auto-deploy knobs; unset means the reviewed workflow default applies, and merge-train.py range-validates any value"
       issue: 16932
       review_by: 2027-02-21
     - kind: variable
