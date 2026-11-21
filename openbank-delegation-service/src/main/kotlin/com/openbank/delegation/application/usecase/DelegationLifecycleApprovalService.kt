@@ -218,12 +218,14 @@ class DelegationLifecycleApprovalService(
         DelegationLifecycleOperation.SUSPEND -> DelegationSuspended(
             aggregateId = grant.id, lifecycleRevision = grant.lifecycleRevision,
             grantorPartyId = grant.grantorPartyId, granteePartyId = grant.granteePartyId,
+            granteeType = grant.granteeType, granteeClientId = grant.granteeClientId,
             resourceType = grant.resourceType, resourceId = grant.resourceId,
             capabilities = grant.capabilities, reason = action.reason, occurredAt = at,
         )
         DelegationLifecycleOperation.REINSTATE -> DelegationReinstated(
             aggregateId = grant.id, lifecycleRevision = grant.lifecycleRevision,
             grantorPartyId = grant.grantorPartyId, granteePartyId = grant.granteePartyId,
+            granteeType = grant.granteeType, granteeClientId = grant.granteeClientId,
             resourceType = grant.resourceType, resourceId = grant.resourceId,
             capabilities = grant.capabilities, validFrom = grant.validFrom,
             validTo = grant.validTo, perTransactionLimit = EventMoney.from(grant.perTransactionLimit), occurredAt = at,
@@ -231,6 +233,7 @@ class DelegationLifecycleApprovalService(
         DelegationLifecycleOperation.REVOKE -> DelegationRevoked(
             aggregateId = grant.id, lifecycleRevision = grant.lifecycleRevision,
             grantorPartyId = grant.grantorPartyId, granteePartyId = grant.granteePartyId,
+            granteeType = grant.granteeType, granteeClientId = grant.granteeClientId,
             resourceType = grant.resourceType, resourceId = grant.resourceId,
             capabilities = grant.capabilities, reason = action.reason, occurredAt = at,
         )

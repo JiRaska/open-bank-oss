@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.3...swift-service-v0.14.4) (2026-11-20)
+
+
+### Bug Fixes
+
+* **swift:** validate released-payment IBANs with the shared Iban validator ([#16763](https://github.com/JiRaska/open-bank-oss/issues/16763)) ([07002c6](https://github.com/JiRaska/open-bank-oss/commit/07002c6cd4d07052fdb3e7831dd4212924289f0c))
+
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.2...swift-service-v0.14.3) (2026-11-16)
+
+
+### Bug Fixes
+
+* **statement,swift,tax-reporting:** reload outbound mTLS client certificates ([#16418](https://github.com/JiRaska/open-bank-oss/issues/16418)) ([037fffa](https://github.com/JiRaska/open-bank-oss/commit/037fffa983a283517805c7858c3fb01c2219468a))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.14.1...swift-service-v0.14.2) (2026-11-15)
 
 

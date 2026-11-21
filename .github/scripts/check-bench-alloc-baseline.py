@@ -151,6 +151,24 @@ def load_baseline(path: pathlib.Path) -> dict[str, float]:
     return {str(k): float(v) for k, v in bench.items()}
 
 
+def fork_floor(metric: dict) -> float:
+    """B/op as the LOWEST per-fork mean, not JMH's mean over every iteration of every fork.
+
+    Escape analysis stays on, because production runs with it. What C2 scalar-replaces is decided
+    once per fork, so a fork is internally constant but forks disagree: unchanged code measured
+    LendingBench.aprcTinyAnnual at 592 / 616 / 632 / 656 B/op across CI forks (2026-11-10..14).
+    A mean over forks moves with the number of unlucky forks; the floor does not. A real
+    regression adds bytes on EVERY plateau, so it moves the floor as well, and a fork landing on
+    the high plateau can no longer make unchanged code red. What this cannot see is a change that
+    moves only the upper plateaus: that would need every fork to land high before it shows.
+    Without per-fork raw data (a hand-built fixture) the reported score is used.
+    """
+    forks = [f for f in (metric.get("rawData") or []) if f]
+    if not forks:
+        return float(metric["score"])
+    return min(sum(float(x) for x in f) / len(f) for f in forks)
+
+
 def load_results(path: pathlib.Path) -> dict[str, float]:
     """R: benchmark -> B/op. A result without the gc profiler's metric is an error, not a zero."""
     out: dict[str, float] = {}
@@ -162,7 +180,7 @@ def load_results(path: pathlib.Path) -> dict[str, float]:
         secondary = entry.get("secondaryMetrics") or {}
         if METRIC not in secondary:
             raise ValueError(f"{path}: {name} has no {METRIC} — was JMH run with -prof gc?")
-        value = float(secondary[METRIC]["score"])
+        value = fork_floor(secondary[METRIC])
         if not math.isfinite(value) or value < 0:
             raise ValueError(f"{path}: {name} has invalid allocation measurement {value}")
         out[name] = value

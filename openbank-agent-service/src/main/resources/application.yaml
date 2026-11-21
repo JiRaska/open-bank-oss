@@ -379,6 +379,8 @@ agent:
           - read.governance
           - draft.ticket
           - query.compliance.readonly
+          - propose.aml.decision
+          - sanctions.review.maker
           - query.payments.readonly
           - query.disputes.readonly
           - query.observability.readonly
@@ -491,6 +493,8 @@ mp:
     tls:
       # aml-service's private-CA mTLS listener (8443, client auth REQUIRED).
       aml-authority:
+        # Re-read the client pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+        reload-period: 1h
         key-store:
           pem:
             client:

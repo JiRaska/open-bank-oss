@@ -51,7 +51,11 @@ spec:
     chart: opentelemetry-collector
     targetRevision: 0.175.0
     helm:
-      valuesObject:
+      # `values` (a string), NOT `valuesObject`: this block disables chart defaults with `null`,
+      # and Kubernetes drops null fields from a stored Application, so a valuesObject with nulls
+      # can never equal its desired state and root stays OutOfSync forever. A string keeps them.
+      # Gate: check-argocd-valuesobject-null.py.
+      values: |
         fullnameOverride: ci-metrics-gateway
         mode: deployment
         replicaCount: 1

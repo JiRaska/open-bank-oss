@@ -141,13 +141,15 @@ sequenceDiagram
   Note over TS: sága běží → COMPLETED/FAILED →<br/>druhý outbox řádek (Completed/Failed)
 
   loop @Scheduled každých 5s (SKIP pokud běží)
-    D->>DB: listProcessable(dávka 25)
+    D->>DB: claimProcessable(dávka 25)
     D->>K: publishWithResilience (CircuitBreaker + Retry + Timeout + Bulkhead)
     D->>DB: markSent / markFailed
   end
 ```
 
 **Proč outbox:** transakční konzistence mezi zápisem do DB a publikací do Kafky. Doručení at-least-once; dispatcher obaluje každou publikaci do SmallRye Fault Tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`) a nikdy nenechá scheduler spadnout.
+
+Dispečer přebírá řádky atomickou aktualizací v PostgreSQL. Dotaz vrací pouze sloupce mapované aktuální entitou outboxu včetně `synthetic`. Přidání sloupců připouštějících NULL do `transaction_outbox` proto zachovává kompatibilitu dispečeru.
 
 ## Klíčové porty
 

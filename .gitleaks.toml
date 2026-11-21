@@ -163,6 +163,9 @@ regexes = [
   '''123456-1234567890/0800''',
   # Sequential digit placeholder in UI demos (not a real rodné číslo)
   '''1234567890''',
+  # Descending-digit placeholder account number in consumer Pact fixtures
+  # (pacts/openbank-customer-edge-openbank-domestic-payment.json) — not a rodné číslo
+  '''9876543210''',
   # IBAN-fragment example in account-service OpenAPI spec (bank code 0800 +
   # placeholder account digits) — a public API-contract example, not a secret;
   # the 10-digit string trips the rod-cislo numeric heuristic.

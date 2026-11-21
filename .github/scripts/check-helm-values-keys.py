@@ -270,7 +270,13 @@ def iter_helm_sources():
             spec = doc.get("spec", {})
             sources = spec.get("sources") or ([spec["source"]] if "source" in spec else [])
             for src in sources:
-                values = (src.get("helm") or {}).get("valuesObject")
+                helm = src.get("helm") or {}
+                # `values` is the string form, used where the block disables chart defaults with
+                # null (a stored Application drops null fields, so a null-bearing valuesObject is
+                # permanently OutOfSync). Same content, so it must stay inside this gate.
+                values = helm.get("valuesObject")
+                if values is None and isinstance(helm.get("values"), str):
+                    values = yaml.safe_load(helm["values"])
                 chart = src.get("chart")
                 if not values or not chart:
                     continue  # path-based or values-less source: nothing to check

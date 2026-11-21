@@ -141,13 +141,15 @@ sequenceDiagram
   Note over TS: saga runs → COMPLETED/FAILED →<br/>second outbox row (Completed/Failed)
 
   loop @Scheduled every 5s (SKIP if running)
-    D->>DB: listProcessable(batch 25)
+    D->>DB: claimProcessable(batch 25)
     D->>K: publishWithResilience (CircuitBreaker + Retry + Timeout + Bulkhead)
     D->>DB: markSent / markFailed
   end
 ```
 
 **Why outbox:** transactional consistency between the DB write and Kafka publish. At-least-once delivery; the dispatcher wraps each publish in SmallRye Fault Tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`) and never lets the scheduler crash.
+
+The dispatcher claims rows with an atomic PostgreSQL update. The claim returns the explicit fields mapped by the current outbox entity, including `synthetic`. Adding nullable columns to `transaction_outbox` therefore keeps this dispatcher compatible.
 
 ## Key ports
 

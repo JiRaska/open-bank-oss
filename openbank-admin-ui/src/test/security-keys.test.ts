@@ -2,12 +2,13 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parseAllDocuments } from 'yaml'
 import { KEY_CATALOG, catalogEntry } from '@/lib/security/keys/catalog'
 import { allStatuses, byUrgency, dependents, entryStatus, statusForDays, type MeasuredCert } from '@/lib/security/keys/status'
-import { measure, projectCertManager, projectStrimzi } from '@/lib/security/keys/prometheus'
+import { measure, projectCertManager, projectSeal, projectStrimzi } from '@/lib/security/keys/prometheus'
 import { buildKeysReport } from '@/lib/security/keys/report'
 import { hasPermission, permissionForPath, ROLES } from '@/lib/auth/roles'
 
@@ -81,10 +82,23 @@ describe('status', () => {
 
   it('non-measurable kinds are explicit, not healthy', () => {
     const statuses = Object.fromEntries(allStatuses([], NOW).map((s) => [s.id, s.status]))
-    expect(statuses['pades-seal']).toBe('untracked')
+    expect(statuses['pades-seal']).toBe('unknown')
+    expect(statuses['push-credentials']).toBe('revocation')
     expect(statuses['cosign-kms']).toBe('rotation')
     expect(statuses['pki-agent']).toBe('short-lived')
     expect(Object.values(statuses)).not.toContain('ok')
+  })
+
+  it('the seal counts down only for the organizational keystore certificate', () => {
+    const seal = catalogEntry('pades-seal')!
+    const sc = (name: string, days: number): MeasuredCert => ({ source: 'seal', namespace: 'documents', name, issuer: '', notAfter: NOW + days * DAY })
+    expect(entryStatus(seal, [sc('keystore', 20)], NOW)).toMatchObject({ status: 'attention', daysLeft: 20 })
+    // the DEV-ONLY fallback never reads as a healthy countdown, however far its date
+    expect(entryStatus(seal, [sc('ephemeral', 3650)], NOW)).toMatchObject({ status: 'dev-only', daysLeft: null })
+    // a real certificate decides the entry even next to an ephemeral replica
+    expect(entryStatus(seal, [sc('ephemeral', 3650), sc('keystore', 5)], NOW).status).toBe('critical')
+    // a cert-manager certificate is not the seal
+    expect(entryStatus(seal, [cm('documents', 'x-tls', 'openbank-ca', 80)], NOW).status).toBe('unknown')
   })
 
   it('urgency puts unknown before attention', () => {
@@ -125,6 +139,24 @@ describe('prometheus projection', () => {
       .toMatchObject({ name: 'clients', notAfter: NOW })
   })
 
+  it('the seal gauge projects only a known identity', () => {
+    expect(projectSeal([
+      { metric: { namespace: 'documents', identity: 'keystore', subject: 'LEAK' }, value: [0, String(NOW)] },
+      { metric: { namespace: 'documents', identity: 'mystery' }, value: [0, String(NOW)] },
+      { metric: { namespace: 'documents', identity: 'ephemeral' }, value: [0, '0'] },
+    ])).toEqual([{ source: 'seal', namespace: 'documents', name: 'keystore', issuer: '', notAfter: NOW }])
+  })
+
+  it('two replicas reporting the same seal count once', async () => {
+    const replica = (pod: string) => ({ metric: { namespace: 'documents', pod, identity: 'keystore' }, value: [0, String(NOW)] })
+    const m = await measure('http://prom', async (url) => new Response(JSON.stringify({
+      status: 'success',
+      data: { result: String(url).includes('document_seal') ? [replica('a'), replica('b')] : [] },
+    })))
+    expect(m.certs).toHaveLength(1)
+    expect(m.reachable.seal).toBe(true)
+  })
+
   it('a target scraped twice counts once', async () => {
     const series = { metric: { namespace: 'a', name: 'x-tls', issuer_name: 'openbank-ca' }, value: [0, String(NOW)] }
     const body = { status: 'success', data: { result: [series, series] } }
@@ -135,13 +167,13 @@ describe('prometheus projection', () => {
 
   it('an unreachable Prometheus reports unreachable, not empty-and-fine', async () => {
     const m = await measure('http://prom', async () => { throw new Error('down') })
-    expect(m).toEqual({ certs: [], reachable: { certManager: false, strimzi: false } })
+    expect(m).toEqual({ certs: [], reachable: { certManager: false, strimzi: false, seal: false } })
     expect((await measure(null)).reachable.certManager).toBe(false)
   })
 })
 
 describe('report and permissions', () => {
-  const m = { certs: [cm('accounts', 'account-service-internal-tls', 'openbank-ca', 40)], reachable: { certManager: true, strimzi: false } }
+  const m = { certs: [cm('accounts', 'account-service-internal-tls', 'openbank-ca', 40)], reachable: { certManager: true, strimzi: false, seal: false } }
 
   it('the per-certificate list is built only for keys:expert', () => {
     expect(buildKeysReport(m, NOW, false).expert).toBeUndefined()
@@ -162,5 +194,55 @@ describe('report and permissions', () => {
     expect(permissionForPath('/security/keys')).toBe('keys:view')
     expect(permissionForPath('/api/security/keys')).toBe('keys:view')
     expect(permissionForPath('/security')).toBe('system:view')
+  })
+})
+
+/**
+ * The catalogue's `algorithm` is hand-written, so a manifest that changes its key type would leave
+ * the page (and its post-quantum column) describing a key that no longer exists. cert-manager
+ * Certificates are the decidable case: their key type is a field, and an omitted `privateKey`
+ * silently means RSA 2048, so that default is spelled out here rather than assumed away.
+ */
+function certManagerDescriptors(file: string): string[] {
+  const out: string[] = []
+  for (const doc of parseAllDocuments(readFileSync(file, 'utf8'))) {
+    const d = doc.toJS() as { apiVersion?: string; kind?: string; spec?: { privateKey?: { algorithm?: string; size?: number } } } | null
+    if (!d || d.kind !== 'Certificate' || !String(d.apiVersion ?? '').startsWith('cert-manager.io/')) continue
+    const algorithm = d.spec?.privateKey?.algorithm ?? 'RSA'
+    const size = d.spec?.privateKey?.size ?? (algorithm === 'ECDSA' ? 256 : 2048)
+    out.push(algorithm === 'ECDSA' ? `ECDSA P-${size}` : `${algorithm} ${size}`)
+  }
+  return out
+}
+
+function yamlFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) return yamlFiles(p)
+    return /\.ya?ml$/.test(e.name) ? [p] : []
+  })
+}
+
+describe('keys catalogue algorithms match the manifests', () => {
+  const repoRoot = path.resolve(__dirname, '../../..')
+  const certBacked = KEY_CATALOG.filter((e) => e.expiry.type === 'cert-manager')
+
+  it('every cert-manager entry names the key type its own manifest declares', () => {
+    expect(certBacked.length).toBeGreaterThan(0)
+    for (const e of certBacked) {
+      const declared = new Set(certManagerDescriptors(path.join(repoRoot, e.definedIn)))
+      expect(declared.size, `${e.id}: no cert-manager Certificate in ${e.definedIn}`).toBe(1)
+      const [descriptor] = [...declared]
+      expect(e.algorithm.startsWith(descriptor), `${e.id}: catalogue says "${e.algorithm}", ${e.definedIn} declares ${descriptor}`).toBe(true)
+    }
+  })
+
+  it('no Certificate anywhere in gitops uses a key type the catalogue does not describe', () => {
+    const described = new Set(certBacked.map((e) => e.algorithm.split(' / ')[0]))
+    const found = yamlFiles(path.join(repoRoot, 'openbank-infra/gitops'))
+      .flatMap((f) => certManagerDescriptors(f).map((d) => ({ f: path.relative(repoRoot, f), d })))
+    expect(found.length).toBeGreaterThan(0)
+    const undescribed = found.filter(({ d }) => !described.has(d)).map(({ f, d }) => `${f}: ${d}`)
+    expect(undescribed).toEqual([])
   })
 })
