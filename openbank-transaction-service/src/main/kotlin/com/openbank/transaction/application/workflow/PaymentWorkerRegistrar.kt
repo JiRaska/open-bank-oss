@@ -54,7 +54,10 @@ class PaymentWorkerRegistrar(
         val factory = WorkerFactory.newInstance(workflowClient.get())
         workerFactory = factory
         val worker = factory.newWorker(temporalConfig.taskQueue(), options)
-        worker.registerWorkflowImplementationTypes(PaymentWorkflowImpl::class.java)
+        worker.registerWorkflowImplementationTypes(
+            PaymentWorkflowImpl::class.java,
+            BranchPaymentWorkflowImpl::class.java,
+        )
         worker.registerActivitiesImplementations(activities)
         factory.start()
         log.infof("Temporal payment worker started on task queue '%s'", temporalConfig.taskQueue())

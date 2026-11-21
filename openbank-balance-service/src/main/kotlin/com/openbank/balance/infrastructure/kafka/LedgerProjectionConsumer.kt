@@ -36,6 +36,16 @@ class LedgerProjectionConsumer(
     @ConfigProperty(name = "openbank.balance.projection.enabled", defaultValue = "false")
     private val projectionEnabled: Boolean,
 ) {
+    @org.eclipse.microprofile.faulttolerance.Retry(
+        maxRetries = -1,
+        delay = 1000,
+        abortOn = [
+            IllegalStateException::class,
+            IllegalArgumentException::class, NullPointerException::class,
+            com.fasterxml.jackson.core.JsonProcessingException::class, java.time.DateTimeException::class,
+            com.openbank.libs.domain.money.InvalidMoneyException::class,
+        ],
+    )
     @Incoming("ledger-events-in")
     suspend fun consume(payload: String) {
         if (!projectionEnabled) return
@@ -67,6 +77,7 @@ class LedgerProjectionConsumer(
         transactionId = UUID.fromString(node["transactionId"].asText()),
         entryDate = LocalDate.parse(node["entryDate"].asText()),
         version = node["version"]?.asLong() ?: 0L,
+        branchBookId = node["branchBookId"]?.takeUnless { it.isNull }?.asText()?.let(UUID::fromString),
     )
 
     companion object {

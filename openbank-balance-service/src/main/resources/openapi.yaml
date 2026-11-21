@@ -13,7 +13,7 @@ info:
   # 1.14.0 -> 1.15.0: additive GET /{accountId}/holds — lists ACTIVE holds (released/expired
   # omitted). The endpoint agent-service's get_balance_holds MCP tool has called against a
   # POST-only path; endpoint and consumer pact ship together (#13071).
-  version: 1.15.0
+  version: 1.17.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -30,6 +30,41 @@ tags:
   - name: Reconciliation
 
 paths:
+  /api/v1/balances/reconciliation/branch-books:
+    post:
+      tags: [Reconciliation]
+      operationId: reconcileBranchBooks
+      summary: Reconcile each immutable book and the bank on the same value-date basis
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+        - { name: bankId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '201':
+          description: Persisted control evidence; complete is false for drift or unknown attribution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchBookReport' }
+        '400': { description: Invalid or absent bank/date }
+        '401': { description: Authentication required }
+        '403': { description: Access denied }
+        '409': { description: Key was already used for another bank or date }
+  /api/v1/balances/reconciliation/branch-books/latest:
+    get:
+      tags: [Reconciliation]
+      operationId: getLatestBranchBookReconciliation
+      parameters:
+        - { name: bankId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Latest persisted evidence with its capture time
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchBookReport' }
+        '400': { description: Invalid or absent bank }
+        '401': { description: Authentication required }
+        '403': { description: Access denied }
+        '404': { description: No report for this bank }
   /api/v1/balances/{accountId}:
     get:
       tags: [Balances]
@@ -492,6 +527,44 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    BranchBookComparison:
+      type: object
+      required: [currency, ledger, projected, difference]
+      properties:
+        branchBookId: { type: string, format: uuid, nullable: true }
+        currency: { type: string }
+        ledger: { type: number }
+        projected: { type: number }
+        difference: { type: number }
+    BranchBookReport:
+      type: object
+      required: [bankId, asOf, generatedAt, books, bank, bankMatches, booksMatch, journalBooksBalanced, unknownAccounts, hasUnattributedJournals, complete]
+      properties:
+        bankId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        bankMatches: { type: boolean }
+        booksMatch: { type: boolean }
+        journalBooksBalanced: { type: boolean }
+        clearingEliminates: { type: boolean }
+        clearingBalances:
+          type: array
+          items:
+            type: object
+            required: [currency, balance]
+            properties:
+              branchBookId: { type: string, format: uuid, nullable: true }
+              currency: { type: string }
+              balance: { type: number }
+        unknownAccounts: { type: integer, format: int64 }
+        hasUnattributedJournals: { type: boolean }
+        complete: { type: boolean }
+        books:
+          type: array
+          items: { $ref: '#/components/schemas/BranchBookComparison' }
+        bank:
+          type: array
+          items: { $ref: '#/components/schemas/BranchBookComparison' }
     LowBalanceAlertRequest:
       type: object
       required: [enabled, threshold, rearmMargin]
@@ -650,6 +723,8 @@ components:
         ttlSeconds:
           type: integer
           format: int64
+          nullable: true
+          description: Omitted or null keeps the reservation until explicit release or ledger projection.
 
     ActiveHoldResponse:
       type: object

@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openbank:events:ledger-booking:v1",
+  "description": "Additive optional branchBookId derived from the immutable journal, including historical replay.",
+  "oneOf": [
+    {
+      "type": "object",
+      "x-openbank-event-type": "JournalPosted",
+      "required": [
+        "eventId",
+        "aggregateId",
+        "aggregateType",
+        "eventType",
+        "version",
+        "occurredAt",
+        "entryNumber",
+        "transactionId",
+        "entryDate",
+        "lineCount"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateType": {
+          "type": "string"
+        },
+        "eventType": {
+          "const": "JournalPosted"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "entryNumber": {
+          "type": "integer"
+        },
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "entryDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "lineCount": {
+          "type": "integer"
+        },
+        "sourceService": {
+          "type": "string"
+        },
+        "branchBookId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "x-openbank-event-type": "JournalReversed",
+      "required": [
+        "eventId",
+        "aggregateId",
+        "aggregateType",
+        "eventType",
+        "version",
+        "occurredAt",
+        "originalJournalId",
+        "transactionId",
+        "reason"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateType": {
+          "type": "string"
+        },
+        "eventType": {
+          "const": "JournalReversed"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "originalJournalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "branchBookId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "x-openbank-event-type": "AccountBookedChanged",
+      "required": [
+        "eventId",
+        "aggregateId",
+        "aggregateType",
+        "eventType",
+        "version",
+        "occurredAt",
+        "currency",
+        "delta",
+        "journalEntryId",
+        "transactionId",
+        "entryDate"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateType": {
+          "type": "string"
+        },
+        "eventType": {
+          "const": "AccountBookedChanged"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "delta": {
+          "type": "number"
+        },
+        "journalEntryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transactionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "entryDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "branchBookId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      }
+    }
+  ]
+}

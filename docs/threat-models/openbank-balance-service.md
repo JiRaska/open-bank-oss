@@ -522,3 +522,23 @@ traffic rather than widening it.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `BALANCE_SERVICE_URL=http://balance-service.balances.svc:8103`. The read is the CRS/FATCA statement `asOf` balance under `service-account-openbank-tax-reporting` (ROLE_API), already admitted in `balance_rest_ext.rego`. **Residual risk, accepted and tracked:** balance-service has no private-CA mTLS listener, so this hop carries the bearer token in plaintext inside the cluster, like its five existing callers (customer-edge, agent, mcp, statements, payments). The new line is declared as V9.1 debt in `.github/asvs-l3-baseline.txt`. Retiring it means adding an 8443 client-auth-required, bearer-only listener (#16075). Mitigations in the meantime: the namespace-scoped ingress allow-list, an OPA decision pinned to the principal id, and a short-lived Keycloak token. A replayed token only reaches the reporting read it was issued for.
+
+### ADR-0380 B2 branch attribution
+
+Trust only AccountCreated's context from the existing ACL-protected account topic. A journal cannot select an
+account's branch. Validate context before dedup and cover release; reject changed replay facts. Database outages
+and missing cross-topic context retain the original unacknowledged record and retry; malformed or conflicting
+business facts go to the configured per-channel DLQ. Reconcile books independently so equal/opposite wrong-book
+postings cannot hide behind a balanced bank total. Unknown history and failed/freshness-lapsed captures do not
+establish readiness. Synthetic contexts are excluded from the BUSINESS control. Context is organizational data,
+with no national identifier or customer name in the new register or report.
+
+## ADR-0380 B2: attributed cash and inter-branch clearing
+
+Transaction pins the authoritative account contexts before starting its payment workflow. A known branch cannot be paired with an unknown account or another bank. The new Account reader uses the named Transaction M2M client; its OPA grant is read-only and the adapter exposes only the id and booking context. Recovered activities use the stored route. Branch FX and transfers to unattributed legacy/home accounts fail closed pending their own route evidence.
+
+Only the named Transaction principal can call the Ledger branch-payment endpoint. A durable key binds the bank, both account/book legs, dates, currency, amount, actor and synthetic origin. A row lock serialises competing retries; both journals, booked events and receipt commit in one transaction. A failed second book leaves neither money nor receipt. Receipt bindings and final journal ids are immutable. Ledger book registration rejects another bank. Existing journal reversals preserve book provenance; a generic reversal of just one clearing side creates a detectable reconciliation break and is not an approved inter-branch reversal workflow.
+
+Independent reconciliation checks every book and bank, native-currency clearing positions and each payment pair's elimination; opposite corrupt pairs cannot hide in the bank net. Synthetic journals are excluded from BUSINESS controls. Reader/schema deployment precedes writers, no historic attribution is inferred, existing projection and branch launch restrictions remain. Rollback stops new writers and retains contexts, receipts, journals and evidence.
+
+The branch workflow is a new Temporal type: dispatch is asynchronous and recoverable from a persisted pending row. Its holds do not expire during an uncertain posting; hold/post/complete retries remain durable. This deliberately retains the reservation while operational stuck-saga controls report an unresolved operation, rather than returning funds that Ledger may already have booked.

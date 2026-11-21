@@ -32,6 +32,7 @@ data class JournalEntry(
     val synthetic: Boolean = false,
     /** Optional, immutable caller-attributed raw source facts; legacy journals remain unknown. */
     val origin: JournalOrigin? = null,
+    val branchBookId: UUID? = null,
 ) {
     init {
         requireValid(lines.size >= 2) { "Journal entry must have at least 2 lines" }
@@ -112,6 +113,7 @@ data class JournalEntry(
             createdBy = reversedBy,
             version = 0L,
             reversalOf = id,
+            branchBookId = branchBookId,
             // A reversal of a synthetic entry is itself synthetic. Dropping the taint here would
             // leave the compensating half inside the real population while the original sat
             // outside it — so a real-only trial balance would carry the reversal's legs alone and

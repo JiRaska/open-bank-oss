@@ -1215,6 +1215,44 @@ Rollback: revert the commit; nothing is migrated and nothing calls the route.
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
 
+## ADR-0380 B2: Transaction booking-context reader
+
+Transaction now reads Account by id with its named `openbank-transaction` M2M identity to pin the authoritative immutable bank/establishment/host/mode before payment persistence. The OPA grant allows account.read only, with no list or lifecycle writes. The existing Account response carries other account metadata, so compromise of that credential is a confidentiality risk; the adapter exposes only id and booking context and records no customer payload. Returned id must match the requested account. Unknown attribution blocks a branch pair, and reader failure blocks a new write. This grant does not approve a country or authorize a payment. Independent security/GDPR review remains required.
+
+## Market restrictions on account commitment (ADR-0380)
+
+| Threat | Control | Evidence |
+|---|---|---|
+| A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. | `AccountServiceTest` |
+| A pending account activates after its offering is no longer available on the route | Re-read catalogue scope before activating pinned pending accounts. Refuse catalogue lookup failure, a changed offering or a foreign-only scope before the state transition is persisted. | `AccountServiceLifecycleTest` |
+
+The domestic check uses catalogue distribution metadata. Earlier unscoped catalogue responses and
+unpinned historical pending accounts use the domestic compatibility path. The passport account path
+requires authoritative facts from the applicable country pack before any FOS or branch launch.
+
+### Passport admission and retry
+
+- A caller can pass a grant reference. Catalogue verifies the named account-service identity
+  and independent subject evidence before admission. The reference alone grants nothing.
+- A durable intent pins the exact operation before catalogue consumption. A retry can recover
+  only that receipt. Account writes and activation outbox events commit atomically.
+- A pending activation is tied to its account version. Changing the account cannot reuse an
+  earlier receipt to activate a different state.
+
+- Recovery claims a bounded batch with a database lease and checks for the same consumed receipt.
+  If it is absent, recovery reads the current party under the original ID and runs fresh sanctions
+  screening of the registered name. Account creation requires the exact catalogue admission.
+  Duplicate runners reuse the account ID and binding. The account transaction clears the queued
+  details, which omit the holder name and raw screening evidence.
+
+### ADR-0380 B2 account book
+
+Booking context is obtained only from the exact consumed catalogue receipt under the named M2M identity. Freeze
+its complete bank/establishment/host/mode tuple in SQL and preserve it through outbox/recovery/lifecycle changes.
+An activation with different context fails before status change. Existing null history is not silently assigned.
+No raw identity evidence or national identifier is added. Branch opening remains TEST-only pending wider B2 and
+country launch evidence. The lower catalogue migration prerequisites must be deployed before V22.
+
 ## 2026-11-18 - IBAN check digits from the shared libs-domain generator (#16748)
 
 `IbanGenerator` computed ISO 7064 check digits with its own copy. It now uses

@@ -17,4 +17,6 @@ data class DirectoryPage(val items: List<DirectoryParty>, val hasMore: Boolean)
  */
 interface PartyDirectoryPort {
     suspend fun listActive(page: Int, size: Int): DirectoryPage
+
+    suspend fun find(partyId: UUID): DirectoryParty?
 }

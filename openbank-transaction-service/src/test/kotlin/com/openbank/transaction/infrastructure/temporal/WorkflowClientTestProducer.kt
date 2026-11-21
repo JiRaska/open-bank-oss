@@ -48,7 +48,10 @@ class WorkflowClientTestProducer(private val activities: PaymentActivitiesImpl) 
     fun start() {
         testEnv = TestWorkflowEnvironment.newInstance()
         val worker = testEnv.newWorker("openbank-payment-execution")
-        worker.registerWorkflowImplementationTypes(NoOpPaymentWorkflow::class.java)
+        worker.registerWorkflowImplementationTypes(
+            NoOpPaymentWorkflow::class.java,
+            com.openbank.transaction.application.workflow.BranchPaymentWorkflowImpl::class.java,
+        )
         worker.registerActivitiesImplementations(activities)
         testEnv.start()
     }

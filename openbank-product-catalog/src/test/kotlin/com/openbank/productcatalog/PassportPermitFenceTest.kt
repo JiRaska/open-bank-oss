@@ -154,7 +154,8 @@ class PassportPermitFenceTest {
         assertEquals(listOf("PROPOSED", "APPROVED", "REVOKED"), offline.states)
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(strings = ["FOS", "BRANCH"])
     @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
     @OidcSecurity(
         claims = [
@@ -162,8 +163,8 @@ class PassportPermitFenceTest {
             Claim(key = "preferred_username", value = "service-account-openbank-account"),
         ],
     )
-    fun `receipt lookup cannot consume an issued permit and remains readable after revocation`() {
-        val request = seed("OPEN")
+    fun `receipt lookup cannot consume an issued permit and remains readable after revocation`(mode: String) {
+        val request = seed("OPEN", mode = mode)
         val body = mapOf(
             "grantId" to request.grant,
             "operationId" to request.operationId,
@@ -173,11 +174,39 @@ class PassportPermitFenceTest {
             "binding" to HASH,
         )
         assertReceipt(body, 404)
+        given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions/context").then().statusCode(404)
+        dataSource.connection.use { db ->
+            db.execute(
+                "INSERT INTO passport_grant_subject_evidence(grant_id,party_id,evidence_ref,valid_until) " +
+                    "VALUES (?,?,'synthetic-proof',CURRENT_TIMESTAMP+interval '1 day')",
+                request.grant,
+                request.party,
+            )
+        }
+        given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions").then().statusCode(204)
         dataSource.connection.use { db ->
             assertNotNull(db.consume(request))
             assertTrue(db.revoke(request.grant))
         }
         assertReceipt(body, 204)
+        val context = given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions/context").then().statusCode(200).extract().jsonPath()
+        assertEquals(request.bank.toString(), context.getString("bankId"))
+        assertEquals(request.establishment.toString(), context.getString("establishmentId"))
+        assertEquals(mode, context.getString("mode"))
+        given().contentType("application/json").body(body + ("binding" to "1".repeat(64)))
+            .post("/api/v2/internal/passport-account-admissions/context").then().statusCode(404)
+        org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException::class.java) {
+            dataSource.connection.use { db ->
+                db.execute(
+                    "UPDATE passport_grants SET bank_id=? WHERE id=?",
+                    UUID.randomUUID(),
+                    request.grant,
+                )
+            }
+        }
         assertReceipt(body + ("binding" to "1".repeat(64)), 404)
     }
 
@@ -266,8 +295,14 @@ class PassportPermitFenceTest {
         }
     }
 
-    private fun seed(operation: String, issue: Boolean = true, approved: Boolean = true): PermitRequest {
-        val request = PermitRequest(operation)
+    private fun seed(
+        operation: String,
+        issue: Boolean = true,
+        approved: Boolean = true,
+        mode: String = "FOS",
+    ): PermitRequest {
+        require(mode in setOf("FOS", "BRANCH"))
+        val request = PermitRequest(operation, mode = mode)
         dataSource.connection.use { db ->
             val offering = UUID.randomUUID()
             val specification = UUID.randomUUID()
@@ -300,21 +335,7 @@ class PassportPermitFenceTest {
                 offering,
                 specification,
             )
-            db.execute(
-                """
-                INSERT INTO passport_grants (id, bank_id, establishment_id, host_country, mode, offering_id,
-                    channel, customer_segment, pack_set_digest, evidence_ref, proposed_by,
-                    effective_from, effective_until)
-                VALUES (?, ?, ?, 'SK', 'FOS', ?, 'WEB', 'RETAIL', ?, 'synthetic-proof', ?,
-                    CURRENT_TIMESTAMP - interval '1 day', CURRENT_TIMESTAMP + interval '1 day')
-                """.trimIndent(),
-                request.grant,
-                request.bank,
-                request.establishment,
-                offering,
-                HASH,
-                request.maker,
-            )
+            seedGrant(db, request, offering, mode)
             if (approved) {
                 assertEquals(
                     true,
@@ -324,6 +345,24 @@ class PassportPermitFenceTest {
             if (issue) assertEquals(request.permit, db.issue(request))
         }
         return request
+    }
+
+    private fun seedGrant(db: Connection, request: PermitRequest, offering: UUID, mode: String) {
+        db.execute(
+            """
+                INSERT INTO passport_grants (id, bank_id, establishment_id, host_country, mode, offering_id,
+                    channel, customer_segment, pack_set_digest, evidence_ref, proposed_by,
+                    effective_from, effective_until)
+                VALUES (?, ?, ?, 'SK', '$mode', ?, 'WEB', 'RETAIL', ?, 'synthetic-proof', ?,
+                    CURRENT_TIMESTAMP - interval '1 day', CURRENT_TIMESTAMP + interval '1 day')
+            """.trimIndent(),
+            request.grant,
+            request.bank,
+            request.establishment,
+            offering,
+            HASH,
+            request.maker,
+        )
     }
 
     private fun Connection.issue(request: PermitRequest): UUID? = scalar(
@@ -338,7 +377,7 @@ class PassportPermitFenceTest {
         request.bank,
         request.establishment,
         request.country,
-        "FOS",
+        request.mode,
         "WEB",
         "RETAIL",
         HASH,
@@ -378,6 +417,7 @@ class PassportPermitFenceTest {
 
     private data class PermitRequest(
         val operation: String,
+        val mode: String = "FOS",
         val grant: UUID = UUID.randomUUID(),
         val permit: UUID = UUID.randomUUID(),
         val operationId: UUID = UUID.randomUUID(),

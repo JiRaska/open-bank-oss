@@ -19,7 +19,9 @@
 #      `party_id` attribute. One extra role turns a canary into a privileged customer.
 #   4. `openbank.synthetic.trusted-principals` is set only to principals that may assert the
 #      taint: in customer-edge, the declared canary clients; anywhere else, customer-edge's own
-#      service account, the one relay the edge forwards the taint through. Any other value lets
+#      service account, plus ledger-only fixture seed and Transaction payment relay identities.
+#      Transaction relays the persisted origin on the authenticated branch-payment endpoint.
+#      Any other value lets
 #      a caller drop real activity out of the regulatory aggregates by sending one header.
 #
 # WHAT IT DOES NOT DO
@@ -56,6 +58,11 @@ RELAY_PRINCIPALS = {"service-account-openbank-edge"}
 # deliberately one name long and lives next to the ledger manifest it guards.
 LEDGER_MANIFEST = "openbank-infra/gitops/components/ledger/ledger-service.yaml"
 LEDGER_SEED_PRINCIPALS = {"service-account-openbank-synthetic-ledger-seed"}
+# ADR-0380 B2: the durable payment activity forwards the saved synthetic origin to Ledger.
+# BranchPaymentResource additionally verifies the named M2M client and requires trusted taint
+# on /branch-payments/synthetic; its real HTTP tests cover both carriers and origin-bound replay.
+# This is a single Ledger-only relay, never permission for arbitrary downstream callers.
+LEDGER_PAYMENT_RELAY_PRINCIPALS = {"service-account-openbank-transaction"}
 FLOWS_OFF = ("standardFlowEnabled", "implicitFlowEnabled", "directAccessGrantsEnabled")
 
 
@@ -165,8 +172,8 @@ def check(root: pathlib.Path) -> tuple[list[str], int]:
             allowed = canaries
             role = "a declared openbank-synthetic-* client"
         elif in_ledger:
-            allowed = RELAY_PRINCIPALS | LEDGER_SEED_PRINCIPALS
-            role = "customer-edge's relay identity or the ledger fixture-seed identity (#14058)"
+            allowed = RELAY_PRINCIPALS | LEDGER_SEED_PRINCIPALS | LEDGER_PAYMENT_RELAY_PRINCIPALS
+            role = "customer-edge's relay, the ledger fixture seed (#14058), or Transaction's payment relay (ADR-0380)"
         else:
             allowed = RELAY_PRINCIPALS
             role = "customer-edge's relay identity"
@@ -237,7 +244,10 @@ def self_test() -> int:
     ]
     ledger_cases = [
         ("ledger trusts the seed identity", "service-account-openbank-synthetic-ledger-seed", 0),
-        ("ledger trusts a non-seed principal", "service-account-openbank-mcp-service", 1),
+        ("ledger trusts the Transaction payment relay", "service-account-openbank-transaction", 0),
+        ("ledger trusts an unrelated principal", "service-account-openbank-mcp-service", 1),
+        ("downstream (wealth) trusts the Transaction payment relay", "service-account-openbank-transaction", 1),
+        ("ledger trusts an alias of the payment relay", "service-account-openbank-transaction-service", 1),
         ("downstream (wealth) trusts the seed identity", "service-account-openbank-synthetic-ledger-seed", 1),
     ]
     failed = 0

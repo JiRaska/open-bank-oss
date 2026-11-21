@@ -43,6 +43,8 @@ data class TransactionInitiatedEvent(
      * (`TopicAttribution`) already maps `openbank.transactions.transaction.initiated` to.
      */
     val sourceService: String = "transaction-service",
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionInitiated"
@@ -55,6 +57,8 @@ data class TransactionCompletedEvent(
     override val occurredAt: Instant,
     /** See [TransactionInitiatedEvent.sourceService] (#3994/#5256). */
     val sourceService: String = "transaction-service",
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionCompleted"
@@ -68,6 +72,8 @@ data class TransactionFailedEvent(
     override val occurredAt: Instant,
     /** See [TransactionInitiatedEvent.sourceService] (#3994/#5256). */
     val sourceService: String = "transaction-service",
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionFailed"
@@ -88,6 +94,8 @@ data class TransactionReversedEvent(
     override val occurredAt: Instant,
     /** See [TransactionInitiatedEvent.sourceService] (#3994/#5256). */
     val sourceService: String = "transaction-service",
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionReversed"

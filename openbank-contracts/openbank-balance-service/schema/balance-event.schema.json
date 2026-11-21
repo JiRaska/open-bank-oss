@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openbank:events:balance:v1",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "accountId",
+    "currency",
+    "bookedAmount",
+    "availableAmount",
+    "reservedAmount",
+    "occurredAt"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "BALANCE_UPDATED",
+        "HOLD_PLACED",
+        "HOLD_RELEASED",
+        "HOLD_EXPIRED"
+      ]
+    },
+    "accountId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "currency": {
+      "type": "string"
+    },
+    "amount": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "bookedAmount": {
+      "type": "number"
+    },
+    "availableAmount": {
+      "type": "number"
+    },
+    "reservedAmount": {
+      "type": "number"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actorId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actorType": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sourceService": {
+      "type": "string"
+    },
+    "branchBookId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    }
+  }
+}
