@@ -124,7 +124,8 @@ BUDGET_DENY_ID_RE = re.compile(
     r"|honeytoken|dlq|deploy-hold|release-evidence|approval|supply|security|audit|sanction|payment"
     r"|matrix|acl|delegation|value-movement|screening|treasury|asvs|crypto|dast|enforcement|write"
     r"|scope|evidence|compliance|regulatory|high-risk|merge-train|merged-past-red|deregistered"
-    r"|gate-runner|agent-pr-guard|lock-integrity"
+    r"|gate-runner|agent-pr-guard|lock-integrity|gh-token|gate-invocation|gate-selftest"
+    r"|gate-subject-floor|selftest-inputs|armed-prs"
 )
 # The `gates` job in ci.yml runs under `timeout-minutes: 15`; a scaled per-gate kill above that
 # (minus a margin for setup/report) could never fire — the job would be cancelled first, which
@@ -1721,7 +1722,7 @@ def self_test():
             "matrix-write-grants", "kafka-acl-coverage", "value-movement-admission-coverage",
             "delegation-capability-enforcement", "asvs-l3-mechanical-subset", "openssf-gold-evidence",
             "merge-train-declaration", "gates-not-deregistered", "agent-pr-guard",
-            "ci-artifact-lock-integrity",
+            "ci-artifact-lock-integrity", "workflow-gh-token-declared", "gate-subject-floor",
         )
         real = pathlib.Path(__file__).resolve().parents[2]
         if (real / MANIFEST).exists():
