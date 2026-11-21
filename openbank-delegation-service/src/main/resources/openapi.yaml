@@ -13,8 +13,8 @@ info:
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
-  # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes.
-  # 1.33.0 is claimed by open PR #16793; whichever lands second re-reads live main and re-bumps.
+  # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes,
+  # on top of main's 1.33.0 (#16793, mcp-client resolve).
   version: 1.34.0
 servers:
   - url: http://localhost:8126
@@ -769,6 +769,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationCheckResponse' }
+  /api/v1/delegations/mcp-client/resolve:
+    post:
+      tags: [Delegations]
+      summary: Active MCP_CLIENT grants for a grantor party, client id and DPoP key thumbprint (ADR-0383 D3)
+      description: |
+        mcp-service's per-call lookup on the customer MCP channel. Reserved to mcp-service's own
+        service-account (OPA action `delegation.mcp-client.resolve`, re-checked in code); refused
+        when the customer-edge party header is present. Only ACTIVE, in-window MCP_CLIENT grants
+        matching all three keys are returned; an empty list is the refusal. Never returns names,
+        limits, approval policy or the recorded key thumbprint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveMcpClientGrantRequest' }
+      responses:
+        '200':
+          description: Matching active grants (possibly none)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolveMcpClientGrantResponse' }
+        '400': { description: Missing grantorPartyId, clientId, or a malformed key thumbprint }
+        '403': { description: Caller is not mcp-service, or the request carries a customer-party header }
   /api/v1/delegations/{id}/reservations:
     post:
       tags: [Delegations]
@@ -1751,6 +1774,35 @@ components:
         updatedAt: { type: string, format: date-time }
         closedAt: { type: string, format: date-time }
         closedReason: { type: string }
+    ResolveMcpClientGrantRequest:
+      type: object
+      required: [grantorPartyId, clientId, keyThumbprint]
+      properties:
+        grantorPartyId: { type: string, format: uuid }
+        clientId: { type: string, maxLength: 255 }
+        keyThumbprint:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: RFC 7638 SHA-256 thumbprint of the DPoP key (the token's cnf.jkt)
+    ResolveMcpClientGrantResponse:
+      type: object
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          items: { $ref: '#/components/schemas/McpClientGrant' }
+    McpClientGrant:
+      type: object
+      required: [grantId, resourceType, resourceId, capabilities]
+      properties:
+        grantId: { type: string, format: uuid }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          items: { type: string }
+          description: Delegation capability names; an MCP_CLIENT grant holds only read capabilities and ACCOUNT_PROPOSE_PAYMENT
+        validTo: { type: string, format: date-time, nullable: true }
     DelegationCheckResponse:
       type: object
       properties:
