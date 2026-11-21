@@ -37,6 +37,7 @@
 
 import argparse
 import pathlib
+import re
 import sys
 
 import gatelib
@@ -66,8 +67,14 @@ def service_modules(root: pathlib.Path) -> list[pathlib.Path]:
     return modules
 
 
+def strip_comments(text: str) -> str:
+    """Drop /* */ blocks and // line comments so a mention in prose is not a declaration."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
 def declares_heap(build_kts: pathlib.Path) -> bool:
-    return "maxHeapSize" in build_kts.read_text()
+    return re.search(r"\bmaxHeapSize\s*=", strip_comments(build_kts.read_text())) is not None
 
 
 def has_trace_contract(module: pathlib.Path) -> bool:
@@ -122,13 +129,15 @@ def _build_self_test_tree(root: pathlib.Path) -> None:
     decides on.
     """
 
-    def module(name: str, *, quarkus: bool, heap: bool, trace: bool) -> None:
+    def module(name: str, *, quarkus: bool, heap: bool, trace: bool, comment_only: bool = False) -> None:
         mod = root / name
         (mod / "src/test/kotlin/x").mkdir(parents=True)
         plugins = 'id("openbank.quarkus-service")' if quarkus else 'id("java")'
         body = f'plugins {{\n    {plugins}\n}}\n'
         if heap:
             body += '\ntasks.test {\n    maxHeapSize = "2g"\n}\n'
+        if comment_only:
+            body += '\n// maxHeapSize = "2g" would go here\n/* maxHeapSize = "2g" */\n'
         (mod / "build.gradle.kts").write_text(body)
         if trace:
             (mod / "src/test/kotlin/x/XTraceContractIT.kt").write_text("// fixture\n")
@@ -139,6 +148,7 @@ def _build_self_test_tree(root: pathlib.Path) -> None:
     module("openbank-d-service", quarkus=True, heap=False, trace=False)
     module("openbank-e-service", quarkus=True, heap=False, trace=True)  # in BASELINE below
     module("openbank-f-service", quarkus=True, heap=True, trace=False)  # in BASELINE, trace gone
+    module("openbank-g-service", quarkus=True, heap=False, trace=True, comment_only=True)  # comment only
 
 
 def self_test() -> int:
@@ -168,16 +178,17 @@ def self_test() -> int:
             "openbank-f-service stale (baseline, trace gone)",
             any("openbank-f-service" in s for s in stale),
         ),
-        ("exactly one finding", len(findings) == 1),
+        ("openbank-g-service flagged (maxHeapSize only in comments)", any("openbank-g-service" in f for f in findings)),
+        ("exactly two findings", len(findings) == 2),
         ("exactly one stale entry", len(stale) == 1),
     ]
     for label, ok in checks:
         print(f"{'pass' if ok else 'FAIL'}  {label}")
         failures += 0 if ok else 1
-    print(f"subjects: {subjects} (expect 6)")
+    print(f"subjects: {subjects} (expect 7)")
 
     print(f"\nself-test: {len(checks) - failures} passed, {failures} failed")
-    return 0 if failures == 0 else 2
+    return 0 if failures == 0 else 1
 
 
 def main() -> int:

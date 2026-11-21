@@ -2,7 +2,7 @@
 date: 2026-11-18
 decision-status: proposed
 delivery-status: planned
-authors: [Kimi]
+authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
