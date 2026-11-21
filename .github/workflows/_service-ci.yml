@@ -509,7 +509,9 @@ jobs:
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: openbank-build
-    timeout-minutes: 45
+    # ADR-0389 SAFE knob: repo var SERVICE_CI_CONTRACT_TIMEOUT_MINUTES overrides (positive integer minutes); unset = today's
+    # value. A non-numeric value makes fromJSON fail the job LOUDLY at start, never silently.
+    timeout-minutes: ${{ fromJSON(vars.SERVICE_CI_CONTRACT_TIMEOUT_MINUTES || '45') }}
     # Only this post-merge, trusted runner receives an OIDC token for its ECR cache access.
     permissions:
       contents: read

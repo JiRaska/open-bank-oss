@@ -79,6 +79,9 @@ openbank:
     opa-pdp-producer:
       enabled: true
   catalog:
+    passport-commitment:
+      # Only the configured product schema is eligible at this service-account boundary.
+      schema-id: org.openbank.banking.loan
     # Current OpenBank deployment enables all reference packs (retirement: ADR-0334). Standalone charts override this to
     # an empty value and let the operator opt in explicitly.
     packs: ${OPENBANK_CATALOG_PACKS:banking,insurance,retirement}
