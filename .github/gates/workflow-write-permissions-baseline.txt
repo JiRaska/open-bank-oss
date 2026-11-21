@@ -149,6 +149,7 @@ services-ci.yml|job:build_other_openbank_libs_finance|id-token
 services-ci.yml|job:build_other_openbank_libs_fincrime|id-token
 services-ci.yml|job:build_other_openbank_libs_iso20022|id-token
 services-ci.yml|job:build_other_openbank_libs_lending|id-token
+services-ci.yml|job:build_other_openbank_libs_market|id-token
 services-ci.yml|job:build_other_openbank_libs_runtime|id-token
 services-ci.yml|job:build_other_openbank_libs_temporal|id-token
 services-ci.yml|job:build_other_openbank_libs_testing|id-token
@@ -235,6 +236,7 @@ services-ci.yml|job:build_pr_openbank_libs_finance|id-token
 services-ci.yml|job:build_pr_openbank_libs_fincrime|id-token
 services-ci.yml|job:build_pr_openbank_libs_iso20022|id-token
 services-ci.yml|job:build_pr_openbank_libs_lending|id-token
+services-ci.yml|job:build_pr_openbank_libs_market|id-token
 services-ci.yml|job:build_pr_openbank_libs_runtime|id-token
 services-ci.yml|job:build_pr_openbank_libs_temporal|id-token
 services-ci.yml|job:build_pr_openbank_libs_testing|id-token
