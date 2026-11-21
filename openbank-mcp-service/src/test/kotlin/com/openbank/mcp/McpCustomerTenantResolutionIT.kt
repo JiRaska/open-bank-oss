@@ -56,6 +56,8 @@ class McpCustomerTenantResolutionIT {
             "quarkus.http.proxy.proxy-address-forwarding" to "true",
             "quarkus.http.proxy.allow-x-forwarded" to "true",
             "quarkus.http.proxy.enable-forwarded-host" to "true",
+            // Only the test client's own loopback hop is a trusted proxy (ProxyForwardingGuard).
+            "quarkus.http.proxy.trusted-proxies" to TRUSTED_LOOPBACK,
             "mcp.customer.enabled" to "true",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
@@ -156,5 +158,6 @@ class McpCustomerTenantResolutionIT {
         const val STAFF = "https://kc.test.example/realms/openbank"
         const val CUSTOMERS = "https://kc.test.example/realms/openbank-customers"
         const val THIRD = "https://idp.attacker.example/realms/openbank"
+        const val TRUSTED_LOOPBACK = "127.0.0.1,0:0:0:0:0:0:0:1"
     }
 }

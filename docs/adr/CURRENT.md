@@ -283,7 +283,7 @@ _Also tagged `api-contract`: 0006 0026 0055 0063 0090 0092 0104 0239 0257 0258 0
 - **[0320](0320-openbank-libs-security-shared-egress-sender-constrained-tokens-and-data-protection-primitives.md)** · openbank-libs-security: shared egress, sender-constrained tokens and data-protection primitives _(proposed)_ · `partial` · Four shared primitives in com.openbank.libs.security, no new module: egress allowlist, DPoP/mTLS token check, Transit field protection, Valkey rate limit; optional JOSE/Redis types load only via opt-in service subclasses (#6240).
 - **[0386](0386-continuous-autonomous-red-team-on-ephemeral-targets-every-exploit-becomes-a-permanent-regression-test.md)** · Continuous autonomous red team on ephemeral targets, every exploit becomes a permanent regression test _(proposed)_ · `planned` · Offensive testing is a closed loop: exhaustive derived probes first, chartered AI agents only where derivation cannot reach, live runs on ephemeral isolated targets outside CI, each confirmed finding a deterministic regression test.
 
-_Also tagged `security`: 0258 0265 0271 0308 0324 0328 0331 0335 0382 0383 0385 0387_
+_Also tagged `security`: 0258 0265 0271 0308 0324 0328 0331 0335 0382 0383 0385_
 
 ## authn
 
@@ -351,7 +351,7 @@ _Also tagged `privacy-gdpr`: 0059 0126 0189 0192 0200 0210 0214 0220 0222 0228 0
 - **[0187](0187-psd3-psr-and-fida-forward-regulatory-position.md)** · PSD3 / PSR and FIDA forward-regulatory position · `n-a` · Forward position on PSD3/PSR and FIDA: the platform's PSD2 XS2A, unified consent and strong SCA already align with much of the regime; the FIDA permission dashboard, PSR fraud sharing and API migration are deferred pending Level-2 text.
 - **[0379](0379-compliance-posture-derived-trace.md)** · Compliance posture is derived from one obligation-to-control-to-evidence trace; AI explains it, never decides it _(proposed)_ · `shipped` · /docs/compliance stops being a hand-kept list: it renders one derived trace obligation → control → evidence with freshness, status computed by code; AI and MCP may read and explain the trace with citations, never set a status.
 
-_Also tagged `compliance`: 0017 0021 0023 0032 0033 0037 0047 0050 0072 0078 0085 0090 0094 0096 0097 0111 0116 0117 0118 0133 0134 0142 0146 0148 0149 0171 0172 0175 0180 0193 0196 0198 0200 0201 0203 0204 0212 0213 0215 0216 0217 0219 0222 0232 0235 0251 0252 0259 0261 0262 0263 0268 0270 0278 0279 0293 0307 0321 0322 0323 0333 0334 0336 0339 0340 0349 0350 0367 0371 0380 0387_
+_Also tagged `compliance`: 0017 0021 0023 0032 0033 0037 0047 0050 0072 0078 0085 0090 0094 0096 0097 0111 0116 0117 0118 0133 0134 0142 0146 0148 0149 0171 0172 0175 0180 0193 0196 0198 0200 0201 0203 0204 0212 0213 0215 0216 0217 0219 0222 0232 0235 0251 0252 0259 0261 0262 0263 0268 0270 0278 0279 0293 0307 0321 0322 0323 0333 0334 0336 0339 0340 0349 0350 0367 0371 0380_
 
 ## regulatory-reporting
 
@@ -413,7 +413,7 @@ _Also tagged `infrastructure`: 0007 0010 0054 0058 0060 0161 0174 0175 0361_
 
 - **[0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md)** · Replace retired ingress-nginx with Gateway API on Envoy Gateway _(proposed)_ · `planned` · ingress-nginx is archived upstream with no further fixes; the edge moves to Gateway API served by Envoy Gateway behind the same single NLB, host by host, and ingress-nginx is removed at the end.
 
-_Also tagged `networking`: 0051 0058 0081 0093 0234 0357 0382 0387_
+_Also tagged `networking`: 0051 0058 0081 0093 0234 0357 0382_
 
 ## database
 
@@ -446,7 +446,7 @@ _Also tagged `kafka`: 0013 0084 0140 0202 0239 0245 0247 0256 0267 0281 0310 032
 - **[0253](0253-evidence-of-effect-a-control-must-be-able-to-show-it-carried-work.md)** · Evidence of effect: a control must be able to show it carried work _(proposed)_ · `partial` · Every control that claims to do work must expose a countable artifact proving it did — a row, a metric, a status — and a reader that fails when the count is zero; a wired, healthy, silent component is this estate's dominant defect.
 - **[0328](0328-upgrade-self-hosted-langfuse-from-the-unmaintained-v2-line-to-v4.md)** · Upgrade self-hosted Langfuse from the unmaintained v2 line to v4 _(proposed)_ · `planned` · Self-hosted Langfuse moves off v2, unpatched since 2025-11-07 while it stores every prompt and completion, to v4 with its own ClickHouse, Valkey and S3. Prompts and evals stay in git (ADR-0148).
 - **[0382](0382-in-cluster-read-only-alertmanager-digest.md)** · In-cluster read-only producer for the standing-critical alert digest _(proposed)_ · `planned` · The daily standing-critical digest runs in-cluster behind a GET-only relay, since Alertmanager accepts unauthenticated POST /silences; envelopes reach the weekly CI review via S3 with Pod Identity and OIDC roles, no stored credential.
-- **[0384](0384-customer-mcp-channel-observability-bounded-telemetry-admin-view-warehouse-history-and-abuse-signals-before-the-route-opens.md)** · Customer MCP channel observability: bounded telemetry, admin view, warehouse history and abuse signals before the route opens _(proposed)_ · `planned` · Customer MCP opens only once observable: hash-linked audit, closed-label metrics, warehouse facts under per-party shreddable keys, single-actor client suspend and connection revoke, four-eyes unsuspend and bulk revoke.
+- **[0384](0384-customer-mcp-channel-observability-bounded-telemetry-admin-view-warehouse-history-and-abuse-signals-before-the-route-opens.md)** · Customer MCP channel observability: bounded telemetry, admin view, warehouse history and abuse signals before the route opens _(proposed)_ · `partial` · Customer MCP opens only once observable: hash-linked audit, closed-label metrics, warehouse facts under per-party shreddable keys, single-actor client suspend and connection revoke, four-eyes unsuspend and bulk revoke.
 
 _Also tagged `observability`: 0059 0070 0075 0091 0112 0119 0160 0163 0218 0234 0236 0243 0246 0252 0255 0265 0273 0274 0279 0288 0309 0316 0326 0357 0361_
 
@@ -472,7 +472,7 @@ _Also tagged `observability`: 0059 0070 0075 0091 0112 0119 0160 0163 0218 0234 
 - **[0321](0321-shared-resilience-policy-profiles-for-inter-service-calls.md)** · Shared resilience policy profiles for inter-service calls _(proposed)_ · `partial` · Inter-service calls use one of four named resilience profiles from openbank-libs; money-sync retries only keyed calls (keyed-only retryOn exception); fault hook needs ADR-0252 trusted-principal taint (empty by default).
 - **[0373](0373-production-durability-profile-synchronous-quorum-for-ledger-class-databases-and-a-replicated-kafka.md)** · Production durability profile: synchronous quorum for ledger-class databases and a replicated Kafka _(proposed)_ · `planned` · Ledger-class databases run three instances with synchronous quorum commit, and Kafka runs three brokers with replication factor 3 and min in-sync 2. The sandbox runs the same profile, because an unrun profile is a claim.
 
-_Also tagged `resilience`: 0004 0050 0088 0098 0100 0101 0120 0132 0146 0159 0211 0218 0241 0244 0271 0277 0325 0327 0338 0346 0356 0366_
+_Also tagged `resilience`: 0004 0050 0088 0098 0100 0101 0120 0132 0146 0159 0211 0218 0241 0244 0271 0277 0325 0327 0338 0346 0356 0366 0389_
 
 ## capacity
 
@@ -518,6 +518,7 @@ _Also tagged `serverless`: 0057_
 - **[0363](0363-remote-gradle-build-cache-for-hosted-ci-written-only-from-main.md)** · Remote Gradle build cache for hosted CI, written only from main _(proposed)_ · `partial` · Hosted service builds read a shared remote Gradle build cache outside AWS; only main builds (push or seeding dispatch) may write it, through a credential in a main-only environment, so unchanged modules come from cache.
 - **[0366](0366-ci-fetches-external-tools-and-charts-through-a-pinned-lock-a-resolver-and-a-mirror-outside-github.md)** · CI fetches external tools and charts through a pinned lock, a resolver and a mirror outside GitHub _(proposed)_ · `planned` · CI resolves every external tool and Helm chart from one sha256-pinned lock through a single resolver: Actions cache, then a mirror on ECR Public outside GitHub, then upstream; an unreachable artifact is UNVERIFIED, never a finding.
 - **[0368](0368-deploy-every-services-ci-service-from-its-completed-main-push-run-not-from-the-push.md)** · Deploy every Services CI service from its completed main-push run, not from the push · `partial` · Auto deploy deploys every service Services CI builds from that run's successful main-push completion, when its Pact version exists, instead of racing it from the push; only self-built images stay on the push lane.
+- **[0389](0389-operational-knobs-are-configuration-not-pull-requests.md)** · Operational knobs are configuration, not pull requests _(proposed)_ · `planned` · Delivery-automation knobs are classified SAFE, GUARDED or NEVER: SAFE ones are validated repo variables changeable in minutes, GUARDED ones owner-only and audited, NEVER ones stay behind a reviewed PR; stopping never needs a PR.
 
 _Also tagged `ci`: 0011 0020 0029 0042 0049 0054 0061 0063 0076 0092 0115 0119 0121 0122 0144 0160 0165 0168 0196 0236 0237 0242 0278 0288 0317 0330 0358 0377_
 
@@ -558,7 +559,7 @@ _Also tagged `testing`: 0030 0043 0076 0104 0151 0168 0243 0250 0253 0263 0279 0
 - **[0227](0227-unified-approval-inbox.md)** · Unified approval inbox: one disposition point for human and agent proposals · `partial` · Sixteen per-service ApprovalResources become one canonical ApprovalItem contract and one supervisor inbox; disposal happens only in the governed UI with SCA for money-path, never in a chat.
 - **[0288](0288-reality-checks-a-scheduled-lane-that-compares-the-repository-s-claims-with-the-running-system.md)** · Reality checks: a scheduled lane that compares the repository's claims with the running system _(proposed)_ · `planned` · A scheduled lane compares what the repository declares with what the running system holds, because every existing gate compares one representation with another and none of them can see the cluster.
 
-_Also tagged `governance`: 0002 0005 0006 0014 0020 0029 0030 0031 0044 0048 0074 0091 0092 0123 0134 0136 0141 0145 0148 0152 0155 0163 0164 0166 0167 0174 0176 0197 0202 0203 0208 0221 0223 0229 0231 0235 0237 0241 0242 0244 0246 0251 0253 0254 0255 0259 0260 0264 0266 0271 0273 0280 0285 0330 0343 0345 0360 0362 0364 0367_
+_Also tagged `governance`: 0002 0005 0006 0014 0020 0029 0030 0031 0044 0048 0074 0091 0092 0123 0134 0136 0141 0145 0148 0152 0155 0163 0164 0166 0167 0174 0176 0197 0202 0203 0208 0221 0223 0229 0231 0235 0237 0241 0242 0244 0246 0251 0253 0254 0255 0259 0260 0264 0266 0271 0273 0280 0285 0330 0343 0345 0360 0362 0364 0367 0389_
 
 ## docs
 
@@ -634,7 +635,6 @@ _Also tagged `libs`: 0003 0019 0026 0034 0067 0161 0223 0319 0320 0321 0323 0352
 - **[0285](0285-communication-studio-governed-style-and-playbook-layer.md)** · Communication Studio: governed style and playbook layer for bots and staff · `partial` · Split every customer- and staff-facing prompt into an immutable git core and a business-editable style/playbook layer served by a new communication-service, edited in admin-ui under four-eyes and evals-on-publish.
 - **[0383](0383-customer-authorised-mcp-channel-dpop-bound-delegation-layered-throttling-propose-only-writes-confirmed-by-sca-in-the-app.md)** · Customer-authorised MCP channel: DPoP-bound delegation, layered throttling, propose-only writes confirmed by SCA in the app _(proposed)_ · `partial` · Customer MCP clients are MCP_CLIENT delegation grantees with read+propose only: allowlisted OAuth+PKCE, DPoP 5-min tokens, grant per party+client+key, throttled before OPA; MCP cannot write, the app authorises via SCA.
 - **[0385](0385-customer-mcp-client-admission-tiers-and-phishing-resistant-cross-device-authentication-at-the-authorize-endpoint.md)** · Customer MCP client admission tiers and phishing-resistant cross-device authentication at the authorize endpoint _(proposed)_ · `planned` · Amends ADR-0383: MCP clients are admitted by allowlist tier — hosted ones only as authenticated confidential clients, local ones only with DPoP; authorize = fresh passkey in the starting browser plus a context-linked SCA in the app.
-- **[0387](0387-public-web-read-tool-for-governed-agents-kitesurf-behind-a-fetch-broker.md)** · Public-web read tool for governed agents: Kitesurf behind a fetch broker _(proposed)_ · `partial` · Agents read the public web only via one in-cluster fetch-broker MCP tool: per-charter host allowlist, GET-only, no PII; plain HTTP first, Cloudflare Kitesurf only for JS pages; content is untrusted data.
 
 _Also tagged `ai-agents`: 0034 0080 0112 0136 0182 0191 0193 0197 0216 0224 0225 0251 0256 0259 0283 0303 0313 0315 0322 0328 0348 0351 0354 0367 0384 0386_
 
