@@ -1036,3 +1036,39 @@ authenticity, required and extra checks, lane routing and the exact-head merge A
 After a strict-lane update, review the combined head and its fresh CI before recording a new
 owner decision. A closed PR cannot receive a retroactive approval, and this change does not
 alter historical merge execution or recorder evidence.
+
+## Amendment: owner break-glass for the `merge-train` status (#17006)
+
+**When.** Only when the merge train itself cannot post `merge-train` — the train is broken, and
+the PR that would fix it is therefore unmergeable too. It is not a fast lane and not a way past a
+red check.
+
+**Who.** The repository owner, dispatching `.github/workflows/merge-train-break-glass.yml` from
+`main`, through the `merge-train-break-glass` environment. Before the workflow is usable the owner
+must create that environment (required reviewers exactly the owner, deployment branches exactly
+`main`) and store environment-scoped secrets `BREAK_GLASS_APP_ID` / `BREAK_GLASS_APP_PRIVATE_KEY`
+for the App the ruleset pins `merge-train` to (or a dedicated App, with the ruleset pin moved to
+it by the owner). Token isolation requires an environment-scoped dedicated credential; see owner
+setup. The job checks the environment protection with the workflow's own token BEFORE minting any
+App credential, never reads the repo-level `GITOPS_APP_*` secrets, and fails closed if either
+the protection or the environment secrets are missing. The environment gates the RUN; it is not
+claimed to protect any other credential. The ruleset, its required contexts and its (empty)
+bypass list are unchanged; no `--admin` is involved.
+
+**What it checks.** `break_glass_check.py` re-derives live, on the PR's current head: owner actor;
+PR open, not draft, base `main`, native auto-merge armed; head not behind `main`; every OTHER
+context required on `main` (read from the rules API, pinned to its integration) `success`; and no
+removal or weakening of a `deploy_holds` entry, no change to `money_path_services`, no file under
+a money-path service directory, and no edit to the break-glass workflow or validator themselves
+(no self-widening). A required context without an integration pin, or one produced as a commit
+status rather than a check run, refuses. `.github/`
+paths are allowed on purpose — fixing the train is the use case. A deploy hold or the money-path
+list are controls the train does not own, so lifting them waits for a working train. It then posts
+`merge-train=success` with the same App the ruleset pins the context to; native auto-merge does
+the rest. Any later push invalidates the status, as for the train's own.
+
+**Audit and post-use review.** Every use writes the job summary first, then a comment on the PR, and a
+comment on the standing `merge-train break-glass log` issue (label `governance`). Each entry is
+reviewed after the fact: was the train genuinely unable to post, and did the fix land. If any
+audit write fails after the status is posted, the run fails and posts a
+`merge-train/break-glass-audit-incomplete` failure status on the same head.
