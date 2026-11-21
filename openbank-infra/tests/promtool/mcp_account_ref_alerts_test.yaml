@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# openbank.mcp: the ephemeral-key gauge is seeded at boot, so the value at t=0 is the pod's real
+# mode. A pod on an ephemeral key warns only after 15m; a pod with the configured key (0) never
+# warns; a pod that switches to the configured key within 15m (Secret synced late) never warns.
+rule_files:
+  - prometheus-rules-mcp.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "cold pod on an ephemeral key: 1 from the first scrape, warns after 15m, not before"
+    input_series:
+      - series: 'openbank_mcp_account_ref_ephemeral_key{namespace="platform",pod="mcp-service-a"}'
+        values: "1x30"
+      - series: 'openbank_mcp_account_ref_ephemeral_key{namespace="platform",pod="mcp-service-b"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: McpAccountRefEphemeralKey
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: McpAccountRefEphemeralKey
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: McpAccountRefEphemeralKey
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: platform
+              pod: mcp-service-a
+            exp_annotations:
+              summary: "mcp-service is issuing accountRefs under a per-process key"
+              description: >-
+                mcp-service-a has run for 15m without openbank.mcp.account-ref.secret, so its
+                accountRefs do not survive a restart or reach another replica and are refused there.
+                Check the mcp-service-account-ref ExternalSecret and its Password generator.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md#account-handles-for-tool-chaining-16678
+
+  - interval: 1m
+    name: "Secret syncs at 5m: the pod flips to 0 and never warns"
+    input_series:
+      - series: 'openbank_mcp_account_ref_ephemeral_key{namespace="platform",pod="mcp-service-c"}'
+        values: "1x5 0x25"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: McpAccountRefEphemeralKey
+        exp_alerts: []

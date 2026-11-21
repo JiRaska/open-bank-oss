@@ -567,3 +567,54 @@ a stub (T-T2/T-D2).
 - **2026-11-17** — **Token audience enforced on `/mcp` (#16622, ADR-0383 D1).** Before this change only the OBO path checked `aud`; an agent token that Quarkus OIDC accepted for the realm reached `CallerContextResolver` whatever resource it was issued for, which is token passthrough. `McpEndpoint` now answers 401 (`invalid_token`) on every method when a presented token's `aud` does not contain `openbank-mcp-service`, and `CallerContextResolver` refuses such a token on the agent path as well, so a call reaching the resolver by another route still fails closed. Refused tool calls are audited as DENIED. Anonymous calls keep their existing tool-less answer. Not done with `quarkus.oidc.token.audience`, because the tenant also serves `/api/v1/mcp/sessions`, which receives the operator's own token. **Residual risk:** no realm client mints `agent:` tokens yet, so the agent branch has no live caller; a future issuer must add an `openbank-mcp-service` audience mapper. An unreachable issuer still yields 500 for a presented token (fail-closed). Rollback: revert the commit.
 
 - **2026-11-17** — **JSON-RPC input hardening (#16628).** Five input bounds the MCP fuzz suite marked as deviations now hold at the endpoint. **STRIDE-T/D/I:** (1) a request whose decoded body carries U+0000 anywhere (keys, values, method, tool name, at any depth) is refused with HTTP 400 and JSON-RPC `-32602` before dispatch, so no tool, consent call or audit write sees it (only the bounded counter `openbank.mcp.input_refused{reason="nul"}` ticks); the fleet NUL guard (#5913) hooks the String deserializer, which a `JsonNode`-bound body never uses, hence a tree scan in `McpInputBounds`. The refusal is logged without the payload and is deliberately not audited (an unauthenticated flood must not become audit writes). (2) The tool name, unknown method and invalid `paymentId` are no longer reflected beyond 64 characters, so a response cannot grow with the input. (3) `list_transactions.limit` must be an integer in 1..200 (parity with transaction-service) (default 50 when absent) or the call is `-32602`. (4) Audit `argument_keys` is bounded to 32 keys of 64 characters each. (5) `get_balance`, `list_transactions` and `get_statement` require the `accountId` in canonical form (uppercase, no spaces; refused, never normalised, because consent compares the exact IBAN) and pass libs-domain `Iban.isValid` (mod-97) before the consent-service call. Rollback: revert the commit.
+
+- **2026-11-17** — **ADR-0383 D7 tool-result sanitisation (#16620, refs #16590).** A new
+  `McpToolResultSanitiser` runs at the existing single seam in `McpToolRegistry.call`, after
+  `McpPiiMasker` and before `McpUntrustedData.wrap`. It covers every string value and object key in
+  a tool result:
+  - Invisible code points are removed and the input cut to 560 surviving code points in one linear
+    pass, and all patterns are linear. 1 MiB of each
+    pathological pattern is processed in well under 200 ms, against about 30 s for one before.
+  - Strings are NFKC-normalised and lose control, format, tag and separator code points.
+  - Percent and HTML-entity encodings are decoded first, to a fixpoint of at most 3 rounds. Link and image markup, HTML and URLs
+    (including `www.` and protocol-relative forms) are then replaced with a placeholder.
+  - IBANs (registry country and length, any grouping) and phone numbers (3-3-3, 3-2-2-2, `+CC`)
+    inside free text are masked, and so is an IBAN fragment left at a cut. Only allow-listed
+    system id fields holding a UUID, and amount fields holding a plain decimal, are exempt, so ids
+    chain unchanged while a payer-controlled field such as `endToEndId` is still masked.
+  - Object keys are sanitised and masked. A key that cleans to another entry's name is dropped.
+  - Marker look-alikes are neutralised on a UTS #39-style skeleton covering case, separators,
+    combining marks, digits between words, and Cyrillic, Greek, Armenian, Cherokee, Lisu,
+    small-capital and fullwidth forms.
+  - Strings are capped at 140 characters.
+  - `logoUrl` is kept only as `https` on the bank CDN host allow-list and is dropped otherwise.
+
+  This narrows T-I3 and T-I4 (exfiltration through rendered URLs, marker breakout and oversized
+  instructions). It does not change the security boundary, which is still D4, D6 and OPA. The
+  layer-4 red-team pack closes 52 of its original 53 recorded gaps, and its 17 added payloads all
+  pass. **Residual:** a natural-person name embedded in a free-text field the masker does not
+  redact wholesale (for example a payment reference) still passes, because a name has no shape to
+  match. It stays in `known-gaps.json`. The marker skeleton is a vendored confusables subset for the
+  marker's own letters, not the full UTS #39 table (ICU4J is not on the runtime classpath, and no
+  dependency was added for it), so a look-alike outside the subset still passes. IBAN detection deliberately skips mod-97: an RF
+  reference passes it and a mistyped IBAN fails it. Rollback: revert the commit. The red-team
+  ratchet then fails until `known-gaps.json` is restored.
+- **2026-11-19** — **Caller-scoped account handles (#16678, refs #16590).** Since #16644 the read
+  tools took the account IBAN as `accountId`, while the masker returns it as `****1234`, so a model
+  could not chain `list_accounts` into `get_balance`. Results now carry `accountRef`, an HMAC-SHA256
+  under a server key over (agentId, consentId, session id, IBAN), and the tools accept it.
+  **STRIDE-I:** the IBAN stays masked towards the model (D7), and the ref names no account outside
+  MCP. **STRIDE-S/E:** a ref is never decoded. It is resolved only by recomputing the refs of the
+  caller's own consent-validated `list_accounts` for the caller's own scope. A token without a
+  session `sid` gets no ref and has every ref refused, so the sessions of one agent cannot share refs.
+  Each such case is counted (`openbank_mcp_account_ref_unavailable_total{reason="no_session"}`).
+  A ref replayed by
+  another agent, under another consent or in another session, or a tampered one, is refused with
+  `-32602` before any read port is called. The consent gate in the port still applies to the
+  resolved IBAN. The ref is attached after masking and sanitising, so no field is exempt from the
+  sanitiser: an upstream `accountRef` carrying an IBAN is masked like any other value. **Key:** `openbank.mcp.account-ref.secret`, generated in-cluster by an ESO `Password` generator (48 characters, `CreatedOnce`, no holder outside the cluster), at least 32 bytes,
+  checked at boot (`@Startup`); a set-but-short value refuses boot, an absent one falls back to a per-process random key (WARN + gauge `openbank_mcp_account_ref_ephemeral_key`), under which refs fail closed across pods/restarts (alert `McpAccountRefEphemeralKey`, warning, after 15m); never logged. A raw IBAN
+  `accountId` is still accepted, because D7 minimises what the bank sends, not what the caller
+  already holds. **Residual:** a leaked key lets someone forge a ref, but only for an IBAN they
+  already know and only usable by that same caller, whose consent still bounds the read. Rotation
+  invalidates all refs. Rollback: revert the commit (chaining breaks again, nothing else changes).
