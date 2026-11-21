@@ -4966,7 +4966,8 @@ gates:
     group: api
     mode: enforced
     run: |
-      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test &&
+      bash .github/scripts/record-deployment-selection.sh --self-test
 
   # The deployed-record reconciler re-records a sandbox deployment once the version it needed has
   # been published (record-deployment is one-shot at gitops merge and races the fan-out's own
