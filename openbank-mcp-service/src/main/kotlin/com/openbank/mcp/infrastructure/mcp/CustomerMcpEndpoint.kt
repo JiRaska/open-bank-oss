@@ -26,7 +26,8 @@ import jakarta.ws.rs.core.Response
  *   binds it to the customers tenant.
  * - 404 while the customer channel is off: nothing serves a channel that admits no one.
  *
- * The JSON-RPC handling itself is [McpEndpoint]'s, which takes its customer branch only on this root.
+ * The JSON-RPC handling itself is [McpEndpoint]'s: this resource calls [McpEndpoint.handleCustomer], the
+ * only entry that runs the customer branch; the staff `@POST` never does, whatever the raw path.
  */
 // Literal, not McpEndpoint.CUSTOMER_ROOT: the openapi-route-conformance gate reads @Path as source text.
 @Path("/customer/mcp")
@@ -44,6 +45,6 @@ class CustomerMcpEndpoint(private val endpoint: McpEndpoint) {
     fun handle(body: JsonNode): Response = if (channel.admission == null || !httpRequest.isSSL) {
         Response.status(Response.Status.NOT_FOUND).build()
     } else {
-        endpoint.handle(body)
+        endpoint.handleCustomer(body)
     }
 }

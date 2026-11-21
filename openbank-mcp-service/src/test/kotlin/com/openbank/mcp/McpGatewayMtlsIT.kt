@@ -81,6 +81,22 @@ class McpGatewayMtlsIT {
         return jws.compactSerialization
     }
 
+    private fun staffToken(): String {
+        val claims = JwtClaims()
+        claims.issuer = "https://kc.test.example/realms/openbank"
+        claims.subject = "agent:test-agent"
+        claims.setAudience("openbank-mcp-service")
+        claims.setStringClaim("consent_id", "11111111-1111-1111-1111-111111111111")
+        claims.setStringClaim("azp", "mcp-local-test")
+        claims.issuedAt = NumericDate.now()
+        claims.setExpirationTimeMinutesInTheFuture(5f)
+        val jws = JsonWebSignature()
+        jws.payload = claims.toJson()
+        jws.algorithmHeaderValue = AlgorithmIdentifiers.RSA_USING_SHA256
+        jws.key = OidcItKeys.pair("staff").private
+        return jws.compactSerialization
+    }
+
     /** tools/list, real customers token, proof for the PUBLISHED resource; [host] is what the edge passes on. */
     private fun publishedProofToolsList(
         spec: RequestSpecification,
@@ -152,22 +168,52 @@ class McpGatewayMtlsIT {
             .describedAs("plain HTTP, forged X-Forwarded-Proto").isEqualTo(401)
     }
 
+    /**
+     * Review of #17004: the customer branch used to be chosen by the RAW path, so these spellings
+     * matched [com.openbank.mcp.infrastructure.mcp.CustomerMcpEndpoint] (or a permission written for
+     * another spelling) and took the staff dispatch: 200 `{"tools":[]}`, no DPoP challenge, no
+     * customer refusal, throttle or audit. Every one must now be refused before any resource runs,
+     * on the TLS listener with a valid customer DPoP call and with a staff Bearer, and on plain HTTP.
+     * Reverting McpPathCanonicalFilter turns this red.
+     */
+    @Test
+    fun `non-canonical spellings of either root are refused on both listeners, whatever the credential`() {
+        NON_CANONICAL.forEach { path ->
+            val key = DpopTestProofs.newKey()
+            val token = customerToken("c0ffee00-0000-0000-0000-000000000031", DpopTestProofs.jkt(key))
+            val dpop = mtls("gateway").urlEncodingEnabled(false).contentType("application/json")
+                .header("Host", PUBLISHED_HOST)
+                .header("Authorization", "DPoP $token")
+                .header("DPoP", DpopTestProofs.proof(key, htu = DpopTestProofs.RESOURCE, token = token))
+                .body(TOOLS_LIST).post(path).then().extract().statusCode()
+            assertThat(dpop).describedAs("customer DPoP over mTLS: $path").isEqualTo(400)
+            val staff = mtls("gateway").urlEncodingEnabled(false).contentType("application/json")
+                .header("Authorization", "Bearer ${staffToken()}")
+                .body(TOOLS_LIST).post(path).then().extract().statusCode()
+            assertThat(staff).describedAs("staff Bearer over mTLS: $path").isEqualTo(400)
+            val plain = given().urlEncodingEnabled(false).contentType("application/json")
+                .header("Authorization", "Bearer ${staffToken()}")
+                .body(TOOLS_LIST).post(path).then().extract().statusCode()
+            assertThat(plain).describedAs("staff Bearer over plain HTTP: $path").isEqualTo(400)
+            val anon = given().urlEncodingEnabled(false).contentType("application/json")
+                .body(TOOLS_LIST).post(path).then().extract().statusCode()
+            assertThat(anon).describedAs("anonymous over plain HTTP: $path").isEqualTo(400)
+        }
+    }
+
+    /** Control for the case above: the canonical spellings are still served (not a blanket 400). */
+    @Test
+    fun `the canonical spellings are not refused by the path filter`() {
+        val staff = given().contentType("application/json").header("Authorization", "Bearer ${staffToken()}")
+            .body(TOOLS_LIST).post("/mcp").then().extract().statusCode()
+        assertThat(staff).isEqualTo(200)
+        publishedProofToolsList(mtls("gateway"), "c0ffee00-0000-0000-0000-000000000032").statusCode(200)
+    }
+
     @Test
     fun `staff - a real staff Bearer token on the staff root still works with the DPoP root beside it`() {
-        val claims = JwtClaims()
-        claims.issuer = "https://kc.test.example/realms/openbank"
-        claims.subject = "agent:test-agent"
-        claims.setAudience("openbank-mcp-service")
-        claims.setStringClaim("consent_id", "11111111-1111-1111-1111-111111111111")
-        claims.setStringClaim("azp", "mcp-local-test")
-        claims.issuedAt = NumericDate.now()
-        claims.setExpirationTimeMinutesInTheFuture(5f)
-        val jws = JsonWebSignature()
-        jws.payload = claims.toJson()
-        jws.algorithmHeaderValue = AlgorithmIdentifiers.RSA_USING_SHA256
-        jws.key = OidcItKeys.pair("staff").private
         val tools = given().contentType("application/json")
-            .header("Authorization", "Bearer ${jws.compactSerialization}")
+            .header("Authorization", "Bearer ${staffToken()}")
             .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
             .post("/mcp").then().statusCode(200).extract().jsonPath().getList<String>("result.tools.name")
         assertThat(tools).isNotEmpty
@@ -228,5 +274,21 @@ class McpGatewayMtlsIT {
         const val CUSTOMERS = "https://kc.test.example/realms/openbank-customers"
         const val EDGE_HEADER = "X-Envoy-External-Address"
         const val PUBLISHED_HOST = "mcp.test.example"
+        const val TOOLS_LIST = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"""
+        val NON_CANONICAL = listOf(
+            "/customer/mcp;a=b",
+            "/customer;a=b/mcp",
+            "/customer/%6dcp",
+            "/customer%2fmcp",
+            "/customer/%2e/mcp",
+            "/customer/./mcp",
+            "/x/../customer/mcp",
+            // "/customer//mcp" is not listed: RestAssured collapses `//` before sending (measured: it
+            // arrived as /customer/mcp and was admitted); McpPathCanonicalFilterTest covers it.
+            "/mcp;a=b",
+            "/%6dcp",
+            "/./mcp",
+            "/x/../mcp",
+        )
     }
 }

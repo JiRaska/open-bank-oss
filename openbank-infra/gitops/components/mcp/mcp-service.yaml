@@ -65,7 +65,7 @@ spec:
             # refuses both). The customer route (still disabled) must target the `https` port below; the
             # edge presents edge-backend-client-tls (envoy-gateway/) and only that DNS SAN may set the
             # client-address header. DPoP htu needs no forwarding: on 8443 absoluteURI() is
-            # https://<external Host>/mcp. The route PR adds the BackendTLSPolicy (CA bundle +
+            # https://<external Host>/customer/mcp. The route PR adds the BackendTLSPolicy (CA bundle +
             # hostname mcp-service.platform.svc) and admits the gateway to 8443 in network-policies.yaml.
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
