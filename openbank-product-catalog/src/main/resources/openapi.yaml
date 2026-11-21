@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.14.0
+  version: 2.19.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -931,6 +931,62 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No matching consumed receipt }
+  /api/v2/internal/passport-commitments:
+    post:
+      tags: [Passport grants]
+      operationId: admitPassportCommitment
+      summary: Consume passport admission for a persisted product commitment
+      description: Only the named lending-service principal can invoke this operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportCommitmentRequest' }
+      responses:
+        '204': { description: Operation admitted or exact receipt replayed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Admission refused }
+  /api/v2/internal/passport-commitments/receipt:
+    post:
+      tags: [Passport Grants]
+      summary: Check an exact already-consumed commitment without creating one
+      operationId: getPassportCommitmentReceipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportCommitmentRequest' }
+      responses:
+        '204': { description: Exact consumed receipt exists }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No matching consumed receipt }
+  /api/v2/internal/passport-commitments/route:
+    post:
+      tags: [Passport grants]
+      operationId: resolvePassportCommitmentRoute
+      summary: Read the approved FOS route for a verified subject and pinned revision
+      description: >-
+        Only the named lending-service principal can invoke this lookup. A result is planning
+        evidence, and creates no permit. A new commitment still requires authoritative admission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportRouteRequest' }
+      responses:
+        '200':
+          description: Approved route scope for the exact subject and revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PassportCommitmentRoute' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Route unavailable }
   /api/v2/events:
     get:
       tags: [Catalog Events]
@@ -1040,6 +1096,45 @@ components:
         partyId: { type: string, format: uuid }
         revisionId: { type: string, format: uuid }
         binding: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportCommitmentRequest:
+      type: object
+      required: [grantId, operation, operationId, partyId, revisionId, revisionContentHash, binding, hostCountry, bankId,
+        establishmentId, channel, customerSegment, packSetDigest]
+      properties:
+        grantId: { type: string, format: uuid }
+        operation: { type: string, enum: [SIGN, DISBURSE] }
+        operationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        revisionContentHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: The pinned published catalogue revision content hash.
+        binding: { type: string, pattern: '^[a-f0-9]{64}$' }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        channel: { type: string, minLength: 1 }
+        customerSegment: { type: string, minLength: 1 }
+        packSetDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportRouteRequest:
+      type: object
+      required: [grantId, partyId, revisionId, revisionContentHash]
+      properties:
+        grantId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        revisionContentHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PassportCommitmentRoute:
+      type: object
+      required: [hostCountry, bankId, establishmentId, channel, customerSegment, packSetDigest]
+      properties:
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        channel: { type: string, minLength: 1 }
+        customerSegment: { type: string, minLength: 1 }
+        packSetDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
     PassportGrantProposal:
       type: object
       additionalProperties: false
