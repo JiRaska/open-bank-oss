@@ -43,6 +43,7 @@ concurrency:
 
 jobs:
   reconcile:
+    if: github.event_name != 'schedule' || (vars.PACT_VERIFICATION_RECONCILE_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     permissions:
       contents: read
       actions: write  # the only credential that can dispatch verify-provider

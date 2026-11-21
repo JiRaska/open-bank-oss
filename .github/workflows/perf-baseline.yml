@@ -34,6 +34,7 @@ permissions:
 
 jobs:
   k6:
+    if: github.event_name != 'schedule' || (vars.PERF_BASELINE_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: k6 money-path read baseline
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -120,6 +121,7 @@ jobs:
   # no-silent-green contract as the money-path job above. Set PERF_<MODULE>_URL vars plus
   # the shared PERF_READ_TOKEN secret and required seeded fixture vars to light a leg up.
   module-read-baselines:
+    if: github.event_name != 'schedule' || (vars.PERF_BASELINE_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: k6 module read baseline (${{ matrix.id }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
