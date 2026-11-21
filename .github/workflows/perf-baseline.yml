@@ -4,17 +4,14 @@
 # runs the read-only k6 baseline (perf/k6/money-path-smoke.js) weekly and on demand,
 # recording latency percentiles so a regression shows as a trend.
 #
-# ADVISORY: k6 evaluates thresholds — a breached tripwire is reported and
-# uploaded, never fails the run or blocks a deploy (issue #334). Money-path perf gating
-# is a deliberate later step, not a surprise red build.
+# The weekly money-path run fails on breached thresholds and retains the summary.
+# The module read baselines use advisory thresholds.
 #
 # Target: the services must already be reachable AND the runner must carry a dedicated,
 # least-privilege read identity. Set the repo/environment variables PERF_LEDGER_URL and
 # PERF_TXN_URL (e.g. a sandbox internal URL reached via a self-hosted runner, or a
-# port-forward), and the PERF_READ_TOKEN environment secret. If any are absent, the job
-# SKIPS with a notice rather than pretending to have measured something — no silent green.
-# An authenticated 200 is required; a 401 is retained as failed evidence because it did not
-# execute the handler.
+# port-forward), the seeded synthetic PERF_ACCOUNT_ID, and PERF_READ_TOKEN.
+# Missing configuration fails the money-path job with an explicit not-run evidence envelope.
 name: Perf baseline
 
 on:
@@ -43,6 +40,7 @@ jobs:
       # A dedicated, read-only client credential. GitHub masks the value and the workflow
       # never prints it; URL variables alone cannot make an authenticated handler measurable.
       PERF_READ_TOKEN: ${{ secrets.PERF_READ_TOKEN }}
+      PERF_ACCOUNT_ID: ${{ vars.PERF_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -57,15 +55,11 @@ jobs:
           set -euo pipefail
           ledger="${IN_LEDGER:-$VAR_LEDGER}"
           txn="${IN_TXN:-$VAR_TXN}"
-          if [ -z "$ledger" ] || [ -z "$txn" ] || [ -z "${PERF_READ_TOKEN:-}" ]; then
-            echo "::notice::PERF_LEDGER_URL, PERF_TXN_URL, or PERF_READ_TOKEN is not configured — skipping the perf baseline (no authenticated target to measure)."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "reason=No safe authenticated money-path target is configured for this GitHub-hosted runner." >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
-            echo "txn=$txn" >> "$GITHUB_OUTPUT"
-          fi
+          LEDGER_URL="$ledger" TXN_URL="$txn" python3 .github/scripts/run-k6-advisory-baseline.py \
+            --check-config --target-env LEDGER_URL --target-env TXN_URL --required-fixtures PERF_ACCOUNT_ID \
+            --summary perf-summary.json --definition perf/k6/money-path-smoke.js
+          echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
+          echo "txn=$txn" >> "$GITHUB_OUTPUT"
 
       - name: Resolve pinned k6 runtime
         if: steps.target.outputs.run == 'true'
@@ -83,8 +77,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/run-k6-advisory-baseline.py \
-            --target-env LEDGER_URL --target-env TXN_URL \
-            --summary perf-summary.json --definition perf/k6/money-path-smoke.js
+            --target-env LEDGER_URL --target-env TXN_URL --required-fixtures PERF_ACCOUNT_ID \
+            --summary perf-summary.json --definition perf/k6/money-path-smoke.js --fail-thresholds
+
+      - name: Require configured money-path target
+        if: steps.target.outputs.run != 'true'
+        run: |
+          echo '::error::The scheduled money-path baseline requires authenticated sandbox targets and a seeded account.'
+          exit 1
 
       - name: Build money-path performance Test Intelligence envelope
         if: always()
