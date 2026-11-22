@@ -224,6 +224,7 @@ openbank:
       retention-years: 10   # keep at least this many calendar years attached (CZ účetnictví / AML)
       drop-enabled: false   # when true, expired partitions are DROPped instead of DETACHed
       dry-run: true         # when true, DETACH/DROP are audited but not executed
+      lock-timeout: 5s      # bound on waiting for the parent-table lock in partition DDL (fail, retry next tick)
   api:
     version: "1"
   build:
