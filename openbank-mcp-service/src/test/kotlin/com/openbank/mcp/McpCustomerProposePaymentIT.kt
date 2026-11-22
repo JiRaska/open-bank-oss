@@ -20,7 +20,6 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
@@ -46,6 +45,8 @@ class McpCustomerProposePaymentIT {
 
     class StoreDoubles : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = McpCustomerChannelIT.CustomerOn().configOverrides
+
+        override fun testResources() = GatewayTls.resources
 
         override fun getEnabledAlternatives(): Set<Class<*>> = setOf(
             CustomerTokenSource::class.java,
@@ -117,8 +118,9 @@ class McpCustomerProposePaymentIT {
         if (k.partyId == party) listOf(CustomerGrant(GRANT, account, caps.toSet(), null)) else emptyList()
     }
 
-    private fun propose(requestId: String = "req-00000001", amount: String = "125.50") = given()
+    private fun propose(requestId: String = "req-00000001", amount: String = "125.50") = GatewayTls.spec()
         .contentType(ContentType.JSON)
+        .header("Host", "mcp.test.example")
         .header("Authorization", "DPoP ${DpopTestProofs.ACCESS_TOKEN}")
         .header("DPoP", DpopTestProofs.proof(key))
         .body(
@@ -127,7 +129,7 @@ class McpCustomerProposePaymentIT {
                 """"creditorName":"Jan Novak","amount":"$amount","currency":"CZK",""" +
                 """"clientRequestId":"$requestId"}}}""",
         )
-        .post("/mcp").then().statusCode(200)
+        .post("/customer/mcp").then().statusCode(200)
 
     private fun toolCalls(decision: String): Double = registry.find("openbank.mcp.tool_calls")
         .tags("tool", "propose_payment", "decision", decision).counters().sumOf { it.count() }

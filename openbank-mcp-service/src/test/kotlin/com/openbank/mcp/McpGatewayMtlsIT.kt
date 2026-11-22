@@ -128,13 +128,19 @@ class McpGatewayMtlsIT {
         publishedProofToolsList(mtls("gateway"), "c0ffee00-0000-0000-0000-000000000021")
             .statusCode(200)
             .body("result.tools.size()", equalTo(0))
-        // Not vacuous: an anonymous caller also lists no tools, but only an ADMITTED customer gets
-        // the customer branch's "Not available on this channel" (an anonymous one reads "Authorization unavailable").
+        // Not vacuous: only an ADMITTED customer reaches the branch's grant lookup, which has no
+        // delegation-service here and so refuses fail-closed ("Authorization unavailable", isError);
+        // a tokenless caller on the same root is refused 401 at admission, never reaching a tool.
         publishedProofToolsList(
             mtls("gateway"),
             "c0ffee00-0000-0000-0000-000000000025",
             body = """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"x","arguments":{}}}""",
-        ).statusCode(200).body("result.content[0].text", equalTo("Not available on this channel"))
+        ).statusCode(200)
+            .body("result.isError", equalTo(true))
+            .body("result.content[0].text", equalTo("Authorization unavailable"))
+        mtls("gateway").contentType("application/json").header("Host", PUBLISHED_HOST)
+            .body("""{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}""")
+            .post("/customer/mcp").then().statusCode(401)
     }
 
     /**

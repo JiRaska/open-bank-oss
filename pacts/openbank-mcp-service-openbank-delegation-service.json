@@ -73,6 +73,29 @@
       }
     },
     {
+      "description": "POST resolve without a bearer token is refused 401",
+      "providerStates": [
+        {
+          "name": "an active MCP_CLIENT grant exists for the pact party, client and key"
+        }
+      ],
+      "request": {
+        "body": {
+          "clientId": "mcp-local-reference",
+          "grantorPartyId": "d3d3d3d3-0000-4000-8000-000000000001",
+          "keyThumbprint": "0000000000000000000000000000000000000000000"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/delegations/mcp-client/resolve"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST create a PENDING payment proposal under an active propose grant",
       "providerStates": [
         {

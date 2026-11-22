@@ -201,19 +201,6 @@ internal class McpCustomerBranch(
         return respond(tools.call(tool, args, caller, known.grants), known.key, ctx, tool, params, id, startedAt)
     }
 
-    /**
-     * The token's session (`sid`), one input of a proposal's derived Idempotency-Key. Bounded and
-     * shape-checked; anything else reads as "no session", which only narrows replay to the key triple.
-     */
-    private fun sessionOf(jwt: JsonWebToken): String? {
-        val raw = when (val claim = jwt.getClaim<Any?>(CLAIM_SESSION_ID)) {
-            is String -> claim
-            is JsonString -> claim.string
-            else -> null
-        }
-        return raw?.takeIf { SESSION_SHAPE.matches(it) }
-    }
-
     @Suppress("LongParameterList")
     private fun respond(
         result: CustomerReadTools.Outcome,
@@ -338,8 +325,6 @@ internal class McpCustomerBranch(
         const val TOOLS_LIST = "tools/list"
         const val DPOP_SCHEME = "DPoP "
         const val CLAIM_PARTY_ID = "party_id"
-        const val CLAIM_SESSION_ID = "sid"
-        val SESSION_SHAPE = Regex("^[A-Za-z0-9._:-]{1,128}$")
         const val DELEGATION_PREFIX = "delegation:"
         const val NO_ACTIVE_GRANT = "no active MCP_CLIENT grant (ADR-0383 D3)"
         const val LOOKUP_UNAVAILABLE = "delegation grant lookup unavailable"
@@ -369,3 +354,19 @@ internal fun customerRefusalWindowKey(subject: String?, clientKey: () -> String)
  */
 internal fun tokenlessRefusalSource(clientKey: () -> String): String =
     runCatching(clientKey).getOrDefault(ClientAddressKey.UNKNOWN)
+
+private const val CLAIM_SESSION_ID = "sid"
+private val SESSION_SHAPE = Regex("^[A-Za-z0-9._:-]{1,128}$")
+
+/**
+ * The token's session (`sid`), one input of a proposal's derived Idempotency-Key. Bounded and
+ * shape-checked; anything else reads as "no session", which only narrows replay to the key triple.
+ */
+private fun sessionOf(jwt: JsonWebToken): String? {
+    val raw = when (val claim = jwt.getClaim<Any?>(CLAIM_SESSION_ID)) {
+        is String -> claim
+        is JsonString -> claim.string
+        else -> null
+    }
+    return raw?.takeIf { SESSION_SHAPE.matches(it) }
+}
