@@ -69,6 +69,7 @@ internal fun CatalogLoanRevisionResponse.toProfile(expectedOfferingId: UUID): Ca
         minPrincipal = minimum,
         maxPrincipal = maximum,
         markets = marketCountries?.let(::OfferingMarkets),
+        productType = attributes.path("productType").takeIf(JsonNode::isTextual)?.asText(),
     )
 }
 
