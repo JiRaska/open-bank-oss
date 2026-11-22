@@ -3747,12 +3747,61 @@ gates:
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
-      python3 .github/scripts/test-merge-train-owner-approval.py
-      python3 .github/scripts/test-merge-train-close-linked-issues.py
-      python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
     # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
+    run: |
+      python3 .github/scripts/merge-train.py --check-declaration
+
+
+  # Split out of merge-train-declaration (#17006) so the shard runs it CONCURRENTLY with that gate's
+  # long --self-test instead of after it; same inputs, same must-pass verdict. Measured 8 s locally, 2026-11-22.
+  - id: merge-train-owner-approval-tests
+    name: "merge-train owner-approval unit tests (enforced; split from merge-train-declaration)"
+    group: registry
+    mode: enforced
+    rationale: "Part of the merge-train-declaration self-test, run as its own gate so the shard parallelises it; a failure here fails the shard exactly as it did inside the parent."
+    review_after: "2027-04-18"
+    budget_seconds: 60
+    min_subjects: 25   # same subject floor as merge-train-declaration: the run is the same declaration check
+    selftest: |
+      python3 .github/scripts/test-merge-train-owner-approval.py
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
+    run: |
+      python3 .github/scripts/merge-train.py --check-declaration
+
+  # Split out of merge-train-declaration (#17006) so the shard runs it CONCURRENTLY with that gate's
+  # long --self-test instead of after it; same inputs, same must-pass verdict. Measured <1 s locally, 2026-11-22.
+  - id: merge-train-close-linked-issues-tests
+    name: "merge-train close-linked-issues unit tests (enforced; split from merge-train-declaration)"
+    group: registry
+    mode: enforced
+    rationale: "Part of the merge-train-declaration self-test, run as its own gate so the shard parallelises it; a failure here fails the shard exactly as it did inside the parent."
+    review_after: "2027-04-18"
+    budget_seconds: 60
+    min_subjects: 25   # same subject floor as merge-train-declaration: the run is the same declaration check
+    selftest: |
+      python3 .github/scripts/test-merge-train-close-linked-issues.py
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
+    run: |
+      python3 .github/scripts/merge-train.py --check-declaration
+
+  # Split out of merge-train-declaration (#17006) so the shard runs it CONCURRENTLY with that gate's
+  # long --self-test instead of after it; same inputs, same must-pass verdict. Measured 1 s locally, 2026-11-22.
+  - id: merge-train-gates-yaml-e2e
+    name: "merge-train gates.yaml end-to-end test (enforced; split from merge-train-declaration)"
+    group: registry
+    mode: enforced
+    rationale: "Part of the merge-train-declaration self-test, run as its own gate so the shard parallelises it; a failure here fails the shard exactly as it did inside the parent."
+    review_after: "2027-04-18"
+    budget_seconds: 60
+    min_subjects: 25   # same subject floor as merge-train-declaration: the run is the same declaration check
+    selftest: |
+      python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
+    selftest_expect: pass
     selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
