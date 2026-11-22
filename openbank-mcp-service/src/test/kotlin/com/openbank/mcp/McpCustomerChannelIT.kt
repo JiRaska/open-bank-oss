@@ -32,6 +32,7 @@ class McpCustomerChannelIT {
     class CustomerOn : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "mcp.customer.enabled" to "true",
+            "mcp.customer.shared-store" to "memory",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
             // Every test below spends this window; the throttle test uses its own subject.
