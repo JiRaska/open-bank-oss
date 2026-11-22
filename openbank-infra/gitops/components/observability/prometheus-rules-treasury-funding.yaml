@@ -18,9 +18,8 @@ spec:
     - name: openbank.treasury.funding
       rules:
         - alert: TreasuryFundingExceeded
-          # Two consecutive 15-minute monitor reads negative: one bad read cannot page, a persistent
-          # shortfall always does. A cold pod's gauges read NaN, which keeps this false until the
-          # balance is actually measured.
+          # Prometheus evaluates the reported gauge. The monitor can retain the last
+          # measured value on an account-map read error, so confirm freshness at triage.
           expr: min(openbank_treasury_funding_contra_balance) by (currency, gl) < 0
           for: 15m
           labels:
@@ -30,9 +29,6 @@ spec:
             summary: "A treasury contra account is negative"
             runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-treasury-service/src/main/resources/docs/05-operations.en.md#treasuryfundingexceeded
             description: >-
-              The {{ $labels.currency }} nostro / settlement account (GL {{ $labels.gl }}) ended a
-              monitor pass below zero: treasury booked or settled against money the account did not
-              hold, or an outflow bypassed the booking-time funding check. Read the account's
-              journals for the day (GET /api/v1/journals on the ledger), identify the unfunded
-              outflow, and either book the covering borrowing through the normal deal lifecycle or
-              reverse the offending deal.
+              The reported balance of the {{ $labels.currency }} nostro / settlement account
+              (GL {{ $labels.gl }}) stayed below zero for 15 minutes. Confirm the monitor's
+              reading against the ledger before investigating or booking a correction.

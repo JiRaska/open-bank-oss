@@ -239,13 +239,11 @@ After a renewal the new certificate is in use within an hour, with no restart. T
 
 ## TreasuryFundingExceeded
 
-A contra (nostro / settlement) account ended two consecutive funding-monitor passes below zero
-(#12115). Booking already refuses a placement the account cannot fund, so a negative balance means
-an outflow bypassed that check (a payment rail, a manual ledger journal, or a settlement after the
-balance moved).
+The reported contra (nostro / settlement) balance stayed below zero for 15 minutes (#12115).
+If the monitor cannot read the ledger's account map, it retains the last reported balance.
 
-1. Read the account's journals for the day on the ledger (`GET /api/v1/journals`) and identify the
-   unfunded outflow.
-2. Either book the covering borrowing through the normal deal lifecycle, or reverse the offending
-   deal. Do this before the next settlement.
+1. Confirm the funding monitor is current and check the balance against the ledger. Read the
+   account's journals for the day (`GET /api/v1/journals`) to identify any unfunded outflow.
+2. If the ledger confirms the shortfall, book the covering borrowing through the normal deal
+   lifecycle or reverse the offending deal before the next settlement.
 3. A monitor that stopped running is a separate alert (workflow liveness, ADR-0237), not this one.
