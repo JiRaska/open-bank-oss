@@ -45,7 +45,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-onboarding-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c15607de2fb8229a"
+        openbank.tech/policy-checksum: "b3aec68790359adc"
       labels:
         app.kubernetes.io/name: onboarding-service
         app.kubernetes.io/part-of: onboarding
