@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   freshness:
+    if: github.event_name != 'schedule' || (vars.DEPS_FRESHNESS_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: dependency freshness score
     # Public repo ⇒ hosted runners are free; no cluster access needed (FinOps: hosted-first).
     runs-on: ubuntu-latest

@@ -35,7 +35,7 @@ command -v opa >/dev/null || { echo "ERROR: opa not on PATH (https://www.openpol
 [ -f "$BUNDLE_MANIFEST" ] || { echo "ERROR: bundle manifest not found: $BUNDLE_MANIFEST"; exit 1; }
 
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+trap 'rm -rf "$STAGE" "$STAGE.trs-enabled"' EXIT
 
 echo "==> opa test (unit, mocked data)"
 opa test "$POLICIES_DIR" "$LIBS_POLICIES_DIR"
@@ -109,9 +109,9 @@ assert "flaky-test-hunter may not merge/approve (segregation of duties, hard tie
 # REST PEP decision assertions against the REAL rules.yaml (ADR-0034 / issue #419). These would
 # all silently pass-as-undefined if rules.yaml were not staged into data.rules — the drift guard
 # that catches the latent "four_eyes never fires in prod" bug.
-rassert() { # desc | rule | input-json | expected (true|false)
+rassert() { # desc | rule | input-json | expected (true|false); RSTAGE overrides the bundle dir
 	local desc="$1" rule="$2" input="$3" expect="$4" got
-	got="$(opa eval -b "$STAGE" -I "data.openbank.rest.$rule" --format=raw <<<"$input" 2>/dev/null || true)"
+	got="$(opa eval -b "${RSTAGE:-$STAGE}" -I "data.openbank.rest.$rule" --format=raw <<<"$input" 2>/dev/null || true)"
 	[ -z "$got" ] && got=false
 	if [ "$got" = "$expect" ]; then
 		echo "  ok   $desc ($rule=$got)"
@@ -151,13 +151,37 @@ rassert "REST bridge forwards attributes: unchartered skill denied via rest.allo
 # agent's only treasury grant is this charter (treasury_rest_ext.rego grants an agent nothing), so
 # these are the must-ALLOW and must-DENY for "the agent drafts, never books" at the policy layer.
 TRS_AGENT='{"id":"agent:treasury-dealing-assistant","type":"AI_AGENT","roles":["ROLE_TREASURY_DEALER","ROLE_TREASURY_APPROVER","ROLE_TREASURY_SENIOR_APPROVER"]}'
-for a in treasury.deal.draft treasury.deal.read treasury.counterparty.read treasury.position.read treasury.quote.read; do
-	rassert "treasury agent may $a (charter allow)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" true
+#
+# The charter is `enabled: false` today, and a disabled charter grants nothing (agents.rego
+# `charter`/`charter_disabled`). So against the REAL data its reads and draft must DENY -- that is
+# the halt working -- and the grant SHAPE is held separately against a copy of the stage whose
+# only difference is this charter's `enabled` flipped to true, so the day the charter is switched
+# on these must-ALLOWs already describe what it gets. If the charter is enabled for real, the
+# first loop fails and must be deleted in that PR.
+TRS_READS="treasury.deal.draft treasury.deal.read treasury.counterparty.read treasury.position.read treasury.quote.read"
+for a in $TRS_READS; do
+	rassert "disabled treasury agent may NOT $a (charter enabled: false)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" false
+done
+TRS_ENABLED_STAGE="$STAGE.trs-enabled"
+cp -R "$STAGE" "$TRS_ENABLED_STAGE"
+python3 - "$TRS_ENABLED_STAGE/agents/data.yaml" <<'PY'
+import sys, yaml
+path = sys.argv[1]
+doc = yaml.safe_load(open(path))
+hit = [a for a in doc["agents"] if a["id"] == "treasury-dealing-assistant"]
+assert len(hit) == 1, "treasury-dealing-assistant charter not found"
+hit[0]["enabled"] = True
+yaml.safe_dump(doc, open(path, "w"), sort_keys=False)
+PY
+for a in $TRS_READS; do
+	RSTAGE="$TRS_ENABLED_STAGE" rassert "treasury agent, once enabled, may $a (charter allow)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" true
 done
 for a in treasury.deal.approve treasury.deal.settle treasury.deal.override-limit treasury.nostro.upload \
 	treasury.deal.submit treasury.deal.reverse treasury.deal.mature treasury.deal.cancel treasury.deal.reject \
 	treasury.deal.confirm treasury.posting-intent.close; do
-	rassert "treasury agent may NOT $a (charter deny)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" false
+	# Against the enabled copy: on the real (disabled) data every action is denied anyway, which
+	# would make these vacuous.
+	RSTAGE="$TRS_ENABLED_STAGE" rassert "treasury agent, once enabled, may NOT $a (charter deny)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" false
 done
 rassert "another agent may not draft a treasury deal (the grant is the charter's, not the role's)" allow.allow \
 	'{"principal":{"id":"agent:ui-assistant","type":"AI_AGENT","roles":["ROLE_TREASURY_DEALER"]},"action":"treasury.deal.draft"}' false

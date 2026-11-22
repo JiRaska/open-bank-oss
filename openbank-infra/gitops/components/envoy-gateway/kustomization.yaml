@@ -11,3 +11,4 @@ resources:
   - podmonitors.yaml
   - network-policies.yaml
   - api-edge-tls.yaml
+  - edge-backend-client-tls.yaml

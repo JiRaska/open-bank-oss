@@ -85,6 +85,7 @@ tasks.configureEach {
 }
 
 dependencies {
+    implementation(project(":openbank-libs-market"))
     // Resource-server auth (issue #401): validate caller tokens for @Authenticated / @RolesAllowed.
     // The @Authorize interceptor, Roles and the Authorize annotation already arrive transitively via
     // :openbank-libs (which api-exports :openbank-libs-runtime + :openbank-libs-domain).

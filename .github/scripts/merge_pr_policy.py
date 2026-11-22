@@ -117,6 +117,14 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '0706fa384166e6be506fa7dc5393a3d69906b6ea',
     # merge-train.py of #16986 (a member natively merged inside the train's merge call continues) merged with #16972, reviewed with #16986.
     '5e1458d0abd19d575cd667e4fae834a5f5aebe00',
+    # merge-train.py of the repo-variable knobs change (caps, operational knobs, guarded stacking, strict-lane aging), reviewed with that PR.
+    '3e8b1a854530ad67b8b2c15e6b68b32788519ef2',
+    # merge-train.py of the aging real-tree fix (auto_squash_enabled counts as armed), reviewed with that PR.
+    'd628b9a9c116f2274fb76e4e8cbdf5c4f80ed22e',
+    # merge-train.py of the owner hotfix lane (#17025) over #17048, reviewed with that PR.
+    'aeccc5f23e736946d8147221db4e86bd4bfa9357',
+    # merge-train.py of the strict yield-once-per-reservation fix (#17072, update merges must come from main) over #17025, reviewed with that PR.
+    '647b424f6b90e79712a2f994a2ca238748a48984',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
