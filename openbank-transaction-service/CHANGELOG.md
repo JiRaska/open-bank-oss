@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.3...transaction-service-v2.2.4) (2026-11-22)
+
+
+### Bug Fixes
+
+* **ledger,transaction:** bound partition DDL lock wait with lock_timeout ([#17125](https://github.com/JiRaska/open-bank-oss/issues/17125)) ([411b33e](https://github.com/JiRaska/open-bank-oss/commit/411b33e3d5712baa3e99f53ad255036c4f971bd6))
+
 ## [2.2.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.2...transaction-service-v2.2.3) (2026-11-22)
 
 
