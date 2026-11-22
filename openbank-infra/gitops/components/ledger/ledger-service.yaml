@@ -106,7 +106,7 @@ spec:
             # OPA admits exactly ledger.create for this principal (ledger_rest_ext.rego:
             # synthetic-ledger-seed-post).
             - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
-              value: "service-account-openbank-synthetic-ledger-seed"
+              value: "service-account-openbank-synthetic-ledger-seed,service-account-openbank-transaction"
             # Flyway checksum mismatch on V7/V9/V11 (2026-07-11 bootstrap redeploy, #880):
             # ledger-service hadn't been redeployed since 2026-07-06, so a repo-wide
             # migration-file touch-up landed while it sat un-deployed. Repair-at-start

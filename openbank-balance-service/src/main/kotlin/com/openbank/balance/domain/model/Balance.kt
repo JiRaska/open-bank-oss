@@ -253,4 +253,5 @@ data class BalanceEvent(
      * property name, same as `actorId`/`actorType` above.
      */
     val sourceService: String = "balance-service",
+    val branchBookId: UUID? = null,
 )

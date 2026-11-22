@@ -39,6 +39,7 @@ class LedgerProjectionService(private val projectionPort: LedgerProjectionPort, 
             transactionId = change.transactionId,
             entryDate = change.entryDate,
             actorId = BalanceEventActors.LEDGER_PROJECTION,
+            branchBookId = change.branchBookId,
         )
 
         if (applied == null) {

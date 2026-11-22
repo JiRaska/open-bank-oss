@@ -20,6 +20,7 @@ data class JournalPostedEvent(
     override val occurredAt: Instant,
     /** Explicit producer attribution for consumers sharing the ledger topic. */
     val sourceService: String = "ledger-service",
+    val branchBookId: UUID? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "JournalEntry"
     override val eventType = "JournalPosted"
@@ -31,6 +32,7 @@ data class JournalReversedEvent(
     val originalJournalId: UUID,
     val transactionId: UUID,
     val reason: String,
+    val branchBookId: UUID? = null,
     override val occurredAt: Instant,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "JournalEntry"
@@ -52,6 +54,7 @@ data class AccountBookedChangedEvent(
     val transactionId: UUID,
     val entryDate: LocalDate,
     override val occurredAt: Instant,
+    val branchBookId: UUID? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountBookedChanged"
