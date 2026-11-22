@@ -1,0 +1,17 @@
+# Agent-plane workloads selected by NO NetworkPolicy with policyTypes Egress (ADR-0387 D7).
+# Ratchet for check-public-web-fetch.py: a workload listed here is tolerated; a new uncovered
+# agent-plane workload fails the gate, and an entry that becomes covered (or disappears) fails
+# as stale until its line is removed. Format: <workload metadata.name> <tracking issue #n>.
+# Only shrink this file.
+ap2-service #17077
+authz-policy-auditor #17077
+case-coordinator-agent #17077
+communication-service #17077
+control-liveness-sentinel #17077
+devops-agent #17077
+docs-truth-agent #17077
+finops-agent #17077
+flaky-test-hunter #17077
+governance-auditor #17077
+mcp-service #17077
+release-steward #17077

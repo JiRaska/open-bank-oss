@@ -8,14 +8,22 @@
 # What the network layer guarantees, and what it cannot: the cluster runs the
 # aws-network-policy-agent, which matches CIDRs only — never hostnames. So the per-charter host
 # allowlist is NOT here (OPA + the broker's SafeHttpClient enforce it after DNS). What IS here:
-#   - the internet on TCP 443 only, with every private and link-local range carved out, so a
-#     public name that resolves to an in-cluster / VPC / instance-metadata address is dropped by
-#     the network even if the application check were bypassed;
+#   - the internet on TCP 443 only, with every private, link-local, CGNAT, loopback and
+#     "this network" range carved out, so a public name that resolves to an in-cluster / VPC /
+#     instance-metadata address is dropped by the network even if the application check were
+#     bypassed;
 #   - DNS and Keycloak (OIDC/JWKS). The OPA sidecar is localhost, which a NetworkPolicy does not
 #     police. Audit events go to the log stream (collected node-side by Alloy), so no audit egress
 #     is needed; tracing is disabled in the Deployment, so there is no Tempo edge either.
-# check-public-web-fetch.py fails if the except list loses any of the ranges below, or if any
-# other agent-plane NetworkPolicy gains a 0.0.0.0/0 egress.
+# What check-public-web-fetch.py enforces about this file (ADR-0387 D7):
+#   - it lives in this directory, in the broker's namespace, and selects the broker workload by
+#     matchLabels app.kubernetes.io/name and no other workload;
+#   - policyTypes lists Egress, and every rule that reaches the internet is exactly TCP 443;
+#   - across ALL egress rules of ALL NetworkPolicies selecting the broker (this one or any other),
+#     no ipBlock reaches 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, 0/8, 127/8, or the
+#     IPv6 ULA / link-local / loopback / IPv4-embedding prefixes, and no rule omits `to`;
+#   - no other NetworkPolicy gives an agent-plane pod internet egress, and every agent-plane
+#     workload is selected by an Egress policy (ratchet: .github/gates/agent-egress-netpol-baseline.txt).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -62,6 +70,9 @@ spec:
               - 192.168.0.0/16
               - 169.254.0.0/16
               - 169.254.169.254/32
+              - 100.64.0.0/10
+              - 0.0.0.0/8
+              - 127.0.0.0/8
       ports:
         - protocol: TCP
           port: 443

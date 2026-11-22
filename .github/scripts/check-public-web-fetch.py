@@ -37,9 +37,20 @@
 #     whose cidr-minus-except leaves anything outside RFC 1918 / link-local / loopback / ULA, and
 #     any egress rule with no `to` (which admits every destination). Pod/namespace selector peers,
 #     `namespaceSelector: {}` included, are in-cluster and out of scope here;
-#   - the broker's policy lives in the broker's namespace, selects it by matchLabels and selects no
-#     other agent-plane pod; its internet rules leave none of 10/8, 172.16/12, 192.168/16,
-#     169.254/16 (so 169.254.169.254) reachable, and allow exactly TCP 443 with no endPort;
+#   - every agent-plane workload is selected by >=1 NetworkPolicy whose policyTypes lists Egress
+#     (an unselected pod has unrestricted egress). Ratchet: today's uncovered workloads are listed
+#     in .github/gates/agent-egress-netpol-baseline.txt with a tracking issue; a new uncovered one
+#     fails, and a baseline entry that is now covered or gone fails as stale;
+#   - the broker's policy lives in the broker's namespace, selects it by matchLabels, selects no
+#     other workload, lists Egress, and allows the internet on exactly TCP 443 with no endPort;
+#   - across ALL egress rules of ALL policies selecting the broker (policies are additive), no
+#     ipBlock reaches 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, 0/8, 127/8 or the IPv6
+#     ULA / link-local / loopback / IPv4-embedding prefixes, and no rule omits `to`;
+#   - namespaces are resolved from the nearest ancestor kustomization.yaml `namespace:` (which
+#     overrides metadata.namespace), else metadata.namespace; an agent-plane workload or a
+#     NetworkPolicy with neither is a finding — never assumed `default`;
+#   - any other *NetworkPolicy kind or apiVersion (CiliumNetworkPolicy, Calico, ...) is a finding:
+#     this gate cannot judge it, so it cannot clear it;
 #   - a gitops manifest that does not parse is a finding (fail closed).
 #
 # Run:
@@ -49,6 +60,7 @@ import argparse
 import ipaddress
 import json
 import pathlib
+import posixpath
 import re
 import sys
 
@@ -208,7 +220,10 @@ def evaluate_gitops(files: dict[str, str]) -> list[str]:
 # containers runs an image of an AGPL agent module (rules.yaml agpl_modules, the canonical list
 # of that plane). Its pods' labels decide which NetworkPolicies are agent-plane.
 WORKLOAD_KINDS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet", "Job", "CronJob"}
-REQUIRED_EXCEPT = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "169.254.169.254/32"}
+REQUIRED_EXCEPT = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "169.254.169.254/32",
+                   "100.64.0.0/10", "0.0.0.0/8", "127.0.0.0/8"}
+KUSTOMIZATION_FILES = {"kustomization.yaml", "kustomization.yml", "Kustomization"}
+BASELINE = REPO / ".github" / "gates" / "agent-egress-netpol-baseline.txt"
 BROKER_EGRESS = f"{BROKER}-egress"
 RULES_YAML = REPO / "openbank-libs" / "governance" / "rules.yaml"
 
@@ -348,13 +363,83 @@ def _port_set(ports: list) -> set | None:
     return out
 
 
-def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[str]) -> list[str]:
+def _kustomize_namespaces(docs_by_path: dict[str, list[dict] | None]) -> dict[str, str]:
+    """directory -> the `namespace:` a kustomization.yaml in that directory sets."""
+    out = {}
+    for path, docs in docs_by_path.items():
+        if posixpath.basename(path) not in KUSTOMIZATION_FILES:
+            continue
+        for doc in docs or []:
+            if isinstance(doc, dict) and isinstance(doc.get("namespace"), str) and doc["namespace"]:
+                out[posixpath.dirname(path)] = doc["namespace"]
+    return out
+
+
+def _resolve_ns(path: str, meta: dict, kns: dict[str, str]) -> str | None:
+    """Effective namespace: the nearest ancestor kustomization's `namespace:` (kustomize
+    overrides metadata.namespace), else metadata.namespace, else None — unresolvable. Never
+    "default": a guessed namespace is how a policy and the pod it is meant for stop meeting."""
+    d = posixpath.dirname(path)
+    while True:
+        if d in kns:
+            return kns[d]
+        if not d:
+            break
+        d = posixpath.dirname(d)
+    ns = meta.get("namespace")
+    return ns if isinstance(ns, str) and ns else None
+
+
+def _forbidden_overlap(policy: dict) -> list[str]:
+    """Every forbidden range ANY egress rule of this policy can reach — ipBlock residuals of all
+    rules, internet or not, plus a rule with no `to` (which reaches everything)."""
+    hit: set[str] = set()
+    for rule in ((policy.get("spec") or {}).get("egress") or []):
+        if not isinstance(rule, dict):
+            raise PolicyError(f"egress rule is not a mapping: {rule!r}")
+        peers = rule.get("to")
+        if not peers:
+            hit.update(str(r) for r in BROKER_FORBIDDEN_NETS)
+            continue
+        for peer in peers:
+            ip = (peer or {}).get("ipBlock")
+            if ip is None:
+                continue
+            for n in _residual(ip):
+                hit.update(str(r) for r in BROKER_FORBIDDEN_NETS if n.version == r.version and n.overlaps(r))
+    return sorted(hit)
+
+
+def _has_egress_type(policy: dict) -> bool:
+    return "Egress" in (((policy.get("spec") or {}).get("policyTypes")) or [])
+
+
+def load_baseline(path: pathlib.Path) -> tuple[dict[str, str], list[str]]:
+    """name -> tracking ref. Every entry must carry an issue reference (`#<n>`)."""
+    entries: dict[str, str] = {}
+    errors: list[str] = []
+    if not path.is_file():
+        return entries, [f"{path.relative_to(REPO)} is missing"]
+    for i, raw in enumerate(gatelib.read_text(path).splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, ref = line.partition(" ")
+        m = re.search(r"#\d+", ref)
+        if not m:
+            errors.append(f"{path.relative_to(REPO)}:{i}: {name} has no tracking issue (#<n>)")
+        entries[name] = m.group(0) if m else ""
+    return entries, errors
+
+
+def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[str],
+                     baseline: dict[str, str] | None = None) -> list[str]:
     findings: list[str] = []
+    baseline = baseline or {}
     for path, docs in sorted(docs_by_path.items()):
         if docs is None:
             findings.append(f"{path}: cannot be parsed — a manifest this gate cannot read cannot be cleared")
-    all_docs = [d for ds in docs_by_path.values() if ds for d in ds if isinstance(d, dict)]
-    del all_docs
+    kns = _kustomize_namespaces(docs_by_path)
     # Broker identity is the WORKLOAD, never a label: a manifest under BROKER_DIR whose
     # metadata.name is the broker and whose every openbank image is the broker module. Any other
     # workload wearing the broker's name is itself a finding and counts as an "other" pod, so a
@@ -362,79 +447,119 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
     broker_pods: list[tuple[str, dict]] = []
     other_pods: list[tuple[str, dict]] = []
     all_other_pods: list[tuple[str, dict]] = []
+    agent_workloads: list[tuple[str, str, str, dict]] = []  # (path, name, ns, labels)
+    policies: list[tuple[str, dict, str]] = []  # (path, doc, ns)
     for path, docs in sorted(docs_by_path.items()):
         for doc in docs or []:
-            if not isinstance(doc, dict) or doc.get("kind") not in WORKLOAD_KINDS:
+            if not isinstance(doc, dict):
                 continue
+            kind = str(doc.get("kind") or "")
             meta = doc.get("metadata") or {}
+            if kind.endswith("NetworkPolicy"):
+                if kind != "NetworkPolicy" or doc.get("apiVersion", "networking.k8s.io/v1") != "networking.k8s.io/v1":
+                    findings.append(f"{path}: {doc.get('apiVersion')}/{kind} {meta.get('name')} — this gate judges only "
+                                    f"networking.k8s.io/v1 NetworkPolicy and cannot clear another policy engine's rules")
+                    continue
+                ns = _resolve_ns(path, meta, kns)
+                if ns is None:
+                    findings.append(f"{path}: NetworkPolicy {meta.get('name')} has no resolvable namespace "
+                                    f"(no metadata.namespace, no kustomization namespace:)")
+                    continue
+                policies.append((path, doc, ns))
+                continue
+            if kind not in WORKLOAD_KINDS:
+                continue
             tpl = _pod_template(doc)
             labels = (tpl.get("metadata") or {}).get("labels") or {}
             pspec = tpl.get("spec") or {}
             mods = {_image_module(str(c.get("image", ""))) for c in
                     (pspec.get("containers") or []) + (pspec.get("initContainers") or []) if isinstance(c, dict)}
             app_mods = {m for m in mods if m.startswith("openbank-")}
-            ns = meta.get("namespace", "default")
+            wears_name = BROKER in (labels.get("app.kubernetes.io/name"), meta.get("name"))
+            is_agent = bool(mods & modules) or wears_name
+            ns = _resolve_ns(path, meta, kns)
+            if ns is None:
+                if is_agent:
+                    findings.append(f"{path}: {kind}/{meta.get('name')} is agent-plane and has no resolvable namespace "
+                                    f"(no metadata.namespace, no kustomization namespace:) — cannot be judged")
+                continue
             if path.startswith(BROKER_DIR) and meta.get("name") == BROKER and app_mods == {BROKER}:
                 broker_pods.append((ns, labels))
                 continue
-            wears_name = BROKER in (labels.get("app.kubernetes.io/name"), meta.get("name"))
             if wears_name:
-                findings.append(f"{path}: {doc.get('kind')}/{meta.get('name')} carries the broker's name but is not the broker workload")
+                findings.append(f"{path}: {kind}/{meta.get('name')} carries the broker's name but is not the broker workload")
             # EVERY non-broker workload is an "other" pod for the broker selector check; the
             # agent-plane subset decides which other policies this gate judges at all.
             all_other_pods.append((ns, labels))
-            if wears_name or mods & modules:
+            if is_agent:
                 other_pods.append((ns, labels))
+                agent_workloads.append((path, str(meta.get("name")), ns, labels))
+
+    # Coverage (ratchet): an agent-plane pod selected by NO Egress policy has unrestricted egress,
+    # which no rule check above can see — there is no rule to read.
+    uncovered = set()
+    for path, name, ns, labels in agent_workloads:
+        if not any(pns == ns and _has_egress_type(p) and _selects((p.get("spec") or {}).get("podSelector"), labels)
+                   for _, p, pns in policies):
+            uncovered.add(name)
+            if name not in baseline:
+                findings.append(f"{path}: agent-plane workload {ns}/{name} is selected by no NetworkPolicy with "
+                                f"policyTypes Egress — its egress is unrestricted (ADR-0387 D7)")
+    present = {n for _, n, _, _ in agent_workloads}
+    for name in sorted(set(baseline) - uncovered):
+        why = "is now covered by an Egress policy" if name in present else "is no longer an agent-plane workload"
+        findings.append(f"{BASELINE.relative_to(REPO)}: stale entry {name} ({baseline[name]}) {why} — remove it")
+
     broker_ns = {ns for ns, _ in broker_pods}
     broker_seen = False
-    for path, docs in sorted(docs_by_path.items()):
-        for doc in docs or []:
-            if not isinstance(doc, dict) or doc.get("kind") != "NetworkPolicy":
+    for path, doc, ns in policies:
+        meta = doc.get("metadata") or {}
+        name = meta.get("name")
+        sel = (doc.get("spec") or {}).get("podSelector")
+        hits_other = any(pns == ns and _selects(sel, labels) for pns, labels in other_pods)
+        hits_broker = any(pns == ns and _selects(sel, labels) for pns, labels in broker_pods)
+        is_broker = path.startswith(BROKER_DIR) and name == BROKER_EGRESS
+        if not (hits_other or hits_broker or is_broker):
+            continue
+        try:
+            rules = _internet_rules(doc)
+            # Every policy selecting the broker, every rule: policies are additive, so one extra
+            # rule anywhere reopens what the broker policy's except closed.
+            leaked = _forbidden_overlap(doc) if (hits_broker or is_broker) else []
+        except PolicyError as e:
+            findings.append(f"{path}: {ns}/{name}: {e}")
+            continue
+        if leaked:
+            findings.append(f"{path}: {ns}/{name} selects the broker and lets it reach forbidden range(s) {leaked}")
+        if not is_broker:
+            if rules:
+                findings.append(
+                    f"{path}: NetworkPolicy {ns}/{name} gives agent-plane pods internet egress — "
+                    f"only {BROKER_EGRESS} in {BROKER_DIR} may (ADR-0387 D7)"
+                )
+            continue
+        broker_seen = True
+        # Identity: the broker's policy must select the broker and nothing else.
+        match_labels = (sel or {}).get("matchLabels") or {}
+        if ns not in broker_ns:
+            findings.append(f"{path}: {name} is in namespace {ns}, the broker runs in {sorted(broker_ns)}")
+        if match_labels.get("app.kubernetes.io/name") != BROKER or (sel or {}).get("matchExpressions"):
+            findings.append(f"{path}: {name} must select by matchLabels including app.kubernetes.io/name: {BROKER}, not {sel!r}")
+        if not hits_broker:
+            findings.append(f"{path}: {name} selects no identified broker workload")
+        if any(pns == ns and _selects(sel, labels) for pns, labels in all_other_pods):
+            findings.append(f"{path}: {name} also selects a workload that is not the broker — internet egress would reach it")
+        if not _has_egress_type(doc):
+            findings.append(f"{path}: {name} does not list Egress in policyTypes")
+        if not rules:
+            findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
+        for nets, ports, open_to in rules:
+            if open_to:
+                findings.append(f"{path}: {name} has an egress rule with no `to` — every destination, no except")
                 continue
-            meta = doc.get("metadata") or {}
-            name, ns = meta.get("name"), meta.get("namespace", "default")
-            sel = (doc.get("spec") or {}).get("podSelector")
-            hits_other = any(pns == ns and _selects(sel, labels) for pns, labels in other_pods)
-            hits_broker = any(pns == ns and _selects(sel, labels) for pns, labels in broker_pods)
-            is_broker = path.startswith(BROKER_DIR) and name == BROKER_EGRESS
-            if not (hits_other or hits_broker or is_broker):
-                continue
-            try:
-                rules = _internet_rules(doc)
-            except PolicyError as e:
-                findings.append(f"{path}: {ns}/{name}: {e}")
-                continue
-            if not is_broker:
-                if rules:
-                    findings.append(
-                        f"{path}: NetworkPolicy {ns}/{name} gives agent-plane pods internet egress — "
-                        f"only {BROKER_EGRESS} in {BROKER_DIR} may (ADR-0387 D7)"
-                    )
-                continue
-            broker_seen = True
-            # Identity: the broker's policy must select the broker and nothing else.
-            match_labels = (sel or {}).get("matchLabels") or {}
-            if ns not in broker_ns:
-                findings.append(f"{path}: {name} is in namespace {ns}, the broker runs in {sorted(broker_ns)}")
-            if match_labels.get("app.kubernetes.io/name") != BROKER or (sel or {}).get("matchExpressions"):
-                findings.append(f"{path}: {name} must select by matchLabels including app.kubernetes.io/name: {BROKER}, not {sel!r}")
-            if not hits_broker:
-                findings.append(f"{path}: {name} selects no identified broker workload")
-            if any(pns == ns and _selects(sel, labels) for pns, labels in all_other_pods):
-                findings.append(f"{path}: {name} also selects a workload that is not the broker — internet egress would reach it")
-            if not rules:
-                findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
-            for nets, ports, open_to in rules:
-                if open_to:
-                    findings.append(f"{path}: {name} has an egress rule with no `to` — every destination, no except")
-                    continue
-                leaked = sorted({str(r) for r in BROKER_FORBIDDEN_NETS for n in nets
-                                 if n.version == r.version and n.overlaps(r)})
-                if leaked:
-                    findings.append(f"{path}: {name} internet egress does not except {leaked}")
-                got = _port_set(ports)
-                if got != {("TCP", 443)}:
-                    findings.append(f"{path}: {name} internet egress must be exactly TCP 443 (no endPort), got {ports or 'all ports'}")
+            got = _port_set(ports)
+            if got != {("TCP", 443)}:
+                findings.append(f"{path}: {name} internet egress must be exactly TCP 443 (no endPort), got {ports or 'all ports'}")
     if broker_pods and not broker_seen:
         findings.append(f"{BROKER} is deployed but {BROKER_DIR} declares no NetworkPolicy {BROKER_EGRESS}")
     return findings
@@ -591,6 +716,11 @@ def self_test() -> int:
         return w
 
     awl = {"x/w.yaml": [agent_wl]}
+
+    def nons(w):
+        w = json.loads(json.dumps(w))
+        del w["metadata"]["namespace"]
+        return w
     bwl = {bdir + "w.yaml": [broker_wl]}
     ncases += [
         # 1. a rule with no `to` admits every destination
@@ -609,7 +739,8 @@ def self_test() -> int:
         ("broker split /1 halves without excepts", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
                                                                                     [{"to": [ipb("0.0.0.0/1"), ipb("128.0.0.0/1", full)], "ports": t443}])]}, 1),
         ("broker split /1 halves, both excepted", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
-                                                                                   [{"to": [ipb("0.0.0.0/1", ["10.0.0.0/8"]), ipb("128.0.0.0/1", ["172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"])], "ports": t443}])]}, 0),
+                                                                                   [{"to": [ipb("0.0.0.0/1", ["10.0.0.0/8", "0.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8"]),
+                                                                                             ipb("128.0.0.0/1", ["172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"])], "ports": t443}])]}, 0),
         ("broker unparseable cidr", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel, [{"to": [ipb("not-a-cidr")], "ports": t443}])]}, 1),
         # 3. broker identity
         ("broker policy in another namespace", {**bwl, **awl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "docs-truth-agent", {}, [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
@@ -666,14 +797,59 @@ def self_test() -> int:
                                                                               {"matchLabels": {"app.kubernetes.io/part-of": "fetch-broker"}},
                                                                               [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}])]}, 1),
         ("tagged broker with the exact name selector is clean", {bdir + "w.yaml": [tagged(broker_wl)], bdir + "np.yaml": [good_broker]}, 0),
+        # 8. coverage ratchet: an agent pod no Egress policy selects has unrestricted egress
+        ("new agent selected by no Egress policy", awl, 1),
+        ("agent covered only by an Ingress-only policy", {**awl, "x/np.yaml": [{"kind": "NetworkPolicy",
+            "metadata": {"name": "i", "namespace": "docs-truth-agent"}, "spec": {"podSelector": {}, "policyTypes": ["Ingress"]}}]}, 1),
+        # 9. every policy and every rule that selects the broker is judged, not just the named one
+        ("extra policy gives the broker 169.254.169.254/32", {**bwl, bdir + "np.yaml": [good_broker],
+            "z/np.yaml": [raw_np("x", "fetch-broker", {}, [{"to": [ipb("169.254.169.254/32")]}])]}, 1),
+        ("extra 10.0.0.0/8 rule inside the broker policy", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+            [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}, {"to": [ipb("10.0.0.0/8")]}])]}, 1),
+        ("broker CGNAT 100.64.0.0/10 on 443", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+            [{"to": [ipb("0.0.0.0/0", full)], "ports": t443}, {"to": [ipb("100.64.0.0/10")], "ports": t443}])]}, 1),
+        ("broker reaching 127.0.0.0/8", {**bwl, bdir + "np.yaml": [raw_np(BROKER_EGRESS, "fetch-broker", bsel,
+            [{"to": [ipb("0.0.0.0/0", [c for c in full if c != "127.0.0.0/8"])], "ports": t443}])]}, 1),
+        ("extra policy with no `to` selecting the broker", {**bwl, bdir + "np.yaml": [good_broker],
+            "z/np.yaml": [raw_np("x", "fetch-broker", {}, [{"ports": [{"protocol": "UDP", "port": 53}]}])]}, 1),
+        # 10. namespace resolution: kustomize namespace:, else metadata, else a finding
+        ("agent with no namespace anywhere", {"x/w.yaml": [nons(agent_wl)],
+            "x/np.yaml": [np("a-egress", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8")]}, 1),
+        ("agent namespace from kustomization, internet policy there", {"x/kustomization.yaml": [{"kind": "Kustomization", "namespace": "docs-truth-agent"}],
+            "x/w.yaml": [nons(agent_wl)], "y/np.yaml": [np("a", "docs-truth-agent")]}, 1),
+        ("agent namespace from parent kustomization, covered", {"x/kustomization.yaml": [{"kind": "Kustomization", "namespace": "docs-truth-agent"}],
+            "x/sub/w.yaml": [nons(agent_wl)], "y/np.yaml": [np("a", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8")]}, 0),
+        ("kustomization namespace overrides metadata.namespace", {"x/kustomization.yaml": [{"kind": "Kustomization", "namespace": "other"}],
+            "x/w.yaml": [agent_wl], "y/np.yaml": [np("a", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8")]}, 1),
+        # 11. a policy engine this gate cannot read is a finding
+        ("CiliumNetworkPolicy under gitops", {**awl, "x/np.yaml": [np("a", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8")],
+            "x/c.yaml": [{"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy", "metadata": {"name": "c", "namespace": "docs-truth-agent"},
+                          "spec": {"endpointSelector": {}, "egress": [{"toEntities": ["world"]}]}}]}, 1),
+        ("NetworkPolicy of a foreign apiVersion", {**awl, "x/np.yaml": [{**np("a", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8"),
+                                                                        "apiVersion": "crd.projectcalico.org/v1"}]}, 1),
         # 5. fail closed
         ("unparseable manifest", {"x/broken.yaml": None}, 1),
     ]
     for name, docs, want in ncases:
-        got = len(evaluate_network(docs, mods))
+        _f = evaluate_network(docs, mods); got = len(_f)
+        if (got > 0) != (want > 0): print(_f)
         ok = (got > 0) == (want > 0)
         failed += not ok
         print(f"  {'ok ' if ok else 'BAD'} network/{name}: findings={got}")
+
+    covered = {**awl, "x/np.yaml": [np("a", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8")]}
+    bcases = [
+        ("baselined uncovered agent passes", awl, {"docs-truth-agent": "#1"}, 0),
+        ("stale baseline entry: agent now covered", covered, {"docs-truth-agent": "#1"}, 1),
+        ("stale baseline entry: agent gone", {}, {"docs-truth-agent": "#1"}, 1),
+        ("baseline does not excuse a different agent", {"x/w.yaml": [wl("finops-agent", "finops-agent", "openbank-docs-truth-agent")]},
+         {"docs-truth-agent": "#1"}, 1),
+    ]
+    for name, docs, base, want in bcases:
+        _f = evaluate_network(docs, mods, base)
+        ok = (len(_f) > 0) == (want > 0)
+        failed += not ok
+        print(f"  {'ok ' if ok else 'BAD'} baseline/{name}: findings={len(_f)}")
 
     print("self-test:", "PASS" if not failed else f"FAIL ({failed})")
     return 1 if failed else 0
@@ -693,7 +869,10 @@ def main() -> int:
     if not modules:
         findings.append("rules.yaml agpl_modules is empty or moved — the agent plane cannot be derived")
     docs = _gitops_docs()
-    findings += evaluate_network(docs, modules)
+    baseline, berr = load_baseline(BASELINE)
+    findings += berr
+    findings += evaluate_network(docs, modules, baseline)
+    print(f"network: {len(baseline)} baselined agent-plane workload(s) without an Egress NetworkPolicy")
     pods = agent_plane_pods([d for ds in docs.values() if ds for d in ds], modules)
     print(f"network: {len(pods)} agent-plane workloads derived from {len(modules)} agent modules")
     gatelib.subjects(count, "agent charters examined for public-web access")
