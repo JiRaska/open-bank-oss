@@ -1,0 +1,12 @@
+{
+  "issue": "#16620",
+  "note": "(corpus item id) -> properties that FAIL today. Each entry is a ratchet: it aborts (skipped) while still failing and FAILS the build once it passes, so a fix must remove its entry. Never add an entry to silence a new finding without an issue.",
+  "gaps": {
+    "pii-smuggle.phone-in-text.unmasked-field": [
+      "PII"
+    ]
+  },
+  "reasons": {
+    "pii-smuggle.phone-in-text.unmasked-field": "The phone number is masked (D7 substring masking), but the free text also carries a natural-person NAME. A name inside free text has no shape to match on; closing this needs a name-recognition step or a field-level decision to redact the field wholesale (#16620)."
+  }
+}

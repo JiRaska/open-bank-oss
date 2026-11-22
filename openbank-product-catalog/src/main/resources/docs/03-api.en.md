@@ -210,6 +210,13 @@ The API contract version is 2.10.0; the change is additive.
 
 Catalog request bodies are decoded strictly: a body that repeats a JSON object key is rejected with `400` instead of the last value silently winning. The 1 MiB size and nesting-depth bounds on the IR lint body are unchanged.
 
+### Offering market scope (ADR-0380)
+
+The legacy-product published-revision response may include `marketCountries` from the current
+offering. Account-service uses the field to reject explicitly foreign-only offerings on the
+Czech domestic route. An empty set is legacy unscoped metadata. The field can be null on other
+revision responses. It is distribution metadata, separate from a passport grant.
+
 ### Passport grant changes
 
 `GET /api/v2/events` publishes `com.openbank.catalog.passport-grant.changed` version 1 from the

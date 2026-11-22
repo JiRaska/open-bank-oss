@@ -11,22 +11,20 @@ import org.eclipse.microprofile.config.Config
 import org.jboss.logging.Logger
 
 /**
- * Boot gate for forwarded-header trust (ADR-0383 D5, #16847).
+ * Boot gate for edge trust (ADR-0383 D5, #16847; owner decision 2026-11-21: trust the gateway hop
+ * by mTLS identity, never by IP).
  *
- * Behind the edge the customers tenant's DPoP check needs the EXTERNAL request URL: with
- * `quarkus.oidc.customers.token.authorization-scheme=DPoP`, quarkus-oidc's
- * `BearerAuthenticationMechanism` compares the proof `htu` with `HttpServerRequest.absoluteURI()`
- * (query stripped) BEFORE the request reaches this service's own admission, whose `htu` check is
- * against the static published resource. Quarkus rewrites `absoluteURI()` from forwarded headers
- * when `quarkus.http.proxy.*` is on — and, with `quarkus.http.proxy.trusted-proxies` UNSET, from ANY
- * peer. That is what this refuses at boot.
- *
- * Checked whenever ANY switch in [FORWARDING_SWITCHES] (every Quarkus 3.40 `ProxyConfig` switch that
- * makes request data depend on a peer-supplied header or the PROXY protocol) is on, OR the edge
- * client-address header is configured: the trusted list must be non-empty, every entry a strict IP
- * literal or CIDR (no hostnames), and no prefix shorter than /8 (IPv4) or /16 (IPv6) — which also
- * rejects every trust-all spelling (`0.0.0.0/0`, `0.0.0.0/00`, `::/0`, `0:0:0:0:0:0:0:0/0`) and the
- * split-half pairs (`0.0.0.0/1,128.0.0.0/1`).
+ * 1. NO Quarkus forwarding, ever: any switch in [FORWARDING_SWITCHES] on, or
+ *    `quarkus.http.proxy.trusted-proxies` set at all, refuses to start. Those rewrite
+ *    `absoluteURI()`/`remoteAddress()` from peer-supplied headers on EVERY listener, plain HTTP
+ *    included. The customers tenant's DPoP `htu` check needs no forwarding: on the TLS listener
+ *    Vert.x builds `absoluteURI()` as `https://<Host>/<path>`, and the edge passes the external
+ *    Host through unchanged.
+ * 2. The edge client-address header ([EDGE_HEADER]) is honoured only over mTLS, so configuring it
+ *    requires `quarkus.http.ssl.client-auth=required` AND a pinned gateway SAN ([GATEWAY_IDENTITY]).
+ *    A header with no pin, or a pin with client auth off, refuses to start.
+ * 3. The customer channel ([CUSTOMER_ENABLED]) is served only on the mTLS listener
+ *    ([CustomerMcpEndpoint]), so enabling it with client auth not REQUIRED refuses to start.
  *
  * `@Startup` because `@ApplicationScoped` is lazy and this is a boot gate, not a request check.
  */
@@ -34,19 +32,28 @@ import org.jboss.logging.Logger
 @ApplicationScoped
 class ProxyForwardingGuard @Inject constructor(config: Config) {
     init {
-        val on = FORWARDING_SWITCHES.any { config.getOptionalValue(it, Boolean::class.javaObjectType).orElse(false) }
-        val edge = config.getOptionalValue(EDGE_HEADER, String::class.java).orElse("").isNotBlank()
-        check(on || edge, config.getOptionalValue(TRUSTED_PROXIES, String::class.java).orElse(""))
+        fun str(key: String) = config.getOptionalValue(key, String::class.java).orElse("").trim()
+        check(
+            forwarding = FORWARDING_SWITCHES.filter {
+                config.getOptionalValue(it, Boolean::class.javaObjectType).orElse(false)
+            },
+            trustedProxies = str(TRUSTED_PROXIES),
+            edgeHeader = str(EDGE_HEADER),
+            gatewayIdentity = str(GATEWAY_IDENTITY),
+            clientAuth = str(CLIENT_AUTH),
+            customerEnabled = config.getOptionalValue(CUSTOMER_ENABLED, Boolean::class.javaObjectType).orElse(false),
+        )
     }
 
     companion object {
         private val log = Logger.getLogger(ProxyForwardingGuard::class.java)
         const val TRUSTED_PROXIES = "quarkus.http.proxy.trusted-proxies"
         const val EDGE_HEADER = "mcp.edge.client-address-header"
-        private const val MIN_V4_PREFIX = 8
-        private const val MIN_V6_PREFIX = 16
+        const val GATEWAY_IDENTITY = "mcp.edge.gateway-identity"
+        const val CLIENT_AUTH = "quarkus.http.ssl.client-auth"
+        const val CUSTOMER_ENABLED = "mcp.customer.enabled"
 
-        /** quarkus-vertx-http 3.40 `ProxyConfig` switches; `trusted-proxy.*` (named form) is not supported here. */
+        /** quarkus-vertx-http 3.40 `ProxyConfig` switches that make request data depend on a peer header. */
         val FORWARDING_SWITCHES = listOf(
             "quarkus.http.proxy.proxy-address-forwarding",
             "quarkus.http.proxy.allow-forwarded",
@@ -57,22 +64,30 @@ class ProxyForwardingGuard @Inject constructor(config: Config) {
             "quarkus.http.proxy.use-proxy-protocol",
         )
 
-        /** Throws when trust is needed without a narrow, literal trusted-proxy list. Visible for the unit test. */
-        fun check(needsTrust: Boolean, trustedProxies: String) {
-            if (!needsTrust) return
-            val entries = trustedProxies.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-            check(entries.isNotEmpty()) {
-                "forwarded-header trust is configured but $TRUSTED_PROXIES is not set: " +
-                    "forwarded headers would be trusted from any peer"
+        /** Throws on any config that would trust a header without the gateway's mTLS identity (unit-tested). */
+        fun check(
+            forwarding: List<String>,
+            trustedProxies: String,
+            edgeHeader: String,
+            gatewayIdentity: String,
+            clientAuth: String,
+            customerEnabled: Boolean = false,
+        ) {
+            check(forwarding.isEmpty()) {
+                "Quarkus proxy forwarding is refused (edge is trusted by mTLS identity, not IP): $forwarding"
             }
-            entries.forEach { entry ->
-                val cidr = checkNotNull(IpLiteral.Cidr.parse(entry)) {
-                    "$TRUSTED_PROXIES entry is not an IP literal or CIDR (hostnames are refused): $entry"
-                }
-                val min = if (cidr.isV6) MIN_V6_PREFIX else MIN_V4_PREFIX
-                check(cidr.bits >= min) { "$TRUSTED_PROXIES entry is broader than /$min: $entry" }
+            check(trustedProxies.isEmpty()) { "$TRUSTED_PROXIES must stay unset: the edge is trusted by mTLS identity" }
+            check(!customerEnabled || clientAuth.equals("required", ignoreCase = true)) {
+                "$CUSTOMER_ENABLED is on but $CLIENT_AUTH is '$clientAuth': the customer root is served only over mTLS"
             }
-            log.infof("forwarded headers trusted only from %d configured proxy entries", entries.size)
+            if (edgeHeader.isEmpty() && gatewayIdentity.isEmpty()) return
+            check(edgeHeader.isNotEmpty() && gatewayIdentity.isNotEmpty()) {
+                "$EDGE_HEADER and $GATEWAY_IDENTITY must be configured together"
+            }
+            check(clientAuth.equals("required", ignoreCase = true)) {
+                "$EDGE_HEADER is configured but $CLIENT_AUTH is '$clientAuth', not 'required'"
+            }
+            log.infof("edge header %s honoured only over mTLS from SAN %s", edgeHeader, gatewayIdentity)
         }
     }
 }
