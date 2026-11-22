@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "898f7abaed9f67ce"
+    openbank.tech/policy-checksum: "08354a49767bbe75"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -922,9 +922,29 @@ data:
     # AI_AGENT is prefixed "agent:" (AuthorizeInterceptor.principalType()'s own convention, e.g.
     # "agent:onboarding" per its test). trim_prefix is a no-op when the prefix isn't present, so
     # this normalises both callers to the bare charter id without needing two lookup rules.
+    #
+    # A charter with `enabled: false` is NOT returned here, so a disabled agent has no charter on
+    # every path that derives a grant from it: the plain-pattern MCP allowlist, the {tier, resources}
+    # object grants, the REST bridge (rest.rego delegates to `allow` below) and any later rule built
+    # on `charter`. agents.yaml documents `enabled: false` as the per-agent halt; before this guard
+    # no rule read the field, so a disabled charter kept every grant live (draft.ticket answered
+    # allow for card-scheme-bulletin-agent). An ABSENT `enabled` key means enabled -- eight
+    # charters omit it -- so only an explicit `false` disables. Written as `not a.enabled == false`
+    # (not object.get) so gen-agents-opa-data.py's static pass sees the `a.enabled` dereference and
+    # keeps the field in the served projection; its differential proof fails the write if it ever
+    # did not.
     charter contains a if {
     	some a in data.agents.agents
     	a.id == trim_prefix(input.agent, "agent:")
+    	not a.enabled == false
+    }
+
+    # The caller names a chartered agent whose charter is switched off. Used for the decision
+    # reason and as an explicit veto in `allow`, independent of `charter` excluding it.
+    charter_disabled if {
+    	some a in data.agents.agents
+    	a.id == trim_prefix(input.agent, "agent:")
+    	a.enabled == false
     }
 
     # The hard-forbidden tier is forbidden for ALL agents, regardless of charter (agents.yaml: tool_tiers.deny).
@@ -1096,6 +1116,7 @@ data:
     # The decision. Allow only when nothing forbids AND the charter permits AND skill is in scope.
     # ---------------------------------------------------------------------------------------
     allow if {
+    	not charter_disabled
     	not hard_denied
     	not charter_denied
     	charter_allowed
@@ -1137,7 +1158,9 @@ data:
     	"reason": reason,
     }
 
-    reason := "hard-denied tool tier" if hard_denied
+    reason := "agent charter disabled" if charter_disabled
+
+    else := "hard-denied tool tier" if hard_denied
 
     else := "denied by charter tier/resource grant" if tier_resource_charter_denied
 
@@ -1170,7 +1193,7 @@ data:
     # MCP and REST decision is unchanged before it writes.
     #
     # Derived paths (read out of the .rego sources, never listed by hand):
-    #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
+    #   data.agents.agents  (each element projected to: enabled, id, skills, tools.allow, tools.deny)
     #   data.agents.tool_tiers.deny
     #   data.agents.tool_tiers.read
     #   data.agents.tool_tiers.write_proposal
@@ -1331,6 +1354,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      enabled: false
       tools:
         allow:
         - tier: read
@@ -1347,6 +1371,7 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
+      enabled: false
       tools:
         allow:
         - tier: read
@@ -1363,6 +1388,7 @@ data:
           resources:
           - '*'
     - id: card-dispute-evidence-agent
+      enabled: false
       tools:
         allow:
         - tier: read
@@ -1379,6 +1405,7 @@ data:
           resources:
           - '*'
     - id: treasury-dealing-assistant
+      enabled: false
       tools:
         allow:
         - treasury.deal.read
@@ -1403,6 +1430,7 @@ data:
         - gh.pr.*
         - secrets.read.raw
     - id: finops-agent
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1423,6 +1451,7 @@ data:
           resources:
           - '*'
     - id: devops-agent
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1443,6 +1472,7 @@ data:
           resources:
           - '*'
     - id: control-liveness-sentinel
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1460,6 +1490,7 @@ data:
           resources:
           - '*'
     - id: governance-auditor
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1478,6 +1509,7 @@ data:
           resources:
           - '*'
     - id: release-steward
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1495,6 +1527,7 @@ data:
           resources:
           - '*'
     - id: docs-truth-agent
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1511,6 +1544,7 @@ data:
           resources:
           - '*'
     - id: authz-policy-auditor
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1527,6 +1561,7 @@ data:
           resources:
           - '*'
     - id: flaky-test-hunter
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1546,6 +1581,7 @@ data:
           resources:
           - '*'
     - id: case-coordinator
+      enabled: true
       tools:
         allow:
         - tier: read
@@ -1568,6 +1604,7 @@ data:
           - gh.pr.*
           - secrets.*
     - id: kyb-analyst
+      enabled: false
       tools:
         allow:
         - tier: read
@@ -1585,6 +1622,7 @@ data:
           resources:
           - '*'
     - id: business-copilot
+      enabled: false
       tools:
         allow:
         - query.balance.readonly
