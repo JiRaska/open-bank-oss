@@ -185,7 +185,7 @@ labels:
 
   - name: "merge-priority:hotfix"
     color: "b60205"
-    description: "Owner-applied only, capped per day, per head: merges via native auto-merge when green. Agents never apply it."
+    description: "Owner-applied, daily cap, bound to one head: merges by native auto-merge when green. Never agents."
 
   - name: "merge-priority:deploy-fix"
     color: "5319e7"
