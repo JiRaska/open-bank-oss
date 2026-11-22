@@ -22,9 +22,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 /**
  * Follow-up to #17101: partition DDL (`CREATE TABLE ... PARTITION OF`) takes ACCESS EXCLUSIVE on
@@ -100,6 +102,7 @@ class PartitionDdlLockTimeoutIT {
     }.joinToString(" | ") { it.toString() }
 
     @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
     fun `partition DDL fails within the lock timeout instead of queueing behind a lock on the parent`() {
         val partition = PartitionManager.yearlyPartition("transactions", 2031)
         val ddl = PartitionManager.createPartitionDdl("transactions", partition)
@@ -125,6 +128,7 @@ class PartitionDdlLockTimeoutIT {
     }
 
     @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
     fun `a maintenance pass blocked by a parent lock fails and records no success`() {
         assertThat(successRecorded()).describedAs("fresh app, nothing succeeded yet").isEqualTo(0.0)
 
