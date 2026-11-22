@@ -354,7 +354,7 @@ step 1 starts. "Open PR" means not on `main`; the PR number is the only claim ma
 | C-S1 | Spoofing | A stolen access token is replayed from another device | DPoP: `CustomerChannelAdmission` requires `cnf.jkt` and the `DPoP` scheme, and `DpopProofVerifier` checks signature, `htm`, `htu` against the allowlist's published resource, `iat`, `ath`, proof key = `cnf.jkt` | LIVE (channel off by default) |
 | C-S2 | Spoofing | A captured proof is replayed within its `iat` window | `jti` replay claim; today `InMemoryDpopReplayStore`, bounded and per pod, accepted only while `mcp-service` is single-replica (ADR-0383 P4) | PARTIAL — shared fail-closed store is open PR #16791; **blocks go-live** together with the HA row C-D3 |
 | C-S3 | Spoofing | An unlisted or disabled MCP client obtains a customer token | `azp` must be declared AND enabled in `McpClientAllowlist`; tier is read from the allowlist, never the token; `CustomerChannel` refuses to boot on a missing or malformed list | LIVE; realm-side admission tiers are open PRs #16664, #16672 |
-| C-S4 | Spoofing | A client forges `X-Forwarded-Host`/`-Proto` to satisfy `htu`, or a client address to choose its audit key | Service: no `quarkus.http.proxy.*` forwarding at all (`ProxyForwardingGuard` refuses it); `htu` is checked against `absoluteURI()` on the `:8443` listener with the external Host passed through. The edge client-address header is honoured only from a verified client certificate whose DNS SAN equals `MCP_EDGE_GATEWAY_IDENTITY`. Edge: the route removes `X-Forwarded-For`, `Forwarded`, `X-Forwarded-Proto/-Host/-Port/-Prefix/-Server`, `X-Real-IP`; `ClientTrafficPolicy` `mcp-edge` trusts zero XFF hops; `BackendTLSPolicy` `mcp-customer-backend` validates the server certificate | Edge: in this route (off). Service mTLS identity pin: open PR #17004. Who may mint the pinned SAN (`openbank-ca` has no approver policy): **OPEN, blocks go-live** |
+| C-S4 | Spoofing | A client forges `X-Forwarded-Host`/`-Proto` to satisfy `htu`, or a client address to choose its audit key | Service: no `quarkus.http.proxy.*` forwarding at all (`ProxyForwardingGuard` refuses it); `htu` is checked by quarkus-oidc against the request's absolute URI on the `:8443` listener with the external Host passed through. The edge client-address header is honoured only from a verified client certificate whose DNS SAN equals `MCP_EDGE_GATEWAY_IDENTITY`. Edge: the route removes `X-Forwarded-For`, `Forwarded`, `X-Forwarded-Proto/-Host/-Port/-Prefix/-Server`, `X-Real-IP`; `ClientTrafficPolicy` `mcp-edge` trusts zero XFF hops; `BackendTLSPolicy` `mcp-customer-backend` validates the server certificate | Edge: in this route (off). Service mTLS identity pin: open PR #17004. Who may mint the pinned SAN (`openbank-ca` has no approver policy): **OPEN, blocks go-live** |
 | C-T1 | Tampering | An MCP client turns a proposal into an executed payment | Propose-only: `ProposedOnly` whitelists `PROPOSED` on every `status`; `UnwiredProposalPort` refuses while no store exists; gate `mcp-customer-channel-propose-only` (enforced) forbids any non-GET REST client in `openbank-mcp-service/src/main` unless allow-listed | LIVE |
 | C-T2 | Tampering | The proposal is approved with a token the MCP client holds | PDP veto: `rest.rego` `customer_app_session` — every `customer.mcp-proposals.*` action is prohibited unless `token_azp` is the bank app and the token is not exchanged (#16915) | LIVE |
 | C-T3 | Tampering | The customer approves something other than what was proposed | Full SCA with dynamic linking over the proposal hash in the app, no exemptions, expiry, no bulk approval | Open PRs #16853 (store), #16845 (app approval), #16864 (MCP write path); **blocks go-live** |
@@ -474,6 +474,27 @@ server-side `inputSchema` validation + idempotency on `propose_payment`, when th
 a stub (T-T2/T-D2).
 
 ## 8. Change log
+
+- **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
+  - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
+    on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
+    check ran there, and a customer token carries this server's audience, so the request was
+    dispatched — and served as ANONYMOUS, because `CallerContextResolver` never resolves a
+    customers-realm token (empty `tools/list`, `tools/call` denied before the PDP). Not
+    exploitable, but the only barrier was one `null` return deep in the resolver. `McpEndpoint`
+    now refuses on the staff root any token whose `iss` is the customers realm, and any
+    `Authorization: DPoP` credential, with 401 pointing the client at `/customer/mcp`, regardless
+    of channel state (reasons `customer_channel_off` / `customer_root_required`, layer `token`).
+  - *Repudiation / audit flooding.* The credential is unverified at that point, so a refused
+    `tools/call` spends the shared anonymous bucket before its audit row; beyond the budget only
+    the throttle's once-per-window row is written. A request with more than one `Authorization`
+    header is refused 400 (`invalid_request`), and a DPoP scheme in ANY of them counts.
+  - *Tests.* `McpStaffRootCustomerCredentialIT` (channel off, shipped `mcp.customer.issuer`, two
+    `Authorization` headers in both orders, metric, audit budget), `McpCustomerChannelIT` (channel on,
+    both schemes, list and call), `McpCustomerTenantResolutionIT` (a token signed by the real
+    customers-realm key on `/mcp`). With the refusal removed the first two went red (200, served
+    anonymous); the third stays green either way, because the OIDC layer already refuses it (the
+    customers tenant is path-bound to `/customer/mcp`, and the staff tenant rejects its `iss`).
 
 - **2026-11-21 (ADR-0383 S6, #16590, #16847)** — Customer route declared, off by construction.
   Adds the "Customer channel — route exposure" STRIDE rows (C-*) with the real state of every
