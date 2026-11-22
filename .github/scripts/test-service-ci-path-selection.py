@@ -19,8 +19,14 @@ cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),
  ('recipe-helper',['.github/scripts/service-ci-steps/build-test.sh'],'canary'),
  ('root-security-md',['SECURITY.md'],'empty'),
  ('root-readme',['README.md'],'readers:openbank-docs-truth-agent'),
- ('governance-rules',['openbank-libs/governance/rules.yaml'],'readers:openbank-authz-policy-auditor,openbank-docs-truth-agent,openbank-domestic-payment,openbank-fetch-broker,openbank-flaky-test-hunter,openbank-libs-runtime,openbank-sca-service,openbank-sdd-service'),
+ # authz-policy-auditor dropped: its only governance/ reference is a @TempDir fixture checkout
+ # (PolicyScanAdapterTest mocks repoRoot() to the temp dir); its build copies prompts/ only.
+ ('governance-rules',['openbank-libs/governance/rules.yaml'],'readers:openbank-docs-truth-agent,openbank-domestic-payment,openbank-fetch-broker,openbank-flaky-test-hunter,openbank-libs-runtime,openbank-sca-service,openbank-sdd-service'),
  ('gitops-payments',['openbank-infra/gitops/components/payments/payments-services.yaml'],'readers:openbank-domestic-payment,openbank-mcp-service,openbank-sepa-instant,openbank-settlement-service'),
+ # A real admin-ui reader survives the NIO root-probe narrowing via its string-template read.
+ ('admin-ui-lion-quest',['openbank-admin-ui/public/lion-quest/embankment.json'],'readers:openbank-engagement-service,openbank-release-steward'),
+ ('admin-ui-unrelated',['openbank-admin-ui/src/app/page.tsx'],'readers:openbank-release-steward'),
+ ('opa-policy-unnamed',['openbank-infra/opa/policies/case_collaboration.rego'],'empty'),
  ('gitops-no-reader',['openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml'],'empty'),
  ('detekt-config',['config/detekt/detekt.yml'],'full')]
 # Tool-only config is inert (no Gradle/Dockerfile/JVM-test reader, measured 2026-11-09);
