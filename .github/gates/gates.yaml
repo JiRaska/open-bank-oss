@@ -3783,10 +3783,12 @@ gates:
     # shard 0/4 and merge-train-selftest-shard-{1,2,3} the rest, in other CI shards. Every shard
     # asserts it saw every scenario marker once and ran exactly the ones it owns, and that no
     # scenario leaves fixture state behind; --self-test-shard-plan (their run:) refuses a plan that
-    # drops a scenario from every shard. Budget re-derived from CI once the split has run.
+    # drops a scenario from every shard, or a gates.yaml that misses, doubles or mis-sizes one.
     review_after: "2027-04-18"
-    budget_seconds: 300   # shard 0/4 of the self-test; the whole self-test read 753.9 s on CI (#17083), 1798 s locally under load ~12 vs 440 s for shard 0 under load ~11-20 with three siblings running
-    timeout_seconds: 420
+    # gate-observability-declarations ratchet: >= ceil(measured p95 329.76 s x 1.5) = 495 (n=30,
+    # max 335.89 s, gate-runtime-measurements.json). Kill at the pre-split 750 s, above the budget.
+    budget_seconds: 495
+    timeout_seconds: 750
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 0/4
@@ -3824,8 +3826,8 @@ gates:
     mode: enforced
     rationale: "Shard 1 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
     review_after: "2027-05-22"
-    budget_seconds: 300   # 1/4 of a self-test that read 753.9 s on CI (#17083); re-derive from CI
-    timeout_seconds: 420
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
     min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 1/4
@@ -3855,8 +3857,8 @@ gates:
     mode: enforced
     rationale: "Shard 2 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
     review_after: "2027-05-22"
-    budget_seconds: 300   # 1/4 of a self-test that read 753.9 s on CI (#17083); re-derive from CI
-    timeout_seconds: 420
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
     min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 2/4
@@ -3886,8 +3888,8 @@ gates:
     mode: enforced
     rationale: "Shard 3 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
     review_after: "2027-05-22"
-    budget_seconds: 300   # 1/4 of a self-test that read 753.9 s on CI (#17083); re-derive from CI
-    timeout_seconds: 420
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
     min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 3/4
@@ -3918,7 +3920,7 @@ gates:
     rationale: "A new check or test script that judges a carrier, the ruleset or the merge machinery must stay strict (PRIVILEGED_GATE_CODE); the derivation reads every workflow and script, so it runs on every PR, split out of merge-train-declaration's slow synthetic self-test (#17006)."
     review_after: "2027-05-22"
     budget_seconds: 30   # 2.4 s wall locally, 2026-11-22
-    min_subjects: 7      # 7 real-tree cases today, 2026-11-22
+    min_subjects: 9      # 9 real-tree cases today (key spread + CI receiver moved in, #17083 review), 2026-11-22
     selftest_exempt: "is-a-test-suite - the run: IS merge-train.py's real-tree self-test, which fails when a carrier-judging script is missing from PRIVILEGED_GATE_CODE"
     run: |
       python3 .github/scripts/merge-train.py --real-tree-self-test

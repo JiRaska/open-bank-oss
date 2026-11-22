@@ -9605,11 +9605,6 @@ def retry_planner_self_test(check) -> None:
         calls = exercise("receiver on second page is found", listing=paged, want=receiver_post)
         check("retry planner: jobs fully paginated", any(path.endswith("/jobs") and query.get("page") == ["2"]
                                                        for _, path, query in calls), str(calls))
-        workflow = pathlib.Path(".github/workflows/ci.yml").read_text()
-        check("retry planner: current CI declares the selected receiver and direct gate dependency",
-              "name: Receive trusted ruleset evidence" in workflow
-              and "needs: [agent-admission, ruleset-evidence]" in workflow
-              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
     finally:
         globals()["_http_open"], globals()["_api_sleep"] = saved[:2]
         if saved[2] is None:
@@ -9699,10 +9694,58 @@ def self_test_shard_plan(n: int = SELF_TEST_SHARDS, owner=self_test_shard_owner)
     return problems
 
 
+SHARD_ARG_RE = re.compile(r"--self-test-shard[ =](\S+)")
+
+
+def shard_declaration_errors(gates_text: str, n: int = SELF_TEST_SHARDS) -> list[str]:
+    """gates.yaml must run `--self-test-shard i/n` for exactly i in 0..n-1, each once (fail closed:
+    a missing, duplicated, malformed or other-N shard is an error, and so is finding none)."""
+    errors: list[str] = []
+    seen: list[tuple[int, int]] = []
+    for raw in SHARD_ARG_RE.findall(gates_text):
+        try:
+            seen.append(parse_shard(raw))
+        except argparse.ArgumentTypeError as e:
+            errors.append(f"malformed --self-test-shard {raw!r}: {e}")
+    for i, m in sorted(set(seen)):
+        if m != n:
+            errors.append(f"--self-test-shard {i}/{m}: N must be SELF_TEST_SHARDS={n}")
+        elif seen.count((i, m)) > 1:
+            errors.append(f"--self-test-shard {i}/{m} is declared {seen.count((i, m))} times (must be once)")
+    for i in range(n):
+        if (i, n) not in seen:
+            errors.append(f"--self-test-shard {i}/{n} is declared by no gate: its scenarios never run")
+    return errors
+
+
+def shard_declaration_controls() -> list[str]:
+    """Known positives for shard_declaration_errors on synthetic gates.yaml text (empty = all hold)."""
+    def decl(*shards: str) -> str:
+        return "gates:\n" + "".join(f"  - id: s{k}\n    selftest: |\n      python3 .github/scripts/merge-train.py "
+                                     f"--self-test-shard {v}\n" for k, v in enumerate(shards))
+    bad = []
+    full = [f"{i}/{SELF_TEST_SHARDS}" for i in range(SELF_TEST_SHARDS)]
+    if shard_declaration_errors(decl(*full)):
+        bad.append(f"a complete declaration is refused: {shard_declaration_errors(decl(*full))}")
+    for label, text, needle in [
+        ("missing shard", decl(*full[:-1]), "declared by no gate"),
+        ("duplicated shard", decl(*full, full[0]), "declared 2 times"),
+        ("N mismatch", decl(*full[:-1], f"{SELF_TEST_SHARDS - 1}/{SELF_TEST_SHARDS + 1}"), "N must be"),
+        ("no shard at all", "gates: []\n", "declared by no gate"),
+    ]:
+        if not any(needle in e for e in shard_declaration_errors(text)):
+            bad.append(f"a declaration with a {label} is not refused: {shard_declaration_errors(text)}")
+    return bad
+
+
 def run_self_test_shard_plan() -> int:
-    """Gate merge-train-selftest-shard-*'s run: the shards partition the scenarios, and the check
-    refuses a plan that drops a scenario or leaves a shard empty (its own known positives)."""
+    """Gate merge-train-selftest-shard-*'s run: the shards partition the scenarios, gates.yaml
+    declares each shard exactly once, and the checks refuse a plan that drops a scenario or leaves a
+    shard empty and a declaration that misses, doubles or mis-sizes a shard (their known positives)."""
     problems = self_test_shard_plan()
+    gates_file = pathlib.Path(GATES_YAML)
+    problems += shard_declaration_errors(gates_file.read_text() if gates_file.is_file() else "")
+    problems += shard_declaration_controls()
     dropped = self_test_shard_plan(SELF_TEST_SHARDS, lambda k, n: n if k == 7 else self_test_shard_owner(k, n))
     if not any("scenario 7 is owned by 0" in p for p in dropped):
         problems.append(f"the plan check does not refuse a scenario dropped from every shard: {dropped}")
@@ -9770,8 +9813,6 @@ def branch_updater_self_test(check) -> None:
           len(branch_updater_spread_errors({"merge-train.yml": wf,
                                             "x.yml": "jobs:\n  j:\n    environment: merge-train-branch-update\n"
                                                      "    steps:\n      - run: echo '${{ toJSON(secrets) }}'\n"})) == 1)
-    check("key spread: the real tree is clean", branch_updater_spread_errors(workflow_texts()) == [],
-          str(branch_updater_spread_errors(workflow_texts())))
 
 
 def prefetch_self_test(check) -> None:
@@ -10282,6 +10323,18 @@ def hotfix_lane_self_test(check) -> None:
               not hg.update_merge_ok(live, good, live))
 
 
+# Tests main's workflows/gates.yaml run by name, as the synthetic self-test's stand-in for
+# referenced_tests(HEAD): the synthetic run reads no real tree (#17083 review). real_tree_self_test
+# asserts each is still referenced, so a stale entry fails the every-PR gate, never silently.
+SYN_REFERENCED_TESTS = frozenset({
+    ".github/scripts/test-admin-ui-request-trace.py", ".github/scripts/test-agent-admission.py",
+    ".github/scripts/test-agent-pr-review.py", ".github/scripts/test-merge-authorization-proof.py",
+    ".github/scripts/test-merge-train-carrier-lock.py", ".github/scripts/test-merge-train-main-red-freshness.py",
+    ".github/scripts/test-merge-train-owner-approval.py", ".github/scripts/test-rerun-flake-artifact.py",
+    ".github/scripts/tests/test_codeql_scope_classifier.py",
+})
+
+
 def real_tree_self_test(check) -> None:
     """The self-test cases that read the REAL tree rather than a synthetic origin (#13750, #17006).
 
@@ -10294,8 +10347,10 @@ def real_tree_self_test(check) -> None:
     real_regen = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
     real_refs = referenced_tests(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else {"*"}
     U = Untrainable(real_regen, real_refs)
-    check("referenced tests: derived from the real tree by one git grep (never the fail-closed sentinel)",
-          "*" not in real_refs and len(real_refs) > 20, str(sorted(real_refs))[:200])
+    check("referenced tests: derived from the real tree by one git grep (never the fail-closed sentinel), "
+          "and the synthetic self-test's SYN_REFERENCED_TESTS is still a subset of it",
+          "*" not in real_refs and len(real_refs) > 20 and SYN_REFERENCED_TESTS <= real_refs,
+          f"{sorted(SYN_REFERENCED_TESTS - real_refs)} {sorted(real_refs)[:10]}")
     # Must-fail control for the DERIVED mechanism: a test a workflow or gates.yaml names, that the static
     # PRIVILEGED list does not carry, is strict only because of the derived set — without it, it would ride.
     derived_only = sorted(r for r in real_refs if r not in PRIVILEGED_GATE_CODE and test_code(r))
@@ -10346,6 +10401,14 @@ def real_tree_self_test(check) -> None:
     missing = sorted(m for m in must if gate_code(m) and not U(m))
     check("privileged gate code: every check script the train, its extra gate or a carrier/ruleset verdict depends on stays strict",
           scripts.is_dir() and not missing, str(missing))
+    check("key spread: the real tree is clean", branch_updater_spread_errors(workflow_texts()) == [],
+          str(branch_updater_spread_errors(workflow_texts())))
+    ci_wf = pathlib.Path(".github/workflows/ci.yml")
+    workflow = ci_wf.read_text() if ci_wf.is_file() else ""
+    check("retry planner: current CI declares the selected receiver and direct gate dependency",
+          "name: Receive trusted ruleset evidence" in workflow
+          and "needs: [agent-admission, ruleset-evidence]" in workflow
+          and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
     real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     real_mods = shareable_modules(Git(real_root), "HEAD")
     check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
@@ -10469,7 +10532,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
             check(f"qualifies: {label} refused", not qualifies({**base_pr, **over}, req, checks)[0])
         check("qualifies: no required set refused", not qualifies(base_pr, [], green)[0])
         real_regen = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
-        real_refs = referenced_tests(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else {"*"}
+        real_refs = set(SYN_REFERENCED_TESTS)   # never a HEAD read here; real_tree_self_test proves it <= the real set
         U = Untrainable(real_regen, real_refs)
         check("referenced tests: an unreadable tree fails closed (every test-shaped path strict)",
               Untrainable(real_regen, {"*"})(".github/scripts/test-foo.py") and not Untrainable(real_regen, {"*"})(".github/scripts/check-foo.py"))
