@@ -91,6 +91,10 @@ def glob_grants(pattern: str, value: str) -> bool:
     """
     if pattern == value:
         return True
+    # OPA's glob also honours [..], [!..], {a,b} and backslash escapes, which the translation
+    # below does not model. Fail closed: a pattern using any of them is treated as granting.
+    if re.search(r"[\[\]{}\\]", pattern):
+        return True
     out = []
     i = 0
     while i < len(pattern):
@@ -622,6 +626,10 @@ def self_test() -> int:
         ("glob *.public_web grants, no scope", [agent("a", resource="*.public_web", scope=False)], 1),
         ("glob ** grants, no scope", [agent("a", resource="**", scope=False)], 1),
         ("bare * does not grant (OPA . delimiter)", [agent("a", resource="*", scope=False)], 0),
+        ("glob char class grants, no scope", [agent("a", resource="read.[p]ublic_web", scope=False)], 1),
+        ("glob negated class grants, no scope", [agent("a", resource="read.[!x]ublic_web", scope=False)], 1),
+        ("glob alternation grants, no scope", [agent("a", resource="{read.public_web,x}", scope=False)], 1),
+        ("glob backslash escape grants, no scope", [agent("a", resource="read.\\public_web", scope=False)], 1),
         ("trailing newline host", [agent("a", ["cnb.cz\n"])], 1),
         ("cluster-internal host", [agent("a", ["litellm.ai-platform.svc"])], 1),
         ("cluster.local host", [agent("a", ["x.default.svc.cluster.local"])], 1),
