@@ -139,6 +139,10 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'b30cbdc9d1993063ec72162e98892165a84323e4',
     # merge-train.py of #17115: CI retry planner reruns failed jobs only, since gate shards bind their own attempt's ruleset evidence (#11442), reviewed with #17115.
     '113d12f7961e632c68f188e62b2b9e4290d73b5b',
+    # merge-train.py of #17108's bot-move hold (no deferral carrier of bot-only moves under a running strict reservation; bounded to one reservation and RESERVATION_CEILING_S per review), reviewed with that PR.
+    'c1283f95612aa4d81f5ffe2e88b628963a682849',
+    # merge-train.py of #17115's failed-only retry planner merged with #17108's bot-move hold (#17112), reviewed with #17115.
+    'a2dcce5daa332417152fddf57a13d5764d5f041f',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
