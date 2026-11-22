@@ -53,6 +53,19 @@ REPO_PATH_LITERAL = re.compile(r'"((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+
 SEGMENTED_PATH = re.compile(r'(?:Path\.of|Paths\.get|File)\(\s*((?:"[^"]*"\s*,\s*)+"[^"]*")\s*\)')
 # `File(dir, "openbank-infra").isDirectory` probes for the repo root; it reads nothing.
 EXISTENCE_PROBE = re.compile(r'"[A-Za-z0-9_.-]+"\s*\)\s*\.(?:isDirectory|isFile|exists\(\))')
+# The NIO form of the same probe: `Files.isDirectory(Path.of("openbank-admin-ui"))` locates the
+# repo root and reads nothing. Before this it was a whole-tree read of openbank-admin-ui, so every
+# admin-ui PR built engagement-service, whose real input is the lion-quest JSON (TEMPLATE_PREFIX).
+NIO_EXISTENCE_PROBE = re.compile(
+    r'Files\.(?:isDirectory|exists|isRegularFile|notExists)\(\s*(?:Path\.of|Paths\.get|File)\(\s*"[A-Za-z0-9_.-]+"\s*\)\s*\)')
+# A string TEMPLATE names its directory as a literal prefix: `"openbank-admin-ui/public/lion-quest/$theme.json"`
+# reads every file under that directory. REPO_PATH_LITERAL cannot match across the `$`, so without
+# this the read was visible only through the whole-tree probe above; narrowing one needs the other.
+TEMPLATE_PREFIX = re.compile(r'"((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)/\$')
+# `@TempDir root: Path` binds a JUnit temporary directory; `root.resolve("docs")` there builds a
+# fixture and reads nothing in the repository. Only a name bound EXCLUSIVELY by @TempDir in the file
+# qualifies (TEMPDIR_NAME minus OTHER_BINDING), so a shadowing `val root = repoRoot()` keeps the read.
+TEMPDIR_NAME = re.compile(r'@TempDir\s+(?:(?:lateinit\s+)?(?:val|var)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:')
 # A bare top-level DIRECTORY name is a whole-tree read only as the argument of a filesystem
 # call: `File(root, "openbank-infra").walkTopDown()`. Elsewhere it is an identifier —
 # `consumer = "openbank-admin-ui"` names a Pact party, and treating it as a path made every
@@ -77,6 +90,14 @@ def external_tops(root: Path) -> tuple[set[str], set[str]]:
     return dirs, files
 
 
+def tempdir_only_names(text: str) -> set[str]:
+    """Identifiers bound ONLY as a JUnit @TempDir in this file (never by val/var/another param)."""
+    names = set(TEMPDIR_NAME.findall(text))
+    return {n for n in names
+            if len(re.findall(r'(?:\b(?:val|var)\s+|[(,]\s*(?:@\w+\s+)*)' + re.escape(n) + r'\b\s*[:=]', text))
+            == len(re.findall(r'@TempDir\s+(?:(?:lateinit\s+)?(?:val|var)\s+)?' + re.escape(n) + r'\s*:', text))}
+
+
 def external_paths(text: str, module: str, tops: set[str], root_files: set[str], root: Path,
                    module_cache: dict[str, bool] | None = None, root_literal: re.Pattern[str] | None = None) -> set[str]:
     """Repository paths a source file references by literal, excluding its own module."""
@@ -91,8 +112,12 @@ def external_paths(text: str, module: str, tops: set[str], root_files: set[str],
         literals.append("/".join(seg.strip().strip('"') for seg in m.group(1).split(",")))
     rest = SEGMENTED_PATH.sub(" ", text)
     rest = EXISTENCE_PROBE.sub(" ", rest)
+    rest = NIO_EXISTENCE_PROBE.sub(" ", rest)
+    for name in tempdir_only_names(text):
+        rest = re.sub(r'\b' + re.escape(name) + r'\s*\.\s*resolve\(\s*"[^"]*"\s*\)', " ", rest)
     tree_reads = set(TREE_READ.findall(rest))
     literals += REPO_PATH_LITERAL.findall(rest)
+    literals += TEMPLATE_PREFIX.findall(rest)
     for lit in literals:
         if "/" not in lit and lit not in root_files and lit not in tops:
             continue
@@ -204,6 +229,20 @@ def self_test() -> int:
         write("openbank-segmenter", "g/SegTest.kt",
               'val y = Path.of("..", "openbank-infra", "gitops", "seg.yaml"); '
               'val marker = generateSequence(File("")) { it.parentFile }.first { File(it, "openbank-infra").isDirectory }')
+        # NIO root probe + string template: the probe reads nothing, the template reads its directory.
+        (r / "openbank-admin-ui" / "public" / "quest").mkdir(parents=True)
+        (r / "toolbox").mkdir()
+        write("openbank-nio-prober", "i/QuestTest.kt",
+              'val root = if (Files.isDirectory(Path.of("openbank-admin-ui"))) Path.of("") else Path.of(".."); '
+              'fun load(t: String) = Files.readString(root.resolve("openbank-admin-ui/public/quest/$t.json"))')
+        write("openbank-nio-treereader", "j/TreeTest.kt",
+              'val all = Files.walk(Path.of("openbank-admin-ui")).count()')  # a real whole-tree read
+        # @TempDir fixtures write a fake checkout; a name that is ALSO bound otherwise keeps the read.
+        write("openbank-tempdir-fixture", "k/FixtureTest.kt",
+              'fun scan(@TempDir tempDir: Path) { tempDir.resolve("toolbox").createDirectories() }')
+        write("openbank-tempdir-shadow", "l/ShadowTest.kt",
+              'fun a(@TempDir root: Path) { root.resolve("toolbox") }; '
+              'fun b() { val root = repoRoot(); root.resolve("toolbox").toFile().walkTopDown() }')
         (r / "openbank-copier").mkdir()
         (r / "openbank-copier" / "build.gradle.kts").write_text('from(rootProject.file("docs/prompts/x")) {}')
         (r / "openbank-resource-copier").mkdir()
@@ -241,6 +280,23 @@ def self_test() -> int:
             ok = False
         if "openbank-namer" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
             print("FAIL: a bare directory name used as an identifier was read as a whole-tree read")
+            ok = False
+        quest = direct_readers(direct, ["openbank-admin-ui/public/quest/bridge.json"])
+        if "openbank-nio-prober" not in quest:
+            print("FAIL: a string-template read of a directory was dropped (must select its reader)")
+            ok = False
+        if direct_readers(direct, ["openbank-admin-ui/package.json"]) & {"openbank-nio-prober"}:
+            print("FAIL: Files.isDirectory(Path.of(..)) root probe was read as a whole-tree read")
+            ok = False
+        if "openbank-nio-treereader" not in direct_readers(direct, ["openbank-admin-ui/package.json"]):
+            print("FAIL: a real Files.walk(Path.of(..)) whole-tree read was dropped")
+            ok = False
+        infra = direct_readers(direct, ["toolbox/run.sh"])
+        if "openbank-tempdir-fixture" in infra:
+            print("FAIL: a @TempDir fixture resolve was read as a repository read")
+            ok = False
+        if "openbank-tempdir-shadow" not in infra:
+            print("FAIL: a name bound both as @TempDir and as a real root lost its repository read")
             ok = False
         if direct_readers(direct, ["README.md"]) != {"openbank-walker"}:
             print("FAIL: root-file reader was not discovered")
