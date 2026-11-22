@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.2...transaction-service-v2.2.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* **transaction:** roll transactions partitions forward before 2027 ([#17103](https://github.com/JiRaska/open-bank-oss/issues/17103)) ([594756a](https://github.com/JiRaska/open-bank-oss/commit/594756a98ad52b51eab11aea448e56f29996fbf8))
+
 ## [2.2.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.1...transaction-service-v2.2.2) (2026-11-17)
 
 

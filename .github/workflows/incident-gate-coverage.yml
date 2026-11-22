@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   report:
+    if: github.event_name != 'schedule' || (vars.INCIDENT_GATE_COVERAGE_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: incident-gate-coverage
     runs-on: ubuntu-latest
     timeout-minutes: 5

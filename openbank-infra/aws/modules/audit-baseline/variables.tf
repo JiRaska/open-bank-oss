@@ -70,3 +70,9 @@ variable "config_recording_frequency" {
     error_message = "config_recording_frequency must be CONTINUOUS or DAILY."
   }
 }
+
+variable "runtime_monitoring_enabled" {
+  description = "Whether GuardDuty EKS Runtime Monitoring and its managed agent add-on are enabled. Billed per monitored vCPU and overlaps Falco, so it is off by default. Turning it off stops the billing but does NOT delete an already-installed aws-guardduty-agent add-on: remove it once with `aws eks delete-addon --cluster-name <cluster> --addon-name aws-guardduty-agent`."
+  type        = bool
+  default     = false
+}

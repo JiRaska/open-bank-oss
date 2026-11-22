@@ -72,6 +72,11 @@ Exact latency SLO numbers are TBD until measured in the sandbox; the saga's down
 ### Flyway checksum mismatch on startup
 - Never rewrite an applied migration. If a checksum mismatch blocks startup, set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in the gitops env, let the DB settle, then remove it.
 
+### `transactions` partition horizon (#17101)
+- `transactions` is RANGE-partitioned by `booking_date` per year. V25 pre-creates 2027/2028; `TransactionPartitionMaintainer` (`suspend` `@Scheduled`, `every: 24h`, cluster-locked) keeps current year + `openbank.transaction.partition.future-years` (default 2) created. Retention is audited only, never executed.
+- Every action is recorded in append-only `partition_lifecycle_audit`. A `DEFAULT_NONEMPTY` row means bookings landed in `transactions_default`: the matching year partition can then no longer be created until those rows are moved out in a maintenance window. V25 fails the migration with an explicit message in that state instead of moving data.
+- A dead maintainer shows as `WorkflowLivenessStale` on `openbank_workflow_*{workflow="transaction-partition-maintenance"}`.
+
 ### FX rate unavailable
 - Cross-currency initiate fails with `FxRateUnavailableException` when fx-service has no quote. Confirm `FX_SERVICE_URL` and fx-service health; same-currency settlements are unaffected (no FX leg).
 

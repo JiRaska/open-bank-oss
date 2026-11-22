@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.0...delegation-service-v0.27.1) (2026-11-22)
+
+
+### Security
+
+* **delegation:** proposal store for customer MCP payment proposals (ADR-0383 D6) ([#16853](https://github.com/JiRaska/open-bank-oss/issues/16853)) ([ed2f5ef](https://github.com/JiRaska/open-bank-oss/commit/ed2f5ef690b21f060930061412502526d6c9be36))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.26.0...delegation-service-v0.27.0) (2026-11-21)
 
 

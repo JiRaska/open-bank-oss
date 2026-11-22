@@ -42,3 +42,11 @@
 # REMOVE THIS LINE once auto-deploy has built and pushed the service — at that point the pin
 # moves to the built tag and this entry would suppress nothing, which the gate's
 # --check-placeholders direction fails on.
+
+# 2026-11-18, ADR-0387 slice 3 (#16794). openbank-fetch-broker is a brand-new service: its
+# gitops manifest has to pin a tag before any image can exist, and no image can exist until
+# slice 2 (#16790) merges and auto-deploy builds one. The IMAGE is absent from ECR, which is
+# the exact class this file is for.
+#
+# REMOVE THIS LINE once auto-deploy has built and pushed the service.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fetch-broker:sandbox-4d9ef15b

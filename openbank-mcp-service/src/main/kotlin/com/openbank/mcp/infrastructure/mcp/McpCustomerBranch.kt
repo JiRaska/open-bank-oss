@@ -44,6 +44,8 @@ internal class McpCustomerBranch(
     private val auditor: McpCallAuditor,
     private val metrics: McpMetricsPort,
     private val limiter: McpRateLimiter,
+    /** The shared (Valkey) D5.3 budgets when configured; null = the in-process [limiter]. */
+    private val shared: CustomerChannelAdmission.Throttles? = null,
     /** The subject-less window key for this request ([ClientAddressResolver]). */
     private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
 ) {
@@ -71,26 +73,55 @@ internal class McpCustomerBranch(
         }
     }
 
-    /** ADR-0383 D5.3 budgets on the shared limiter; which run before the DPoP check is decided in admission. */
-    private val throttles = object : CustomerChannelAdmission.Throttles {
-        override fun proofKey(thumbprint: String) =
-            refusal(limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
-
-        override fun client(clientId: String) =
-            refusal(limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
-
-        override fun subject(subject: String, clientId: String) =
-            refusal(limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
+    /** #16847: on the customer root a staff (or any non-customers-realm) token is refused, never dispatched. */
+    fun refuseNonCustomerToken(): Response {
+        log.info("customer root refused a token that is not a customers-realm token")
+        return Response.status(Response.Status.UNAUTHORIZED)
+            .header(WWW_AUTHENTICATE, admission.missingTokenChallenge())
+            .build()
     }
 
-    private fun refusal(outcome: McpRateLimiter.Outcome): String? =
-        outcome.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let {
-            metrics.requestThrottled(
-                McpMetricsPort.ThrottleSurface.TOOLS_CALL,
-                McpMetricsPort.ThrottleCaller.AUTHENTICATED,
-            )
-            it.reason ?: "rate limit exceeded"
-        }
+    /**
+     * ADR-0383 D5.3 budgets — the shared Valkey windows when configured, else the in-process
+     * limiter; which run before the DPoP check is decided in admission. Every refusal is metered.
+     */
+    private val throttles = object : CustomerChannelAdmission.Throttles {
+        // With a shared store configured the local limiter is never consulted, not even as a fallback:
+        // a shared-store failure throws (503), it does not degrade to per-pod budgets.
+        override suspend fun proofKey(thumbprint: String) = metered(
+            if (shared != null) {
+                shared.proofKey(thumbprint)
+            } else {
+                reason(limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
+            },
+        )
+
+        override suspend fun client(clientId: String) = metered(
+            if (shared != null) {
+                shared.client(clientId)
+            } else {
+                reason(limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
+            },
+        )
+
+        override suspend fun subject(subject: String, clientId: String) = metered(
+            if (shared != null) {
+                shared.subject(subject, clientId)
+            } else {
+                reason(limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
+            },
+        )
+    }
+
+    private fun reason(outcome: McpRateLimiter.Outcome): String? =
+        outcome.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let { it.reason ?: "rate limit exceeded" }
+
+    private fun metered(reason: String?): String? = reason?.also {
+        metrics.requestThrottled(
+            McpMetricsPort.ThrottleSurface.TOOLS_CALL,
+            McpMetricsPort.ThrottleCaller.AUTHENTICATED,
+        )
+    }
 
     /**
      * A refusal writes at most ONE audit row per subject per minute (the same window the staff path

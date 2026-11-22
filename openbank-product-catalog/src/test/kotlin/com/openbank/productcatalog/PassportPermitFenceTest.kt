@@ -605,6 +605,7 @@ class PassportPermitFenceTest {
         val bank: UUID = UUID.randomUUID(),
         val establishment: UUID = UUID.randomUUID(),
         val country: String = "SK",
+        val mode: String = "FOS",
         val maker: UUID = UUID.randomUUID(),
     )
 
