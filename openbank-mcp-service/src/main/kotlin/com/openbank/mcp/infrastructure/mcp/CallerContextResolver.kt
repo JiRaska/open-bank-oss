@@ -56,9 +56,6 @@ class CallerContextResolver @Inject constructor(
     /** The validated token, for the customer-channel branch (which reads `iss`, `azp`, `cnf`). */
     val token: JsonWebToken get() = jwt
 
-    /** True when the presented token was issued by the customers realm (ADR-0383 D1). */
-    fun presentsCustomerRealmToken(): Boolean = isCustomerRealmToken()
-
     private fun isCustomerRealmToken(): Boolean {
         val iss = jwt.issuer ?: return false
         return customerIssuer.map { it.isNotBlank() && it == iss }.orElse(false)

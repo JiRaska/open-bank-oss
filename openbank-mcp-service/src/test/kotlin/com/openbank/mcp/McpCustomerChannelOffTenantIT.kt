@@ -93,7 +93,10 @@ class McpCustomerChannelOffTenantIT {
         // Measured: the staff tenant only reads `Bearer`, so this request reaches McpEndpoint with NO
         // identity. Without the endpoint's staff-root refusal it was answered 200 on the anonymous path.
         call(token, scheme = "DPoP").statusCode(401)
-            .header("WWW-Authenticate", org.hamcrest.Matchers.containsString("customer credentials are accepted only at"))
+            .header(
+                "WWW-Authenticate",
+                org.hamcrest.Matchers.containsString("customer credentials are accepted only at"),
+            )
     }
 
     @Test
