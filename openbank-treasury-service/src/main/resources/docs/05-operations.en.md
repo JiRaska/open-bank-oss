@@ -236,3 +236,16 @@ before it expires; without a reload period the process would keep presenting the
 the peer rejects it, while every expiry signal measured the renewed Secret and read healthy.
 After a renewal the new certificate is in use within an hour, with no restart. The
 `tls-certificate-reload` gate keeps every such configuration covered.
+
+## TreasuryFundingExceeded
+
+A contra (nostro / settlement) account ended two consecutive funding-monitor passes below zero
+(#12115). Booking already refuses a placement the account cannot fund, so a negative balance means
+an outflow bypassed that check (a payment rail, a manual ledger journal, or a settlement after the
+balance moved).
+
+1. Read the account's journals for the day on the ledger (`GET /api/v1/journals`) and identify the
+   unfunded outflow.
+2. Either book the covering borrowing through the normal deal lifecycle, or reverse the offending
+   deal. Do this before the next settlement.
+3. A monitor that stopped running is a separate alert (workflow liveness, ADR-0237), not this one.
