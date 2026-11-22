@@ -3600,20 +3600,12 @@ class GitHub:
                                    for j in jobs):
                     return False
                 receiver_name = "Receive trusted ruleset evidence"
-                receivers = [j for j in jobs if j["name"] == receiver_name]
-                if len(receivers) > 1:
+                if sum(j["name"] == receiver_name for j in jobs) > 1:
                     return False
-                failed = [j for j in jobs if j["conclusion"] not in {"success", "skipped", "neutral"}]
-                descendants_only = all(j["name"] in {receiver_name, GATE_AGGREGATE_JOB}
-                                       or GATE_SHARD_JOB_RE.fullmatch(j["name"]) for j in failed)
-                if receivers and receivers[0]["run_attempt"] == attempt and descendants_only:
-                    # GitHub reruns this job AND its dependents in one attempt. Never retry a gate
-                    # first and then the receiver: that creates yet another attempt boundary.
-                    retry = f"/repos/{self.repo}/actions/jobs/{receivers[0]['id']}/rerun"
-                else:
-                    # Full CI is necessary when the receiver is inherited or another failed job
-                    # is outside its dependency closure. The separate Services CI is untouched.
-                    retry = path + "/rerun"
+                # #11442: no gate shard consumes the receiver JOB's output any more; the one
+                # consuming shard receives evidence bound to its OWN attempt. So an inherited
+                # receiver authorizes nothing and failed-only (the default above) is exact: one
+                # attempt reruns every failed job, the receiver included when it failed.
             plans.append(retry)
         # Finish every read before the first mutation. api() never retries an uncertain POST;
         # no failed-only/full-run fallback is permitted after a refused receiver request either.
@@ -9512,8 +9504,7 @@ def retry_planner_self_test(check) -> None:
     jobs = [job(500, "Receive trusted ruleset evidence"), job(501, "gates (data)", "failure"),
             job(502, "Validate manifests", "failure"), job(503, "UI build", attempt=1)]
     saved = (_http_open, _api_sleep, os.environ.get("GH_TOKEN"), _api_slept[0], dict(_GET_MEMO))
-    receiver_post, full_post, failed_post = (f"{prefix}/jobs/500/rerun", f"{prefix}/runs/123/rerun",
-                                            f"{prefix}/runs/123/rerun-failed-jobs")
+    failed_post = f"{prefix}/runs/123/rerun-failed-jobs"
 
     def exercise(label, *, metadata=None, listing=None, check_runs=None, want=None,
                  read_error=None, post_error=None, extra_run=False):
@@ -9572,18 +9563,19 @@ def retry_planner_self_test(check) -> None:
         return calls
 
     try:
-        exercise("current receiver refreshes its descendants once", want=receiver_post)
+        # #11442: shards bind their own attempt's evidence, so CI retries failed-only in every shape.
+        exercise("failed shard with a current receiver retries failed-only once", want=failed_post)
         inherited = copy.deepcopy(jobs)
         inherited[0]["run_attempt"] = 1
-        exercise("old successful receiver requires one full CI run", listing=inherited, want=full_post)
-        exercise("absent current receiver requires one full CI run", listing=jobs[1:], want=full_post)
+        exercise("inherited receiver no longer forces full CI", listing=inherited, want=failed_post)
+        exercise("absent receiver retries failed-only", listing=jobs[1:], want=failed_post)
         outside = copy.deepcopy(jobs)
         outside[-1].update(conclusion="cancelled", run_attempt=2)
-        exercise("cancelled job outside receiver descendants requires full CI", listing=outside, want=full_post)
+        exercise("cancelled job outside the gates retries failed-only", listing=outside, want=failed_post)
         exercise("unrelated workflow keeps failed-only", metadata={**run, "path": ".github/workflows/security.yml"},
                  want=failed_post)
         exercise("workflow ref suffix still identifies actual CI", metadata={**run, "path": run["path"] + "@refs/pull/1/merge"},
-                 want=receiver_post)
+                 want=failed_post)
         for label, metadata in [("missing metadata", {}), ("wrong source", {**run, "head_sha": "b" * 40}),
                                 ("nonterminal run", {**run, "status": "in_progress"}),
                                 ("invalid attempt", {**run, "run_attempt": 0}),
@@ -9600,9 +9592,10 @@ def retry_planner_self_test(check) -> None:
         exercise("attempt advanced during read", listing=future)
         exercise("unreadable later run causes no earlier write", extra_run=True)
         for code in (403, 500):
-            exercise(f"receiver POST {code} never falls back to another write", want=receiver_post, post_error=code)
+            exercise(f"failed-only POST {code} never falls back to another write", want=failed_post, post_error=code)
         paged = [job(1000 + n, f"green-{n}") for n in range(100)] + jobs
-        calls = exercise("receiver on second page is found", listing=paged, want=receiver_post)
+        calls = exercise("receiver on second page is still read", listing=paged, want=failed_post)
+        exercise("ambiguous receiver across pages", listing=paged + [job(601, "Receive trusted ruleset evidence")])
         check("retry planner: jobs fully paginated", any(path.endswith("/jobs") and query.get("page") == ["2"]
                                                        for _, path, query in calls), str(calls))
     finally:
@@ -10405,9 +10398,12 @@ def real_tree_self_test(check) -> None:
           str(branch_updater_spread_errors(workflow_texts())))
     ci_wf = pathlib.Path(".github/workflows/ci.yml")
     workflow = ci_wf.read_text() if ci_wf.is_file() else ""
-    check("retry planner: current CI declares the selected receiver and direct gate dependency",
+    # failed-only is exact only while no shard consumes the receiver JOB (#11442): a shard that
+    # needs it again would inherit an old attempt's snapshot on a failed-only rerun.
+    check("retry planner: current CI declares the receiver, and gate shards bind their own evidence",
           "name: Receive trusted ruleset evidence" in workflow
-          and "needs: [agent-admission, ruleset-evidence]" in workflow
+          and "needs.ruleset-evidence.outputs" not in workflow
+          and "RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot }}" in workflow
           and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
     real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     real_mods = shareable_modules(Git(real_root), "HEAD")
