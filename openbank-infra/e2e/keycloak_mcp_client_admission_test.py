@@ -59,6 +59,7 @@ COUNTER = itertools.count(int(time.time()))
 YOUNG_USER, YOUNG_PARTY = "mcp-it-young@example.test", "22222222-2222-4222-8222-222222222222"
 YOUNG_USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11d"
 RESOURCE = "https://api.open-bank.tech/mcp"
+WEAK_L = "it-mcp-tier-l-weakened"
 # The withheld-code session lifespan configured for THIS disposable server. The extension caps it
 # at 300 s (ADR-0385 D3.6, unit-tested in ExtensionTests); a short value lets the expiry case run
 # in seconds rather than five minutes.
@@ -308,6 +309,17 @@ class McpClientAdmission(unittest.TestCase):
             assert "openbank.mcp.tier" in clients[cid]["attributes"], f"{cid} is not a derived MCP client"
             clients[cid]["enabled"] = True
         clients[H]["redirectUris"].append(H_CB)
+        # test-only: a Tier L client whose own attributes were WEAKENED (as an admin-console edit
+        # would): PKCE attribute gone, direct/implicit grants on, DPoP binding off. Only the
+        # tier-scoped built-in client policies (openbank-mcp-oauth-hardening, -tier-l-dpop) still
+        # stand between it and those grants, so these tests fail if the policies do nothing.
+        weak = json.loads(json.dumps(clients[L]))
+        weak.pop("id", None)
+        weak["clientId"], weak["directAccessGrantsEnabled"], weak["implicitFlowEnabled"] = WEAK_L, True, True
+        weak["attributes"].pop("pkce.code.challenge.method", None)
+        weak["attributes"]["dpop.bound.access.tokens"] = "false"
+        weak["attributes"]["require.pushed.authorization.requests"] = "false"
+        realm["clients"].append(weak)
         clients[H]["attributes"]["jwks.string"] = json.dumps({"keys": [{**cls.hkey.jwk(), "alg": "ES256", "use": "sig", "kid": "it-1"}]})
         realm["clients"].append({"clientId": "local-cookie-seeder", "publicClient": True, "enabled": True,
                                  "standardFlowEnabled": True, "directAccessGrantsEnabled": False,
@@ -525,6 +537,34 @@ class McpClientAdmission(unittest.TestCase):
                 with self.subTest(client=client, pkce=name):
                     resp, _ = self.par(client, redirect, **kwargs)
                     self.assertEqual(resp.status, 400, resp.text[:200])
+
+    def test_builtin_policies_hold_when_client_attributes_are_weakened(self):
+        # Review of #16672 (6): pkce-enforcer / reject-ropc-grant / reject-implicit-grant /
+        # dpop-bind-enforcer, scoped by openbank.mcp.tier, on a client whose own switches are off.
+        # pkce-enforcer acts on AUTHORIZATION_REQUEST (not PUSHED_AUTHORIZATION_REQUEST, Keycloak
+        # 26.8.1), so a PKCE-less PAR is accepted and the authorize that redeems it is refused.
+        resp, _ = self.par(WEAK_L, L_CB, pkce=False)
+        if resp.status == 201:
+            resp = self.authorize(Browser(self.origin), WEAK_L, resp.json()["request_uri"])
+            self.assertEqual(resp.query().get("error"), ["invalid_request"],
+                             f"pkce-enforcer: authorize without PKCE must be refused: {resp.status} {resp.location[:160]}")
+            self.assertFalse(self.is_passkey_challenge(resp))
+        else:
+            self.assertEqual(resp.status, 400, resp.text[:200])
+        resp = self.post(self.token_url, {"grant_type": "password", "client_id": WEAK_L, "username": USER,
+                                          "password": self.password, "scope": "openid"})
+        self.assertEqual(resp.status, 400, f"reject-ropc-grant: {resp.text[:200]}")
+        self.assertNotIn("access_token", resp.text)
+        resp = Browser(self.origin).request("GET", self.auth_url + "?" + urllib.parse.urlencode({
+            "client_id": WEAK_L, "response_type": "token", "redirect_uri": L_CB, "scope": "openid",
+            "nonce": "n", "state": "s"}))
+        self.assertNotIn("access_token", resp.location + resp.text, "reject-implicit-grant")
+        self.assertTrue("error=" in resp.location or resp.status >= 400, f"implicit must be refused: {resp.status}")
+        query, verifier = self.code_for(WEAK_L, L_CB)
+        resp = self.post(self.token_url, {"grant_type": "authorization_code", "client_id": WEAK_L,
+                                          "code": query["code"][0], "redirect_uri": L_CB, "code_verifier": verifier})
+        self.assertEqual(resp.status, 400, f"dpop-bind-enforcer: token without a DPoP proof: {resp.text[:200]}")
+        self.assertNotIn("access_token", resp.text)
 
     def test_redirects_exact_and_loopback_only(self):
         for redirect in ("http://127.0.0.1:53682/callback", "http://127.0.0.1:61001/callback", "http://[::1]:53682/callback"):
@@ -852,8 +892,8 @@ class McpClientAdmission(unittest.TestCase):
                          f"party_id must be unchanged after a user attempt (account API answered {status})")
 
     def test_edge_service_account_can_still_write_party_id(self):
-        # Review of #16672: customer-edge's KeycloakAdminClient.setPartyIdAttribute PUTs exactly
-        # {"attributes":{"party_id":[...]}} as a service account with manage-users. The admin-only
+        # Review of #16672: customer-edge's KeycloakAdminClient.setPartyIdAttribute PUTs the user's
+        # profile fields with party_id merged, as a service account with manage-users. The admin-only
         # profile (edit: ["admin"]) must keep admitting that write.
         sa = self.post(self.token_url, {"grant_type": "client_credentials", "client_id": "it-edge-admin",
                                          "client_secret": self.edge_admin_secret}).json()["access_token"]
@@ -867,19 +907,30 @@ class McpClientAdmission(unittest.TestCase):
         # back. A bare {"attributes": {...}} body is refused by Keycloak 26 with or without this
         # profile (email "required"), measured on 26.8.1 — which is why the edge no longer sends it.
         user = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=auth), timeout=30).read())
-        user.setdefault("attributes", {})["party_id"] = [new_party]
-        req = urllib.request.Request(url, data=json.dumps(user).encode(), method="PUT",
-                                     headers={**auth, "Content-Type": "application/json"})
+
+        def put(body):
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), method="PUT",
+                                         headers={**auth, "Content-Type": "application/json"})
+            try:
+                return urllib.request.urlopen(req, timeout=30).status, ""
+            except urllib.error.HTTPError as error:
+                return error.code, error.read().decode(errors="replace")[:300]
+
+        # A concurrent admin disable lands between the edge's GET and its PUT.
+        self.assertEqual(put({**user, "enabled": False})[0], 204)
         try:
-            status = urllib.request.urlopen(req, timeout=30).status
-            detail = ""
-        except urllib.error.HTTPError as error:
-            status, detail = error.code, error.read().decode(errors="replace")[:300]
-        self.assertEqual(status, 204, f"the edge-shaped admin write must succeed: {detail}")
-        after = json.loads(urllib.request.urlopen(urllib.request.Request(
-            f"{self.origin}/admin/realms/openbank-customers/users/{users[0]['id']}", headers=auth), timeout=30).read())
-        self.assertEqual(after["attributes"]["party_id"], [new_party])
-        self.assertEqual(after["username"], YOUNG_USER, "the partial PUT must not wipe the user's identity")
+            # The edge's body (KeycloakAdminClient.withPartyId): the profile fields of the STALE
+            # read, party_id merged, and no account state.
+            body = {k: user[k] for k in ("username", "email", "firstName", "lastName") if k in user}
+            body["attributes"] = {**(user.get("attributes") or {}), "party_id": [new_party]}
+            status, detail = put(body)
+            self.assertEqual(status, 204, f"the edge-shaped admin write must succeed: {detail}")
+            after = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=auth), timeout=30).read())
+            self.assertEqual(after["attributes"]["party_id"], [new_party])
+            self.assertEqual(after["username"], YOUNG_USER, "the partial PUT must not wipe the user's identity")
+            self.assertFalse(after["enabled"], "the party_id write must not re-enable a concurrently disabled user")
+        finally:
+            put({**user, "enabled": True, "attributes": {**(user.get("attributes") or {}), "party_id": [new_party]}})
 
     def test_young_passkey_refused(self):
         browser = Browser(self.origin)

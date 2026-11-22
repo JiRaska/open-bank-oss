@@ -17,7 +17,10 @@ writes, into customers-realm-template.json:
   * the `openbank-mcp` client profile + policy binding the `openbank-mcp-client-guard` executor
     to every client (`any-client`; the executor acts only on `openbank.mcp.tier` clients): no
     token exchange for or of an MCP client (#16667), the bound RFC 8707 resource at PAR, and the
-    PAR-held request facts the authenticator recomputes the connect context from.
+    PAR-held request facts the authenticator recomputes the connect context from;
+  * the `openbank-mcp-oauth-hardening` (pkce-enforcer, reject-implicit-grant, reject-ropc-grant)
+    and `openbank-mcp-dpop` (dpop-bind-enforcer) Keycloak built-in profiles, bound by the
+    `openbank-mcp-tier-h` / `openbank-mcp-tier-l` policies on the `openbank.mcp.tier` attribute.
 
 Both providers ship in the bank's Keycloak image (openbank-infra/docker/keycloak/extension).
 
@@ -50,6 +53,26 @@ RESOURCE_ATTR = "openbank.mcp.resource"
 WITHHELD_CODE_AUTHENTICATOR = "openbank-mcp-withheld-code"
 GUARD_EXECUTOR = "openbank-mcp-client-guard"
 POLICY_NAME = "openbank-mcp"
+# Review of #16672 (6): Keycloak's BUILT-IN executors, as a second layer under the per-client
+# attributes (pkce.code.challenge.method, implicitFlowEnabled, directAccessGrantsEnabled,
+# dpop.bound.access.tokens). A client edited in the admin console loses its attribute silently;
+# it cannot lose a client policy without a realm-level change. Scoped by the client's own tier
+# attribute (never any-client: reject-ropc-grant on every customers-realm client is not this
+# PR's decision to make).
+HARDENING_PROFILE = "openbank-mcp-oauth-hardening"
+HARDENING_POLICY_PREFIX = "openbank-mcp-tier-"
+HARDENING_EXECUTORS = [
+    {"executor": "pkce-enforcer", "configuration": {"auto-configure": "false"}},
+    {"executor": "reject-implicit-grant", "configuration": {"auto-configure": "false"}},
+    {"executor": "reject-ropc-grant", "configuration": {}},
+]
+# Only Tier L is DPoP-bound (Tier H is private_key_jwt-confidential, dpop.bound=false), so the
+# DPoP enforcer is its own profile, bound for Tier L alone.
+DPOP_PROFILE = "openbank-mcp-dpop"
+DPOP_EXECUTORS = [
+    {"executor": "dpop-bind-enforcer",
+     "configuration": {"auto-configure": "false", "enforce-authorization-code-binding-to-dpop": "false"}},
+]
 
 ACCESS_TOKEN_LIFESPAN_S = 300  # ADR-0385 D1: access tokens live at most 5 minutes
 
@@ -199,6 +222,40 @@ def build_profile() -> dict:
     }
 
 
+def _tier_condition(tier: str) -> dict:
+    # ONE key/value per condition: Keycloak 26.8.1's client-attributes condition deserialises the
+    # list into a Map and refuses (matches nothing, logs "More values ... cannot match any client")
+    # when one key carries two values, so "tier H or L" is two policies, not one OR condition.
+    return {
+        "condition": "client-attributes",
+        "configuration": {
+            "is_negative_logic": False,
+            "attributes": json.dumps([{"key": TIER_ATTR, "value": tier}]),
+        },
+    }
+
+
+def build_hardening() -> tuple[list[dict], list[dict]]:
+    """(profiles, policies) for the built-in executors, in the order they are written."""
+    profiles = [
+        {"name": HARDENING_PROFILE, "description": "Review of #16672: PKCE, no implicit, no ROPC for every MCP "
+         "client. DERIVED from mcp-client-allowlist.yaml.", "executors": copy.deepcopy(HARDENING_EXECUTORS)},
+        {"name": DPOP_PROFILE, "description": "Review of #16672: DPoP-bound tokens (Tier L). DERIVED from "
+         "mcp-client-allowlist.yaml.", "executors": copy.deepcopy(DPOP_EXECUTORS)},
+    ]
+    policies = []
+    for tier, names in (("H", [HARDENING_PROFILE]), ("L", [HARDENING_PROFILE, DPOP_PROFILE])):
+        policies.append({
+            "name": f"{HARDENING_POLICY_PREFIX}{tier.lower()}",
+            "description": f"Review of #16672: Keycloak built-in hardening for Tier {tier} MCP clients. "
+                           f"DERIVED from mcp-client-allowlist.yaml.",
+            "enabled": True,
+            "conditions": [_tier_condition(tier)],
+            "profiles": names,
+        })
+    return profiles, policies
+
+
 def build_policy() -> dict:
     # any-client, not a client-id list: the executor decides by the client's own tier attribute,
     # so a newly declared client is covered without touching the policy, and the grant-type
@@ -220,6 +277,14 @@ def jwks_sha256(base: Path, rel: str) -> str:
     return hashlib.sha256((base / rel).read_bytes()).hexdigest()
 
 
+class OwnedPrefix:
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and (name == self.prefix or name.startswith(self.prefix + "-"))
+
+
 def render(template: dict, decl: dict, base: Path) -> dict:
     out = copy.deepcopy(template)
     wanted = [build_client(decl, c, base) for c in decl["clients"]]
@@ -237,11 +302,17 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     alias = decl["flow"]["alias"]
     flows = [f for f in out.get("authenticationFlows", []) if f.get("alias") != alias]
     out["authenticationFlows"] = flows + [build_flow(decl)]
+    # The guard stays LAST in both lists (the parity self-test mutates `[-1]`).
+    hardening_profiles, hardening_policies = build_hardening()
+    # Every client profile/policy named `openbank-mcp*` is owned here, so a renamed one cannot linger.
+    owned_profiles = owned_policies = OwnedPrefix(POLICY_NAME)
     profiles = out.get("clientProfiles") or {}
-    profiles["profiles"] = [p for p in profiles.get("profiles") or [] if p.get("name") != POLICY_NAME] + [build_profile()]
+    profiles["profiles"] = [p for p in profiles.get("profiles") or [] if p.get("name") not in owned_profiles] + [
+        *hardening_profiles, build_profile()]
     out["clientProfiles"] = profiles
     policies = out.get("clientPolicies") or {}
-    policies["policies"] = [p for p in policies.get("policies") or [] if p.get("name") != POLICY_NAME] + [build_policy()]
+    policies["policies"] = [p for p in policies.get("policies") or [] if p.get("name") not in owned_policies] + [
+        *hardening_policies, build_policy()]
     out["clientPolicies"] = policies
     return out
 

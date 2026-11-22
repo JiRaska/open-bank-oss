@@ -822,6 +822,41 @@
   "clientProfiles": {
     "profiles": [
       {
+        "name": "openbank-mcp-oauth-hardening",
+        "description": "Review of #16672: PKCE, no implicit, no ROPC for every MCP client. DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [
+          {
+            "executor": "pkce-enforcer",
+            "configuration": {
+              "auto-configure": "false"
+            }
+          },
+          {
+            "executor": "reject-implicit-grant",
+            "configuration": {
+              "auto-configure": "false"
+            }
+          },
+          {
+            "executor": "reject-ropc-grant",
+            "configuration": {}
+          }
+        ]
+      },
+      {
+        "name": "openbank-mcp-dpop",
+        "description": "Review of #16672: DPoP-bound tokens (Tier L). DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [
+          {
+            "executor": "dpop-bind-enforcer",
+            "configuration": {
+              "auto-configure": "false",
+              "enforce-authorization-code-binding-to-dpop": "false"
+            }
+          }
+        ]
+      },
+      {
         "name": "openbank-mcp",
         "description": "ADR-0385 / #16667: MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
         "executors": [
@@ -835,6 +870,41 @@
   },
   "clientPolicies": {
     "policies": [
+      {
+        "name": "openbank-mcp-tier-h",
+        "description": "Review of #16672: Keycloak built-in hardening for Tier H MCP clients. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-attributes",
+            "configuration": {
+              "is_negative_logic": false,
+              "attributes": "[{\"key\": \"openbank.mcp.tier\", \"value\": \"H\"}]"
+            }
+          }
+        ],
+        "profiles": [
+          "openbank-mcp-oauth-hardening"
+        ]
+      },
+      {
+        "name": "openbank-mcp-tier-l",
+        "description": "Review of #16672: Keycloak built-in hardening for Tier L MCP clients. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-attributes",
+            "configuration": {
+              "is_negative_logic": false,
+              "attributes": "[{\"key\": \"openbank.mcp.tier\", \"value\": \"L\"}]"
+            }
+          }
+        ],
+        "profiles": [
+          "openbank-mcp-oauth-hardening",
+          "openbank-mcp-dpop"
+        ]
+      },
       {
         "name": "openbank-mcp",
         "description": "ADR-0385 / #16667: bind the MCP client guard. DERIVED from mcp-client-allowlist.yaml.",

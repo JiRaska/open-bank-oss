@@ -29,6 +29,10 @@ Asserted, per declared client:
   * `party_id` a declared user-profile attribute viewable and editable by admin only;
   * an enabled `any-client` client policy binding the `openbank-mcp-client-guard` executor
     (#16667: no token exchange for or of an MCP client);
+  * per tier, an enabled policy whose ONLY condition is `client-attributes` on exactly
+    `openbank.mcp.tier=<tier>` (one value — two values for one key match nothing in Keycloak
+    26.8.1) and whose profiles carry Keycloak's built-in pkce-enforcer, reject-implicit-grant,
+    reject-ropc-grant, plus dpop-bind-enforcer for Tier L (review of #16672);
   * the realm: refreshTokenMaxReuse == 0 and revokeRefreshToken == true (never loosened).
 
     python3 .github/scripts/check-mcp-client-realm-parity.py             # enforce
@@ -54,6 +58,10 @@ RESOURCE_ATTR = "openbank.mcp.resource"
 WITHHELD = "openbank-mcp-withheld-code"
 GUARD = "openbank-mcp-client-guard"
 MAX_EXCEPTION_DAYS = 183
+BUILTIN_EXECUTORS = {
+    "H": {"pkce-enforcer", "reject-implicit-grant", "reject-ropc-grant"},
+    "L": {"pkce-enforcer", "reject-implicit-grant", "reject-ropc-grant", "dpop-bind-enforcer"},
+}
 EXPECTED_MAPPERS = ("sub", "party-id", "mcp-service-audience")
 LOOPBACK_PREFIXES = ("http://127.0.0.1/", "http://[::1]/")
 
@@ -214,6 +222,27 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
     if not bound:
         f.append(f"realm: no enabled any-client client policy binds the {GUARD} executor — MCP clients could "
                  f"token-exchange (#16667) and the withheld-code step would have no request facts")
+
+    # Review of #16672 (6): Keycloak's built-in executors, bound per tier by the tier attribute.
+    for tier in sorted({c.get("tier") for c in decl.get("clients") or []} & set(BUILTIN_EXECUTORS)):
+        have: set[str] = set()
+        for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
+            if pol.get("enabled") is not True or len(pol.get("conditions") or []) != 1:
+                continue
+            cond = pol["conditions"][0]
+            conf = cond.get("configuration") or {}
+            try:
+                attrs = json.loads(conf.get("attributes")) if isinstance(conf.get("attributes"), str) else None
+            except ValueError:
+                attrs = None
+            if (cond.get("condition") != "client-attributes" or conf.get("is_negative_logic") not in (None, False, "false")
+                    or attrs != [{"key": TIER_ATTR, "value": tier}]):
+                continue
+            have |= {e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []}
+        missing = BUILTIN_EXECUTORS[tier] - have
+        if missing:
+            f.append(f"realm: no enabled client-attributes policy on {TIER_ATTR}={tier} binds the built-in "
+                     f"executor(s) {sorted(missing)} (review of #16672: a weakened client attribute must not reopen them)")
 
     # Review of #16672: the MCP token's party_id claim and the withheld-code consume's
     # expectedPartyId both come from the user attribute `party_id`, so a customer must never be able
@@ -400,6 +429,18 @@ def self_test() -> int:
         mutate_realm=lambda r: r["clientPolicies"]["policies"][-1].update(conditions=[{"condition": "grant-type"}]), needle=GUARD)
     run("guard executor dropped from the profile flagged",
         mutate_realm=lambda r: r["clientProfiles"]["profiles"][-1].update(executors=[]), needle=GUARD)
+    def tier_policy(r, tier):
+        return next(p for p in r["clientPolicies"]["policies"] if p["name"] == f"openbank-mcp-tier-{tier.lower()}")
+    run("built-in reject-ropc-grant dropped flagged",
+        mutate_realm=lambda r: [p.update(executors=[e for e in p["executors"] if e["executor"] != "reject-ropc-grant"])
+                                for p in r["clientProfiles"]["profiles"]], needle="reject-ropc-grant")
+    run("Tier L DPoP profile unbound flagged",
+        mutate_realm=lambda r: tier_policy(r, "L").update(profiles=["openbank-mcp-oauth-hardening"]), needle="dpop-bind-enforcer")
+    run("tier condition with two values for one key (inert in Keycloak) flagged",
+        mutate_realm=lambda r: tier_policy(r, "H")["conditions"][0]["configuration"].update(attributes=json.dumps(
+            [{"key": TIER_ATTR, "value": "H"}, {"key": TIER_ATTR, "value": "L"}])), needle="=H")
+    run("tier condition with negative logic flagged",
+        mutate_realm=lambda r: tier_policy(r, "H")["conditions"][0]["configuration"].update(is_negative_logic=True), needle="=H")
     run("bound resource attribute drift flagged",
         mutate_realm=lambda r: client(r, H)["attributes"].update({RESOURCE_ATTR: "https://evil.example/mcp"}), needle="RFC 8707")
     def profile(r, mutate):

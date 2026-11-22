@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * Keycloak 26 refuses a partial admin PUT (an omitted root attribute counts as removed), so the
- * party_id write merges into the user's own representation. Live counterpart:
+ * party_id write merges into the user's own profile fields — and only those. Live counterpart:
  * openbank-infra/e2e/keycloak_mcp_client_admission_test.py test_edge_service_account_can_still_write_party_id.
  */
 class KeycloakAdminClientPartyIdTest {
@@ -28,9 +28,29 @@ class KeycloakAdminClientPartyIdTest {
             },
         ).containsExactly("11111111-1111-4111-8111-111111111111")
         assertThat(out["attributes"]["locale"].map { it.asText() }).containsExactly("cs")
-        listOf("id", "username", "email", "firstName", "lastName", "enabled").forEach {
+        listOf("username", "email", "firstName", "lastName").forEach {
             assertThat(out[it]).`as`(it).isEqualTo(mapper.readTree(user)[it])
         }
+    }
+
+    @Test
+    fun `account state is absent from the PUT so a concurrent disable is not reverted`() {
+        // Review of #16672: the body is built from a GET; anything it echoes back is a stale copy
+        // that would overwrite a change made between the GET and the PUT (an admin disabling the
+        // user, adding a required action, resetting credentials). Keycloak leaves omitted fields as
+        // they are, so they must be omitted.
+        val user = """{"id":"u1","username":"a@b.c","email":"a@b.c","firstName":"A","lastName":"B",
+            "enabled":true,"emailVerified":true,"totp":false,"requiredActions":[],
+            "credentials":[{"type":"password","value":"x"}],"federationLink":"ldap",
+            "access":{"manageGroup":true},"notBefore":0,"createdTimestamp":1,
+            "disableableCredentialTypes":[],"attributes":{"party_id":["old"]}}"""
+        val out = mapper.readTree(client.withPartyId(user, "p"))
+        listOf(
+            "enabled", "credentials", "requiredActions", "emailVerified", "totp", "federationLink",
+            "access", "notBefore", "createdTimestamp", "disableableCredentialTypes", "id",
+        ).forEach { assertThat(out.has(it)).`as`("$it must not be sent").isFalse() }
+        assertThat(out.fieldNames().asSequence().toList())
+            .containsExactlyInAnyOrder("username", "email", "firstName", "lastName", "attributes")
     }
 
     @Test

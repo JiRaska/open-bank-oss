@@ -189,6 +189,20 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   (`McpEndpointTest`'s dedicated "no token → denied" case). The NetworkPolicy fence described in T-E1
   is now defense-in-depth rather than the only control.
 
+- **T-S3 — an MCP client connected by a stolen SSO session, a fresh passkey or an unapproved
+  request. [BUILT, #16672; live once the realm and Keycloak config are applied]** The customers-realm
+  flow `openbank-mcp-fresh-passkey` has no `auth-cookie` alternative (an SSO cookie never skips the
+  passkey) and ends in the bank's `openbank-mcp-withheld-code` authenticator (ADR-0385 D3): the
+  authorization code is issued only after sca-service CONSUMED an `MCP_CLIENT_CONNECT` challenge whose
+  `payloadSha256` is the canonical connect context recomputed from the PAR-held request (client,
+  redirect host, resource, scopes, party), single-use, for that party. The authenticator also refuses a
+  **passkey enrolled < 72 h** (ADR-0385's passkey-age rule, now enforced; the SCA device-age half was
+  already in sca-service), so an account takeover that enrols its own passkey cannot connect an
+  assistant for three days. Fail closed: unconfigured, or sca-service unreachable, no code is issued.
+  Residual: the customer approves an attacker-initiated connect on their device (ADR-0385 D5) — the
+  app must render only the signed context. Proof: `keycloak_mcp_client_admission_test.py`
+  (`test_code_not_issued_before_consume`, `test_young_passkey_refused`, `test_sso_cookie_*`).
+
 ### Tampering
 
 - **T-T1 — policy-bundle tampering.** The rego + charter + `rules.yaml` are baked into the
@@ -340,6 +354,24 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   directly, and the HITL + SCA guarantee must be enforced at the write boundary, not asserted in
   YAML.
 
+- **T-E5 — an MCP client's token turned into a broader one by token exchange. [BUILT, #16667]**
+  Keycloak's legacy token-exchange v1 does not fire the `grant-type` client-policy condition, so the
+  bank's `openbank-mcp-client-guard` executor is bound by an `any-client` policy and refuses, for
+  every exchange, (a) an MCP client as requester, (b) the MCP resource as target, and (c) a subject
+  token issued to an MCP client. Keycloak's built-in `pkce-enforcer`, `reject-implicit-grant`,
+  `reject-ropc-grant` (both tiers) and `dpop-bind-enforcer` (Tier L) are bound by tier-scoped
+  policies as a second layer under the per-client switches, so an admin-console edit of one client
+  cannot reopen those grants. Proof: `test_token_exchange_refused_for_mcp_client`,
+  `test_no_exchange_may_target_the_mcp_resource`,
+  `test_builtin_policies_hold_when_client_attributes_are_weakened` (each red with its control removed);
+  `check-mcp-client-realm-parity.py` holds the realm shape.
+- **T-E6 — a customer sets the `party_id` their MCP token asserts. [BUILT, #16672]** The token's
+  `party_id` claim and the withheld-code consume's `expectedPartyId` both come from the user attribute
+  `party_id`, so it is a declared user-profile attribute that only `admin` may view or edit (account
+  console, registration and update-profile cannot write it). customer-edge's service account still
+  writes it, and writes ONLY the profile fields — see customer-edge T-6. Proof:
+  `test_customer_cannot_set_party_id`, `test_edge_service_account_can_still_write_party_id`.
+
 ## 5. Documented-but-unenforced controls (summary)
 
 > **2026-07-31 — ADR-0224 D2 (agent sessions) landed.** The service is stateful now: the
@@ -442,6 +474,17 @@ server-side `inputSchema` validation + idempotency on `propose_payment`, when th
 a stub (T-T2/T-D2).
 
 ## 8. Change log
+
+- **2026-11-22 (ADR-0385 D3, #16667, review of #16672)** — The authorization server side of the
+  customer connect. *Spoofing:* T-S3 (withheld code + 72 h passkey age, now enforced).
+  *Elevation:* T-E5 (token exchange refused for and of MCP clients; Keycloak built-in executors bound
+  per tier) and T-E6 (`party_id` admin-only). *Deployment:* the authenticator's server-level config
+  (`KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__*`) is wired in `keycloak.yaml`, its client
+  secret from OpenBao `keycloak/keycloak-mcp` through the `keycloak-mcp-sca-client` ExternalSecret
+  (optional ref; the factory logs a WARN at boot when unconfigured, and every connect is refused).
+  The realm changes reach the live realm only by the owner step in
+  `openbank-infra/gitops/components/keycloak/README.md` — import runs on cold start only, so until
+  then nothing in this entry is live.
 
 - **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
   IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.

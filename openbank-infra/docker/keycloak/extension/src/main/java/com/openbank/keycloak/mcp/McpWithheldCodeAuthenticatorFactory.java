@@ -4,6 +4,7 @@
 
 package com.openbank.keycloak.mcp;
 
+import org.jboss.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.authentication.Authenticator;
 import org.keycloak.authentication.AuthenticatorFactory;
@@ -22,6 +23,7 @@ import java.util.List;
  */
 public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory {
     public static final String PROVIDER_ID = "openbank-mcp-withheld-code";
+    private static final Logger LOG = Logger.getLogger(McpWithheldCodeAuthenticatorFactory.class);
 
     private ScaClient.Settings settings = new ScaClient.Settings(null, null, null, null);
     private long lifespanSeconds = McpConnectPolicy.MAX_SESSION_SECONDS;
@@ -40,6 +42,13 @@ public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory
                 get(config, "client-secret", "clientSecret"));
         String lifespan = get(config, "session-lifespan-seconds", "sessionLifespanSeconds");
         lifespanSeconds = McpConnectPolicy.sessionLifespan(lifespan == null ? 0 : Long.parseLong(lifespan.trim()));
+        // Eager, at boot: the deployment supplies the client secret through an OPTIONAL secret ref (a
+        // missing OpenBao key must never stop the bank's only IdP from starting), so an unconfigured
+        // authenticator would otherwise be silent until the first refused connect.
+        if (!settings.complete()) {
+            LOG.warn("openbank-mcp-withheld-code is NOT configured (sca-url/token-url/client-id/client-secret);"
+                    + " every MCP connect will be refused until it is");
+        }
     }
 
     private static String get(Config.Scope config, String kebab, String camel) {

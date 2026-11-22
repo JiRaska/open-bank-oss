@@ -108,8 +108,10 @@ class KeycloakAdminClient {
         val token = adminToken()
         // Keycloak 26 validates an admin PUT against the realm's user profile and treats an
         // omitted root attribute as removed: a body of only {"attributes":{"party_id":…}} is
-        // refused 400 `error-user-attribute-required` (email). So read the user, merge party_id
-        // into its own representation, and write that back.
+        // refused 400 `error-user-attribute-required` (email). So read the user and write back its
+        // user-profile fields with party_id merged in — and NOTHING else: Keycloak leaves a field
+        // the body omits (enabled, credentials, requiredActions, …) untouched, so a disable or a
+        // required action set between this GET and the PUT is not reverted by a stale copy.
         val current = http.send(
             HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -145,11 +147,24 @@ class KeycloakAdminClient {
         false
     }
 
-    /** The user representation [userJson] with `attributes.party_id` set to exactly [partyId]; nothing else changes. */
+    /**
+     * The PUT body for [userJson]: only the user-profile fields Keycloak validates
+     * ([PROFILE_FIELDS]), with `attributes.party_id` set to exactly [partyId]. Account state —
+     * `enabled`, `credentials`, `requiredActions`, `emailVerified`, federation, access — is
+     * deliberately absent so a concurrent admin change to it survives this write.
+     */
     internal fun withPartyId(userJson: String, partyId: String): String {
         val user = json.readTree(userJson) as ObjectNode
-        val attributes = (user.get("attributes") as? ObjectNode) ?: user.putObject("attributes")
+        val body = json.createObjectNode()
+        PROFILE_FIELDS.forEach { field -> user.get(field)?.let { body.set<ObjectNode>(field, it) } }
+        val attributes = (user.get("attributes") as? ObjectNode)?.deepCopy() ?: json.createObjectNode()
         attributes.putArray("party_id").add(partyId)
-        return json.writeValueAsString(user)
+        body.set<ObjectNode>("attributes", attributes)
+        return json.writeValueAsString(body)
+    }
+
+    private companion object {
+        /** Root user-profile attributes Keycloak 26 requires present on an admin PUT. */
+        val PROFILE_FIELDS = listOf("username", "email", "firstName", "lastName")
     }
 }

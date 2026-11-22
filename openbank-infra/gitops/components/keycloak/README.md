@@ -361,6 +361,47 @@ audience (impersonation + a token-exchange fine-grained-authz permission on
 `openbank-app`). Kept separate from `customer-edge-admin`, whose blast radius is
 deliberately narrower (`party_id` attribute writes only).
 
+## MCP connect (ADR-0385 D3, #16672) — REQUIRED owner apply step
+
+Nothing in this section is live until an owner does it: realm import runs on cold start
+only, and there is no in-repo job that applies a realm change to a running Keycloak (by
+design — the admin API is 403 at the edge and reached only through a port-forward). Until
+every step is done the MCP connect fails CLOSED: the authenticator refuses every connect.
+Do them in this order; each is idempotent.
+
+1. **Image.** Build and push the Keycloak image that carries the extension
+   (`openbank-infra/scripts/build-push-keycloak.sh`), then bump the `openbank-keycloak` tag in
+   `keycloak.yaml` in a PR. The `KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__*` env in
+   `keycloak.yaml` is runtime config read by that extension at boot.
+2. **Client + secret (`openbank` realm).** Create client `openbank-keycloak-mcp` from
+   `realm-template.json` **without** its `secret` (Keycloak generates it), give
+   `service-account-openbank-keycloak-mcp` the realm role `ROLE_API` and nothing else, and write
+   the generated secret to OpenBao `openbank/keycloak/keycloak-mcp`, property `client_secret`,
+   with the narrow SSO writer role (runbook 0027 — never the root token).
+   `provision-synthetic-customer.sh` is the worked example of this exact sequence. External Secrets
+   then fills `iam/keycloak-mcp-sca-client` within the hour (`refreshInterval: 1h`); the
+   Keycloak pod reads it at boot, so **restart the Deployment** after the Secret exists
+   (`kubectl -n iam rollout restart deploy/keycloak`). Then move `keycloak/keycloak-mcp` from
+   `openbao.unprovisioned` to `openbao.keys` in `.github/config-inventory.yaml`.
+3. **Customers realm (`openbank-customers`).** Over `kubectl -n iam port-forward svc/keycloak 8080:8080`,
+   apply from `customers-realm-template.json`, in this order (a policy naming a missing profile,
+   or a client override naming a missing flow, is refused):
+   - the user profile (`PUT /admin/realms/openbank-customers/users/profile`) — `party_id`
+     admin-view/admin-edit only;
+   - the flow `openbank-mcp-fresh-passkey` and its executions;
+   - client profiles, then client policies (`PUT .../client-policies/profiles`, then
+     `PUT .../client-policies/policies`) — profiles `openbank-mcp-oauth-hardening`,
+     `openbank-mcp-dpop`, `openbank-mcp`; policies `openbank-mcp-tier-h`, `openbank-mcp-tier-l`,
+     `openbank-mcp`; these PUTs REPLACE the realm's whole list, so send the template's full list;
+   - the MCP clients and their `offline_access` scope mappings (they ship `enabled: false`).
+   Rehearse the exact calls against a local Keycloak first (recipe at the top of this file);
+   `openbank-infra/e2e/keycloak_mcp_client_admission_test.py` is the end-to-end check of the result.
+4. **Import artifact.** Add the same client (with its real secret) and the customers-realm
+   changes to the OpenBao realm-import blobs (runbook 0009), so a cold start keeps them.
+
+Verify: the Keycloak boot log carries **no** `openbank-mcp-withheld-code is NOT configured`
+WARN, and an MCP connect against the live realm reaches the in-app approval.
+
 ## What this does NOT fix
 
 The committed templates feed **nothing** today. Keycloak reads the Secrets
