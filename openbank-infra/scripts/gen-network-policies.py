@@ -115,6 +115,13 @@ ARC_RUNNER_CALLEES = [
 # here too.
 INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-native"}
 
+# The kube-prometheus-stack Prometheus pods (same labels networkpolicy-ci-metrics-gateway.yaml uses),
+# the only scraper a `open-bank.tech/metrics-ingress-prometheus-only` workload admits.
+PROMETHEUS_POD_LABELS = (
+    ("app.kubernetes.io/name", "prometheus"),
+    ("app.kubernetes.io/instance", "kube-prometheus-stack-prometheus"),
+)
+
 # Sidecar ports with no application cross-namespace callers. Decisions use pod loopback;
 # read-only diagnostics may bind the pod network for kubelet probes. Neither is an app
 # HTTP discovery port. Keyed by `ports[].name`, like INTERNAL_ONLY_PORT_NAMES above.
@@ -509,12 +516,115 @@ spec:
         policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
         case("non-opted workload retains both ports", allowed("payments"), [8117, 8443])
 
+    # A store annotated with open-bank.tech/same-namespace-ingress-from admits ONLY that workload
+    # from its own namespace; without the annotation every co-tenant pod is admitted (#16791).
+    with tempfile.TemporaryDirectory() as temp_dir:
+        component = pathlib.Path(temp_dir) / "fixture"
+        component.mkdir()
+        source = component / "workloads.yaml"
+        source.write_text("""\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-store
+  namespace: fixture
+  annotations: {open-bank.tech/same-namespace-ingress-from: fixture-owner}
+spec:
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: fixture-store}
+    spec:
+      containers:
+        - name: store
+          ports: [{name: redis, containerPort: 6379}]
+""", encoding="utf-8")
+
+        def same_ns_from():
+            previous_components, previous_argv = COMPONENTS, sys.argv
+            try:
+                globals()["COMPONENTS"] = temp_dir
+                sys.argv = [sys.argv[0]]
+                main()
+            finally:
+                globals()["COMPONENTS"] = previous_components
+                sys.argv = previous_argv
+            docs = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+            pol = next(d for d in docs if d["metadata"]["name"] == "fixture-store-ingress-allow-list")
+            return [(peer.get("podSelector"), sorted(p["port"] for p in rule.get("ports", [])))
+                    for rule in pol["spec"]["ingress"] for peer in rule["from"]
+                    if "podSelector" in peer and "namespaceSelector" not in peer]
+
+        case("annotated store admits only its named same-namespace client, on its datastore port only",
+             same_ns_from(), [({"matchLabels": {"app.kubernetes.io/name": "fixture-owner"}}, [6379])])
+        source.write_text(source.read_text(encoding="utf-8").replace(
+            "  annotations: {open-bank.tech/same-namespace-ingress-from: fixture-owner}\n", ""), encoding="utf-8")
+        case("unannotated store keeps the open same-namespace rule", same_ns_from(), [({}, [])])
+
+    # A workload annotated open-bank.tech/metrics-ingress-prometheus-only exposes its scraped port to
+    # the Prometheus pods only: no admin-ui rule, and the observability peer carries a podSelector.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        component = pathlib.Path(temp_dir) / "fixture"
+        component.mkdir()
+        source = component / "workloads.yaml"
+        source.write_text("""\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-cache
+  namespace: fixture
+  annotations: {open-bank.tech/metrics-ingress-prometheus-only: 'true'}
+spec:
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: fixture-cache}
+    spec:
+      containers:
+        - name: store
+          ports: [{name: redis, containerPort: 6379}]
+        - name: exporter
+          ports: [{name: redis-metrics, containerPort: 9121}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: fixture-cache-metrics
+  namespace: fixture
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: fixture-cache}
+  podMetricsEndpoints:
+    - port: redis-metrics
+""", encoding="utf-8")
+
+        def port_peers():
+            previous_components, previous_argv = COMPONENTS, sys.argv
+            try:
+                globals()["COMPONENTS"] = temp_dir
+                sys.argv = [sys.argv[0]]
+                main()
+            finally:
+                globals()["COMPONENTS"] = previous_components
+                sys.argv = previous_argv
+            docs = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+            pol = next(d for d in docs if d["metadata"]["name"] == "fixture-cache-ingress-allow-list")
+            return sorted(
+                (peer.get("namespaceSelector", {}).get("matchLabels", {}).get("kubernetes.io/metadata.name", ""),
+                 bool(peer.get("podSelector")))
+                for rule in pol["spec"]["ingress"] if any(p.get("port") == 9121 for p in rule.get("ports", []))
+                for peer in rule["from"])
+
+        case("prometheus-only metrics port admits only Prometheus pods", port_peers(), [("observability", True)])
+        source.write_text(source.read_text(encoding="utf-8").replace(
+            "  annotations: {open-bank.tech/metrics-ingress-prometheus-only: 'true'}\n", ""), encoding="utf-8")
+        case("unannotated metrics port keeps admin-ui and all of observability", port_peers(),
+             [("admin-ui", False), ("observability", False)])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction, atomic publication and port scoping (27 cases)")
+    print("self-test ok: dependency extraction, atomic publication, port scoping and named same-namespace clients and Prometheus-only metrics ports (31 cases)")
     return 0
 
 def main():
@@ -595,6 +705,16 @@ def main():
                 # workloads may have callers hidden in Secrets or runtime discovery.
                 "port_scoped": (meta.get("annotations", {}) or {}).get(
                     "open-bank.tech/port-scoped-ingress") == "true",
+                # A store that exactly ONE workload may talk to (e.g. mcp-valkey, the customer
+                # channel's replay store): its same-namespace rule names that workload instead of
+                # every co-tenant pod in a shared namespace (#16791).
+                "same_ns_from": ((meta.get("annotations", {}) or {}).get(
+                    "open-bank.tech/same-namespace-ingress-from") or "").strip() or None,
+                # Scraped ports of this workload are reachable ONLY from the in-cluster Prometheus pods,
+                # never from admin-ui BFF discovery nor from every pod in observability (#16791: an
+                # exporter port must not be a reachable endpoint for anything but its scraper).
+                "metrics_prometheus_only": (meta.get("annotations", {}) or {}).get(
+                    "open-bank.tech/metrics-ingress-prometheus-only") == "true",
             }
             ns_dir.setdefault(ns, os.path.dirname(path))
             blob = "\n".join(blob_parts)
@@ -807,9 +927,10 @@ def main():
             p for n, p in wl["ports"].items()
             if n in INTERNAL_ONLY_PORT_NAMES or n in SIDECAR_LOCAL_ONLY_PORT_NAMES
         }
+        prom_only_ports = set(scrape_ports.get((ns, wl_name), set())) if wl.get("metrics_prometheus_only") else set()
         http_ports = sorted(
             p for n, p in wl["ports"].items()
-            if p != mgmt_port and p not in internal_only_ports
+            if p != mgmt_port and p not in internal_only_ports and p not in prom_only_ports
         )
         callers = sorted(edges.get((ns, wl_name), set()) - {ns})
         ing_ports = {
@@ -821,7 +942,17 @@ def main():
             for p in gateway_backends.get((ns, wl_name), set())
         }
 
-        rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
+        if wl.get("same_ns_from"):
+            # One named same-namespace client, and only on the store's datastore ports: without a port
+            # list the rule would also open every other port of the pod (e.g. an exporter) to it.
+            client_ports = sorted(internal_only_ports) or sorted(
+                p for p in wl["ports"].values() if p != mgmt_port)
+            rules = [{
+                "from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": wl["same_ns_from"]}}}],
+                "ports": [{"protocol": "TCP", "port": p} for p in client_ports],
+            }]
+        else:
+            rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:
             port_callers = {port: {ADMIN_UI_NS} for port in http_ports}  # BFF dynamic discovery
             for caller in callers:
@@ -859,8 +990,11 @@ def main():
         if mgmt_port is not None:
             obs_ports.add(mgmt_port)
         if obs_ports:
+            obs_peer = ns_peer(OBSERVABILITY_NS)
+            if wl.get("metrics_prometheus_only"):
+                obs_peer = {**obs_peer, "podSelector": {"matchLabels": dict(PROMETHEUS_POD_LABELS)}}
             rules.append({
-                "from": [ns_peer(OBSERVABILITY_NS)],
+                "from": [obs_peer],
                 "ports": [{"protocol": "TCP", "port": p} for p in sorted(obs_ports)],
             })
         # security-scanner posture probe (#1811): openbank-security-scanner performs
