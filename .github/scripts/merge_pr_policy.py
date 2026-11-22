@@ -135,6 +135,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '82f517cde74e25753d7c498401c4cc9d861074b5',
     # merge-train.py of #16885 stacked on #16988 and #16986, merged with #16972 (ruff B007 + stale-ref fix kept), reviewed with #16885.
     'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
+    # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways) merged with #17078 (deferral_chain_self_test in shard scenario 0), plus #17083's review fixes (no real-tree read in the synthetic self-test; gates.yaml shard-declaration check), reviewed with #17083.
+    'b30cbdc9d1993063ec72162e98892165a84323e4',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
