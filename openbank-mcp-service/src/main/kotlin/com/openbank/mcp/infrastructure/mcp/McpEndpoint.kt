@@ -172,29 +172,50 @@ class McpEndpoint(
                 ) ?: branch.refuseNonCustomerToken()
             } ?: Response.status(Response.Status.NOT_FOUND).build()
         } else {
-            // #16590 defence in depth: a customer credential (customers-realm `iss`, or the DPoP scheme
-            // no staff caller uses) is refused on the staff root WHATEVER the channel state, before the
-            // audience check. The resolver would only ever treat it as anonymous; refusing it here means
-            // no staff dispatch path ever runs for it, and the client is told where it belongs.
-            audienceRefusal.takeIf { authorizationHeaders().size > 1 }?.respondAmbiguousCredential(method)
-                ?: audienceRefusal.takeIf { presentsCustomerCredential() }?.respondCustomerOnStaffRoot(
-                    method,
-                    params,
-                    if (customerBranch == null) {
-                        McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
-                    } else {
-                        McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
-                    },
-                    callerResolver.token.getClaim<String?>("azp"),
-                ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+            staffPreDispatch(method, params)
         }
 
-    private fun authorizationHeaders(): List<String> =
-        if (::httpRequest.isInitialized) httpRequest.headers().getAll(AUTHORIZATION_HEADER).orEmpty() else emptyList()
+    private fun staffPreDispatch(method: String, params: JsonNode): Response? {
+        // #16590 defence in depth: a customer credential (customers-realm `iss`, or the DPoP scheme
+        // no staff caller uses) is refused on the staff root WHATEVER the channel state, before the
+        // audience check. The resolver would only ever treat it as anonymous; refusing it here means
+        // no staff dispatch path ever runs for it, and the client is told where it belongs.
+        // FAIL CLOSED: headers that cannot be read are refused 400, never treated as "no credential".
+        val authorization = authorizationHeaders() ?: return audienceRefusal.respondUnreadableCredential(method)
+        return audienceRefusal.takeIf { authorization.size > 1 }?.respondAmbiguousCredential(method)
+            ?: audienceRefusal.takeIf { presentsCustomerCredential(authorization) }?.respondCustomerOnStaffRoot(
+                method,
+                params,
+                if (customerBranch == null) {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
+                } else {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
+                },
+                callerResolver.token.getClaim<String?>("azp"),
+            ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+    }
 
-    /** Customers-realm `iss`, or ANY `Authorization` header in the DPoP scheme (review of #17086). */
-    private fun presentsCustomerCredential(): Boolean = callerResolver.presentsCustomerRealmToken() ||
-        authorizationHeaders().any { it.trimStart().startsWith("$DPOP_HEADER ", ignoreCase = true) }
+    /**
+     * Every `Authorization` header value, or null when reading them THROWS — the caller refuses that
+     * (fail closed). No HTTP request in scope (a direct unit-test call) reads as no header at all.
+     */
+    @Suppress("TooGenericExceptionCaught") // any failure to read the header must refuse, never admit
+    private fun authorizationHeaders(): List<String>? {
+        if (!::httpRequest.isInitialized) return emptyList()
+        return try {
+            httpRequest.headers().getAll(AUTHORIZATION_HEADER).orEmpty()
+        } catch (e: Exception) {
+            log.warnf("refusing: Authorization header unreadable (%s)", e.javaClass.simpleName)
+            null
+        }
+    }
+
+    /**
+     * Customers-realm `iss`, or ANY `Authorization` header in the DPoP scheme (review of #17086).
+     * RFC 7235: the scheme is case-insensitive and ends at whitespace (SP or HTAB) or end of value.
+     */
+    private fun presentsCustomerCredential(authorization: List<String>): Boolean =
+        callerResolver.presentsCustomerRealmToken() || authorization.any { DPOP_SCHEME.containsMatchIn(it) }
 
     /** The staff root. Never runs the customer branch, whatever the request path says. */
     @POST
@@ -555,6 +576,7 @@ class McpEndpoint(
 
         private const val DPOP_HEADER = "DPoP"
         private const val AUTHORIZATION_HEADER = "Authorization"
+        private val DPOP_SCHEME = Regex("^\\s*DPoP(\\s|$)", RegexOption.IGNORE_CASE)
 
         private const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 

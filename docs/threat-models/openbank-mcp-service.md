@@ -443,6 +443,16 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-22 (#16590 follow-up)** — Staff-root credential parsing hardened.
+  - *Spoofing / tenant confusion.* The DPoP-scheme check matched only `DPoP` + a space, so
+    `DPoP<TAB>token` or a bare `DPoP` was not recognised as a customer credential and was served on
+    the anonymous path. It now matches the RFC 7235 scheme case-insensitively, ended by any
+    whitespace or end of value; `DPoPx` is still not the scheme.
+  - *Fail open on a read error.* An `Authorization` header that throws on read is now refused 400
+    `invalid_request` instead of being treated as absent. With no HTTP request in scope (direct
+    unit-test construction) there is no header, as before.
+  - *Tests.* `McpStaffRootCredentialParsingTest`; each half sabotaged (old prefix match; catch
+    returning an empty list) went red.
 - **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
   - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
     on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience

@@ -75,7 +75,18 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
             .build()
     }
 
+    /** The `Authorization` header could not be read: refused, never served as anonymous (fail closed). */
+    fun respondUnreadableCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: Authorization header unreadable", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", UNREADABLE_CHALLENGE)
+            .build()
+    }
+
     private companion object {
+        const val UNREADABLE_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"the Authorization header could not be read\""
         const val AMBIGUOUS_CHALLENGE =
             "Bearer error=\"invalid_request\", error_description=\"exactly one Authorization header is allowed\""
         const val CUSTOMER_CHALLENGE =
