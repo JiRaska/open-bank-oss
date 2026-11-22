@@ -22,7 +22,6 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.vertx.core.http.HttpServerRequest
-import io.vertx.core.http.impl.headers.HeadersMultiMap
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -76,23 +75,27 @@ class McpStaffRootCredentialParsingTest {
 
     private val call = rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>()))
 
-    private fun request(vararg authorization: String): HttpServerRequest {
-        val headers = HeadersMultiMap.httpHeaders()
-        authorization.forEach { headers.add("Authorization", it) }
-        return mockk(relaxed = true) {
-            every { headers() } returns headers
-            every { getHeader(any<String>()) } answers { headers.get(firstArg<String>()) }
+    private fun request(vararg authorization: String) =
+        TestHttpRequests.withHeaders(*authorization.map { "Authorization" to it }.toTypedArray())
+
+    private fun status(vararg authorization: String) =
+        endpoint(request(*authorization)).handle(rpc("tools/list")).status
+
+    @Test
+    fun `control - no Authorization header is dispatched`() {
+        assertThat(status()).isEqualTo(200)
+    }
+
+    @Test
+    fun `a legitimate Bearer JWT passes, the scheme case-insensitively`() {
+        listOf("Bearer $JWT", "bearer $JWT", "BEARER $JWT", "Bearer abc+/~-._=", "Bearer abc==").forEach {
+            assertThat(status(it)).describedAs(it).isEqualTo(200)
         }
     }
 
     @Test
-    fun `control - a request with no customer credential is dispatched`() {
-        assertThat(endpoint(request()).handle(rpc("tools/list")).status).isEqualTo(200)
-    }
-
-    @Test
-    fun `control - with no HTTP request in scope the call is dispatched, not refused`() {
-        assertThat(endpoint(request = null).handle(rpc("tools/list")).status).isEqualTo(200)
+    fun `with no HTTP request in scope the staff root refuses 400 (fail closed)`() {
+        assertThat(endpoint(request = null).handle(rpc("tools/list")).status).isEqualTo(400)
     }
 
     @Test
@@ -107,21 +110,49 @@ class McpStaffRootCredentialParsingTest {
     }
 
     @Test
-    fun `the DPoP scheme is refused case-insensitively with any RFC 7235 whitespace or no token`() {
-        listOf("DPoP token", "DPoP\ttoken", "dpop token", "  DPOP\ttoken", "DPoP", "dPoP ").forEach { header ->
-            val status = endpoint(request(header)).handle(rpc("tools/list")).status
-            assertThat(status).describedAs(header).isEqualTo(401)
-        }
+    fun `the DPoP scheme in any case and after any whitespace is the customer refusal 401`() {
+        listOf(
+            "DPoP token",
+            "DPoP\ttoken",
+            "dpop token",
+            "  DPOP\ttoken",
+            "DPoP",
+            "dPoP ",
+            "DPoP\u00A0x",
+            "DPoP\u2003x",
+        )
+            .forEach { assertThat(status(it)).describedAs(it).isEqualTo(401) }
     }
 
     @Test
-    fun `control - a scheme that merely starts with DPoP is not the DPoP scheme`() {
-        listOf("Bearer x", "DPoPx token", "Bearer DPoP").forEach { header ->
-            assertThat(endpoint(request(header)).handle(rpc("tools/list")).status).describedAs(header).isEqualTo(200)
-        }
+    fun `every shape outside Bearer b64token is malformed 400`() {
+        listOf(
+            "Bearer a, DPoP b",
+            "Bearer x, Bearer y",
+            "Bearer\u00A0$JWT",
+            "Bearer\u2003$JWT",
+            "Bearer\t$JWT",
+            "Bearer  $JWT",
+            " Bearer $JWT",
+            "Bearer $JWT ",
+            "Bearer ",
+            "Bearer a=b",
+            "Basic dXNlcjpwYXNz",
+            "DPoPx token",
+            "Token x",
+        ).forEach { assertThat(status(it)).describedAs(it).isEqualTo(400) }
+    }
+
+    @Test
+    fun `two Authorization headers are refused 400`() {
+        assertThat(status("Bearer a", "Bearer b")).isEqualTo(400)
     }
 
     private object NoSessions : AgentSessionRepository() {
         override suspend fun findActiveByJti(jti: String, asOf: java.time.Instant): AgentSessionEntity? = null
+    }
+
+    private companion object {
+        const val JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZ2VudDp0ZXN0In0.c2lnbmF0dXJlLXZhbHVl-_"
     }
 }

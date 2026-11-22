@@ -84,7 +84,18 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
             .build()
     }
 
+    /** An `Authorization` value outside the staff root's `Bearer <b64token>` allowlist. */
+    fun respondMalformedCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: malformed Authorization header", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", MALFORMED_CHALLENGE)
+            .build()
+    }
+
     private companion object {
+        const val MALFORMED_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"Authorization must be one Bearer b64token\""
         const val UNREADABLE_CHALLENGE =
             "Bearer error=\"invalid_request\", error_description=\"the Authorization header could not be read\""
         const val AMBIGUOUS_CHALLENGE =

@@ -443,16 +443,23 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
-- **2026-11-22 (#16590 follow-up)** — Staff-root credential parsing hardened.
-  - *Spoofing / tenant confusion.* The DPoP-scheme check matched only `DPoP` + a space, so
-    `DPoP<TAB>token` or a bare `DPoP` was not recognised as a customer credential and was served on
-    the anonymous path. It now matches the RFC 7235 scheme case-insensitively, ended by any
-    whitespace or end of value; `DPoPx` is still not the scheme.
-  - *Fail open on a read error.* An `Authorization` header that throws on read is now refused 400
-    `invalid_request` instead of being treated as absent. With no HTTP request in scope (direct
-    unit-test construction) there is no header, as before.
-  - *Tests.* `McpStaffRootCredentialParsingTest`; each half sabotaged (old prefix match; catch
-    returning an empty list) went red.
+- **2026-11-22 (#16590 follow-up, #17099)** — Staff-root `Authorization` parsing is an ALLOWLIST.
+  - *Spoofing / tenant confusion.* The DPoP check was a denylist (`startsWith("DPoP ")`), so
+    `DPoP<TAB>x`, a bare `DPoP`, `DPoP<NBSP>x`, or a comma list such as `Bearer a, DPoP b` was not
+    recognised as a customer credential and reached the anonymous path. On `/mcp` an `Authorization`
+    header, when present, must now be exactly ONE header whose whole value is `Bearer <b64token>`
+    (RFC 6750 §2.1: scheme case-insensitive, one SP, `[A-Za-z0-9-._~+/]+=*`, nothing else). A value
+    starting with the DPoP scheme after any whitespace (Unicode included), or a valid Bearer from the
+    customers realm, gets the 401 that points at `/customer/mcp`. Every other shape (comma lists,
+    tabs, double or leading/trailing spaces, non-ASCII whitespace, `Basic` and other schemes) is
+    400 `invalid_request`. Staff JWTs are base64url with dots, so they are inside the allowlist.
+  - *Fail open on a read error or missing request.* An `Authorization` header that throws on read,
+    and a hand-built endpoint with no injected request, are refused 400 instead of reading as
+    "no credential". `httpRequest` is CDI-`@Inject`ed on every served request.
+  - *Tests.* `McpStaffRootCredentialParsingTest` (each shape above, legit JWT and `bearer` controls)
+    and two real-HTTP cases in `McpStaffRootCustomerCredentialIT` (`DPoP<TAB>x` → 401,
+    `Bearer a, DPoP b` → 400). Each guard was sabotaged (missing request read as no header, b64token
+    loosened to `.*`, DPoP match ASCII-only) and its tests went red.
 - **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
   - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
     on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
