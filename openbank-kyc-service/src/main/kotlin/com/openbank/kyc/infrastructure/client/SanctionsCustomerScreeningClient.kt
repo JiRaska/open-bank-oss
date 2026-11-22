@@ -6,7 +6,7 @@ package com.openbank.kyc.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -22,9 +22,11 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * service token) with [SanctionsServiceClient], which stays on the frozen v1 contract for the
  * operator-triggered PEP re-screen.
  */
+// #15723: the bearer for the customer screen is minted by the NAMED oidc-client `m2m` - Keycloak
+// client `openbank-kyc` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "sanctions-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v3/sanctions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

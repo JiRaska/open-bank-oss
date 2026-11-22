@@ -6,7 +6,7 @@ package com.openbank.kyc.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -24,12 +24,14 @@ import java.util.UUID
  *
  * Mirrors the [SanctionsServiceClient] stack already in this service (ADR-0032 §D) — the reactive
  * OIDC filter attaches the service token, without which party-service answers 401. The endpoint
- * admits `ROLE_API`, which is the role the shared service account carries in every realm, so no
- * new grant is needed for this call.
+ * admits `ROLE_API` and consults no policy action, so kyc-service's own service account (ROLE_API
+ * only) needs no further grant for this call.
  */
+// #15723: the bearer for the party register read is minted by the NAMED oidc-client `m2m` - Keycloak
+// client `openbank-kyc` (ROLE_API only) - never the shared `openbank-services` default client.
+@OidcClientFilter("m2m")
 @RegisterRestClient(configKey = "party-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)
 interface PartyServiceClient {

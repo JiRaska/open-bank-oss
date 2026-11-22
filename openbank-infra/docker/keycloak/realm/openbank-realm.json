@@ -1124,6 +1124,23 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-kyc",
+      "name": "OpenBank KYC Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-pension",
       "name": "OpenBank Pension Service",
       "enabled": true,
@@ -1650,6 +1667,14 @@
       "username": "service-account-openbank-kyb",
       "enabled": true,
       "serviceAccountClientId": "openbank-kyb",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-kyc",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-kyc",
       "realmRoles": [
         "ROLE_API"
       ]
