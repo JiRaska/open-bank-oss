@@ -5,6 +5,7 @@ package com.openbank.lending.infrastructure.client
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.market.MarketCountry
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -32,6 +33,18 @@ class CatalogLoanProfileAdapterTest {
         assertThatThrownBy { malformed.toProfile(offeringId) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("canonical decimal")
+    }
+
+    @Test
+    fun `published catalog countries are validated and carried into lending policy`() {
+        val profile = revision().copy(marketCountries = setOf("SK")).toProfile(offeringId)
+        val markets = checkNotNull(profile.markets)
+        assertThat(markets.includes(MarketCountry("SK"))).isTrue()
+        assertThat(markets.includes(MarketCountry("CZ"))).isFalse()
+        assertThat(revision().toProfile(offeringId).markets).isNull()
+
+        assertThatThrownBy { revision().copy(marketCountries = setOf("ZZ")).toProfile(offeringId) }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     private fun revision(rate: String = "0.0699"): CatalogLoanRevisionResponse {
