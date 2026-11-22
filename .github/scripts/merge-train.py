@@ -3510,7 +3510,6 @@ class GitHub:
         """created_at of #n's latest auto-merge ENABLE timeline item; None = unknowable (any read failure).
         GitHub names the item after the merge method — `auto_squash_enabled` for this repo's squash merges,
         `auto_merge_enabled` / `auto_rebase_enabled` otherwise — so all three count (aging_armed_at)."""
-        at = None
         try:
             timeline = self.pr_timeline(n)
         except (SystemExit, ApiAbort) as exc:
