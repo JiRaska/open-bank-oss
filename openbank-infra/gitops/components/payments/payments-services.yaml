@@ -455,7 +455,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-44fff644@sha256:9fba769ef8ab40d6830fc46c7fc6aba07d6a9537cc1e6d557389c3158d02d8d6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-1dcfc8f1@sha256:543c53ce0b37960ff5e841e7bc718612e3d30c8aa91fc97a2daafb2e5e39e402
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -844,7 +844,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-5321edaa@sha256:cd868290082754cee56a45b2b987af32147690085e33c246677051731b8afdbb
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-1dcfc8f1@sha256:e3b79ebcebb5ec47eee90cc8a46c675e4b840629dc202054e7c5dbd28cce3708
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1251,7 +1251,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-44fff644@sha256:2395a1f1b1e7f24dd52cbc48dfcc940813440dba4539aa0412829f8677576e69
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-1dcfc8f1@sha256:612f1fc61d77bce91ebdabd4bc050ee75cfe3096b05e24ca5b3f5c070243397b
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1590,7 +1590,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-44fff644@sha256:5119d729a791b3083ad38d6a9193d7b4cf85af261a825bb6c2e19d30d9c720e6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-1dcfc8f1@sha256:9822a8392d96e182d94c29fe2d6e6998cb7223286e9e12e4b956a6f0e0a10687
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1921,7 +1921,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-c1495916@sha256:c165ee3b4a3f644fa06c7b20f5ad097d5016721d0ce7b6a373678a75d5eee2f1
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-1dcfc8f1@sha256:664a852e290a874a2200ff2bf3e2ef7bf28ff0b970099e0212dd45665cb609ee
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2240,7 +2240,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-4351e46e@sha256:2ed94f134e0db9f15ce0435b5b81d7ec743a1a9aeafee4caa21f00d7f48bb254
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-1dcfc8f1@sha256:c0a0c1049043c2609b4cfdced4fed439fd052bb21ea6722a9eeb5643307f9f2a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2810,7 +2810,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-3cf5c536@sha256:3d46e979a462c6b991afe09a36dc39659b8ba4649a802e1b733ef50b57efb524
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-1dcfc8f1@sha256:74adc43bb466b32a785401a17c4555ed5f04713221178c6c3ba3d6f7163b0ddd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3165,7 +3165,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-548fa683@sha256:e0cab235d523b51f087517b1b841b26998689f91b9ed0d98930c762d2883795f
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-1dcfc8f1@sha256:d2be1397b59e1ed8f2ae9c589e0e210ad8d1fa1d4817f58255b05073f65e9638
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3625,7 +3625,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-3cf5c536@sha256:f2d31bea08c9d38fb1bb8a5dde3352a1ece696d4412bb557c9f61672d7e81c43
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-1dcfc8f1@sha256:1248c48cf90d207c1e6b8ce4eb880ab998b410411354ec84301cab849c8526ba
 
           imagePullPolicy: IfNotPresent
           ports:

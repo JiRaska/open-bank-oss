@@ -49,7 +49,7 @@ spec:
         - name: tax-reporting-service
           # First build lands via auto-deploy on the merge that adds openbank-tax-reporting-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tax-reporting-service:sandbox-44fff644@sha256:aac01fc22f9ad401b5b9ade97781713d2ee5716fb46572b27124f2f7216e4dd6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tax-reporting-service:sandbox-1dcfc8f1@sha256:59308baf0d485f99c5651673eebd9167c5012b3654fa99c964ecb763f907f445
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8152 and management 8085 — both read off the service's own application.yaml
