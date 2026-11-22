@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.9.0...product-catalog-v1.10.0) (2026-11-22)
+
+
+### Features
+
+* **lending:** enforce catalogue market scope at domestic application ([#16408](https://github.com/JiRaska/open-bank-oss/issues/16408)) ([8bc49c9](https://github.com/JiRaska/open-bank-oss/commit/8bc49c9dadafc7e859d4173f75914545d02331e0))
+
 ## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.8.0...product-catalog-v1.9.0) (2026-11-22)
 
 
