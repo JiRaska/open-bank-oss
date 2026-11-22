@@ -31,6 +31,20 @@ import java.util.UUID
 interface LedgerRestClient {
 
     @POST
+    @Path("/branch-payments")
+    fun postBranchPayment(
+        request: BranchPaymentRequest,
+        @HeaderParam(SyntheticTaint.KAFKA_HEADER) taint: String?,
+    ): Uni<BranchPaymentReceipt>
+
+    @POST
+    @Path("/branch-payments/synthetic")
+    fun postSyntheticBranchPayment(
+        request: BranchPaymentRequest,
+        @HeaderParam(SyntheticTaint.KAFKA_HEADER) taint: String,
+    ): Uni<BranchPaymentReceipt>
+
+    @POST
     fun postJournal(request: PostJournalRequest): Uni<JournalResponse>
 
     @POST
@@ -72,3 +86,19 @@ data class JournalLineRequest(
 data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
 
 data class JournalResponse(val id: UUID, val transactionId: UUID, val status: String)
+
+data class BranchPaymentRequest(
+    val idempotencyKey: String,
+    val transactionId: UUID,
+    val bankId: UUID,
+    val sourceAccountId: UUID?,
+    val targetAccountId: UUID?,
+    val sourceBookId: UUID?,
+    val targetBookId: UUID?,
+    val amount: BigDecimal,
+    val currency: String,
+    val entryDate: java.time.LocalDate,
+    val valueDate: java.time.LocalDate,
+    val createdBy: UUID,
+)
+data class BranchPaymentReceipt(val transactionId: UUID, val bankId: UUID, val journalIds: List<UUID?>)

@@ -1215,6 +1215,9 @@ Rollback: revert the commit; nothing is migrated and nothing calls the route.
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `ACCOUNT_SERVICE_URL=https://account-service.accounts.svc:8443`. The caller and route are not new. The read is the CRS/FATCA `/active` roster under `service-account-openbank-tax-reporting` (ROLE_API), already admitted and tested in `account_rest_ext.rego`. Before this the client config never bound (it was nested under `kafka:`, #16056), so the edge existed only on paper. Transport is the private-CA mTLS listener: client cert `tax-reporting-internal-tls`, server hostname verified, bearer-only auth permission (#12511), so the certificate is transport auth and never an identity. Residual risk: none new. The ingress allow-list widens by one namespace, and authz still pins the principal id.
 
+## ADR-0380 B2: Transaction booking-context reader
+
+Transaction now reads Account by id with its named `openbank-transaction` M2M identity to pin the authoritative immutable bank/establishment/host/mode before payment persistence. The OPA grant allows account.read only, with no list or lifecycle writes. The existing Account response carries other account metadata, so compromise of that credential is a confidentiality risk; the adapter exposes only id and booking context and records no customer payload. Returned id must match the requested account. Unknown attribution blocks a branch pair, and reader failure blocks a new write. This grant does not approve a country or authorize a payment. Independent security/GDPR review remains required.
 
 ## Market restrictions on account commitment (ADR-0380)
 

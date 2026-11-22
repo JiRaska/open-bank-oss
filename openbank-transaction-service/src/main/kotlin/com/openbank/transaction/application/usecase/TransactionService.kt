@@ -72,6 +72,15 @@ class TransactionService(
     @Inject
     lateinit var tracer: Tracer
 
+    @Inject
+    lateinit var accountBookings: com.openbank.transaction.application.port.out.AccountBookingPort
+
+    @Inject
+    lateinit var branchDispatch: com.openbank.transaction.application.workflow.BranchPaymentDispatch
+
+    @Inject
+    lateinit var branchReversals: BranchReversalService
+
     /**
      * Public constructor kept stable for the unit tests that construct this class by hand
      * with a mock WorkflowClient (Provider wraps it without changing their call sites).
@@ -216,6 +225,14 @@ class TransactionService(
             )
         }
 
+        val sourceContext = command.sourceAccountId?.let {
+            accountBookings.context(it, command.synthetic, amount.currency)
+        }
+        val targetContext = command.targetAccountId?.let {
+            accountBookings.context(it, command.synthetic, amount.currency)
+        }
+        validateBranchRoute(command, sourceContext, targetContext, amount, baseAmount)
+
         val transaction = Transaction(
             id = UUID.randomUUID(),
             referenceNumber = generateReferenceNumber(),
@@ -243,6 +260,8 @@ class TransactionService(
             reversalOf = command.reversalOf,
             isReversal = command.type == TransactionType.REVERSAL,
             synthetic = command.synthetic,
+            sourceBookingContext = sourceContext,
+            targetBookingContext = targetContext,
         )
 
         val saved = try {
@@ -259,6 +278,11 @@ class TransactionService(
             return recoverConcurrentReplay(e, command)
         } catch (e: PgException) {
             return recoverConcurrentReplay(e, command)
+        }
+
+        if (listOfNotNull(saved.sourceBookingContext, saved.targetBookingContext).any { it.mode == "BRANCH" }) {
+            branchDispatch.start(saved.id)
+            return transactionRepository.findById(saved.id) ?: saved
         }
 
         // ADR-0120 Phase 5: Temporal is the sole orchestrator — PaymentSagaOrchestrator removed.
@@ -293,9 +317,22 @@ class TransactionService(
         val original = transactionRepository.findById(command.originalTransactionId)
         // Idempotency: return the existing reversal in the same origin context.
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) return existing.verifyReplayOrigin(original?.synthetic == true)
+        if (existing != null) {
+            if (listOfNotNull(original?.sourceBookingContext, original?.targetBookingContext).any {
+                    it.mode == "BRANCH"
+                }
+            ) {
+                check(existing.isReversal && existing.reversalOf == original?.id) {
+                    "Idempotency key belongs to a different reversal"
+                }
+            }
+            return existing.verifyReplayOrigin(original?.synthetic == true)
+        }
 
         requireNotNull(original) { "Transaction ${command.originalTransactionId} not found" }
+        if (listOfNotNull(original.sourceBookingContext, original.targetBookingContext).any { it.mode == "BRANCH" }) {
+            return branchReversals.reverse(original, command)
+        }
         check(original.status == TransactionStatus.COMPLETED) {
             "Cannot reverse a ${original.status} transaction"
         }
@@ -325,7 +362,9 @@ class TransactionService(
             InitiateTransactionCommand(
                 idempotencyKey = command.idempotencyKey,
                 type = TransactionType.REVERSAL,
-                sourceAccountId = null,
+                sourceAccountId = original.targetAccountId.takeIf {
+                    original.sourceBookingContext?.mode == "BRANCH" && original.targetBookingContext?.mode == "BRANCH"
+                },
                 targetAccountId = targetAccountId,
                 amount = original.amount.amount,
                 currencyCode = original.amount.currency.code,
@@ -448,3 +487,23 @@ class TransactionNotFoundException(message: String) : RuntimeException(message)
  */
 class TransactionUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class FxRateUnavailableException(message: String) : RuntimeException(message)
+
+private fun validateBranchRoute(
+    command: InitiateTransactionCommand,
+    source: com.openbank.libs.market.BookingContext?,
+    target: com.openbank.libs.market.BookingContext?,
+    amount: Money,
+    base: Money,
+) {
+    if (listOfNotNull(source, target).none { it.mode == "BRANCH" }) return
+    com.openbank.libs.market.BranchPaymentCurrency.of(amount.currency.code)
+    check(command.sourceAccountId == null || command.sourceAccountId != command.targetAccountId) {
+        "Branch payment requires distinct accounts"
+    }
+    check(command.sourceAccountId == null || source?.mode == "BRANCH") { "Source branch attribution is unknown" }
+    check(command.targetAccountId == null || target?.mode == "BRANCH") { "Target branch attribution is unknown" }
+    check(source == null || target == null || source.bankId == target.bankId) {
+        "An internal transfer must stay in one bank"
+    }
+    check(amount.currency == base.currency) { "Branch FX payments require a separately verified FX route" }
+}

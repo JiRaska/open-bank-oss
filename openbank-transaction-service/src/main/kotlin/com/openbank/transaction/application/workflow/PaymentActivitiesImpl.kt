@@ -6,17 +6,20 @@ package com.openbank.transaction.application.workflow
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.out.BalanceCoverPort
+import com.openbank.transaction.application.port.out.InsufficientPaymentCover
 import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.usecase.PaymentJournalFactory
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.infrastructure.client.BranchPaymentRequest
 import com.openbank.transaction.infrastructure.client.LedgerCallGuard
 import com.openbank.transaction.infrastructure.client.PostJournalRequest
 import com.openbank.transaction.infrastructure.client.ReverseJournalRequest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.temporal.failure.ApplicationFailure
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,20 +71,77 @@ open class PaymentActivitiesImpl(
             return@runOnVertxContext PaymentActivities.SENTINEL_HOLD
         }
         val cover = transaction.baseAmount
-        balanceCoverPort.placeHold(
-            accountId = coverAccount,
-            amount = cover.amount,
-            currency = cover.currency.code,
-            reason = "payment ${transaction.id}",
-            referenceId = transaction.id.toString(),
-            ttlSeconds = HOLD_TTL_SECONDS,
-        )
+        val branch = transaction.sourceBookingContext?.mode == "BRANCH"
+        try {
+            balanceCoverPort.placeHold(
+                accountId = coverAccount,
+                amount = cover.amount,
+                currency = cover.currency.code,
+                reason = "payment ${transaction.id}",
+                referenceId = transaction.id.toString(),
+                ttlSeconds = if (branch) null else HOLD_TTL_SECONDS,
+            )
+        } catch (ex: InsufficientPaymentCover) {
+            if (!branch) throw ex
+            throw ApplicationFailure.newNonRetryableFailure(
+                "Insufficient funds for payment cover",
+                InsufficientPaymentCover::class.java.simpleName,
+            )
+        }
     }
 
     override fun postJournal(transactionId: UUID): UUID = runOnVertxContext {
         val transaction = loadTransaction(transactionId)
-        ledgerCallGuard.postJournal(buildJournalRequest(transaction), synthetic = transaction.synthetic)
-            .awaitSuspending().id
+        if (listOfNotNull(transaction.sourceBookingContext, transaction.targetBookingContext).any {
+                it.mode == "BRANCH"
+            }
+        ) {
+            postBranchPayment(transaction)
+        } else {
+            ledgerCallGuard.postJournal(buildJournalRequest(transaction), synthetic = transaction.synthetic)
+                .awaitSuspending().id
+        }
+    }
+
+    private suspend fun postBranchPayment(transaction: Transaction): UUID {
+        val source = transaction.sourceBookingContext
+        val target = transaction.targetBookingContext
+        val bank = checkNotNull(source ?: target).bankId
+        check(transaction.sourceAccountId == null || source?.mode == "BRANCH") { "Unknown source branch" }
+        check(transaction.targetAccountId == null || target?.mode == "BRANCH") { "Unknown target branch" }
+        check(source == null || target == null || source.bankId == target.bankId) { "Different legal banks" }
+        check(transaction.amount.currency == transaction.baseAmount.currency) { "Unverified branch FX route" }
+        val request = BranchPaymentRequest(
+            idempotencyKey = "payment:${transaction.id}",
+            transactionId = transaction.id,
+            bankId = bank,
+            sourceAccountId = transaction.sourceAccountId,
+            targetAccountId = transaction.targetAccountId,
+            sourceBookId = source?.establishmentId,
+            targetBookId = target?.establishmentId,
+            amount = transaction.amount.amount,
+            currency = transaction.amount.currency.code,
+            entryDate = transaction.bookingDate,
+            valueDate = transaction.valueDate,
+            createdBy = systemActor,
+        )
+        val receipt = ledgerCallGuard.postBranchPayment(request, transaction.synthetic).awaitSuspending()
+        check(receipt.transactionId == transaction.id && receipt.bankId == bank) {
+            "Branch payment receipt has a different scope"
+        }
+        val expected = if (source != null &&
+            target != null &&
+            source.establishmentId != target.establishmentId
+        ) {
+            2
+        } else {
+            1
+        }
+        val journalIds = receipt.journalIds.map { checkNotNull(it) { "Branch receipt contains a missing journal" } }
+        check(journalIds.size == expected && journalIds.distinct().size == expected) {
+            "Incomplete branch payment receipt"
+        }
+        return journalIds.first()
     }
 
     // Best-effort compensation: balance-service TTL-expires the hold and the ledger reversal is

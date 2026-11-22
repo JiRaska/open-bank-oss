@@ -298,3 +298,13 @@ test_other_service_cannot_read_gsft_roster if {
 	principal := object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "another-client"})
 	not rest.allow.allow with input as {"principal": principal, "action": "account.gsft.roster"}
 }
+
+test_transaction_reads_booking_context if {
+	rest.allow with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-transaction", "client_id": "openbank-transaction", "roles": ["ROLE_API"]}, "action": "account.read"}
+		with data.rules as rules_mock
+}
+
+test_transaction_cannot_mutate_account if {
+	not rest.allow with input as {"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-transaction", "client_id": "openbank-transaction", "roles": ["ROLE_API"]}, "action": "account.update"}
+		with data.rules as rules_mock
+}

@@ -1,0 +1,55 @@
+{
+  "consumer": {
+    "name": "openbank-transaction-service"
+  },
+  "interactions": [
+    {
+      "description": "Transaction reads immutable account identity before pinning a payment route",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-555555555555"
+      },
+      "response": {
+        "body": {
+          "currencyCode": "CZK",
+          "id": "11111111-2222-4333-8444-555555555555"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "Transaction cannot obtain routing for a missing account",
+      "providerStates": [
+        {
+          "name": "no account exists for the requested account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-000000000999"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.7"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

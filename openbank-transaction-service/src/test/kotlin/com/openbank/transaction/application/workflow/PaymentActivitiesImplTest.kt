@@ -55,6 +55,26 @@ class PaymentActivitiesImplTest {
     }
 
     @Test
+    fun `an incomplete branch receipt cannot acknowledge settlement`(): Unit = runBlocking {
+        val bank = UUID.randomUUID()
+        val tx = transaction(sourceAccountId = UUID.randomUUID()).copy(
+            targetAccountId = UUID.randomUUID(),
+            sourceBookingContext = com.openbank.libs.market.BookingContext(bank, UUID.randomUUID(), "AT", "BRANCH"),
+            targetBookingContext = com.openbank.libs.market.BookingContext(bank, UUID.randomUUID(), "SK", "BRANCH"),
+        )
+        coEvery { transactionRepository.findById(tx.id) } returns tx
+        val receipt = com.openbank.transaction.infrastructure.client.BranchPaymentReceipt(
+            tx.id,
+            bank,
+            listOf(null, UUID.randomUUID()),
+        )
+        every { ledgerCallGuard.postBranchPayment(any(), false) } returns Uni.createFrom().item(receipt)
+        val failure = runCatching { activities.postJournal(tx.id) }.exceptionOrNull()
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
+    }
+
+    @Test
     fun `markCompleted writes COMPLETED and the completed outbox message in one call`(): Unit = runBlocking {
         val tx = transaction(sourceAccountId = UUID.randomUUID())
         coEvery { transactionRepository.findById(tx.id) } returns tx
