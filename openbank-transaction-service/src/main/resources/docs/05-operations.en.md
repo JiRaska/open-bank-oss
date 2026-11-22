@@ -75,6 +75,7 @@ Exact latency SLO numbers are TBD until measured in the sandbox; the saga's down
 ### `transactions` partition horizon (#17101)
 - `transactions` is RANGE-partitioned by `booking_date` per year. V25 pre-creates 2027/2028; `TransactionPartitionMaintainer` (`suspend` `@Scheduled`, `every: 24h`, cluster-locked) keeps current year + `openbank.transaction.partition.future-years` (default 2) created. Retention is audited only, never executed.
 - Every action is recorded in append-only `partition_lifecycle_audit`. A `DEFAULT_NONEMPTY` row means bookings landed in `transactions_default`: the matching year partition can then no longer be created until those rows are moved out in a maintenance window. V25 fails the migration with an explicit message in that state instead of moving data.
+- Partition DDL runs under `SET LOCAL lock_timeout` (`openbank.transaction.partition.lock-timeout`, default `5s`, must be > 0). `CREATE TABLE ... PARTITION OF` needs ACCESS EXCLUSIVE on `transactions`; a long transaction holding a lock on it makes the DDL fail with SQLState 55P03 after the timeout rather than queueing every booking behind it. The pass records no success (`transaction-partition-maintenance` liveness alert) and the next tick retries.
 - A dead maintainer shows as `WorkflowLivenessStale` on `openbank_workflow_*{workflow="transaction-partition-maintenance"}`.
 
 ### FX rate unavailable
