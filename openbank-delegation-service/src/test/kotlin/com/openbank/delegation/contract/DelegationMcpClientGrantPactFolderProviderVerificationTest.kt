@@ -19,6 +19,7 @@ import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.integration.SpendReservationOutboxWriteIT
 import com.openbank.delegation.it.PostgresTestResource
+import io.quarkus.redis.datasource.RedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -30,10 +31,13 @@ import io.quarkus.test.security.oidc.OidcSecurity
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
+import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.sql.Connection
+import java.sql.DriverManager
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -78,6 +82,9 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
 
     @Inject
     lateinit var testIdentity: TestIdentityAssociation
+
+    @Inject
+    lateinit var redis: RedisDataSource
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -143,6 +150,69 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
 
     @State("no MCP_CLIENT grant exists for the pact party, client and key")
     fun noGrant() = answer(emptyList())
+
+    /*
+     * Payment-proposal create (ADR-0383 D6). Unlike resolve, `PaymentProposalService` reads the
+     * grant straight from `DelegationRepository`, so these states seed the REAL table over JDBC —
+     * the write paths refuse an MCP_CLIENT grant (dormancy guard), the database does not. Every
+     * proposal runs the real service, hash and outbox.
+     *
+     * Both create interactions carry the same Idempotency-Key and body, so a key left in Redis by
+     * the first would replay its answer to the second; each state clears the create keys first.
+     * Previous grants for the pact party are revoked rather than deleted (DELETE is not a legal
+     * transition), so a fresh grant id is what the create finds and nothing deduplicates.
+     */
+    @State("an active MCP_CLIENT propose grant exists for the pact party, client, key and account")
+    fun activeProposeGrant() {
+        resetProposeState()
+        val grant = UUID.randomUUID()
+        jdbc().use { c ->
+            c.prepareStatement(
+                """
+                insert into delegation_grants
+                    (id, grantor_party_id, grantee_party_id, resource_type, resource_id, valid_from, status,
+                     grantee_type, grantee_client_id, grantee_key_thumbprint)
+                values (?, ?, ?, 'ACCOUNT', ?, now() - interval '1 day', 'ACTIVE', 'MCP_CLIENT', ?, ?)
+                """.trimIndent(),
+            ).use { s ->
+                s.setObject(1, grant)
+                s.setObject(2, PARTY)
+                s.setObject(3, DelegationGrant.mcpClientGranteeId(CLIENT))
+                s.setObject(4, ACCOUNT)
+                s.setString(5, CLIENT)
+                s.setString(6, JKT)
+                s.executeUpdate()
+            }
+            c.prepareStatement(
+                "insert into delegation_capabilities (grant_id, capability) values (?, 'ACCOUNT_PROPOSE_PAYMENT')",
+            ).use { s ->
+                s.setObject(1, grant)
+                s.executeUpdate()
+            }
+        }
+    }
+
+    @State("no MCP_CLIENT propose grant exists for the pact party, client, key and account")
+    fun noProposeGrant() = resetProposeState()
+
+    private fun resetProposeState() {
+        val keys = redis.key().keys("*payment-proposal:create:*")
+        if (keys.isNotEmpty()) redis.key().del(*keys.toTypedArray())
+        jdbc().use { c ->
+            c.prepareStatement(
+                "update delegation_grants set status = 'REVOKED' where grantor_party_id = ? and status = 'ACTIVE'",
+            ).use { s ->
+                s.setObject(1, PARTY)
+                s.executeUpdate()
+            }
+        }
+    }
+
+    private fun jdbc(): Connection = DriverManager.getConnection(
+        ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java),
+        "openbank",
+        "openbank_secret",
+    )
 
     companion object {
         val PARTY: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000001")

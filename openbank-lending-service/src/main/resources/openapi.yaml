@@ -46,7 +46,7 @@ info:
   # 1.42.0 was taken on main by #15656 after this branch was cut.
   # 1.43.0 -> 1.44.0: additive — signatureRecordedAt, the bank-recorded signature receipt time, on
   # the application response (#9890). 1.42.0 was taken on main by #15656 after this branch was cut.
-  version: 1.44.0
+  version: 1.45.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -2513,6 +2513,11 @@ components:
           description: >-
             Optional published catalog offering. When supplied, its immutable revision sets the
             rate, currency, tenor and amortization constraints and is retained with the application.
+        passportGrantId:
+          type: string
+          format: uuid
+          nullable: true
+          description: FOS grant selector. The catalogue resolves the route for the subject and pinned offering revision.
     LoanApplicationResponse:
       type: object
       required: [requestedAmount]
