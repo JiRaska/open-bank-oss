@@ -10408,7 +10408,7 @@ def real_tree_self_test(check) -> None:
     check("retry planner: current CI declares the selected receiver and direct gate dependency",
           "name: Receive trusted ruleset evidence" in workflow
           and "needs: [agent-admission, ruleset-evidence]" in workflow
-          and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
+          and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-e2e, ui-coverage, ui-rbac-contract]" in workflow)
     real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     real_mods = shareable_modules(Git(real_root), "HEAD")
     check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
