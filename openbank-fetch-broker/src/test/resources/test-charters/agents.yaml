@@ -1,0 +1,26 @@
+agents:
+  - id: web-reader
+    enabled: true
+    tools:
+      allow: [read.public_web, draft.ticket]
+    data_scope:
+      public_web:
+        hosts:
+          - example.org
+          - { host: js.example.org, render: js }
+          - "*.example.net"
+          - 192.0.2.10
+  - id: opa-denied
+    enabled: true
+    tools:
+      allow: [read.public_web]
+    data_scope:
+      public_web:
+        hosts: [example.org]
+  - id: disabled-reader
+    enabled: false
+    tools:
+      allow: [read.public_web]
+    data_scope:
+      public_web:
+        hosts: [example.org]

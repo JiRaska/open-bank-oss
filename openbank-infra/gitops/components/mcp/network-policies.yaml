@@ -71,3 +71,37 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-valkey-ingress-allow-list
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: platform
+    open-bank.tech/derived: gen-network-policies
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-valkey
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-service
+      ports:
+        - protocol: TCP
+          port: 6379
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/instance: kube-prometheus-stack-prometheus
+      ports:
+        - protocol: TCP
+          port: 9121
