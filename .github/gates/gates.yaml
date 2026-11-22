@@ -2251,7 +2251,9 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
-    selftest_inputs: [".github/scripts/check-license-headers.py"]
+    # evals/ declared (#16623): the self-test walks every SPDX-headered source file, and
+    # evals/mcp-redteam added the first .sh/.js/.yaml under evals/, which the trace caught.
+    selftest_inputs: [".github/scripts/check-license-headers.py", "evals/"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -2950,6 +2952,48 @@ gates:
     run: |
       python3 .github/scripts/run-evals.py --require-recordings
 
+  # ADR-0383 D7 / #16617 layer 4 — MCP prompt-injection red-team pack, split in two so neither
+  # gate claims more than it measures. The deterministic server half is JUnit in
+  # openbank-mcp-service (PoisonedToolResultRedTeamTest).
+  #
+  # (1) ENFORCED: needs no model. Corpus <-> committed rendered fixture <-> scenarios.json <->
+  # generated promptfoo tests/tools agree, so a recording can only ever be about the bytes the
+  # server renders today. SUBJECTS = corpus items checked.
+  - id: mcp-redteam-fixture-integrity
+    name: "MCP red-team fixture integrity (ADR-0383 D7, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The model-in-the-loop pack replays a model against committed bytes; if the corpus, rendered fixture, scenarios or generated promptfoo files disagree, any verdict is about a server that no longer exists."
+    review_after: "2027-05-17"
+    budget_seconds: 30
+    # 85 corpus items today; the JUnit test pins the exact size.
+    min_subjects: 80
+    selftest: python3 .github/scripts/check-mcp-redteam-fixture-integrity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-redteam-fixture-integrity.py", ".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/check-mcp-redteam-fixture-integrity.py
+
+  # (2) ADVISORY (ADR-0144, rules.yaml: mcp_redteam_model_verdict): the model verdict. Until the
+  # owner commits a first live recording it evaluates NOTHING — it prints "model verdict: NOT
+  # MEASURED" and SUBJECTS=0, which is why it cannot be enforced yet. Once a recording exists it
+  # must cover every scenario (partial => fail); a moved scenario digest is STALE => fail.
+  - id: mcp-redteam-model-verdict
+    name: "MCP red-team model verdict (ADR-0383 D7, advisory)"
+    group: registry
+    mode: advisory
+    verified: "2026-11-17 — 0 of 45 scenarios evaluated: no recording committed (CI holds no model keys); self-test proves partial/stale/failing recordings fail"
+    rationale: "Whether a model given a poisoned tool result proposes an unrequested payment, fetches beyond the question or repeats an attacker URL can only be measured against a recorded model run; CI holds no keys."
+    review_after: "2026-12-15"
+    budget_seconds: 30
+    # 45 scenarios; today 0 are evaluated, so the floor reports it (advisory) until recorded.
+    min_subjects: 45
+    selftest: python3 .github/scripts/run-mcp-redteam-evals.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/run-mcp-redteam-evals.py
+
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
   # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
@@ -3172,6 +3216,30 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-agent-bounded-write-surface.py
+
+  # ADR-0387 (issue #16754): agents read the public web only through the fetch broker's
+  # `web.fetch` tool (resource read.public_web). The network layer cannot carry the host
+  # allowlist (aws-network-policy-agent matches CIDRs, not hostnames), so the charter is the
+  # control: explicit HTTPS hostnames, no write/execute next to web access, and the renderer
+  # credential mounted by the broker alone.
+  #
+  # ENFORCED. Pure python, one file read plus a gitops scan, <1 s. Falsified by effect on
+  # 2026-11-18: granting read.public_web to regulatory-obligations-watcher without a host list
+  # made it exit 1; the self-test covers wildcard, IP literal, scheme, upper case, write/execute
+  # tier, dead allowlist and a second secret mount.
+  - id: public-web-fetch
+    min_subjects: 15   # agent charters examined; 23 today (2026-11-18)
+    name: "public-web fetch bounded per charter (ADR-0387, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 30
+    rationale: "Fetched web content is untrusted and the host allowlist exists only in the application layer, so a wildcard host, a write tier beside web access or a second renderer-credential mount would each widen agent egress with nothing else to notice."
+    review_after: "2027-05-18"
+    selftest: python3 .github/scripts/check-public-web-fetch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-public-web-fetch.py"]
+    run: |
+      python3 .github/scripts/check-public-web-fetch.py
 
   - id: agent-model-parity
     name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
