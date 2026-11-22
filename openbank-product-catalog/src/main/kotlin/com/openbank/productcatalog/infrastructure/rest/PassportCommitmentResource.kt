@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.infrastructure.rest
 
+import com.openbank.libs.market.PassportMode
 import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import io.quarkus.security.identity.SecurityIdentity
@@ -33,7 +34,8 @@ class PassportCommitmentResource(
     suspend fun admit(request: PassportCommitmentRequest): Response {
         requireLendingClient()
         validateCommitment(request)
-        val receipt = pool.preparedQuery(ADMIT).execute(request.arguments().addString(schemaId))
+        val arguments = request.arguments().addString(schemaId).addString(request.mode.name)
+        val receipt = pool.preparedQuery(ADMIT).execute(arguments)
             .awaitSuspending().first().getOffsetDateTime(0)
         if (receipt == null) {
             val terminal = pool.preparedQuery(REFUSED)
@@ -45,7 +47,7 @@ class PassportCommitmentResource(
                         request.partyId,
                         request.revisionId,
                         request.binding,
-                    ),
+                    ).addString(request.mode.name),
                 )
                 .awaitSuspending().first().getBoolean(0)
             if (terminal) return Response.status(Response.Status.CONFLICT).header(DECISION_HEADER, "refused").build()
@@ -59,7 +61,7 @@ class PassportCommitmentResource(
     suspend fun receipt(request: PassportCommitmentRequest): Response {
         requireLendingClient()
         validateCommitment(request)
-        val found = pool.preparedQuery(CONSUMED_RECEIPT).execute(request.arguments())
+        val found = pool.preparedQuery(CONSUMED_RECEIPT).execute(request.arguments().addString(request.mode.name))
             .awaitSuspending().first().getBoolean(0)
         return if (found) Response.noContent().build() else Response.status(Response.Status.NOT_FOUND).build()
     }
@@ -76,6 +78,7 @@ class PassportCommitmentResource(
             request.revisionId,
             request.revisionContentHash,
             schemaId,
+            request.mode.name,
         )
         val route = pool.preparedQuery(ROUTE).execute(arguments)
             .awaitSuspending().firstOrNull() ?: throw CatalogConflictException("passport route unavailable")
@@ -86,6 +89,7 @@ class PassportCommitmentResource(
             channel = route.getString("channel"),
             customerSegment = route.getString("customer_segment"),
             packSetDigest = route.getString("pack_set_digest"),
+            mode = PassportMode.valueOf(route.getString("mode")),
         )
     }
 
@@ -113,7 +117,7 @@ class PassportCommitmentResource(
 
     private companion object {
         val ADMIT = """
-            SELECT admit_passport_commitment($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            SELECT admit_passport_commitment($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         """.trimIndent()
         val OPERATIONS = setOf("SIGN", "DISBURSE")
         val COUNTRY = Regex("^[A-Z]{2}$")
@@ -121,13 +125,14 @@ class PassportCommitmentResource(
         const val DECISION_HEADER = "X-FOS-Decision"
         val REFUSED = """
             SELECT EXISTS (
-                SELECT 1 FROM passport_commitment_refusals WHERE operation = $1 AND operation_id = $2
-                    AND grant_id = $3 AND party_id = $4 AND product_revision_id = $5 AND binding_digest = $6
+                SELECT 1 FROM passport_commitment_refusals f JOIN passport_grants g ON g.id = f.grant_id
+                WHERE operation = $1 AND operation_id = $2 AND grant_id = $3 AND party_id = $4
+                    AND product_revision_id = $5 AND binding_digest = $6 AND g.mode = $7
             )
         """.trimIndent()
         val ROUTE = """
             SELECT g.host_country::TEXT AS host_country, g.bank_id, g.establishment_id, g.channel,
-                g.customer_segment, g.pack_set_digest
+                g.customer_segment, g.pack_set_digest, g.mode
             FROM passport_grants g
             JOIN passport_grant_subject_evidence e ON e.grant_id = g.id
             JOIN catalog_offerings o ON o.id = g.offering_id
@@ -136,7 +141,7 @@ class PassportCommitmentResource(
                 AND r.id = $3 AND r.content_hash::TEXT = $4 AND r.schema_id = $5
                 AND r.state = 'PUBLISHED' AND r.effective_from <= statement_timestamp()
                 AND (r.effective_to IS NULL OR r.effective_to > statement_timestamp())
-                AND g.mode = 'FOS' AND g.approved_by IS NOT NULL AND g.revoked_at IS NULL
+                AND g.mode = $6 AND g.approved_by IS NOT NULL AND g.revoked_at IS NULL
                 AND g.effective_from <= statement_timestamp() AND g.effective_until > statement_timestamp()
                 AND o.market -> 'countries' ? g.host_country::TEXT
         """.trimIndent()
@@ -149,7 +154,7 @@ class PassportCommitmentResource(
                     AND g.host_country::TEXT = $7 AND g.bank_id = $8 AND g.establishment_id = $9
                     AND g.channel = $10 AND g.customer_segment = $11 AND g.pack_set_digest = $12
                     AND product_revision_id = $5 AND binding_digest = $6 AND consumed_at IS NOT NULL
-                    AND r.content_hash::TEXT = $13
+                    AND r.content_hash::TEXT = $13 AND g.mode = $14
             )
         """.trimIndent()
     }
@@ -169,6 +174,7 @@ data class PassportCommitmentRequest(
     val channel: String,
     val customerSegment: String,
     val packSetDigest: String,
+    val mode: PassportMode = PassportMode.FOS,
 )
 
 data class PassportRouteRequest(
@@ -176,6 +182,7 @@ data class PassportRouteRequest(
     val partyId: UUID,
     val revisionId: UUID,
     val revisionContentHash: String,
+    val mode: PassportMode = PassportMode.FOS,
 )
 
 data class PassportCommitmentRoute(
@@ -185,4 +192,5 @@ data class PassportCommitmentRoute(
     val channel: String,
     val customerSegment: String,
     val packSetDigest: String,
+    val mode: PassportMode = PassportMode.FOS,
 )

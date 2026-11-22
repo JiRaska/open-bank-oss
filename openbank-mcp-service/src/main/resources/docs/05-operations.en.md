@@ -108,6 +108,22 @@ The only caller in the tree today is admin-ui's OBO route, which exchanges for `
 
 If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with HTTP 500 rather than 401. That is fail-closed (nothing reaches the endpoint) and is left as is here.
 
+## Staff-root Authorization allowlist (#16590, #17099)
+
+On the staff root `/mcp`, an `Authorization` header is optional, but if it is present it must be exactly
+**one** header whose whole value is `Bearer <b64token>` (RFC 6750 §2.1). The scheme is case-insensitive,
+followed by a single space and `[A-Za-z0-9-._~+/]+=*`, with nothing else. Staff Keycloak JWTs fit this.
+
+| Request | Answer |
+|---|---|
+| No `Authorization` header, or one valid `Bearer <b64token>` | Normal handling (audience check, then dispatch) |
+| A value starting with the `DPoP` scheme (any case, any whitespace), or a valid Bearer issued by the customers realm | 401 `invalid_token`, pointing the client at `/customer/mcp` |
+| Anything else: comma lists, tabs, extra or non-ASCII spaces, other schemes such as `Basic`, an empty token | 400 `invalid_request` |
+| More than one `Authorization` header, an unreadable header, or no injected request | 400 `invalid_request` (fail closed) |
+
+The check runs before the audience check and the rate limiter. A 400 here means the client sent a malformed
+credential, not that the token was rejected.
+
 ## Throttling and request bounds (ADR-0383)
 
 `McpRateLimiter` runs BEFORE the policy decision, so a flood of calls that would be denied anyway costs no PDP round trip.
@@ -150,6 +166,47 @@ With the customer channel on, an admitted customer sees only the read tools its 
 - **Token exchange.** Each read exchanges the customer's own token at the customers realm (RFC 8693) for a token with one audience (`openbank-balance-service` or `openbank-transaction-service`) and one read scope, living at most 60 s. The requester client is `mcp.customer.exchange.client-id` (default `openbank-mcp-service`); its secret is read only from `MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET` (OpenBao `keycloak/mcp-service-customer-exchange`). With no secret set, every customer read is refused. The realm side (requester, audience clients, scopes) is derived from the allowlist's `exchange:` block by `gen-mcp-realm-clients.py` and held to it by the `mcp-client-realm-parity` gate.
 - **Audit.** Every customer call is audited under the customer's subject; an allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 drops the cached grant.
 - **Not yet working end to end:** the downstream services accept only the staff realm today, so exchanged customer tokens are refused there until ADR-0383 P5 lands. Every failure on this path is a refusal.
+
+## Customer-channel Valkey (`mcp-valkey`)
+
+The customer MCP channel's shared DPoP replay store and D5.3 budgets live in `mcp-valkey`
+(namespace `platform`, `openbank-infra/gitops/components/mcp/valkey.yaml`). It is deliberately
+ephemeral, so:
+
+- **A restart, reschedule or OOM-kill empties it.** For up to 365 s afterwards a proof that was
+  already used can be accepted once more, and every customer budget restarts from zero. Do not roll
+  it during customer traffic; if it restarts unexpectedly, treat the next 365 s as a reduced-assurance
+  window and check `mcp-valkey` for OOM (`kubectl -n platform describe pod -l app.kubernetes.io/name=mcp-valkey`).
+- **Full store:** `--maxmemory 128mb` with `noeviction` makes writes fail rather than evict; the channel
+  then answers 503 `replay_store_unavailable`. Never change the policy to an evicting one — eviction
+  silently reopens replay.
+- **Secrets:** generated in-cluster, nothing to provision. Three ESO `Password` generators
+  (`refreshPolicy: CreatedOnce`, 48 letters/digits each) feed three Secrets: `mcp-customer-store-valkey`
+  (`valkey_password`), `mcp-customer-store-hmac` (`key_hmac_secret`) and `mcp-customer-store-metrics`
+  (`metrics_password`, the exporter's ACL user). No copy exists outside the
+  cluster. Until ESO creates them the Valkey pod waits in `CreateContainerConfigError` (by design: it
+  never starts unauthenticated) and mcp-service runs with the customer channel off; enabling the
+  channel without them refuses to boot.
+- **Auth:** the Valkey container reads its passwords from files mounted from the Secrets (tmpfs,
+  mode 0440), validates them (`[A-Za-z0-9]+`, non-empty), renders them into a tmpfs config file and
+  `exec`s `valkey-server`: they are in neither the process arguments, the container environment, nor
+  the node's disk. The exporter's least-privilege `metrics` password is an env var in its own
+  container (redis_exporter has no single-target password file).
+- **Rollout:** merging this restarts the live mcp-service pod once (its env gains the Valkey host,
+  password and HMAC refs; terminate-first, ~160 s unavailable). mcp-valkey is created fresh.
+- **Exporter:** the `redis_exporter` sidecar uses the `metrics` ACL user (own generated password in
+  `mcp-customer-store-metrics`, introspection commands only, no `CONFIG GET`), its `/scrape`
+  multi-target endpoint is disabled, and port 9121 admits only the Prometheus pods.
+- **Alerts:** `MCPValkeyMemoryNearMax` (> 80% of maxmemory for 5m, warning) and
+  `MCPValkeyMemoryFull` (> 95% for 2m, critical) from the redis_exporter sidecar.
+- **Rotation** (customer channel drained):
+  - Valkey password: delete Secret `platform/mcp-customer-store-valkey` (ESO regenerates it), then
+    restart `mcp-valkey` and every mcp-service pod. The Valkey restart empties the store: live replay
+    entries and budgets reset.
+  - Metrics password: delete Secret `platform/mcp-customer-store-metrics`, then restart `mcp-valkey`
+    (same store-emptying effect).
+  - Key HMAC secret: delete Secret `platform/mcp-customer-store-hmac`, then restart every mcp-service
+    pod. Keys hashed with the old secret are orphaned until they expire (at most a day).
 
 ## The edge hop: mTLS identity, not IP (#16847)
 
@@ -212,3 +269,13 @@ from a peer header.
 through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
 reads the same series through the delegations MCP-channel view. Alert thresholds for the
 channel live with the fleet alerting rules, not in this service.
+
+### Why a tool call failed: `openbank_mcp_tool_call_failures_total`
+
+The tool-call counter records `result="FAILURE"` without a reason, so a client's bad arguments
+and a downstream fault look the same there. Every failed `tools/call` (and a PDP outage,
+`decision=UNAVAILABLE`) also increments `openbank_mcp_tool_call_failures_total{tool,kind}`,
+where `kind` is a closed set: `invalid_params` (client error), `unavailable` (an advertised tool
+with nothing behind it yet) and `error` (a server-side fault, also the default for any unmapped
+reason, and what a PDP outage maps to). The customer-channel availability SLO
+(`pyrra-slo-mcp-customer.yaml`) counts `kind="error"` only.

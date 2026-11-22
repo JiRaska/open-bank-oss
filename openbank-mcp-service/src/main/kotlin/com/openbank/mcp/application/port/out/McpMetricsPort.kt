@@ -56,6 +56,14 @@ interface McpMetricsPort {
     )
 
     /**
+     * Record WHY one completed `tools/call` failed (`result=FAILURE`, or a PDP outage: `decision=UNAVAILABLE`). The tool-call counter cannot say:
+     * it carries no reason, so a client's bad arguments and a downstream fault look identical there.
+     * Only [ToolFailureKind.ERROR] is a server-side fault; an availability SLI must count that alone.
+     * Default no-op so test doubles need not implement it.
+     */
+    fun toolCallFailed(tool: String, kind: ToolFailureKind, channel: ChannelTags = ChannelTags.AGENT) = Unit
+
+    /**
      * Record one customer-channel request refused before it reached a tool (ADR-0384 D1). The
      * reason carries its layer, so an impossible (layer, reason) pair cannot be expressed. Counts a
      * REFUSAL observed by this server — never a judgement about the caller. Default no-op so test
@@ -80,6 +88,31 @@ interface McpMetricsPort {
      * doubles need not implement it; the Micrometer adapter overrides it.
      */
     fun inputRefused(reason: InputRefusal) = Unit
+
+    /** Why a tool call ended in FAILURE. A closed enum, so safe as a tag. */
+    enum class ToolFailureKind {
+        /** The caller's arguments were rejected (JSON-RPC invalid params): a client error. */
+        INVALID_PARAMS,
+
+        /** The tool is advertised but has nothing behind it yet (a known, intended refusal). */
+        UNAVAILABLE,
+
+        /** The tool or its downstream failed: a server-side fault. Also the default for any unmapped reason. */
+        ERROR,
+        ;
+
+        companion object {
+            /** Maps the endpoint's audit reason to the closed set; anything unrecognised is a server fault. */
+            fun of(reason: String?, decision: McpCallAuditor.Decision): ToolFailureKind {
+                if (decision == McpCallAuditor.Decision.UNAVAILABLE) return ERROR
+                return when (reason) {
+                    "invalid params" -> INVALID_PARAMS
+                    "tool unavailable" -> UNAVAILABLE
+                    else -> ERROR
+                }
+            }
+        }
+    }
 
     /** Which MCP channel a call arrived on (ADR-0384 D1), derived from the resolution path, never a client claim. */
     enum class McpChannel { AGENT, OPERATOR, CUSTOMER }

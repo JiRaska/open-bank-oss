@@ -118,6 +118,37 @@ class McpMetricsAdapterTest {
     }
 
     @Test
+    fun `the Pyrra SLO series exist in a real scrape - the 1,07s bucket and the failure counter`() {
+        val prom = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        val a = McpMetricsAdapter(prom, McpCustomerClientAllowlist(listOf("acme")))
+        val customer = McpMetricsPort.ChannelTags(McpMetricsPort.McpChannel.CUSTOMER, client = "acme")
+        a.toolCallCompleted(
+            "list_accounts",
+            McpCallAuditor.Decision.ALLOW,
+            AuditResult.FAILURE,
+            Duration.ofMillis(5),
+            customer,
+        )
+        a.toolCallFailed("list_accounts", McpMetricsPort.ToolFailureKind.ERROR, customer)
+        val scrape = prom.scrape().lines()
+
+        // pyrra-slo-mcp-customer.yaml reads exactly these series; a rename here must fail this test.
+        val customerFalse = listOf("channel=\"customer\"", "synthetic=\"false\"")
+        assertThat(scrape).anyMatch { line ->
+            line.startsWith("openbank_mcp_tool_call_duration_seconds_bucket{") &&
+                (customerFalse + "le=\"1.073741824\"").all { line.contains(it) }
+        }
+        assertThat(scrape).anyMatch { line ->
+            line.startsWith("openbank_mcp_tool_call_failures_total{") &&
+                (customerFalse + "kind=\"error\"").all { line.contains(it) }
+        }
+        assertThat(scrape).anyMatch { line ->
+            line.startsWith("openbank_mcp_tool_calls_total{") &&
+                listOf("decision=\"ALLOW\"", "result=\"FAILURE\"").all { line.contains(it) }
+        }
+    }
+
+    @Test
     fun `an operator call is tagged operator with the placeholders`() {
         adapter.toolCallCompleted(
             "list_accounts",
