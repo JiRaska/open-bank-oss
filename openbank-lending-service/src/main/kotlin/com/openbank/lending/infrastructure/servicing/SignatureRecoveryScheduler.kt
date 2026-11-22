@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.servicing
 
+import com.openbank.lending.application.port.out.FosLoanOperations
 import com.openbank.lending.application.port.out.SignatureIntents
 import com.openbank.lending.application.usecase.LendingService
 import com.openbank.libs.messaging.SyntheticTaintKafkaRail
@@ -20,6 +21,7 @@ import java.time.Duration
 @ApplicationScoped
 class SignatureRecoveryScheduler(
     private val intents: SignatureIntents,
+    private val fos: FosLoanOperations,
     private val lending: LendingService,
     metrics: DomainMetrics,
 ) {
@@ -42,6 +44,16 @@ class SignatureRecoveryScheduler(
                             intent.id,
                             failure.javaClass.simpleName,
                         )
+                        Unit
+                    }.awaitSuspending()
+            }
+        }
+        fos.claimDue(BATCH_SIZE).awaitSuspending().forEach { operation ->
+            SyntheticTaintKafkaRail.withTaint(operation.command.synthetic) {
+                lending.resumeFosOperation(operation)
+                    .onFailure { failure -> failure is RuntimeException && failure !is CancellationException }
+                    .recoverWithItem { failure: Throwable ->
+                        log.warnf("FOS commitment recovery failed (%s)", failure.javaClass.simpleName)
                         Unit
                     }.awaitSuspending()
             }

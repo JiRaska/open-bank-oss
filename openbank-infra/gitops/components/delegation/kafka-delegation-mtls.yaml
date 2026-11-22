@@ -57,6 +57,12 @@ spec:
           name: openbank.delegation.approval-group-revisions
           patternType: literal
         operations: [Write, Describe]
+      # ADR-0383 D6 customer MCP payment-proposal lifecycle (its KafkaTopic is in kafka-topic.yaml).
+      - resource:
+          type: topic
+          name: openbank.delegation.payment-proposal-events
+          patternType: literal
+        operations: [Write, Describe]
       # ADR-0249 D3 amendment (#16000): settle spend reservations from domestic payment outcomes.
       # Harmless while openbank.delegation.payment-outcome-consumer.enabled is false (no channel).
       - resource:
