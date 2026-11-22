@@ -415,7 +415,8 @@ def _has_egress_type(policy: dict) -> bool:
 
 
 def load_baseline(path: pathlib.Path) -> tuple[dict[str, str], list[str]]:
-    """name -> tracking ref. Every entry must carry an issue reference (`#<n>`)."""
+    """`<namespace>/<name> <image-module>` -> tracking ref. Every entry must carry an issue reference
+    (`#<n>`) and all three identity parts: a bare name would exempt any later workload reusing it."""
     entries: dict[str, str] = {}
     errors: list[str] = []
     if not path.is_file():
@@ -424,11 +425,14 @@ def load_baseline(path: pathlib.Path) -> tuple[dict[str, str], list[str]]:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        name, _, ref = line.partition(" ")
-        m = re.search(r"#\d+", ref)
-        if not m:
-            errors.append(f"{path.relative_to(REPO)}:{i}: {name} has no tracking issue (#<n>)")
-        entries[name] = m.group(0) if m else ""
+        parts = line.split()
+        if len(parts) != 3 or "/" not in parts[0]:
+            errors.append(f"{path.relative_to(REPO)}:{i}: expected `<namespace>/<name> <image-module> #<n>`, got {line!r}")
+            continue
+        key = f"{parts[0]} {parts[1]}"
+        if not re.fullmatch(r"#\d+", parts[2]):
+            errors.append(f"{path.relative_to(REPO)}:{i}: {key} has no tracking issue (#<n>)")
+        entries[key] = parts[2] if re.fullmatch(r"#\d+", parts[2]) else ""
     return entries, errors
 
 
@@ -447,7 +451,7 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
     broker_pods: list[tuple[str, dict]] = []
     other_pods: list[tuple[str, dict]] = []
     all_other_pods: list[tuple[str, dict]] = []
-    agent_workloads: list[tuple[str, str, str, dict]] = []  # (path, name, ns, labels)
+    agent_workloads: list[tuple[str, str, str, dict, str]] = []  # (path, name, ns, labels, baseline key)
     policies: list[tuple[str, dict, str]] = []  # (path, doc, ns)
     for path, docs in sorted(docs_by_path.items()):
         for doc in docs or []:
@@ -493,22 +497,23 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
             all_other_pods.append((ns, labels))
             if is_agent:
                 other_pods.append((ns, labels))
-                agent_workloads.append((path, str(meta.get("name")), ns, labels))
+                mod = ",".join(sorted(mods & modules)) or "-"
+                agent_workloads.append((path, str(meta.get("name")), ns, labels, f"{ns}/{meta.get('name')} {mod}"))
 
     # Coverage (ratchet): an agent-plane pod selected by NO Egress policy has unrestricted egress,
     # which no rule check above can see — there is no rule to read.
     uncovered = set()
-    for path, name, ns, labels in agent_workloads:
+    for path, name, ns, labels, key in agent_workloads:
         if not any(pns == ns and _has_egress_type(p) and _selects((p.get("spec") or {}).get("podSelector"), labels)
                    for _, p, pns in policies):
-            uncovered.add(name)
-            if name not in baseline:
+            uncovered.add(key)
+            if key not in baseline:
                 findings.append(f"{path}: agent-plane workload {ns}/{name} is selected by no NetworkPolicy with "
                                 f"policyTypes Egress — its egress is unrestricted (ADR-0387 D7)")
-    present = {n for _, n, _, _ in agent_workloads}
-    for name in sorted(set(baseline) - uncovered):
-        why = "is now covered by an Egress policy" if name in present else "is no longer an agent-plane workload"
-        findings.append(f"{BASELINE.relative_to(REPO)}: stale entry {name} ({baseline[name]}) {why} — remove it")
+    present = {k for *_, k in agent_workloads}
+    for key in sorted(set(baseline) - uncovered):
+        why = "is now covered by an Egress policy" if key in present else "is no longer an agent-plane workload"
+        findings.append(f"{BASELINE.relative_to(REPO)}: stale entry {key} ({baseline[key]}) {why} — remove it")
 
     broker_ns = {ns for ns, _ in broker_pods}
     broker_seen = False
@@ -839,15 +844,22 @@ def self_test() -> int:
 
     covered = {**awl, "x/np.yaml": [np("a", "docs-truth-agent", "docs-truth-agent", cidr="10.0.0.0/8")]}
     bcases = [
-        ("baselined uncovered agent passes", awl, {"docs-truth-agent": "#1"}, 0),
-        ("stale baseline entry: agent now covered", covered, {"docs-truth-agent": "#1"}, 1),
-        ("stale baseline entry: agent gone", {}, {"docs-truth-agent": "#1"}, 1),
+        ("baselined uncovered agent passes", awl, {"docs-truth-agent/docs-truth-agent openbank-docs-truth-agent": "#1"}, 0),
+        ("stale baseline entry: agent now covered", covered, {"docs-truth-agent/docs-truth-agent openbank-docs-truth-agent": "#1"}, 1),
+        ("stale baseline entry: agent gone", {}, {"docs-truth-agent/docs-truth-agent openbank-docs-truth-agent": "#1"}, 1),
         ("baseline does not excuse a different agent", {"x/w.yaml": [wl("finops-agent", "finops-agent", "openbank-docs-truth-agent")]},
-         {"docs-truth-agent": "#1"}, 1),
+         {"docs-truth-agent/docs-truth-agent openbank-docs-truth-agent": "#1"}, 1),
+        ("baselined name in a different namespace is NOT exempt",
+         {"x/w.yaml": [wl("docs-truth-agent", "other-ns", "openbank-docs-truth-agent")]}, {"docs-truth-agent/docs-truth-agent openbank-docs-truth-agent": "#1"}, "uncovered"),
+        ("baselined name with a different image is NOT exempt",
+         {"x/w.yaml": [wl("docs-truth-agent", "docs-truth-agent", "openbank-finops-agent")]}, {"docs-truth-agent/docs-truth-agent openbank-docs-truth-agent": "#1"}, "uncovered"),
     ]
     for name, docs, base, want in bcases:
-        _f = evaluate_network(docs, mods, base)
-        ok = (len(_f) > 0) == (want > 0)
+        _f = evaluate_network(docs, mods | {"openbank-finops-agent"}, base)
+        if want == "uncovered":  # the workload itself must be reported, not merely the entry as stale
+            ok = any("selected by no NetworkPolicy" in x for x in _f)
+        else:
+            ok = (len(_f) > 0) == (want > 0)
         failed += not ok
         print(f"  {'ok ' if ok else 'BAD'} baseline/{name}: findings={len(_f)}")
 

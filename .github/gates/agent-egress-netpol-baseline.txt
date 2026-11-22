@@ -1,17 +1,19 @@
 # Agent-plane workloads selected by NO NetworkPolicy with policyTypes Egress (ADR-0387 D7).
 # Ratchet for check-public-web-fetch.py: a workload listed here is tolerated; a new uncovered
 # agent-plane workload fails the gate, and an entry that becomes covered (or disappears) fails
-# as stale until its line is removed. Format: <workload metadata.name> <tracking issue #n>.
+# as stale until its line is removed. Format: <namespace>/<workload metadata.name> <agent image module> <tracking issue #n>.
+# An entry exempts a workload only when ALL THREE identity parts match (a bare name exempted any later
+# workload reusing it, in another namespace or with another image).
 # Only shrink this file.
-ap2-service #17077
-authz-policy-auditor #17077
-case-coordinator-agent #17077
-communication-service #17077
-control-liveness-sentinel #17077
-devops-agent #17077
-docs-truth-agent #17077
-finops-agent #17077
-flaky-test-hunter #17077
-governance-auditor #17077
-mcp-service #17077
-release-steward #17077
+platform/ap2-service openbank-ap2-service #17077
+authz-policy-auditor/authz-policy-auditor openbank-authz-policy-auditor #17077
+platform/case-coordinator-agent openbank-case-coordinator-agent #17077
+communication/communication-service openbank-communication-service #17077
+control-liveness-sentinel/control-liveness-sentinel openbank-control-liveness-sentinel #17077
+devops-agent/devops-agent openbank-devops-agent #17077
+docs-truth-agent/docs-truth-agent openbank-docs-truth-agent #17077
+finops-agent/finops-agent openbank-finops-agent #17077
+flaky-test-hunter/flaky-test-hunter openbank-flaky-test-hunter #17077
+governance-auditor/governance-auditor openbank-governance-auditor #17077
+platform/mcp-service openbank-mcp-service #17077
+release-steward/release-steward openbank-release-steward #17077
