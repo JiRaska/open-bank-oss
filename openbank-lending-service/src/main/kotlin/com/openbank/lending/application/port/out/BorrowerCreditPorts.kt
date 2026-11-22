@@ -5,6 +5,7 @@ package com.openbank.lending.application.port.out
 
 import com.openbank.libs.domain.money.Money
 import io.smallrye.mutiny.Uni
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -28,6 +29,10 @@ interface BorrowerAccountLookupPort {
 interface BorrowerCreditPort {
     /** Succeeds once the credit is confirmed. Retrying [reference] refers to the same transaction. */
     fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit>
+
+    /** Retries use the same date and account even across a business day rollover. */
+    fun creditOn(reference: String, borrowerAccountId: UUID, amount: Money, valueDate: LocalDate): Uni<Unit> =
+        Uni.createFrom().failure(UnsupportedOperationException("Borrower credit backend cannot confirm dated credits"))
 
     /**
      * Idempotent per [reference]. [description] is what the borrower sees on the booked transaction:

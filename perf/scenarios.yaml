@@ -115,6 +115,13 @@ scenarios:
     target_schedule: "0 6 * * 3"
     blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required). The batch-detail probe is id-scoped (PERF_BATCH_ID), so the module ships src/test/k6/fixtures.sql — one SETTLED SEPA_SCT batch with 200 items at the fixture batch id — loaded into the throwaway database after boot.
     assertions: Exercises the batch list, the pending four-eyes approval queue and batch detail at the fixture id. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+  - id: swift-read-baseline
+    definition: openbank-swift-service/src/test/k6/swift-read-baseline.js
+    execution_mode: scheduled-read-only-throwaway
+    safety_boundary: Read-only by construction — every request is a GET against openbank-swift-service; nothing is created, mutated or deleted, so the lane is safe against any booted stack, including a shared sandbox.
+    target_schedule: "0 6 * * 3"
+    blocker: RESOLVED for the scheduled lane — wired into perf-gate.yml's declared scope, which boots the service in dev mode against a throwaway PostgreSQL (OIDC and dev-mode auth disabled, so no read identity is required). No probe is id-scoped (list, status-filtered view, approval queue), so the lane ships no fixtures.sql — an empty result set answers 200 and the tripwire measures the handler, not fixture density. PERF_SWIFT_STATUS defaults to PENDING, a status SwiftStatus actually declares — an unknown value fails enum conversion with a 404 and the run fails loudly.
+    assertions: Exercises the message list, the status-filtered in-flight view and the pending four-eyes approval queue. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: balance-read-baseline
     definition: openbank-balance-service/src/test/k6/balance-read-baseline.js

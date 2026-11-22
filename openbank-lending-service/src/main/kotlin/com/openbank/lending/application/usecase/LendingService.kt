@@ -14,10 +14,18 @@ import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
 import com.openbank.lending.application.port.out.BorrowerCreditPort
+import com.openbank.lending.application.port.out.CatalogFosLoanPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
+import com.openbank.lending.application.port.out.FosAction
+import com.openbank.lending.application.port.out.FosCash
+import com.openbank.lending.application.port.out.FosCommand
+import com.openbank.lending.application.port.out.FosCommitmentRefused
+import com.openbank.lending.application.port.out.FosLoanOperations
+import com.openbank.lending.application.port.out.FosOperation
+import com.openbank.lending.application.port.out.FosRoutePin
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
@@ -33,6 +41,7 @@ import com.openbank.lending.application.port.out.SignatureIntents
 import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
+import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -142,6 +151,12 @@ class LendingService @Inject constructor(
 
     @Inject
     lateinit var signatureIntents: SignatureIntents
+
+    @Inject
+    lateinit var fosOperations: FosLoanOperations
+
+    @Inject
+    lateinit var fosCatalogue: CatalogFosLoanPort
 
     private val log = Logger.getLogger(LendingService::class.java)
 
@@ -399,18 +414,43 @@ class LendingService @Inject constructor(
 
     // --- Origination --------------------------------------------------------------------------------
 
-    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
-        request.catalogOfferingId?.let { offeringId ->
+    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+        require(request.passportGrantId == null || request.catalogOfferingId != null) {
+            "FOS origination requires a published catalogue offering"
+        }
+        return request.catalogOfferingId?.let { offeringId ->
             catalogLoanProfiles.resolvePublished(offeringId).flatMap { profile ->
                 applyCatalogProfile(request, proposedBy, profile)
             }
         } ?: applyLegacy(request, proposedBy, null)
+    }
 
     private fun applyCatalogProfile(
         request: LoanApplicationRequest,
         proposedBy: String,
         profile: CatalogLoanProfile,
     ): Uni<LoanApplication> {
+        val priced = priceCatalogRequest(request, profile)
+        val grant = request.passportGrantId
+        if (grant != null) {
+            return fosCatalogue.resolve(grant, request.partyId, profile.snapshot).flatMap { route ->
+                val host = MarketCountry(route.hostCountry)
+                require(host != DOMESTIC_MARKET && profile.markets?.includes(host) == true) {
+                    "Catalogue offering does not include the FOS host market"
+                }
+                require(request.jurisdiction == null || request.jurisdiction == host.code) {
+                    "Requested jurisdiction does not match the approved FOS route"
+                }
+                require(profile.productType == "INSTALLMENT_LOAN" && route.customerSegment == "RETAIL") {
+                    "The FOS route requires a retail installment product"
+                }
+                require(request.productType == null || request.productType == "CONSUMER_CREDIT") {
+                    "Requested credit type does not match the FOS offering"
+                }
+                val routed = priced.copy(jurisdiction = host.code, productType = "CONSUMER_CREDIT")
+                applyLegacy(routed, proposedBy, profile.snapshot, FosRoutePin(grant, route))
+            }
+        }
         val markets = profile.markets
         if (markets != null) {
             require(markets.includes(DOMESTIC_MARKET)) { "Catalog offering is outside the Czech domestic route" }
@@ -418,6 +458,14 @@ class LendingService @Inject constructor(
                 "Catalog offering requires the Czech domestic jurisdiction"
             }
         }
+        val domestic = priced.copy(jurisdiction = if (markets == null) request.jurisdiction else DOMESTIC_MARKET.code)
+        return applyLegacy(domestic, proposedBy, profile.snapshot)
+    }
+
+    private fun priceCatalogRequest(
+        request: LoanApplicationRequest,
+        profile: CatalogLoanProfile,
+    ): LoanApplicationRequest {
         require(request.requestedAmount.currency.code == profile.currency) {
             "Requested currency does not match catalog"
         }
@@ -432,17 +480,14 @@ class LendingService @Inject constructor(
         }
         // A catalog profile publishes a single rate and no index terms, so a catalog loan is FIXED.
         require(request.rateTerms.rateType == LoanRateType.FIXED) { "Catalog loans carry a FIXED rate" }
-        val priced = request.copy(
-            nominalAnnualRate = profile.nominalAnnualRate,
-            jurisdiction = if (markets == null) request.jurisdiction else DOMESTIC_MARKET.code,
-        )
-        return applyLegacy(priced, proposedBy, profile.snapshot)
+        return request.copy(nominalAnnualRate = profile.nominalAnnualRate)
     }
 
     private fun applyLegacy(
         request: LoanApplicationRequest,
         proposedBy: String,
-        catalogSnapshot: com.openbank.lending.domain.model.CatalogLoanSnapshot?,
+        catalogSnapshot: CatalogLoanSnapshot?,
+        fosRoute: FosRoutePin? = null,
     ): Uni<LoanApplication> {
         complianceGuard.checkOriginationAllowed(request.jurisdiction, request.productType)
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
@@ -460,6 +505,7 @@ class LendingService @Inject constructor(
             }
         val now = OffsetDateTime.now(clock)
         val pack = complianceGuard.resolveOriginationPack(request.jurisdiction, request.productType)
+        requireFosOriginationAllowed(fosRoute, pack != null)
         val application = LoanApplication(
             partyId = request.partyId,
             requestedAmount = request.requestedAmount,
@@ -484,7 +530,7 @@ class LendingService @Inject constructor(
             employmentTenureMonths = request.employmentTenureMonths,
             catalogSnapshot = catalogSnapshot,
         )
-        return applications.save(application).call { saved ->
+        return saveApplication(application, fosRoute).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
             armTimers(saved.id, state, reflectionDaysFor(saved))
         }.map { saved ->
@@ -502,6 +548,21 @@ class LendingService @Inject constructor(
             )
         }
     }
+
+    private fun requireFosOriginationAllowed(route: FosRoutePin?, hasHostPack: Boolean) {
+        require(route == null || (hasHostPack && !originationConfig.autoApprove)) {
+            "FOS requires an active host pack and human approval"
+        }
+    }
+
+    private fun saveApplication(application: LoanApplication, route: FosRoutePin?): Uni<LoanApplication> =
+        if (route == null) {
+            applications.save(application)
+        } else {
+            applications.withLocked(application.id) {
+                applications.save(application).call { saved -> fosOperations.pin(saved.id.value, route) }
+            }
+        }
 
     private data object UnusedCatalogLoanProfilePort : CatalogLoanProfilePort {
         override fun resolvePublished(offeringId: UUID): Uni<CatalogLoanProfile> =
@@ -755,6 +816,7 @@ class LendingService @Inject constructor(
             when {
                 existing == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.requiresFosPermit() -> signFos(existing, request, signedBy)
                 existing.signatureRecordedAt != null && existing.supportsDurableSignature() ->
                     replaySignature(existing, request, signedBy)
                 existing.status != OriginationState.AWAITING_SIGNATURE ->
@@ -974,6 +1036,7 @@ class LendingService @Inject constructor(
             when {
                 application == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $applicationId"))
+                application.requiresFosPermit() -> disburseFos(application, disbursedBy)
                 application.status != OriginationState.READY_TO_DISBURSE ->
                     Uni.createFrom().failure(
                         IllegalStateException(
@@ -1038,10 +1101,10 @@ class LendingService @Inject constructor(
             }
         }
 
-    @Suppress("LongMethod") // ADR-0100: clock-stamp fields push this 3 lines past threshold
-    private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
+    private fun newLoan(application: LoanApplication, loanId: LoanId = LoanId.random()): Loan {
         val now = OffsetDateTime.now(clock)
-        val loan = Loan(
+        return Loan(
+            id = loanId,
             applicationId = application.id,
             partyId = application.partyId,
             principal = application.requestedAmount,
@@ -1054,6 +1117,9 @@ class LendingService @Inject constructor(
             disbursedAt = now,
             createdAt = now,
         )
+    }
+
+    private fun scheduleRows(loan: Loan): List<LoanInstallment> {
         // Generate the contractual schedule from the pure libs primitive.
         val schedule = Amortization.schedule(
             principal = loan.principal,
@@ -1063,7 +1129,7 @@ class LendingService @Inject constructor(
             periodsPerYear = loan.periodsPerYear,
             method = loan.method,
         )
-        val rows = schedule.installments.map { i ->
+        return schedule.installments.map { i ->
             LoanInstallment(
                 loanId = loan.id,
                 number = i.number,
@@ -1075,6 +1141,12 @@ class LendingService @Inject constructor(
                 closingBalance = i.closingBalance,
             )
         }
+    }
+
+    @Suppress("LongMethod") // Existing local booking and two remote cash calls.
+    private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
+        val loan = newLoan(application)
+        val rows = scheduleRows(loan)
         // One transaction for every LOCAL write of the booking (#11626): the loan row, its
         // schedule, the DISBURSED claim on the application and the transition evidence commit
         // together or not at all. Measured before this: three transaction ids for one request
@@ -1154,6 +1226,178 @@ class LendingService @Inject constructor(
                     }
                     .map { saved }
             }
+    }
+
+    private fun LoanApplication.requiresFosPermit(): Boolean =
+        catalogSnapshot != null && jurisdiction != null && jurisdiction != DOMESTIC_MARKET.code
+
+    private fun signFos(app: LoanApplication, request: SignApplicationRequest, actor: String): Uni<LoanApplication> {
+        val command = FosCommand(actor, SyntheticTaintKafkaRail.currentlyTainted(), artefactHash = request.artefactHash)
+        return stageFos(app.id, FosAction.SIGN, command).flatMap(::finishFosSignature)
+    }
+
+    private fun disburseFos(app: LoanApplication, actor: String): Uni<Loan> {
+        val command = FosCommand(actor, SyntheticTaintKafkaRail.currentlyTainted())
+        return fosOperations.find(app.id.value, FosAction.DISBURSE).flatMap { existing ->
+            if (existing != null) {
+                stageFos(app.id, FosAction.DISBURSE, command.copy(cash = existing.command.cash))
+            } else {
+                validateFosActor(app, FosAction.DISBURSE, actor)
+                borrowerAccounts.findCurrentAccount(app.partyId, app.requestedAmount.currency.code).flatMap { account ->
+                    checkNotNull(account) { "Borrower has no eligible current account" }
+                    val cash = FosCash(account, LocalDate.now(clock))
+                    stageFos(app.id, FosAction.DISBURSE, command.copy(cash = cash))
+                }
+            }
+        }.flatMap(::finishFosDisbursement)
+    }
+
+    private fun validateFosActor(app: LoanApplication, action: FosAction, actor: String) {
+        require(actor.isNotBlank()) { "FOS commitment actor is required" }
+        if (lacksDecision(app)) throw decisionMissing(app)
+        if (action == FosAction.SIGN) {
+            check(app.status == OriginationState.AWAITING_SIGNATURE) { "Application is not awaiting signature" }
+            return
+        }
+        check(app.status == OriginationState.READY_TO_DISBURSE) { "Application is not ready to disburse" }
+        if (actor == app.decidedBy || actor == app.proposedBy) {
+            throw OriginationRefusedException(
+                OriginationRefusedException.SEGREGATION_OF_DUTIES,
+                "Disburser must differ from the proposer and the approver",
+            )
+        }
+    }
+
+    private fun stageFos(id: LoanApplicationId, action: FosAction, command: FosCommand): Uni<FosOperation> =
+        applications.withLocked(id) { current ->
+            val app = checkNotNull(current) { "FOS application no longer exists" }
+            fosOperations.route(id.value).flatMap { route ->
+                check(route?.route?.hostCountry == app.jurisdiction) { "Application has no verified FOS route" }
+                fosOperations.find(id.value, action).flatMap { existing ->
+                    if (existing != null) {
+                        check(existing.command == command && !existing.refused) {
+                            "FOS operation has a different command or was refused"
+                        }
+                        Uni.createFrom().item(existing)
+                    } else {
+                        validateFosActor(app, action, command.actor)
+                        val operation = FosOperation(Ids.newId(), id.value, action, command)
+                        checkFosPrerequisite(operation).flatMap {
+                            fosOperations.stage(operation)
+                        }.replaceWith(operation)
+                    }
+                }
+            }
+        }
+
+    private fun checkFosPrerequisite(operation: FosOperation): Uni<Unit> = if (operation.action == FosAction.SIGN) {
+        Uni.createFrom().item(Unit)
+    } else {
+        fosOperations.find(operation.applicationId, FosAction.SIGN).invoke { signature ->
+            check(signature?.admitted == true) { "FOS disbursement requires a confirmed signature" }
+        }.replaceWith(Unit)
+    }
+
+    private fun admitFos(operation: FosOperation): Uni<Unit> {
+        if (operation.admitted) return Uni.createFrom().item(Unit)
+        val applicationId = LoanApplicationId(operation.applicationId)
+        return applications.findById(applicationId).flatMap { app ->
+            val current = checkNotNull(app) { "FOS application no longer exists" }
+            val revision = checkNotNull(current.catalogSnapshot) { "FOS application has no pinned catalogue revision" }
+            fosOperations.route(operation.applicationId).flatMap { pin ->
+                check(pin != null && pin.route.hostCountry == current.jurisdiction) { "Verified FOS route changed" }
+                fosCatalogue.admit(operation, pin, current.partyId, revision)
+            }
+        }.onFailure(FosCommitmentRefused::class.java).call { _ ->
+            applications.withLocked(applicationId) { fosOperations.refuse(operation.id) }
+        }
+    }
+
+    private fun finishFosSignature(operation: FosOperation): Uni<LoanApplication> = admitFos(operation).flatMap {
+        applications.withLocked(LoanApplicationId(operation.applicationId)) { row ->
+            val app = checkNotNull(row)
+            if (app.signatureRecordedAt != null) {
+                check(app.signatureArtefactHash == operation.command.artefactHash)
+                Uni.createFrom().item(app)
+            } else {
+                validateFosActor(app, FosAction.SIGN, operation.command.actor)
+                fosOperations.admit(operation.id)
+                    .flatMap {
+                        commitSignature(
+                            app,
+                            OriginationState.SIGNED,
+                            checkNotNull(operation.command.artefactHash),
+                            operation.command.actor,
+                        )
+                    }
+            }
+        }
+    }.call { app ->
+        if (operation.completed) {
+            Uni.createFrom().item(Unit)
+        } else {
+            armTimers(app.id, app.status, reflectionDaysFor(app)).flatMap { fosOperations.complete(operation.id) }
+        }
+    }
+
+    private fun finishFosDisbursement(operation: FosOperation): Uni<Loan> = admitFos(operation).flatMap {
+        applications.withLocked(LoanApplicationId(operation.applicationId)) { row ->
+            val app = checkNotNull(row)
+            val loanId = LoanId(operation.id)
+            if (app.status == OriginationState.DISBURSED) {
+                loans.findById(loanId).map { loan -> checkNotNull(loan) { "FOS booked loan is missing" } }
+            } else {
+                validateFosActor(app, FosAction.DISBURSE, operation.command.actor)
+                val loan = newLoan(app, loanId)
+                fosOperations.admit(operation.id).flatMap {
+                    bookLocally(loan, scheduleRows(loan), app, operation.command.actor)
+                }
+            }
+        }
+    }.flatMap { loan ->
+        if (operation.completed) Uni.createFrom().item(loan) else finishFosCash(operation, loan)
+    }
+
+    private fun finishFosCash(operation: FosOperation, loan: Loan): Uni<Loan> {
+        val cash = checkNotNull(operation.command.cash)
+        return ledger.postConfirmedDisbursement(
+            LedgerPosting(
+                "loan:${loan.id.value}:disbursement",
+                loan.partyId,
+                loan.principal,
+                PostingKind.DISBURSEMENT,
+                accountingDate = cash.date,
+            ),
+        ).flatMap {
+            borrowerCredit.creditOn(
+                LoanCashReferences.disbursementCredit(loan.id),
+                cash.accountId,
+                loan.principal,
+                cash.date,
+            )
+        }.flatMap {
+            applications.withLocked(loan.applicationId) {
+                fosOperations.find(operation.applicationId, FosAction.DISBURSE).flatMap { current ->
+                    if (checkNotNull(current).completed) {
+                        Uni.createFrom().item(Unit)
+                    } else {
+                        events.emit(disbursementEvent(loan))
+                            .call { _ ->
+                                events.emitExposureFact(
+                                    loan,
+                                    LoanExposureChange.Disbursed(clock.instant()),
+                                    loan.disbursedAt.toInstant(),
+                                )
+                            }.call { _ -> fosOperations.complete(operation.id) }
+                    }
+                }
+            }
+        }.replaceWith(loan)
+    }
+
+    fun resumeFosOperation(operation: FosOperation): Uni<Unit> = when (operation.action) {
+        FosAction.SIGN -> finishFosSignature(operation).replaceWith(Unit)
+        FosAction.DISBURSE -> finishFosDisbursement(operation).replaceWith(Unit)
     }
 
     private fun disbursementEvent(loan: Loan) = LendingOutboxMessage(

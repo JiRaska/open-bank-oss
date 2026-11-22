@@ -35,7 +35,22 @@ class PassportCommitmentResource(
         validateCommitment(request)
         val receipt = pool.preparedQuery(ADMIT).execute(request.arguments().addString(schemaId))
             .awaitSuspending().first().getOffsetDateTime(0)
-        if (receipt == null) throw CatalogConflictException("passport commitment refused")
+        if (receipt == null) {
+            val terminal = pool.preparedQuery(REFUSED)
+                .execute(
+                    Tuple.of(
+                        request.operation,
+                        request.operationId,
+                        request.grantId,
+                        request.partyId,
+                        request.revisionId,
+                        request.binding,
+                    ),
+                )
+                .awaitSuspending().first().getBoolean(0)
+            if (terminal) return Response.status(Response.Status.CONFLICT).header(DECISION_HEADER, "refused").build()
+            throw CatalogConflictException("passport commitment refused")
+        }
         return Response.noContent().build()
     }
 
@@ -103,6 +118,13 @@ class PassportCommitmentResource(
         val OPERATIONS = setOf("SIGN", "DISBURSE")
         val COUNTRY = Regex("^[A-Z]{2}$")
         val DIGEST = Regex("^[a-f0-9]{64}$")
+        const val DECISION_HEADER = "X-FOS-Decision"
+        val REFUSED = """
+            SELECT EXISTS (
+                SELECT 1 FROM passport_commitment_refusals WHERE operation = $1 AND operation_id = $2
+                    AND grant_id = $3 AND party_id = $4 AND product_revision_id = $5 AND binding_digest = $6
+            )
+        """.trimIndent()
         val ROUTE = """
             SELECT g.host_country::TEXT AS host_country, g.bank_id, g.establishment_id, g.channel,
                 g.customer_segment, g.pack_set_digest
