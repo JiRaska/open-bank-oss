@@ -34,7 +34,39 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
             .build()
     }
 
+    /**
+     * #16590: the 401 for a customer credential on the STAFF root — refused whatever the channel
+     * state, so no staff dispatch path ever runs for it. Counted on the customer-rejected series
+     * (`layer="token"`) and, for `tools/call`, audited as DENIED like the audience refusal.
+     */
+    fun respondCustomerOnStaffRoot(
+        method: String,
+        params: JsonNode,
+        reason: McpMetricsPort.CustomerRejectReason,
+        client: String?,
+    ): Response {
+        log.warnf(
+            "rejected %s on the staff root: customer credential (%s)",
+            McpInputBounds.logSafe(method),
+            reason.name.lowercase(),
+        )
+        metrics.customerRejected(reason, client, synthetic = false)
+        if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
+            throttle.auditAnonymousCall(
+                McpInputBounds.echo(params.path("name").asText("")),
+                McpInputBounds.auditKeys(params.path("arguments")),
+                "customer credential on the staff root",
+            )
+        }
+        return Response.status(Response.Status.UNAUTHORIZED)
+            .header("WWW-Authenticate", CUSTOMER_CHALLENGE)
+            .build()
+    }
+
     private companion object {
+        const val CUSTOMER_CHALLENGE =
+            "Bearer error=\"invalid_token\", error_description=\"customer credentials are accepted only at " +
+                McpEndpoint.CUSTOMER_ROOT + "\""
         const val CHALLENGE =
             "Bearer error=\"invalid_token\", error_description=\"token audience does not include this server\""
     }

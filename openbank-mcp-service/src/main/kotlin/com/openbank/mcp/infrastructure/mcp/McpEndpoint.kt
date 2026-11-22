@@ -172,8 +172,28 @@ class McpEndpoint(
                 ) ?: branch.refuseNonCustomerToken()
             } ?: Response.status(Response.Status.NOT_FOUND).build()
         } else {
-            audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+            // #16590 defence in depth: a customer credential (customers-realm `iss`, or the DPoP scheme
+            // no staff caller uses) is refused on the staff root WHATEVER the channel state, before the
+            // audience check. The resolver would only ever treat it as anonymous; refusing it here means
+            // no staff dispatch path ever runs for it, and the client is told where it belongs.
+            audienceRefusal.takeIf { presentsCustomerCredential() }?.respondCustomerOnStaffRoot(
+                method,
+                params,
+                if (customerBranch == null) {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
+                } else {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
+                },
+                callerResolver.token.getClaim<String?>("azp"),
+            ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
         }
+
+    private fun presentsCustomerCredential(): Boolean = callerResolver.presentsCustomerRealmToken() ||
+        (
+            ::httpRequest.isInitialized &&
+                httpRequest.getHeader(AUTHORIZATION_HEADER)
+                    ?.trimStart()?.startsWith("$DPOP_HEADER ", ignoreCase = true) == true
+            )
 
     /** The staff root. Never runs the customer branch, whatever the request path says. */
     @POST

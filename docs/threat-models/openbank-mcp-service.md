@@ -443,6 +443,22 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
+  - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
+    on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
+    check ran there, and a customer token carries this server's audience, so the request was
+    dispatched — and served as ANONYMOUS, because `CallerContextResolver` never resolves a
+    customers-realm token (empty `tools/list`, `tools/call` denied before the PDP). Not
+    exploitable, but the only barrier was one `null` return deep in the resolver. `McpEndpoint`
+    now refuses on the staff root any token whose `iss` is the customers realm, and any
+    `Authorization: DPoP` credential, with 401 pointing the client at `/customer/mcp`, regardless
+    of channel state (reasons `customer_channel_off` / `customer_root_required`, layer `token`).
+  - *Tests.* `McpEndpointTest` (channel off, metric + audit), `McpCustomerChannelIT` (channel on,
+    both schemes, list and call), `McpCustomerTenantResolutionIT` (a token signed by the real
+    customers-realm key on `/mcp`). With the refusal removed the first two went red (200, served
+    anonymous); the third stays green either way, because the OIDC layer already refuses it (the
+    customers tenant is path-bound to `/customer/mcp`, and the staff tenant rejects its `iss`).
+
 - **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
   IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
   - *Spoofing (forwarded headers).* `ProxyForwardingGuard` now refuses to boot with ANY

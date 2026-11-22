@@ -54,12 +54,18 @@ class McpEndpointTest {
         jwt: TestJsonWebToken = testAgentJwt(),
         toolsListCacheTtlMs: Long = 0,
         oboEnabled: Boolean = false,
+        customerIssuer: String? = null,
     ): McpEndpoint {
         val stub = StubReads(mapper)
         val toolRegistry =
             McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         val caller =
-            CallerContextResolver(jwt, oboEnabled, fakeSessionRepo(), customerIssuer = java.util.Optional.empty())
+            CallerContextResolver(
+                jwt,
+                oboEnabled,
+                fakeSessionRepo(),
+                customerIssuer = java.util.Optional.ofNullable(customerIssuer),
+            )
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -295,6 +301,39 @@ class McpEndpointTest {
             ).entity,
         )
         assertThat(resp.path("result").path("isError").asBoolean()).isFalse()
+    }
+
+    // Defence in depth (#16590): a customers-realm credential on the STAFF root is refused at the
+    // door even though the resolver would only ever treat it as anonymous. Here the customer channel
+    // is OFF (no CustomerChannel injected), so the reason is customer_channel_off.
+    @Test
+    fun `a customers-realm token on the staff root is refused with 401 when the channel is off`() {
+        val customerToken = TestJsonWebToken(
+            mapOf(
+                "iss" to CUSTOMERS_ISSUER,
+                "sub" to "agent:test-agent",
+                "aud" to "openbank-mcp-service",
+                "consent_id" to TEST_CONSENT_ID,
+            ),
+        )
+        val pdp = RecordingPdp()
+        val e = endpoint(pdp, jwt = customerToken, customerIssuer = CUSTOMERS_ISSUER)
+        val list = e.handle(rpc("tools/list"))
+        assertThat(list.status).isEqualTo(401)
+        assertThat(list.getHeaderString("WWW-Authenticate")).contains("invalid_token").contains("/customer/mcp")
+        val call = e.handle(rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())))
+        assertThat(call.status).isEqualTo(401)
+        assertThat(pdp.queries).isEmpty()
+        assertThat(audit.events.single().result).isEqualTo(AuditResult.DENIED)
+        val rejected = registry.find("openbank.mcp.customer.rejected").tag("reason", "customer_channel_off").counter()
+        assertThat(rejected?.count()).isEqualTo(2.0)
+    }
+
+    @Test
+    fun `control - a staff token is not mistaken for a customer credential`() {
+        val resp = endpoint(allowAll(), customerIssuer = CUSTOMERS_ISSUER).handle(rpc("tools/list"))
+        assertThat(resp.status).isEqualTo(200)
+        assertThat(registry.find("openbank.mcp.customer.rejected").counter()).isNull()
     }
 
     @Test
@@ -775,6 +814,7 @@ class McpEndpointTest {
     private companion object {
         const val SECRET = "CZ6508000000192000145399"
         const val TEST_CONSENT_ID = "11111111-1111-1111-1111-111111111111"
+        const val CUSTOMERS_ISSUER = "https://kc.test.example/realms/openbank-customers"
     }
 
     private class StubReads(private val m: com.fasterxml.jackson.databind.ObjectMapper) :
