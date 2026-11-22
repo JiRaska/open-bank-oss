@@ -1223,10 +1223,32 @@ The network policy now admits the `tax-reporting` namespace, and tax-reporting-s
 | A caller opens an account for an offering restricted to another market | Resolve the published catalogue revision using the product ID. Compare explicit offering countries with the service's existing Czech route before persisting the account. A malformed catalogue country code makes the revision `Unavailable` (503), never a caller error. | `ProductRevisionMarketTest`, `ProductCatalogAdapterTest` |
 | A pending account activates after its offering is no longer available on the route | Re-read catalogue scope before activating pinned pending accounts. Refuse catalogue lookup failure, a changed offering or a foreign-only scope before the state transition is persisted. | `AccountServiceLifecycleTest` |
 
-The check uses catalogue distribution metadata. The passport grant registry and atomic permit
-consumption against revocation are provided by the catalogue (#16351). This service does not consume them yet. Earlier unscoped catalogue responses and unpinned
-historical pending accounts use the domestic compatibility path. Cross-border activation requires
-the registry, authoritative facts and commitment fence before any FOS or branch launch.
+The domestic check uses catalogue distribution metadata. Earlier unscoped catalogue responses and
+unpinned historical pending accounts use the domestic compatibility path. The passport account path
+requires authoritative facts from the applicable country pack before any FOS or branch launch.
+
+### Passport admission and retry
+
+- A caller can pass a grant reference. Catalogue verifies the named account-service identity
+  and independent subject evidence before admission. The reference alone grants nothing.
+- A durable intent pins the exact operation before catalogue consumption. A retry can recover
+  only that receipt. Account writes and activation outbox events commit atomically.
+- A pending activation is tied to its account version. Changing the account cannot reuse an
+  earlier receipt to activate a different state.
+
+- Recovery claims a bounded batch with a database lease and checks for the same consumed receipt.
+  If it is absent, recovery reads the current party under the original ID and runs fresh sanctions
+  screening of the registered name. Account creation requires the exact catalogue admission.
+  Duplicate runners reuse the account ID and binding. The account transaction clears the queued
+  details, which omit the holder name and raw screening evidence.
+
+### ADR-0380 B2 account book
+
+Booking context is obtained only from the exact consumed catalogue receipt under the named M2M identity. Freeze
+its complete bank/establishment/host/mode tuple in SQL and preserve it through outbox/recovery/lifecycle changes.
+An activation with different context fails before status change. Existing null history is not silently assigned.
+No raw identity evidence or national identifier is added. Branch opening remains TEST-only pending wider B2 and
+country launch evidence. The lower catalogue migration prerequisites must be deployed before V22.
 
 ## 2026-11-18 - IBAN check digits from the shared libs-domain generator (#16748)
 
