@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.11.0...product-catalog-v1.12.0) (2026-11-22)
+
+
+### Features
+
+* **lending,product-catalog:** fence and recover branch loan commitments ([#16587](https://github.com/JiRaska/open-bank-oss/issues/16587)) ([504a164](https://github.com/JiRaska/open-bank-oss/commit/504a16408662f92403944fcc5015ffb5a07b18f2))
+
+## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.10.0...product-catalog-v1.11.0) (2026-11-22)
+
+
+### Features
+
+* **lending,product-catalog:** recover FOS signing and disbursement ([#16539](https://github.com/JiRaska/open-bank-oss/issues/16539)) ([491fd26](https://github.com/JiRaska/open-bank-oss/commit/491fd26e456954b41a0959306b8bd031f35626d5))
+
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.9.0...product-catalog-v1.10.0) (2026-11-22)
+
+
+### Features
+
+* **lending:** enforce catalogue market scope at domestic application ([#16408](https://github.com/JiRaska/open-bank-oss/issues/16408)) ([8bc49c9](https://github.com/JiRaska/open-bank-oss/commit/8bc49c9dadafc7e859d4173f75914545d02331e0))
+
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.8.0...product-catalog-v1.9.0) (2026-11-22)
+
+
+### Features
+
+* **product-catalog:** fence FOS loan signing and disbursement ([#16454](https://github.com/JiRaska/open-bank-oss/issues/16454)) ([d599256](https://github.com/JiRaska/open-bank-oss/commit/d59925620c883b3d6d6784f92170e5e230bf2f51))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.7.0...product-catalog-v1.8.0) (2026-11-21)
 
 

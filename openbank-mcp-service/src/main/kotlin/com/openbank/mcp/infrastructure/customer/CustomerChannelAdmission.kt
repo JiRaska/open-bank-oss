@@ -49,11 +49,11 @@ class CustomerChannelAdmission(
      * per-client cap, minute-only), then the replay claim, then [subject].
      */
     interface Throttles {
-        fun proofKey(thumbprint: String): String?
+        suspend fun proofKey(thumbprint: String): String?
 
-        fun client(clientId: String): String?
+        suspend fun client(clientId: String): String?
 
-        fun subject(subject: String, clientId: String): String?
+        suspend fun subject(subject: String, clientId: String): String?
     }
 
     sealed interface Outcome {
@@ -99,7 +99,13 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
-        return admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+        // Fail closed (#16590): a shared replay store or bucket that cannot answer is a 503, never an
+        // admission and never a 429 the client would read as "slow down and retry the same proof".
+        return try {
+            admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+        } catch (_: SharedStoreUnavailableException) {
+            storeUnavailable()
+        }
     }
 
     /** Everything the proof steps need, in one parameter. */
@@ -158,17 +164,19 @@ class CustomerChannelAdmission(
             )
             DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
             DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
-            DpopResult.REPLAY_STORE_UNAVAILABLE -> Outcome.Refused(
-                STATUS_UNAVAILABLE,
-                null,
-                "dpop replay store unavailable",
-            )
+            DpopResult.REPLAY_STORE_UNAVAILABLE -> storeUnavailable()
             else -> Outcome.Refused(
                 STATUS_UNAUTHORIZED,
                 challenge("invalid_dpop_proof", "dpop proof rejected"),
                 "dpop proof rejected: $result",
             )
         }
+
+    /**
+     * The ONE outcome for "the shared replay store / budgets could not answer", whichever of the
+     * peek, the claim or a budget failed — so a metric on it is a single match on [REPLAY_STORE_UNAVAILABLE].
+     */
+    private fun storeUnavailable() = Outcome.Refused(STATUS_UNAVAILABLE, null, REPLAY_STORE_UNAVAILABLE)
 
     private fun invalidToken(reason: String) =
         Outcome.Refused(STATUS_UNAUTHORIZED, challenge("invalid_token", reason), reason)
@@ -179,6 +187,9 @@ class CustomerChannelAdmission(
 
     companion object {
         val CHANNEL = McpMetricsPort.McpChannel.CUSTOMER
+
+        /** Refusal reason of every store-unavailable 503 (see [storeUnavailable]). */
+        const val REPLAY_STORE_UNAVAILABLE = "replay_store_unavailable"
         private const val PRINCIPAL_HUMAN = "HUMAN"
         private const val HTTP_METHOD = "POST"
         private const val CLAIM_AZP = "azp"
