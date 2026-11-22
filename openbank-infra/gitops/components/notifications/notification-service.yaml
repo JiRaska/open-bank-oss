@@ -66,7 +66,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notification-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-44fff644@sha256:34c4c907b8d4d823b937a2a7db585f490224f2e5ccc5254c139f8ad1cf6d3842
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-5fb68132@sha256:782f668bed79414ec251bcd935fdac61d17fb5d92858eff574285875e4b55f2e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
