@@ -101,7 +101,26 @@ is_ancestor() {
       0) return 0 ;;
       1) return 1 ;;
     esac
-    # 128: a commit outside main's graph. Ask the compare API, as before the graph existed.
+    # 128: a commit outside main's graph — typically an image built from a PR branch commit that
+    # main only holds as a squash. Pins carry an ABBREVIATED sha, which git cannot fetch by name,
+    # so once per invocation fetch every PR head (no blobs, ~20 s) into the graph and ask git
+    # again; only a commit still unknown after that asks the compare API. Push run 45072881880
+    # went red on exactly this: one branch-built pin, an exhausted installation token, and a
+    # compare call the graph could have answered.
+    if [ "$grc" = 128 ] && [ "${PULL_HEADS_FETCHED:-0}" = 0 ] && [ "${PDP_ROLLOUT_PULL_HEADS:-1}" = 1 ]; then
+      PULL_HEADS_FETCHED=1
+      GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" fetch -q --filter=blob:none --no-tags origin \
+        '+refs/pull/*/head:refs/pull/*' 2>/dev/null \
+        || echo "::warning::could not fetch PR heads; off-main pins fall back to the compare API" >&2
+    fi
+    if [ "$grc" = 128 ] && [ "${PULL_HEADS_FETCHED:-0}" = 1 ]; then
+      grc=0
+      GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" merge-base --is-ancestor "$1" "$2" 2>/dev/null || grc=$?
+      case "$grc" in
+        0) return 0 ;;
+        1) return 1 ;;
+      esac
+    fi
   fi
   local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
   # #14011: one GitOps invocation compares the same immutable (marker, source) pair once per
