@@ -290,6 +290,11 @@ openbao:
       reason: "client secret of openbank-keycloak-mcp (ADR-0385 D3) is written by the owner when the client is created in the live realm; Keycloak's secret ref is optional and the MCP authenticator refuses every connect until then"
       issue: 16667
       review_by: 2027-01-31
+    - kind: openbao
+      names: [fetch-broker/browser-run]
+      reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
+      issue: 16754
+      review_by: 2027-02-18
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
