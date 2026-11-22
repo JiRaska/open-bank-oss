@@ -119,15 +119,6 @@ class DelegationEventPactBrokerProviderVerificationTest {
     @State("no MCP_CLIENT grant exists for the pact party, client and key")
     fun mcpClientGrantAbsent() = Unit
 
-    // customer-edge's HTTP payment-proposal interactions are likewise filtered out above and replayed by
-    // DelegationProposalPactFolderProviderVerificationTest (which seeds the row); these two states exist
-    // here for the same twin-parity reason (#9752).
-    @State("a PENDING payment proposal exists for the customer")
-    fun pendingPaymentProposal() = Unit
-
-    @State("an APPROVED payment proposal exists for the customer")
-    fun approvedPaymentProposal() = Unit
-
     @State("an active MCP_CLIENT propose grant exists for the pact party, client, key and account")
     fun mcpClientProposeGrantActive() = Unit
 
