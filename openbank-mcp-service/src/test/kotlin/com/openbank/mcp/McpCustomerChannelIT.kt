@@ -157,12 +157,32 @@ class McpCustomerChannelIT {
     }
 
     @Test
-    fun `a customer token on the staff root never reaches the staff tools`() {
+    fun `a customer token on the staff root is refused and pointed at the customer root`() {
+        // #16590 defence in depth: refused at the door (401), not merely served as anonymous.
         CustomerTokenSource.claims = customerClaims(sub = "agent:test-agent", extra = mapOf("consent_id" to CONSENT))
+        listOf("DPoP", "Bearer").forEach { scheme ->
+            listOf(LIST, CALL).forEach { body ->
+                given().contentType(ContentType.JSON)
+                    .header("Authorization", "$scheme ${DpopTestProofs.ACCESS_TOKEN}")
+                    .header("DPoP", DpopTestProofs.proof(key))
+                    .body(body).post("/mcp").then().statusCode(401)
+                    .header("WWW-Authenticate", containsString("/customer/mcp"))
+            }
+        }
+    }
+
+    @Test
+    fun `a DPoP-scheme credential on the staff root is refused whatever its issuer`() {
+        CustomerTokenSource.claims = mapOf(
+            "iss" to DpopTestProofs.STAFF_ISSUER,
+            "sub" to "agent:test-agent",
+            "aud" to "openbank-mcp-service",
+            "consent_id" to CONSENT,
+        )
         given().contentType(ContentType.JSON)
             .header("Authorization", "DPoP ${DpopTestProofs.ACCESS_TOKEN}")
-            .header("DPoP", DpopTestProofs.proof(key))
-            .body(LIST).post("/mcp").then().statusCode(200).body("result.tools.size()", equalTo(0))
+            .body(LIST).post("/mcp").then().statusCode(401)
+            .header("WWW-Authenticate", containsString("/customer/mcp"))
     }
 
     @Test

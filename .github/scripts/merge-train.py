@@ -4629,7 +4629,7 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
             log(f"published {branch} STACKED over #{hn} head {hh[:12]} (main {base[:12]}): members {v.applied}")
             return "published"
         log(f"::notice::not stacked over #{hn}: {why}")
-        if SHA_RE.fullmatch(hh or "") and deferral_used(gh, git, hh):
+        if SHA_RE.fullmatch(hh or "") and deferral_used(gh, git, hh, base):
             # Over main it could merge past a holder that already yielded once: never pre-empted twice.
             log(f"::notice::#{hn} already yielded once — carrier not published over main either")
             return "rejected"
@@ -5060,7 +5060,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             running = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
             if (running is not None
                     and git("merge-base", "--is-ancestor", live_main, running["head_sha"], check=False).returncode == 0):
-                if deferral_used(gh, git, running["head_sha"]):
+                if deferral_used(gh, git, running["head_sha"], live_main):
                     problem = f"strict-lane #{holder} already yielded once — not pre-empted again"
                 elif not shadow:
                     gh.post_status(running["head_sha"], "success",
@@ -5322,7 +5322,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         summary["stack_window"] = (holder, stack_head)
     elif (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any_carrier_open(gh, repo)
-            and deferral_state(gh, git, strict, holder) == "open"):
+            and holder_may_yield(gh, git, strict, holder, urgent, base)):
         # Bounded deferral (#13400): the running reservation lets ONE carrier be built from green
         # candidates during its CI; publish records the yield on the strict head (DEFER_CONTEXT).
         log(f"strict-lane #{holder} CI running, no deferral yet: a carrier may be built during it (bounded deferral)")
@@ -5330,7 +5330,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         summary["deferral_window"] = holder
     elif (holder is None and len(summary["updated"]) == 1 and not carrier_in_flight and not summary["strict"]
             and train_waiting and not main_red and not any_carrier_open(gh, repo)
-            and update_opens_deferral(gh, git, strict, summary["updated"][0])):
+            and summary["updated"][0] not in urgent
+            and update_opens_deferral(gh, git, strict, summary["updated"][0], base)):
         # Overlap from the update tick (#13400): the update-branch just issued starts a reservation over
         # THIS main, and its one deferral is still unused, so the carrier is built over the same main in
         # this tick instead of the next one. Measured 2026-10-26 16:06-17:14Z: every update-branch tick
@@ -6338,6 +6339,66 @@ def fix_preempts_strict_self_test(check) -> None:
           breakage_dirs(_Hist(), hgit, "c3", red, {}) == {"docs/adr"}, str(breakage_dirs(_Hist(), hgit, "c3", red, {})))
 
 
+def deferral_chain_self_test(check) -> None:
+    """#17072: the yield-once record belongs to the reservation, not to one head sha. Real git."""
+    with tempfile.TemporaryDirectory() as d:
+        def g(*a):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=d, text=True,
+                                  capture_output=True, check=True, env=base_env()).stdout.strip()
+        g("init", "-q", "-b", "main")
+        pathlib.Path(d, "a").write_text("a\n"); g("add", "a"); g("commit", "-qm", "base")
+        g("checkout", "-qb", "pr"); pathlib.Path(d, "p").write_text("p\n"); g("add", "p"); g("commit", "-qm", "pr")
+        h1 = g("rev-parse", "HEAD")
+        heads = [h1]
+        for i in (1, 2, 3):   # three carrier merges move main; the train update-branches the holder each time
+            g("checkout", "-q", "main"); pathlib.Path(d, f"m{i}").write_text(f"{i}\n"); g("add", f"m{i}")
+            g("commit", "-qm", f"main {i}")
+            g("checkout", "-q", "pr"); g("merge", "-q", "--no-edit", "main")
+            heads.append(g("rev-parse", "HEAD"))
+        g("checkout", "-q", "pr"); pathlib.Path(d, "work").write_text("w\n"); g("add", "work"); g("commit", "-qm", "new work")
+        own = g("rev-parse", "HEAD")
+        g("checkout", "-q", "main"); pathlib.Path(d, "m9").write_text("9\n"); g("add", "m9"); g("commit", "-qm", "main 9")
+        g("checkout", "-q", "-b", "evil", heads[3]); g("merge", "-q", "--no-edit", "main")
+        pathlib.Path(d, "smuggled").write_text("x\n"); g("add", "smuggled"); g("commit", "-q", "--amend", "--no-edit")
+        evil = g("rev-parse", "HEAD")
+        g("checkout", "-q", "-b", "side", "main"); pathlib.Path(d, "sidecode").write_text("s\n"); g("add", "sidecode")
+        g("commit", "-qm", "author side branch")
+        g("checkout", "-q", "-b", "sneak", heads[3]); g("merge", "-q", "--no-edit", "side")
+        sneak = g("rev-parse", "HEAD")
+        base = g("rev-parse", "main")
+        git = Git(d)
+
+        class GH:
+            def __init__(self, deferred): self.deferred = set(deferred)
+            def app_statuses(self, sha):
+                return {DEFER_CONTEXT: ("success", "yielded once")} if sha in self.deferred else {}
+        gh = GH([h1])
+        check("deferral #17072: the head that yielded is used", deferral_used(gh, git, h1, base))
+        check("deferral #17072: one update-branch later still used (as before)", deferral_used(gh, git, heads[1], base))
+        check("deferral #17072 must-FAIL: two and three update-branches later STILL used (the reset bug)",
+              deferral_used(gh, git, heads[2], base) and deferral_used(gh, git, heads[3], base))
+        check("deferral #17072: a holder that never yielded is not used", not deferral_used(GH([]), git, heads[3], base))
+        check("deferral #17072: new work by the author starts a new reservation", not deferral_used(gh, git, own, base))
+        check("deferral #17072 must-FAIL: a merge carrying extra content is not an update merge (chain stops)",
+              is_update_merge(git, evil, base) is None and is_update_merge(git, heads[3], base) == heads[2])
+        check("deferral #17078 must-FAIL: old head merged with the author's OWN side branch (clean tree, second "
+              "parent not on main) is not an update merge and does NOT keep the yield",
+              is_update_merge(git, sneak, base) is None and not deferral_used(gh, git, sneak, base))
+        check("deferral #17078: a merge whose first parent yielded but which is not an update merge is not used",
+              not deferral_used(GH([heads[3]]), git, sneak, base) and deferral_used(GH([heads[2]]), git, heads[3], base))
+        check("deferral #17078: no valid live-main base fails toward strict priority (counted as yielded)",
+              is_update_merge(git, heads[3], "") is None and deferral_used(GH([]), git, heads[3], ""))
+        view = {"number": 35, "head_sha": heads[3]}
+        check("deferral #17072 must-FAIL: holder yielded once, update-branched twice -> next tick builds NO carrier",
+              deferral_state(gh, git, [("pending", view)], 35, base) is None
+              and not holder_may_yield(gh, git, [("pending", view)], 35, set(), base))
+        fresh = GH([])
+        check("deferral: a running holder that never yielded may yield once",
+              holder_may_yield(fresh, git, [("pending", view)], 35, set(), base))
+        check("deferral #17072 must-FAIL: an URGENT holder never yields (no carrier over main while it holds)",
+              not holder_may_yield(fresh, git, [("pending", view)], 35, {35}, base))
+
+
 def urgent_strict_self_test(check) -> None:
     """ADR-0343 amendment 2026-11-19 (urgent strict path). 2026-11-19: #16835, a green, up-to-date workflow
     fix, could not merge for hours behind ~15 queued strict PRs; expedite only reorders. An owner-applied,
@@ -6875,13 +6936,56 @@ def reservation_expired(git, head: str, now: float, activity=None, green: bool =
     return None
 
 
-def deferral_used(gh, git, head: str) -> bool:
-    """The strict head, or the head it was update-branched from (first parent), already yielded."""
-    parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
-    return any(gh.app_statuses(sha).get(DEFER_CONTEXT, ("", ""))[0] == "success" for sha in [head] + parents[1:2])
+DEFER_CHAIN_DEPTH = 8   # update-branch merges walked back per reservation; deeper = treated as already yielded
 
 
-def deferral_state(gh, git, strict: list, holder: int) -> str | None:
+def is_update_merge(git, sha: str, base: str) -> str | None:
+    """`sha`'s first parent when `sha` is exactly an update-branch merge — two parents, the second an
+    ancestor of live main `base` (as update_merge_ok), and a tree equal to `git merge-tree` of them, so it
+    adds nothing beyond "old head + main" — else None. Without the ancestor test an author could merge the
+    old head with their OWN side branch carrying new code and keep the spent reservation's record."""
+    if not SHA_RE.fullmatch(base or ""):
+        return None
+    parents = git("rev-list", "--parents", "-n", "1", sha, check=False).stdout.split()
+    if len(parents) != 3:
+        return None
+    if git("merge-base", "--is-ancestor", parents[2], base, check=False).returncode != 0:
+        return None
+    mt = git("merge-tree", "--write-tree", parents[1], parents[2], check=False)
+    tree = git("rev-parse", f"{sha}^{{tree}}", check=False).stdout.strip()
+    ok = mt.returncode == 0 and bool(tree) and (mt.stdout or "").split("\n", 1)[0].strip() == tree
+    return parents[1] if ok else None
+
+
+def deferral_used(gh, git, head: str, base: str) -> bool:
+    """The RESERVATION already yielded (#17072). The yield is recorded on one head (DEFER_CONTEXT), and every
+    carrier merge moves main, so the holder is update-branched to a NEW head with no marker. Per head, the
+    "yield once" therefore reset on every update and carriers could pre-empt the same holder without bound.
+    So the record is followed back: the head itself, then through every update-branch merge
+    (is_update_merge: exactly old head + a commit on live main `base`) to the head the reservation started
+    on — a first parent is consulted ONLY through such a merge. New work by the author (a non-merge commit,
+    or a merge with anything not on main) starts a new reservation. Past DEFER_CHAIN_DEPTH merges the walk
+    stops and counts as yielded (fail toward the strict PR's priority)."""
+    if gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success" or not SHA_RE.fullmatch(base or ""):
+        return True
+    cur = head
+    for _ in range(DEFER_CHAIN_DEPTH):
+        prev = is_update_merge(git, cur, base)
+        if prev is None:
+            return False
+        if gh.app_statuses(prev).get(DEFER_CONTEXT, ("", ""))[0] == "success":
+            return True
+        cur = prev
+    return True
+
+
+def holder_may_yield(gh, git, strict: list, holder: int, urgent, base: str) -> bool:
+    """May ONE carrier be built under the running holder this tick (bounded deferral)? Never for an
+    urgent holder (#17072): the owner's urgent priority means no carrier over main while it holds."""
+    return holder not in (urgent or ()) and deferral_state(gh, git, strict, holder, base) == "open"
+
+
+def deferral_state(gh, git, strict: list, holder: int, base: str) -> str | None:
     """Bounded deferral (ADR-0343, #13400) for the reservation holder: "open" — its CI is still
     RUNNING and it never yielded, so ONE carrier may be built under it; "granted" — a carrier was
     published under it (DEFER_CONTEXT on THIS head), so that green carrier may merge past it; None —
@@ -6897,15 +7001,15 @@ def deferral_state(gh, git, strict: list, holder: int) -> str | None:
     head = view["head_sha"]
     if gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success":
         return "granted"
-    return None if deferral_used(gh, git, head) else "open"
+    return None if deferral_used(gh, git, head, base) else "open"
 
 
-def update_opens_deferral(gh, git, strict: list, n: int) -> bool:
+def update_opens_deferral(gh, git, strict: list, n: int, base: str) -> bool:
     """The strict PR `n` was update-branched this tick: may a carrier be built under its new head? Only
     when the head it was updated FROM never yielded (deferral_used: that head or its first parent). The
     new head's first parent is that head, so this is exactly deferral_state's "open" one tick early."""
     view = next((v for _st, v in strict if v["number"] == n), None)
-    return view is not None and not deferral_used(gh, git, view["head_sha"])
+    return view is not None and not deferral_used(gh, git, view["head_sha"], base)
 
 
 def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[int]:
@@ -6923,7 +7027,7 @@ def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[
                 checks.get(c) == "failure" for c in required):
             continue
         git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:refs/merge-train/pr-{n}", check=False)
-        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0 or deferral_used(gh, git, head):
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0 or deferral_used(gh, git, head, base):
             continue
         gh.post_status(head, "success", f"strict lane: yielded once to carrier {carrier_branch}; priority from here",
                        context=DEFER_CONTEXT)
@@ -10138,6 +10242,7 @@ def self_test() -> int:
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
     urgent_strict_self_test(check)
+    deferral_chain_self_test(check)
     hotfix_lane_self_test(check)
     strict_aging_self_test(check)
     for raw, want in ((None, "false"), ("", "false"), ("false", "false"), ("true", "true"), ("TRUE", "true"),

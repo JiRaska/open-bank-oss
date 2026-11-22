@@ -155,6 +155,24 @@ class McpCustomerTenantResolutionIT {
         }
     }
 
+    @Test
+    fun `a genuine customers-realm token on the staff root never reaches the staff tools`() {
+        // #16590: signed by the REAL customers key, so the tenant layer may accept it; whatever the
+        // tenant does, the staff root must refuse it with 401 and never list a staff tool.
+        val dpopKey = DpopTestProofs.newKey()
+        val token = sign(
+            OidcItKeys.pair("customers").private,
+            CUSTOMERS,
+            cnfJkt = DpopTestProofs.jkt(dpopKey),
+        )
+        list(token).statusCode(401)
+        given().contentType(ContentType.JSON)
+            .header("Authorization", "DPoP $token")
+            .header("DPoP", DpopTestProofs.proof(dpopKey, htu = "http://localhost/mcp", token = token))
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+            .post("/mcp").then().statusCode(401)
+    }
+
     // The ADMITTED-end-to-end case needs the published https URL, which only the mTLS listener
     // yields without proxy forwarding (owner decision 2026-11-21): McpGatewayMtlsIT holds it.
 
