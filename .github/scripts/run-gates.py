@@ -135,23 +135,29 @@ GATES_JOB_TIMEOUT_MARGIN = 60
 
 
 GATES_JOB_PER_SLUG_TIMEOUT_RE = re.compile(
-    r"^\$\{\{ matrix\.slug == '[a-z0-9-]+' && ([0-9]+) \|\| ([0-9]+) \}\}$")
+    r"^\$\{\{ matrix\.slug == '([a-z0-9-]+)' && ([0-9]+) \|\| ([0-9]+) \}\}$")
+GATES_FETCH_SLUG_IF_RE = re.compile(r"^matrix\.slug == '([a-z0-9-]+)'$")
 
 
 def gates_job_timeout_error(job) -> str | None:
     """None when ci.yml's gates job gives every shard exactly GATES_JOB_TIMEOUT_SECONDS for its GATES.
     One shard may add time, but only exactly the `timeout-minutes` of its evidence-receive step
-    (id current-evidence), which runs before `Run gates`: its gates keep the same ceiling (#11442)."""
+    (id current-evidence, `if: matrix.slug == '<that slug>'`), which runs before `Run gates`: its
+    gates keep the same ceiling (#11442)."""
     base = GATES_JOB_TIMEOUT_SECONDS // 60
     tmo = job.get("timeout-minutes")
     msg = f"GATES_JOB_TIMEOUT_SECONDS ({GATES_JOB_TIMEOUT_SECONDS}s) disagrees with ci.yml jobs.gates.timeout-minutes ({tmo})"
     if tmo == base:
         return None
     m = GATES_JOB_PER_SLUG_TIMEOUT_RE.fullmatch(tmo) if isinstance(tmo, str) else None
-    fetch = [s.get("timeout-minutes") for s in job.get("steps") or [] if s.get("id") == "current-evidence"]
-    if not m or int(m.group(2)) != base or len(fetch) != 1 or type(fetch[0]) is not int \
-            or int(m.group(1)) != base + fetch[0]:
-        return msg + f"; a per-slug value must be {base} + the current-evidence step's timeout-minutes"
+    fetch = [s for s in job.get("steps") or [] if s.get("id") == "current-evidence"]
+    tmo_f = fetch[0].get("timeout-minutes") if len(fetch) == 1 else None
+    cond = GATES_FETCH_SLUG_IF_RE.fullmatch(str(fetch[0].get("if", ""))) if len(fetch) == 1 else None
+    # The extra time belongs to the ONE shard that runs the fetch: same slug, or it is a free budget.
+    if not m or not cond or m.group(1) != cond.group(1) or int(m.group(3)) != base \
+            or type(tmo_f) is not int or int(m.group(2)) != base + tmo_f:
+        return msg + (f"; a per-slug value must name the slug in the current-evidence step's `if:` and be "
+                      f"{base} + that step's timeout-minutes")
     return None
 
 
@@ -1764,12 +1770,19 @@ def self_test():
             ("plain", {"timeout-minutes": 15}, None),
             ("plain wrong", {"timeout-minutes": 20}, "disagrees"),
             ("per-slug exact", {"timeout-minutes": "${{ matrix.slug == 'x' && 47 || 15 }}",
-                                "steps": [{"id": "current-evidence", "timeout-minutes": 32}]}, None),
+                                "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                           "timeout-minutes": 32}]}, None),
+            ("per-slug extra on a shard that does not fetch",
+             {"timeout-minutes": "${{ matrix.slug == 'gitops-api' && 47 || 15 }}",
+              "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'", "timeout-minutes": 32}]},
+             "disagrees"),
             ("per-slug extra exceeds fetch cap", {"timeout-minutes": "${{ matrix.slug == 'x' && 50 || 15 }}",
-                                                  "steps": [{"id": "current-evidence", "timeout-minutes": 32}]},
+                                                  "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                                             "timeout-minutes": 32}]},
              "disagrees"),
             ("per-slug base wrong", {"timeout-minutes": "${{ matrix.slug == 'x' && 47 || 20 }}",
-                                     "steps": [{"id": "current-evidence", "timeout-minutes": 32}]}, "disagrees"),
+                                     "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                                "timeout-minutes": 32}]}, "disagrees"),
             ("per-slug without capped fetch", {"timeout-minutes": "${{ matrix.slug == 'x' && 47 || 15 }}",
                                                "steps": []}, "disagrees"),
         ):
