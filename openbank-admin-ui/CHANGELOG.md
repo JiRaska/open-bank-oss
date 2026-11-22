@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.22.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.0...admin-ui-v4.22.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** read merge-train knob defaults from repo-variable expressions ([#17047](https://github.com/JiRaska/open-bank-oss/issues/17047)) ([4cc61c7](https://github.com/JiRaska/open-bank-oss/commit/4cc61c799be149a5da040471b18a88d52f0b62a9)), closes [#17009](https://github.com/JiRaska/open-bank-oss/issues/17009)
+
 ## [4.22.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.1...admin-ui-v4.22.0) (2026-11-21)
 
 

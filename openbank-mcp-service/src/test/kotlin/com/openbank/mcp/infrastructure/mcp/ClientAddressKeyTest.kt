@@ -70,17 +70,11 @@ class ProxyForwardingGuardTest {
         SmallRyeConfigBuilder().withSources(PropertiesConfigSource(props, "test", 500)).build(),
     )
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "", " , ", "0.0.0.0/0", "0.0.0.0/00", "::/0", "::0/0", "0:0:0:0:0:0:0:0/0", "[::]/0",
-            "0.0.0.0/1,128.0.0.0/1", "10.0.0.0/7", "2001::/15", "gateway.envoy-gateway-system.svc", "*",
-            "10.80.0.0/16,edge.example", "10.0.0.0/33",
-        ],
+    private val pinned = mapOf(
+        ProxyForwardingGuard.EDGE_HEADER to "X-Envoy-External-Address",
+        ProxyForwardingGuard.GATEWAY_IDENTITY to "edge-gateway.envoy-gateway-system.client.open-bank.tech",
+        ProxyForwardingGuard.CLIENT_AUTH to "required",
     )
-    fun `forwarding with a missing, broad or non-literal trusted list refuses to boot`(list: String) {
-        assertThatThrownBy { ProxyForwardingGuard.check(true, list) }.isInstanceOf(IllegalStateException::class.java)
-    }
 
     @ParameterizedTest
     @ValueSource(
@@ -91,55 +85,84 @@ class ProxyForwardingGuardTest {
             "quarkus.http.proxy.use-proxy-protocol",
         ],
     )
-    fun `constructor - any real forwarding switch with no list throws IllegalStateException`(switch: String) {
+    fun `any Quarkus forwarding switch refuses to boot, even with a narrow trusted list`(switch: String) {
         assertThatThrownBy { guard(mapOf(switch to "true")) }.isInstanceOf(IllegalStateException::class.java)
-        assertThatThrownBy { guard(mapOf(switch to "true", ProxyForwardingGuard.TRUSTED_PROXIES to "0.0.0.0/0")) }
+        assertThatThrownBy {
+            guard(
+                pinned + mapOf(switch to "true", ProxyForwardingGuard.TRUSTED_PROXIES to "10.80.4.0/22"),
+            )
+        }
             .isInstanceOf(IllegalStateException::class.java)
-        assertThatCode { guard(mapOf(switch to "true", ProxyForwardingGuard.TRUSTED_PROXIES to "10.80.4.0/22")) }
-            .doesNotThrowAnyException()
     }
 
     @Test
-    fun `constructor - the edge header alone requires the list even with forwarding off`() {
-        assertThatThrownBy { guard(mapOf(ProxyForwardingGuard.EDGE_HEADER to "X-Envoy-External-Address")) }
+    fun `a trusted-proxies list refuses to boot on its own - the edge is trusted by identity, not IP`() {
+        assertThatThrownBy { guard(mapOf(ProxyForwardingGuard.TRUSTED_PROXIES to "10.80.4.0/22")) }
             .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `the full pinned mTLS shape boots, and so does nothing configured`() {
+        assertThatCode { guard(pinned) }.doesNotThrowAnyException()
         assertThatCode { guard(emptyMap()) }.doesNotThrowAnyException()
     }
 
+    /** Removal test: drop ANY one element of the pinned shape and boot is refused. */
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            ProxyForwardingGuard.EDGE_HEADER,
+            ProxyForwardingGuard.GATEWAY_IDENTITY,
+            ProxyForwardingGuard.CLIENT_AUTH,
+        ],
+    )
+    fun `removing one element of the pinned mTLS shape refuses to boot`(removed: String) {
+        assertThatThrownBy { guard(pinned - removed) }.isInstanceOf(IllegalStateException::class.java)
+    }
+
     @Test
-    fun `narrow literal lists pass`() {
-        ProxyForwardingGuard.check(true, "10.80.4.0/22, 2001:db8:ff::/48, 127.0.0.1")
-        ProxyForwardingGuard.check(false, "")
+    fun `the customer channel without client auth REQUIRED refuses to boot`() {
+        val on = mapOf(ProxyForwardingGuard.CUSTOMER_ENABLED to "true")
+        assertThatThrownBy { guard(on) }.isInstanceOf(IllegalStateException::class.java)
+        assertThatThrownBy { guard(on + (ProxyForwardingGuard.CLIENT_AUTH to "request")) }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThatCode { guard(on + (ProxyForwardingGuard.CLIENT_AUTH to "required")) }.doesNotThrowAnyException()
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["none", "request", "NONE", ""])
+    fun `the edge header with client auth not REQUIRED refuses to boot`(clientAuth: String) {
+        assertThatThrownBy { guard(pinned + (ProxyForwardingGuard.CLIENT_AUTH to clientAuth)) }
+            .isInstanceOf(IllegalStateException::class.java)
     }
 }
 
 class ClientAddressResolverTest {
-    private val resolver = ClientAddressResolver(
-        Optional.of("X-Envoy-External-Address"),
-        Optional.of("10.80.4.0/22, 2001:db8:ff::/48"),
-    )
+    private val gatewaySan = "edge-gateway.envoy-gateway-system.client.open-bank.tech"
+    private val resolver = ClientAddressResolver(Optional.of("X-Envoy-External-Address"), Optional.of(gatewaySan))
 
     @Test
-    fun `the edge header is used only from a peer inside a trusted CIDR`() {
-        assertThat(resolver.resolve("10.80.5.7", listOf("198.51.100.9"))).isEqualTo("198.51.100.9")
-        assertThat(resolver.resolve("10.80.8.1", listOf("198.51.100.9"))).isEqualTo("10.80.8.1")
-        assertThat(resolver.resolve("2001:db8:ff:1::2", listOf("198.51.100.9"))).isEqualTo("198.51.100.9")
-        assertThat(resolver.resolve("2001:db8:fe::2", listOf("198.51.100.9"))).isEqualTo("2001:db8:fe::2")
+    fun `the edge header is used only for a request from the gateway identity`() {
+        assertThat(resolver.resolve("10.80.5.7", listOf("198.51.100.9"), fromGateway = true)).isEqualTo("198.51.100.9")
+        assertThat(resolver.resolve("10.80.5.7", listOf("198.51.100.9"), fromGateway = false)).isEqualTo("10.80.5.7")
     }
 
     @Test
     fun `two header values, a list, a hostname or garbage falls back to the peer`() {
-        assertThat(resolver.resolve("10.80.5.7", listOf("203.0.113.66", "198.51.100.9"))).isEqualTo("10.80.5.7")
-        assertThat(resolver.resolve("10.80.5.7", listOf("203.0.113.66, 198.51.100.9"))).isEqualTo("10.80.5.7")
-        assertThat(resolver.resolve("10.80.5.7", listOf("evil.example"))).isEqualTo("10.80.5.7")
-        assertThat(resolver.resolve("10.80.5.7", listOf("1.2.3.4:443"))).isEqualTo("10.80.5.7")
-        assertThat(resolver.resolve("10.80.5.7", null)).isEqualTo("10.80.5.7")
+        listOf(
+            listOf("203.0.113.66", "198.51.100.9"),
+            listOf("203.0.113.66, 198.51.100.9"),
+            listOf("evil.example"),
+            listOf("1.2.3.4:443"),
+        )
+            .forEach { assertThat(resolver.resolve("10.80.5.7", it, fromGateway = true)).isEqualTo("10.80.5.7") }
+        assertThat(resolver.resolve("10.80.5.7", null, fromGateway = true)).isEqualTo("10.80.5.7")
     }
 
     @Test
     fun `with no edge header configured no header is ever read`() {
-        val off = ClientAddressResolver(Optional.empty(), Optional.of("10.80.0.0/16"))
-        assertThat(off.resolve("10.80.5.7", listOf("198.51.100.9"))).isEqualTo("10.80.5.7")
+        val off = ClientAddressResolver(Optional.empty(), Optional.of(gatewaySan))
+        assertThat(off.resolve("10.80.5.7", listOf("198.51.100.9"), fromGateway = true)).isEqualTo("10.80.5.7")
     }
 
     @Test
