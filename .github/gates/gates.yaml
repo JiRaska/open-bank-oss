@@ -3775,11 +3775,41 @@ gates:
       python3 .github/scripts/test-merge-train-close-linked-issues.py
       python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
-    # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
-    # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
-    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
+    # The synthetic self-test's own inputs only (#17006). The cases that read the REAL tree (every
+    # workflow, check/test script and the Gradle/test sources at HEAD, #13750) moved to
+    # merge-train-real-tree-drift below, which runs on every pull request. Enumerated from what the
+    # self-tests open/execute (Python audit-hook trace) plus their git-object reads; CI's strace
+    # (OB_SELFTEST_TRACE=require) fails this gate if a read is missing. gates.yaml is universal.
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
+
+  - id: merge-train-real-tree-drift
+    name: "merge-train's privileged-gate-code drift guard holds on the real tree (#13750, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A new check or test script that judges a carrier, the ruleset or the merge machinery must stay strict (PRIVILEGED_GATE_CODE); the derivation reads every workflow and script, so it runs on every PR, split out of merge-train-declaration's slow synthetic self-test (#17006)."
+    review_after: "2027-05-22"
+    budget_seconds: 30   # 2.4 s wall locally, 2026-11-22
+    min_subjects: 7      # 7 real-tree cases today, 2026-11-22
+    selftest_exempt: "is-a-test-suite - the run: IS merge-train.py's real-tree self-test, which fails when a carrier-judging script is missing from PRIVILEGED_GATE_CODE"
+    run: |
+      python3 .github/scripts/merge-train.py --real-tree-self-test
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"

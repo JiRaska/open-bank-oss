@@ -10124,6 +10124,106 @@ def hotfix_lane_self_test(check) -> None:
               not hg.update_merge_ok(live, good, live))
 
 
+def real_tree_self_test(check) -> None:
+    """The self-test cases that read the REAL tree rather than a synthetic origin (#13750, #17006).
+
+    They derive what must stay strict from every workflow, every check/test script, gates.yaml,
+    rules.yaml and the Gradle/test sources at HEAD, so they must re-run on ANY change there. The
+    controller's synthetic self-test (--self-test) does not read those, so it runs as its own gate
+    (merge-train-declaration) scoped to the train's own inputs, and these run here under
+    --real-tree-self-test (gate merge-train-real-tree-drift) with the broad inputs. Must run from
+    the repository root; a missing tree fails, never skips."""
+    real_regen = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
+    real_refs = referenced_tests(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else {"*"}
+    U = Untrainable(real_regen, real_refs)
+    check("referenced tests: derived from the real tree by one git grep (never the fail-closed sentinel)",
+          "*" not in real_refs and len(real_refs) > 20, str(sorted(real_refs))[:200])
+    # Must-fail control for the DERIVED mechanism: a test a workflow or gates.yaml names, that the static
+    # PRIVILEGED list does not carry, is strict only because of the derived set — without it, it would ride.
+    derived_only = sorted(r for r in real_refs if r not in PRIVILEGED_GATE_CODE and test_code(r))
+    check("referenced tests: at least one referenced test is strict by derivation alone",
+          bool(derived_only) and all(U(r) for r in derived_only)
+          and not any(Untrainable(real_regen)(r) for r in derived_only[:3]), str(derived_only[:3]))
+    real_srefs = referenced_scripts(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else ({"*"}, set())
+    check("referenced scripts: derived from the real tree (never the sentinel); run-gates.py and agent-admission.py ride alone",
+          "*" not in real_srefs[0] and judge_path(".github/scripts/run-gates.py", real_srefs)
+          and judge_path(".github/scripts/agent-admission.py", real_srefs)
+          and judge_path(".github/scripts/ensure-admin-ui-deps.sh", real_srefs)
+          and judge_path(".github/scripts/provision-gradle-distribution.sh", real_srefs), str(sorted(real_srefs[0]))[:200])
+    # Drift guard on the REAL tree: every check script the train's own workflows or the pinned
+    # extra gate run, every one that judges a carrier (imports merge_train_carrier) or the merge
+    # machinery, and every one that proves a DERIVED_OUTPUTS entry must be in PRIVILEGED_GATE_CODE.
+    scripts = pathlib.Path(".github/scripts")
+    check("privileged gate code: the drift guard runs from the repository root (it never skips silently)",
+          scripts.is_dir() and pathlib.Path(".github/workflows").is_dir(), str(pathlib.Path.cwd()))
+    must: set[str] = set(FRESHNESS_GATE_CODE)
+    # Every workflow that mentions the train or its carrier library, plus each pinned extra gate's
+    # workflow: the check scripts they run decide a train's own verdict.
+    extra_wfs = {pathlib.Path(w) for w in (parse_extra_gates(pathlib.Path(RULES_FILE).read_text()) or {}).values()} \
+        if pathlib.Path(RULES_FILE).exists() else set()
+    test_ref = r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:test[-_][A-Za-z0-9_.-]*\.py|[A-Za-z0-9_.-]+_test\.py)"
+    for wf in sorted(pathlib.Path(".github/workflows").glob("*.y*ml")) if scripts.is_dir() else []:
+        text = wf.read_text(errors="replace")
+        if wf in extra_wfs or re.search(r"merge_train_carrier|merge-train", text):
+            must |= set(re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*check-[A-Za-z0-9_.-]+", text))
+        # Any test a WORKFLOW runs by name is executed with that workflow's permissions (review of #14891:
+        # auto-retry-cancelled.yml, admin-ui-deploy.yml, agent-*.yml): it stays strict, whatever the workflow.
+        must |= set(re.findall(test_ref, text))
+    # ...and any test gates.yaml names in a `selftest:` or `run:` field: part of a gate's own verdict.
+    gates_decl = pathlib.Path(GATES_YAML)
+    if gates_decl.is_file():
+        must |= set(re.findall(test_ref, gates_decl.read_text(errors="replace")))
+    for c in sorted([*scripts.glob("check-*"), *scripts.glob("test-*"), *scripts.glob("test_*")]) if scripts.is_dir() else []:
+        if c.is_file() and re.search(r"merge_train_carrier|merge-train|bypass_actors|branches/[^/\s]*/protection|/rulesets",
+                                     c.read_text(errors="replace")):
+            must.add(c.as_posix())
+    # A test a PRIVILEGED script names or imports is part of that script's verdict: it stays strict too.
+    for priv in PRIVILEGED_GATE_CODE:
+        pp = pathlib.Path(priv)
+        if pp.is_file():
+            must |= {m for m in re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test\.py)",
+                                           pp.read_text(errors="replace"))}
+            must |= {f".github/scripts/{m}" for m in re.findall(r"with_name\('((?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test)\.py)'\)",
+                                                                   pp.read_text(errors="replace"))}
+    missing = sorted(m for m in must if gate_code(m) and not U(m))
+    check("privileged gate code: every check script the train, its extra gate or a carrier/ruleset verdict depends on stays strict",
+          scripts.is_dir() and not missing, str(missing))
+    real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    real_mods = shareable_modules(Git(real_root), "HEAD")
+    check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
+          "a leaf service is",
+          "openbank-ap2-service" in real_mods
+          and not ({"openbank-libs-detekt-rules", "openbank-libs-runtime", "openbank-libs-testing",
+                    "openbank-client-transaction", "openbank-card-processing-service",
+                    "openbank-ledger-service", "openbank-infra", "openbank-contracts",
+                    "openbank-campaign-service", "openbank-consent-service", "openbank-aml-service",
+                    "openbank-audit-service", "openbank-domestic-payment", "openbank-billing-service",
+                    "openbank-finrep-service", "openbank-vop-service"} & real_mods),
+          str(sorted(real_mods)))
+    own_real = train_code_paths(Git(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "HEAD")
+    check("train_code_paths: on the real tree it finds the carrier library, the stall watch and the tests",
+          {".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py",
+           ".github/scripts/merge-train-stall-watch.py", ".github/workflows/merge-train.yml"} <= own_real,
+          str(sorted(own_real)))
+
+
+def run_real_tree_self_test() -> int:
+    fails: list[str] = []
+    ran: list[str] = []
+
+    def check(label: str, cond: bool, detail: str = "") -> None:
+        ran.append(label)
+        if not cond:
+            fails.append(f"{label}: {detail}")
+
+    real_tree_self_test(check)
+    for f in fails:
+        print(f"FAIL {f}")
+    print(f"SUBJECTS={len(ran)}  # real-tree cases")
+    print(f"merge-train real-tree self-test: {len(ran)} cases, {len(fails)} failed")
+    return 1 if fails or not ran else 0
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -10182,20 +10282,6 @@ def self_test() -> int:
     real_regen = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
     real_refs = referenced_tests(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else {"*"}
     U = Untrainable(real_regen, real_refs)
-    check("referenced tests: derived from the real tree by one git grep (never the fail-closed sentinel)",
-          "*" not in real_refs and len(real_refs) > 20, str(sorted(real_refs))[:200])
-    # Must-fail control for the DERIVED mechanism: a test a workflow or gates.yaml names, that the static
-    # PRIVILEGED list does not carry, is strict only because of the derived set — without it, it would ride.
-    derived_only = sorted(r for r in real_refs if r not in PRIVILEGED_GATE_CODE and test_code(r))
-    check("referenced tests: at least one referenced test is strict by derivation alone",
-          bool(derived_only) and all(U(r) for r in derived_only)
-          and not any(Untrainable(real_regen)(r) for r in derived_only[:3]), str(derived_only[:3]))
-    real_srefs = referenced_scripts(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else ({"*"}, set())
-    check("referenced scripts: derived from the real tree (never the sentinel); run-gates.py and agent-admission.py ride alone",
-          "*" not in real_srefs[0] and judge_path(".github/scripts/run-gates.py", real_srefs)
-          and judge_path(".github/scripts/agent-admission.py", real_srefs)
-          and judge_path(".github/scripts/ensure-admin-ui-deps.sh", real_srefs)
-          and judge_path(".github/scripts/provision-gradle-distribution.sh", real_srefs), str(sorted(real_srefs[0]))[:200])
     check("referenced tests: an unreadable tree fails closed (every test-shaped path strict)",
           Untrainable(real_regen, {"*"})(".github/scripts/test-foo.py") and not Untrainable(real_regen, {"*"})(".github/scripts/check-foo.py"))
     check("untrainable: main's find enumeration is parsed", (U.find_root, U.find_name) ==
@@ -10348,44 +10434,6 @@ def self_test() -> int:
               ".github/scripts/check-ruleset-bypass-actors.py", ".github/scripts/check-branch-protection.py"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: member touching {f} is refused (strict lane)", not ok and "manual lane" in why and U(f), why)
-    # Drift guard on the REAL tree: every check script the train's own workflows or the pinned
-    # extra gate run, every one that judges a carrier (imports merge_train_carrier) or the merge
-    # machinery, and every one that proves a DERIVED_OUTPUTS entry must be in PRIVILEGED_GATE_CODE.
-    scripts = pathlib.Path(".github/scripts")
-    check("privileged gate code: the drift guard runs from the repository root (it never skips silently)",
-          scripts.is_dir() and pathlib.Path(".github/workflows").is_dir(), str(pathlib.Path.cwd()))
-    must: set[str] = set(FRESHNESS_GATE_CODE)
-    # Every workflow that mentions the train or its carrier library, plus each pinned extra gate's
-    # workflow: the check scripts they run decide a train's own verdict.
-    extra_wfs = {pathlib.Path(w) for w in (parse_extra_gates(pathlib.Path(RULES_FILE).read_text()) or {}).values()} \
-        if pathlib.Path(RULES_FILE).exists() else set()
-    test_ref = r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:test[-_][A-Za-z0-9_.-]*\.py|[A-Za-z0-9_.-]+_test\.py)"
-    for wf in sorted(pathlib.Path(".github/workflows").glob("*.y*ml")) if scripts.is_dir() else []:
-        text = wf.read_text(errors="replace")
-        if wf in extra_wfs or re.search(r"merge_train_carrier|merge-train", text):
-            must |= set(re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*check-[A-Za-z0-9_.-]+", text))
-        # Any test a WORKFLOW runs by name is executed with that workflow's permissions (review of #14891:
-        # auto-retry-cancelled.yml, admin-ui-deploy.yml, agent-*.yml): it stays strict, whatever the workflow.
-        must |= set(re.findall(test_ref, text))
-    # ...and any test gates.yaml names in a `selftest:` or `run:` field: part of a gate's own verdict.
-    gates_decl = pathlib.Path(GATES_YAML)
-    if gates_decl.is_file():
-        must |= set(re.findall(test_ref, gates_decl.read_text(errors="replace")))
-    for c in sorted([*scripts.glob("check-*"), *scripts.glob("test-*"), *scripts.glob("test_*")]) if scripts.is_dir() else []:
-        if c.is_file() and re.search(r"merge_train_carrier|merge-train|bypass_actors|branches/[^/\s]*/protection|/rulesets",
-                                     c.read_text(errors="replace")):
-            must.add(c.as_posix())
-    # A test a PRIVILEGED script names or imports is part of that script's verdict: it stays strict too.
-    for priv in PRIVILEGED_GATE_CODE:
-        pp = pathlib.Path(priv)
-        if pp.is_file():
-            must |= {m for m in re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test\.py)",
-                                           pp.read_text(errors="replace"))}
-            must |= {f".github/scripts/{m}" for m in re.findall(r"with_name\('((?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test)\.py)'\)",
-                                                                   pp.read_text(errors="replace"))}
-    missing = sorted(m for m in must if gate_code(m) and not U(m))
-    check("privileged gate code: every check script the train, its extra gate or a carrier/ruleset verdict depends on stays strict",
-          scripts.is_dir() and not missing, str(missing))
     for f in ("docs/a\nb.md", "svc/tab\there.txt", "svc/esc\x1b.txt", "svc/del\x7f.txt"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: a DATA path with a control character {f!r} is refused", not ok and "control character" in why, why)
@@ -12532,18 +12580,6 @@ def self_test() -> int:
                       "openbank-other/src/main/kotlin/X.kt"):            # not a shareable module of this tree
                 check(f"config_judge_path: {f} (module consumed by builds or analysis) rides alone",
                       config_judge_path(f, syn_refs, syn_mods))
-            real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            real_mods = shareable_modules(Git(real_root), "HEAD")
-            check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
-                  "a leaf service is",
-                  "openbank-ap2-service" in real_mods
-                  and not ({"openbank-libs-detekt-rules", "openbank-libs-runtime", "openbank-libs-testing",
-                            "openbank-client-transaction", "openbank-card-processing-service",
-                            "openbank-ledger-service", "openbank-infra", "openbank-contracts",
-                            "openbank-campaign-service", "openbank-consent-service", "openbank-aml-service",
-                            "openbank-audit-service", "openbank-domestic-payment", "openbank-billing-service",
-                            "openbank-finrep-service", "openbank-vop-service"} & real_mods),
-                  str(sorted(real_mods)))
             for f in (".github/scripts/run-gates.py", ".github/scripts/lib/foo.sh", ".github/workflows/ci.yml",
                       GATES_YAML, "openbank-libs/governance/rules.yaml", ".github/actions/x/action.yml",
                       "build-logic/x.kts", "svc/build.gradle.kts", "svc/detekt-baseline.xml", "openbank-x/package.json",
@@ -12565,11 +12601,6 @@ def self_test() -> int:
                   and not any(TRAIN_CODE_RE.fullmatch(f) for f in (".github/scripts/run-gates.py", "docs/merge-train.md",
                                                                    ".github/scripts/lib/merge-train.py"))
                   and ".github/scripts/run-gates.py" not in own_syn, str(sorted(own_syn)))
-            own_real = train_code_paths(Git(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "HEAD")
-            check("train_code_paths: on the real tree it finds the carrier library, the stall watch and the tests",
-                  {".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py",
-                   ".github/scripts/merge-train-stall-watch.py", ".github/workflows/merge-train.yml"} <= own_real,
-                  str(sorted(own_real)))
 
             # ---- DISJOINT JUDGE BATCHING (ADR-0343 amendment 2026-11-15) ---------------------------------
             # (16) three judge members that configure no verdict, pairwise disjoint, form ONE carrier (before
@@ -15409,6 +15440,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval", "owner-status"])
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--real-tree-self-test", action="store_true",
+                    help="only the self-test cases that read the real tree (gate merge-train-real-tree-drift)")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
@@ -15484,6 +15517,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.self_test:
         return self_test()
+    if args.real_tree_self_test:
+        return run_real_tree_self_test()
     if args.check_declaration:
         return check_declaration()
     if not args.mode or not args.repo:
