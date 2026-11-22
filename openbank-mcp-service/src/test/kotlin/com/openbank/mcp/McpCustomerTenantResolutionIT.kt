@@ -132,6 +132,29 @@ class McpCustomerTenantResolutionIT {
         assertThat(challenge).startsWith("DPoP").contains("invalid_dpop_proof").contains("resource_metadata=")
     }
 
+    @Test
+    fun `a validly signed customers-realm token sent as Bearer to the staff root executes no tool`() {
+        // Signature and issuer are both genuine for the customers tenant, and the subject is shaped
+        // like an agent token with consent_id and the MCP audience: everything the staff agent path
+        // reads. Measured: this stays green with CallerContextResolver's issuer check removed, so the
+        // refusal comes from the OIDC layer before the resolver runs (the customers tenant takes only
+        // `DPoP`). The resolver check is defence in depth that this input cannot reach; this case
+        // pins the outcome at the staff root, not that particular guard.
+        val token = sign(OidcItKeys.pair("customers").private, CUSTOMERS)
+        val resp = given().contentType(ContentType.JSON)
+            .header("Authorization", "Bearer $token")
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_consents","arguments":{}}}""")
+            .post("/mcp").then().extract()
+        val body = resp.body().asString()
+        if (resp.statusCode() != 401) {
+            assertThat(resp.statusCode()).`as`(body).isEqualTo(200)
+            val path = resp.jsonPath()
+            val refused = path.get<Any?>("error") != null || path.getBoolean("result.isError")
+            assertThat(refused).`as`("customers-realm Bearer must not execute a staff tool: %s", body).isTrue()
+            assertThat(body).doesNotContain("agent:test-agent")
+        }
+    }
+
     // The ADMITTED-end-to-end case needs the published https URL, which only the mTLS listener
     // yields without proxy forwarding (owner decision 2026-11-21): McpGatewayMtlsIT holds it.
 
