@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.23.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.1...admin-ui-v4.23.0) (2026-11-22)
+
+
+### Features
+
+* **fetch-broker:** gitops, egress policy and OPA host check (ADR-0387 S3) ([#16794](https://github.com/JiRaska/open-bank-oss/issues/16794)) ([69de3a7](https://github.com/JiRaska/open-bank-oss/commit/69de3a76661109ca7a70a22acba251cb79a1da96))
+
+
+### Security
+
+* **mcp-service:** shared fail-closed Valkey DPoP replay store and budgets ([#16791](https://github.com/JiRaska/open-bank-oss/issues/16791)) ([49b0b6c](https://github.com/JiRaska/open-bank-oss/commit/49b0b6cb70d888ef9cd468d203fb309f676b8789))
+
 ## [4.22.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.0...admin-ui-v4.22.1) (2026-11-22)
 
 
