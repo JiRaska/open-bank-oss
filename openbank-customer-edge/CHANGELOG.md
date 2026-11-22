@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.0...customer-edge-v1.13.1) (2026-11-22)
+
+
+### Security
+
+* **customer-edge:** approve MCP payment proposals in the app with hash-bound SCA ([#16845](https://github.com/JiRaska/open-bank-oss/issues/16845)) ([060aafa](https://github.com/JiRaska/open-bank-oss/commit/060aafa1990aab37fbd35dd9a3397bc1eb902bb0))
+
 ## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.2...customer-edge-v1.13.0) (2026-11-20)
 
 
