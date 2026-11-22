@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.49.2...lending-service-v0.50.0) (2026-11-22)
+
+
+### Features
+
+* **lending:** enforce catalogue market scope at domestic application ([#16408](https://github.com/JiRaska/open-bank-oss/issues/16408)) ([8bc49c9](https://github.com/JiRaska/open-bank-oss/commit/8bc49c9dadafc7e859d4173f75914545d02331e0))
+
 ## [0.49.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.49.1...lending-service-v0.49.2) (2026-11-16)
 
 

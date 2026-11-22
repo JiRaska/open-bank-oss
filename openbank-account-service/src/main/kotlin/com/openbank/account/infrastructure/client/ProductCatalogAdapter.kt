@@ -9,6 +9,7 @@ import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.application.port.out.PublishedRevision
 import com.openbank.account.application.port.out.RevisionResolution
+import com.openbank.libs.market.OfferingMarkets
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Instant
@@ -93,6 +94,7 @@ class ProductCatalogAdapter(private val reads: ResilientProductCatalogReads) : P
                 contentHash = body.contentHash,
                 irRevisionHash = irHash,
                 irVersion = irVersion,
+                marketCountries = body.marketCountries?.takeIf { it.isNotEmpty() }?.let(::OfferingMarkets),
             ),
         )
     }

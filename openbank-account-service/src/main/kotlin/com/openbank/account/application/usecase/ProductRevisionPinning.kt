@@ -8,8 +8,10 @@ import com.openbank.account.application.port.out.PinOutcome
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.application.port.out.ProductRevisionPinMetrics
+import com.openbank.account.application.port.out.PublishedRevision
 import com.openbank.account.application.port.out.RevisionResolution
 import com.openbank.account.domain.model.ProductRevisionPin
+import com.openbank.libs.market.MarketCountry
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Instant
 import java.util.UUID
@@ -49,15 +51,8 @@ class ProductRevisionPinning(
                 ProductNotEligibleException(productId, "product currency is ${product.currency}, not $currency")
             }
         }
-        val revision = when (val resolution = productCatalog.resolvePublishedRevision(productId, at)) {
-            is RevisionResolution.Published -> resolution.revision
-            RevisionResolution.NoPublishedRevision -> refuse(PinOutcome.NO_PUBLISHED_REVISION) {
-                ProductRevisionNotPublishedException(productId)
-            }
-            RevisionResolution.Unavailable -> refuse(PinOutcome.CATALOG_UNAVAILABLE) {
-                ProductCatalogUnavailableException(productId)
-            }
-        }
+        val revision = resolveRevision(productId, at)
+        requireDomesticMarket(productId, revision)
         val pin = ProductRevisionPin(
             offeringId = revision.offeringId,
             productCode = product.code,
@@ -72,6 +67,36 @@ class ProductRevisionPinning(
         return pin
     }
 
+    /** Pending accounts with a pin must still be available on the domestic route at activation. */
+    suspend fun checkActivation(productId: UUID, pin: ProductRevisionPin, at: Instant) {
+        val revision = resolveRevision(productId, at)
+        if (revision.offeringId != pin.offeringId) {
+            refuse(PinOutcome.PRODUCT_NOT_ELIGIBLE) {
+                ProductNotEligibleException(productId, "account offering changed before activation")
+            }
+        }
+        requireDomesticMarket(productId, revision)
+    }
+
+    private fun requireDomesticMarket(productId: UUID, revision: PublishedRevision) {
+        if (revision.marketCountries?.includes(DOMESTIC_MARKET) == false) {
+            refuse(PinOutcome.PRODUCT_NOT_ELIGIBLE) {
+                ProductNotEligibleException(productId, "offering is outside the Czech domestic route")
+            }
+        }
+    }
+
+    private suspend fun resolveRevision(productId: UUID, at: Instant): PublishedRevision =
+        when (val resolution = productCatalog.resolvePublishedRevision(productId, at)) {
+            is RevisionResolution.Published -> resolution.revision
+            RevisionResolution.NoPublishedRevision -> refuse(PinOutcome.NO_PUBLISHED_REVISION) {
+                ProductRevisionNotPublishedException(productId)
+            }
+            RevisionResolution.Unavailable -> refuse(PinOutcome.CATALOG_UNAVAILABLE) {
+                ProductCatalogUnavailableException(productId)
+            }
+        }
+
     private inline fun refuse(outcome: PinOutcome, error: () -> RuntimeException): Nothing {
         metrics.record(outcome)
         throw error()
@@ -79,6 +104,7 @@ class ProductRevisionPinning(
 
     private companion object {
         const val ACTIVE = "ACTIVE"
+        val DOMESTIC_MARKET = MarketCountry("CZ")
     }
 }
 

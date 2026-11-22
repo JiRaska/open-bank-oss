@@ -3876,17 +3876,15 @@ class GitHub:
                 "verified": ((data.get("commit") or {}).get("verification") or {}).get("verified")}
 
     def armed_since(self, n: int) -> float | None:
-        """created_at of #n's latest auto_merge_enabled timeline item; None = unknowable (any read failure)."""
-        at = None
+        """created_at of #n's latest auto-merge ENABLE timeline item; None = unknowable (any read failure).
+        GitHub names the item after the merge method — `auto_squash_enabled` for this repo's squash merges,
+        `auto_merge_enabled` / `auto_rebase_enabled` otherwise — so all three count (aging_armed_at)."""
         try:
             timeline = self.pr_timeline(n)
         except (SystemExit, ApiAbort) as exc:
             log(f"::notice::aging: armed time of #{n} unreadable ({type(exc).__name__}) — no aging hold")
             return None
-        for e in timeline or []:
-            if e.get("event") == "auto_merge_enabled":
-                at = e.get("created_at")
-        return iso_epoch(at) if at else None
+        return aging_armed_at(timeline)
 
     def pr_timeline(self, n: int) -> list | None:
         """Every timeline item of #n in order (labels with actor and id, commits, force-pushes); None =
@@ -4707,9 +4705,27 @@ def iso_epoch(text: str | None) -> float | None:
         return None
 
 
+# Live tree, 2026-11-21 22:00Z: every one of 18 strict candidates logged "green/armed time unknowable", because
+# the reader looked for `auto_merge_enabled` and a squash-armed PR's timeline only ever says
+# `auto_squash_enabled` (merge_method squash). The event name follows the merge method.
+AUTO_MERGE_ENABLE_EVENTS = ("auto_merge_enabled", "auto_squash_enabled", "auto_rebase_enabled")
+
+
+def aging_armed_at(timeline) -> float | None:
+    """created_at of the LATEST auto-merge enable item (any merge method); a later `auto_merge_disabled` with
+    no re-enable after it means not armed now (None). None also for an unreadable timeline."""
+    at = None
+    for e in timeline or []:
+        if e.get("event") in AUTO_MERGE_ENABLE_EVENTS:
+            at = e.get("created_at")
+        elif e.get("event") == "auto_merge_disabled":
+            at = None
+    return iso_epoch(at) if at else None
+
+
 def strict_unserved_since(gh, view: dict) -> float | None:
     """When this strict PR became continuously green AND armed: the later of its head's green time (last
-    required check completed) and its armed time (latest auto_merge_enabled). None = unknowable."""
+    required check completed) and its armed time (latest auto-merge enable, aging_armed_at). None = unknowable."""
     green = gh.green_since(view["head_sha"])
     armed = gh.armed_since(view["number"])
     if green is None or armed is None:
@@ -9763,6 +9779,22 @@ def strict_aging_self_test(check) -> None:
           got is not None and strict_aging_candidate(Rot(0, now - 99999), [("green", {"number": 1, "head_sha": "a" * 40}),
                                                                            ("green", {"number": 2, "head_sha": "b" * 40})],
                                                      set(), now, thr, 3600, lambda: now - 7200) is None, repr(got))
+    # REAL-tree case: the auto-merge items of #16863's live timeline (captured 2026-11-21 22:10Z, trimmed to the
+    # fields read). Squash-armed, disarmed, re-armed: armed since the LAST enable, never "unknowable".
+    real_16863 = [{"event": "auto_squash_enabled", "created_at": "2026-11-21T00:50:32Z", "actor": {"login": "JiRaska"}},
+                  {"event": "committed", "sha": "7" * 40},
+                  {"event": "auto_merge_disabled", "created_at": "2026-11-21T16:04:17Z", "actor": {"login": "JiRaska"}},
+                  {"event": "auto_squash_enabled", "created_at": "2026-11-21T22:00:41Z", "actor": {"login": "JiRaska"}}]
+    check("strict aging (real tree #16863) must-FAIL: a squash-armed PR has a known armed time = its last enable",
+          aging_armed_at(real_16863) == iso_epoch("2026-11-21T22:00:41Z"), repr(aging_armed_at(real_16863)))
+    check("strict aging: disabled after the last enable -> not armed (None)",
+          aging_armed_at(real_16863[:3]) is None, repr(aging_armed_at(real_16863[:3])))
+    check("strict aging: merge- and rebase-method enables count too",
+          aging_armed_at([{"event": "auto_merge_enabled", "created_at": "2026-11-21T01:00:00Z"}]) is not None
+          and aging_armed_at([{"event": "auto_rebase_enabled", "created_at": "2026-11-21T01:00:00Z"}]) is not None)
+    g = GitHub("o/r", "main", "")
+    g.pr_timeline = lambda n: real_16863
+    check("strict aging (real tree): GitHub.armed_since reads the captured payload", g.armed_since(16863) is not None)
     # Reads that fail are "unknowable" (no hold), never a tick abort (#17009 review MEDIUM).
     real_api = api
     try:
