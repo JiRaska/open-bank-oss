@@ -13,10 +13,10 @@ import java.util.Optional
  * [ClientAddressResolver] picks — never a hash of the raw peer string (#16919 adoption, #16800).
  */
 class TokenlessRefusalSourceTest {
-    private val untrustedEdge = ClientAddressResolver(Optional.of(EDGE), Optional.of("10.80.0.0/16"))
+    private val resolver = ClientAddressResolver(Optional.of(EDGE), Optional.of("gateway.test.example"))
 
-    private fun source(peer: String, edge: List<String> = emptyList()) =
-        tokenlessRefusalSource { ClientAddressKey.of(untrustedEdge.resolve(peer, edge)) }
+    private fun source(peer: String, edge: List<String> = emptyList(), fromGateway: Boolean = false) =
+        tokenlessRefusalSource { ClientAddressKey.of(resolver.resolve(peer, edge, fromGateway)) }
 
     @Test
     fun `addresses rotating inside one IPv6 64 share a source, another 64 does not`() {
@@ -38,12 +38,12 @@ class TokenlessRefusalSourceTest {
     }
 
     @Test
-    fun `a spoofed forwarded address from an untrusted peer does not change the source`() {
+    fun `a spoofed forwarded address from a peer that is not the gateway does not change the source`() {
         val direct = source("198.51.100.20")
         assertThat(source("198.51.100.20", listOf("203.0.113.7"))).isEqualTo(direct)
         assertThat(source("198.51.100.20", listOf("2001:db8:1:2::a"))).isEqualTo(direct)
-        // control: the same header from a TRUSTED peer does move it, so the assertion above can fail
-        assertThat(source("10.80.1.1", listOf("203.0.113.7"))).isNotEqualTo(source("10.80.1.1"))
+        // control: the same header from the verified gateway does move it, so the assertion above can fail
+        assertThat(source("10.80.1.1", listOf("203.0.113.7"), fromGateway = true)).isNotEqualTo(source("10.80.1.1"))
     }
 
     @Test

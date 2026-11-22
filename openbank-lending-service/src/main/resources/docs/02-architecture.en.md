@@ -119,3 +119,16 @@ The published loan revision read (`ProductCatalogLoanClient`, `GET /api/v2/produ
 shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
 denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
 client selection.
+
+### Catalogue distribution on the Czech application route
+
+Before writing a catalogue-backed application, lending reads the current distribution countries
+with the effective catalogue revision. A scoped offering must include CZ. Lending assigns CZ
+jurisdiction for that route and refuses a contradictory caller-supplied jurisdiction. Historical
+offerings with no declared distribution scope follow the existing application path.
+
+For a Czech application with a pinned catalogue revision, Lending first commits the signature
+intent, including the revision identity and content hash. The request and the recovery scheduler
+use the same operation. Recovery claims due intents across replicas. The application transition,
+signature evidence and intent completion commit in one transaction. A later retry must match the
+recorded artefact and signer. The intent also records synthetic taint for asynchronous recovery.

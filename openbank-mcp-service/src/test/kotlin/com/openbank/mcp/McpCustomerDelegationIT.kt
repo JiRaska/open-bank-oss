@@ -22,7 +22,6 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
@@ -49,6 +48,8 @@ class McpCustomerDelegationIT {
     /** The customer channel ON, with the three ports replaced by the doubles below. */
     class DataPlaneDoubles : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = McpCustomerChannelIT.CustomerOn().configOverrides
+
+        override fun testResources() = GatewayTls.resources
 
         override fun getEnabledAlternatives(): Set<Class<*>> = setOf(
             CustomerTokenSource::class.java,
@@ -160,10 +161,11 @@ class McpCustomerDelegationIT {
         if (k.partyId == grantor) listOf(CustomerGrant(GRANT, account, caps.toSet(), null)) else emptyList()
     }
 
-    private fun post(body: String) = given().contentType(ContentType.JSON)
+    private fun post(body: String) = GatewayTls.spec().contentType(ContentType.JSON)
+        .header("Host", "mcp.test.example")
         .header("Authorization", "DPoP ${DpopTestProofs.ACCESS_TOKEN}")
         .header("DPoP", DpopTestProofs.proof(key))
-        .body(body).post("/mcp").then().statusCode(200)
+        .body(body).post("/customer/mcp").then().statusCode(200)
 
     private fun call(tool: String, accountId: UUID = account) = post(
         """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$tool","arguments":{"accountId":"$accountId"}}}""",

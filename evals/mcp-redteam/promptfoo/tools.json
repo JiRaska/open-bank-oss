@@ -1,0 +1,162 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "list_accounts",
+      "description": "List the accounts the presented PSD2 consent grants access to.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_balance",
+      "description": "Get the balance of a granted account.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$",
+            "description": "IBAN (uppercase, no spaces; must be within the consent)"
+          }
+        },
+        "required": [
+          "accountId"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_transactions",
+      "description": "List recent transactions of a granted account.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$",
+            "description": "IBAN (uppercase, no spaces; must be within the consent)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Max rows (default 50)"
+          }
+        },
+        "required": [
+          "accountId"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_consents",
+      "description": "List the PSD2 consents the acting agent holds.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_statement",
+      "description": "Get a closed account statement as STRUCTURED DATA (period, opening/closing balance, the itemized entry list with a best-effort `category` per entry) \u2014 use this to answer 'summarize my March statement', 'what did I spend on groceries last month' or 'why was I charged X' by reasoning over the entries yourself; this tool returns data, not a rendered document or a written summary. Pass `legalSequence` (with `currency`) for one exact statement, or omit both to get the most recently closed one for the account (optionally narrowed to `currency`). `category` is a rule-based heuristic over each entry's description/counterparty \u2014 treat it as a hint, not fact. IBANs and counterparty names come back masked (only the account's own last 4 digits are kept) \u2014 amounts, dates, currency and category are not, and are enough to explain the statement.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$",
+            "description": "IBAN (uppercase, no spaces; must be within the consent)"
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 pocket currency; required together with legalSequence"
+          },
+          "legalSequence": {
+            "type": "integer",
+            "description": "Exact statement sequence; omit for the latest"
+          }
+        },
+        "required": [
+          "accountId"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_payment_confirmation",
+      "description": "Get the confirmation details of a payment you already made \u2014 reference/end-to-end id, execution/settlement date, amount, currency, debtor/creditor account, payee name, remittance/reference text and status. Works for either a SEPA or a domestic (CZK) payment; you do not need to know which rail it went on. Use this to answer 'did my payment to X go through', 'when did payment Y settle' or to confirm the details of a specific past payment by its id \u2014 it does not list or search payments. IBANs and payee/payer names come back masked, same as every other tool on this surface.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "paymentId": {
+            "type": "string",
+            "description": "The payment id (as returned when the payment was created)"
+          }
+        },
+        "required": [
+          "paymentId"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "count_marketing_consents",
+      "description": "Count ACTIVE marketing consents per scope (campaign reach). Returns COUNTS ONLY \u2014 never party ids, names or contact details. Who receives anything is decided by campaign-service under consent-gated delivery, not here.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "propose_payment",
+      "description": "UNAVAILABLE \u2014 no proposal store is wired, so this call is refused and records nothing. When implemented it creates a REVIEWABLE payment proposal (never a debit; a human + SCA disposes).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fromAccountId": {
+            "type": "string",
+            "description": "Debtor account (must be within the consent)"
+          },
+          "toIban": {
+            "type": "string",
+            "description": "Creditor IBAN"
+          },
+          "amount": {
+            "type": "string",
+            "description": "Amount, decimal string"
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 currency"
+          }
+        },
+        "required": [
+          "fromAccountId",
+          "toIban",
+          "amount",
+          "currency"
+        ]
+      }
+    }
+  }
+]
