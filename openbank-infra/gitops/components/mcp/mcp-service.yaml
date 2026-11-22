@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "efdaa54bbf6597b0"
+        openbank.tech/policy-checksum: "e74ce6cf39d0d909"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -131,9 +131,6 @@ spec:
               value: http://transaction-service.payments.svc:8102
             - name: QUARKUS_REST_CLIENT_CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
-            # Customer-channel grant lookup (ADR-0383 D3): POST /api/v1/delegations/mcp-client/resolve.
-            - name: QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL
-              value: http://delegation-service.delegation.svc:8126
             # openbank-services client secret (shared M2M identity, ADR-0104 D3 — the SAME client
             # transaction-service/lending-service/settlement-service/agent-service already use) —
             # lets RealAccountReadPort's OidcClientRequestReactiveFilter mint a client-credentials

@@ -157,6 +157,52 @@ tier_resource_resources_granted(resources) if {
 	glob_match(pattern, input.resource)
 }
 
+# ADR-0387: the public-web read. The fetch broker queries data.openbank.rest.allow for an
+# AI_AGENT with action `read.public_web` and attributes {tool: web.fetch, tier: read, host}, so
+# rest.rego's bridge arrives here with input.tool == "read.public_web", no input.tier and no
+# input.resource -- the generic tier/resource rule above can never fire for it. The grant needs
+# all four: the declared tier is `read` (a write/execute claim gets nothing), the tool is the
+# broker's one tool, the charter's object-shaped `read` grant covers the resource, AND the
+# request host is listed verbatim in that SAME charter's data_scope.public_web.hosts (a string
+# entry or a {host, render} mapping). The broker re-checks the host after DNS; this rule is the
+# PDP half of ADR-0387 D2, so an off-list host is denied by policy, not only by broker code.
+public_web_resource := "read.public_web"
+
+charter_allowed if public_web_allowed
+
+charter_denied if public_web_denied
+
+public_web_allowed if {
+	input.tool == public_web_resource
+	input.attributes.tier == "read"
+	input.attributes.tool == "web.fetch"
+	is_string(input.attributes.host)
+	some a in charter
+	some entry in a.tools.allow
+	entry.tier == "read"
+	some pattern in entry.resources
+	glob_match(pattern, public_web_resource)
+	public_web_host_listed(a.data_scope.public_web.hosts, input.attributes.host)
+}
+
+# A charter's own tools.deny on the resource beats its allow, whatever tier the caller claims.
+public_web_denied if {
+	input.tool == public_web_resource
+	some entry in tier_resource_deny_entries
+	some pattern in entry.resources
+	glob_match(pattern, public_web_resource)
+}
+
+public_web_host_listed(hosts, host) if {
+	some h in hosts
+	h == host
+}
+
+public_web_host_listed(hosts, host) if {
+	some h in hosts
+	h.host == host
+}
+
 # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
 # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
 # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
