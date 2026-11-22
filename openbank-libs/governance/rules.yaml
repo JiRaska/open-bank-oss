@@ -852,6 +852,18 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-delivery-scripts.sh"
     target_enforce_date: "2027-01-31"   # ADR-0144; enforce once two more ADRs carry an executable block
     blocked_on: "only ADR-0317 and ADR-0344 have a ```bash Delivery check today; a line whose tool the runner lacks (yq) is UNMEASURED, so enforcement waits until the blocks are written for the runner"
+  schedule_pause_switch:
+    # ADR-0389: stopping or pausing automation must never need a PR.
+    detect: [".github/workflows/*.yml with an `on.schedule` trigger"]
+    require:
+      - "each entry job (no needs:, or an if: with a status function) is gated on `github.event_name != 'schedule' || (vars.<WORKFLOW_ID>_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')`"
+      - "or the workflow is listed in the checker's EXCLUDED map with a reason (a control whose pause must stay a reviewed PR)"
+      - "an EXCLUDED entry naming no scheduled workflow is a finding"
+    gate: schedule-pause-switch
+    enforced: advisory
+    ci_producer: ".github/scripts/check-schedule-pause-switch.py"
+    target_enforce_date: "2027-02-28"   # ADR-0144; enforce once the exclusion list has had one review pass
+    blocked_on: "the exclusion list is a first classification; enforcing before a review pass would freeze it"
   requirements_traceability:
     # A functional-baseline catalogue in ADR prose has no traceability: 38 treasury items had to be
     # audited by hand to learn which existed. <service>/governance/requirements.yaml makes each item
