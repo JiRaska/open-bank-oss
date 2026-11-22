@@ -25,3 +25,10 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 the `Qualified` literal, `referrerPartyId`, and `inviteId` — the invite id being the earn's
 idempotency key. The generated pact is committed to `pacts/` and replayed by the provider in
 openbank-referral-service on every pull request.
+
+## Trace-contract testing
+
+`LoyaltyTraceContractIT` boots the service under its own test profile and asserts the span shape the
+shared trace contract requires (see `openbank-libs/docs/trace-contract-testing.en.md`). Because that
+second Quarkus application shares the test fork, `build.gradle.kts` raises the test task heap to
+2 GiB; the setting affects tests only and changes nothing in the packaged service.

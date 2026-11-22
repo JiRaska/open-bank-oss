@@ -9,7 +9,6 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.restassured.RestAssured
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.assertj.core.api.Assertions.assertThat
@@ -51,15 +50,12 @@ class McpCustomerTenantResolutionIT {
             "quarkus.oidc.resolve-tenants-with-issuer" to "true",
             "quarkus.oidc.customers.tenant-enabled" to "true",
             "quarkus.oidc.customers.public-key" to OidcItKeys.publicKeyConfig("customers"),
-            // The edge forwards the external scheme and host, so the tenant's own DPoP check sees the
-            // published resource URL; this is the deployment shape the two htu checks need to agree.
-            "quarkus.http.proxy.proxy-address-forwarding" to "true",
-            "quarkus.http.proxy.allow-x-forwarded" to "true",
-            "quarkus.http.proxy.enable-forwarded-host" to "true",
             "mcp.customer.enabled" to "true",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
-        )
+        ) + GatewayTls.listener()
+
+        override fun testResources() = GatewayTls.resources
     }
 
     private fun sign(key: PrivateKey, iss: String, sub: String = "agent:test-agent", cnfJkt: String? = null): String {
@@ -120,37 +116,23 @@ class McpCustomerTenantResolutionIT {
         )
         // Bound to the URL THIS request hits, so the tenant's own DPoP check (authorization-scheme
         // DPoP) passes; the customer branch then checks htu against the PUBLISHED resource and refuses.
-        val proof = DpopTestProofs.proof(dpopKey, htu = "http://localhost:${RestAssured.port}/mcp", token = token)
-        val challenge = given().contentType(ContentType.JSON)
+        // The customer root over the mTLS listener with a Host other than the published one: the
+        // tenant's check (htu == absoluteURI) passes, the branch's (htu == published resource) refuses.
+        val proof = DpopTestProofs.proof(dpopKey, htu = "https://other.test.example/customer/mcp", token = token)
+        val challenge = GatewayTls.spec().contentType(ContentType.JSON)
+            .header("Host", "other.test.example")
             .header("Authorization", "DPoP $token")
             .header("DPoP", proof)
             .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
-            .post("/mcp").then()
+            .post("/customer/mcp").then()
             .statusCode(401)
             .extract().header("WWW-Authenticate")
         // Only the customer branch emits resource_metadata; a tenant-level rejection would not.
         assertThat(challenge).startsWith("DPoP").contains("invalid_dpop_proof").contains("resource_metadata=")
     }
 
-    @Test
-    fun `a real customers token with a proof for the published resource is ADMITTED end to end`() {
-        val dpopKey = DpopTestProofs.newKey()
-        val token = sign(
-            OidcItKeys.pair("customers").private,
-            CUSTOMERS,
-            sub = "c0ffee00-0000-0000-0000-000000000005",
-            cnfJkt = DpopTestProofs.jkt(dpopKey),
-        )
-        given().contentType(ContentType.JSON)
-            .header("Authorization", "DPoP $token")
-            .header("DPoP", DpopTestProofs.proof(dpopKey, htu = DpopTestProofs.RESOURCE, token = token))
-            .header("X-Forwarded-Proto", "https")
-            .header("X-Forwarded-Host", "mcp.test.example")
-            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
-            .post("/mcp").then()
-            .statusCode(200)
-            .body("result.tools.size()", org.hamcrest.Matchers.equalTo(0))
-    }
+    // The ADMITTED-end-to-end case needs the published https URL, which only the mTLS listener
+    // yields without proxy forwarding (owner decision 2026-11-21): McpGatewayMtlsIT holds it.
 
     private companion object {
         const val STAFF = "https://kc.test.example/realms/openbank"

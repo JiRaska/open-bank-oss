@@ -10,7 +10,7 @@ metadata:
   namespace: ledger
   labels:
     # ADR-0373: ledger-class = an acknowledged commit survives the loss of any one instance.
-    openbank.io/durability-class: ledger-class
+    open-bank.tech/durability-class: ledger-class
 spec:
   # DB-layer observability (Dynatrace-parity #0): CNPG runs its built-in
   # Prometheus exporter on :9187 and creates a PodMonitor the operator owns.

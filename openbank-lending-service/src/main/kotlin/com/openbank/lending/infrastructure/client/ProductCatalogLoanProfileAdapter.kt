@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.market.OfferingMarkets
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
@@ -67,6 +68,7 @@ internal fun CatalogLoanRevisionResponse.toProfile(expectedOfferingId: UUID): Ca
         nominalAnnualRate = rate,
         minPrincipal = minimum,
         maxPrincipal = maximum,
+        markets = marketCountries?.let(::OfferingMarkets),
     )
 }
 
@@ -95,6 +97,7 @@ data class CatalogLoanRevisionResponse(
     val state: String,
     val content: CatalogLoanRevisionContentResponse,
     val contentHash: String?,
+    val marketCountries: Set<String>? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

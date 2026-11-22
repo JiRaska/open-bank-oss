@@ -291,8 +291,20 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_0706fa38_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('0706fa384166e6be506fa7dc5393a3d69906b6ea')
 
+    def test_reviewed_5e1458d0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('5e1458d0abd19d575cd667e4fae834a5f5aebe00')
+
+    def test_reviewed_3e8b1a85_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('3e8b1a854530ad67b8b2c15e6b68b32788519ef2')
+
     def test_reviewed_4ff3f289_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('4ff3f289c41f697c1f498435a0ac7bcf4fa6b507')
+
+    def test_reviewed_bffe20f4_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('bffe20f4c51c3b6fe3a7d961617d4f484276478e')
+
+    def test_reviewed_82f517cd_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('82f517cde74e25753d7c498401c4cc9d861074b5')
 
     def test_current_policy_source_is_within_bounds(self):
         # #16187: the controller outgrew the size bound and nothing noticed until merge records
@@ -406,8 +418,20 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_25f1786d_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('25f1786d171b1ab122685d39314fd850fc019b85')
 
+    def test_reviewed_82746dd0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('82746dd0548f1f2e352fefbe97cb2aa9a801df5b')
+
+    def test_reviewed_15c3e151_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('15c3e1510c102bdd91e8006e1a04207b1abb83ef')
+
     def test_reviewed_0c35ce96_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('0c35ce9601da83a44dd580d42b451e95a6bd1f6a')
+
+    def test_reviewed_1e5e9f5b_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('1e5e9f5b334f640d8102054b8155a9526d035e79')
+
+    def test_reviewed_e2b6a5df_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a')
 
     def test_branch_spoofing_rejected(self):
         github = PolicyGitHub()

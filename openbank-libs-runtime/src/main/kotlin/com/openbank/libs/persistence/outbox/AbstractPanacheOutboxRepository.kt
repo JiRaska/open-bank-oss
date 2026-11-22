@@ -34,8 +34,8 @@ import kotlin.random.Random
  *
  * plus its own `persistInTransaction`. The statements use [OutboxSql] and require
  * `claimed_at`, `next_attempt_at` and the two partial indexes from `db/outbox-v2-template.sql`.
- * The entity must map every column returned by the native claim query. Hibernate Reactive can
- * fail when `RETURNING *` contains an unmapped column, even when the dispatcher never reads it.
+ * Native row reads project the concrete entity's Hibernate-mapped columns. Additive unmapped
+ * table columns therefore do not enter entity hydration; mapped service extensions remain included.
  *
  * Reactive surface, event-loop only (ADR-0050 N1): every method runs its statement inside
  * `Panache.withTransaction` on the calling Vert.x context, so the `@Scheduled suspend` dispatcher
@@ -54,6 +54,8 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
     protected lateinit var clock: Clock
         private set
     private var random: Random = Random.Default
+
+    internal val projectionCache = OutboxEntityProjectionCache()
 
     constructor(shape: OutboxTableShape, entityClass: Class<E>, clock: Clock = Clock.systemUTC()) {
         this.shape = shape
@@ -84,7 +86,8 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> {
         val now = Instant.now(clock)
         return inTransaction { s ->
-            s.createNativeQuery(OutboxSql.listProcessable(shape), entityClass)
+            val projection = projectionCache.resolve(s.factory.metamodel, entityClass, shape.table)
+            s.createNativeQuery(OutboxRowSql.listProcessable(shape, projection), entityClass)
                 .bindEligibility(now, now.minus(DEFAULT_STALE_AFTER))
                 .setParameter("limit", limit.coerceAtLeast(1))
                 .resultList
@@ -94,7 +97,8 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
     override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
         val now = Instant.now(clock)
         return inTransaction { s ->
-            s.createNativeQuery(OutboxSql.claim(shape), entityClass)
+            val projection = projectionCache.resolve(s.factory.metamodel, entityClass, shape.table)
+            s.createNativeQuery(OutboxRowSql.claim(shape, projection), entityClass)
                 .bindEligibility(now, now.minus(staleAfter))
                 .setParameter("limit", limit.coerceAtLeast(1))
                 .resultList
@@ -241,7 +245,8 @@ abstract class AbstractClaimFencedOutboxRepository<E : PanacheClaimFencedOutboxE
         val token = Ids.randomId()
         val now = Instant.now(clock)
         return inTransaction { s ->
-            s.createNativeQuery(OutboxClaimFenceSql.claim(shape), entityClass)
+            val projection = projectionCache.resolve(s.factory.metamodel, entityClass, shape.table)
+            s.createNativeQuery(OutboxClaimFenceSql.claim(shape, projection), entityClass)
                 .bindEligibility(now, now.minus(staleAfter))
                 .setParameter("claimToken", token)
                 .setParameter("limit", limit.coerceAtLeast(1))

@@ -53,8 +53,10 @@ import java.util.UUID
  *     the same statement must satisfy them.
  *
  * Plain JDBC on a Testcontainers Postgres: `EXPLAIN` needs no Hibernate, and the statement text
- * is [OutboxSql.claim] verbatim with its named parameters inlined as literals — the only thing a
- * JDBC driver cannot bind. Docker missing: SKIPPED locally, FAILS when `CI=true`.
+ * uses the repository's projected [OutboxRowSql.claim] renderer with the canonical entity columns.
+ * Named parameters are inlined as literals — the only thing a JDBC driver cannot bind. ORM
+ * mapping itself is verified by the service integration tests. Docker missing: SKIPPED locally,
+ * FAILS when `CI=true`.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
@@ -64,6 +66,9 @@ class OutboxClaimPlanIT {
     private lateinit var conn: Connection
     private val mapper = ObjectMapper()
     private val shape = OutboxTableShape("ledger_outbox")
+    private val projection =
+        "id, event_id, aggregate_id, event_type, payload, status, attempt_count, sent_at, last_error, " +
+            "synthetic, created_at, updated_at, claimed_at, next_attempt_at"
 
     @BeforeAll fun start() {
         requireDocker(DockerClientFactory.instance().isDockerAvailable, System.getenv("CI"))
@@ -179,7 +184,7 @@ class OutboxClaimPlanIT {
         seedFencedHead(event, tail, aggregate, claimTime)
         try {
             fun claimAt(now: Instant, token: UUID): List<UUID> = queryColumn(
-                OutboxClaimFenceSql.claim(fenced),
+                OutboxClaimFenceSql.claim(fenced, "$projection, claim_token"),
                 mapOf(
                     "pending" to "PENDING",
                     "failed" to "FAILED",
@@ -271,11 +276,11 @@ class OutboxClaimPlanIT {
 
     // ── helpers ────────────────────────────────────────────────────────────────
 
-    /** Runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over [OutboxSql.claim] inside a rolled-back transaction. */
+    /** Runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` over [OutboxRowSql.claim] inside a rolled-back transaction. */
     private fun explainClaim(): JsonNode {
         val now = Instant.now()
         val sql = bind(
-            OutboxSql.claim(shape),
+            OutboxRowSql.claim(shape, projection),
             mapOf(
                 "pending" to OutboxStatus.PENDING.name,
                 "failed" to OutboxStatus.FAILED.name,
