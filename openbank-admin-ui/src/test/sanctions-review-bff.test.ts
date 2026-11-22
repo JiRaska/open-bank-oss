@@ -52,7 +52,7 @@ describe('sanctions review BFF', () => {
 
     expect(res.status).toBe(200)
     const [url, init] = lastFetchCall()
-    expect(url).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/review')
+    expect(url).toBe('http://localhost:8123/api/v1/sanctions/review')
     expect(headersOf(init).Authorization).toBe('Bearer operator-token')
   })
 
@@ -132,7 +132,7 @@ describe('sanctions approvals decide BFF (checker half)', () => {
 
     expect(res.status).toBe(200)
     const [url, init] = lastFetchCall()
-    expect(url).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals/approval-42')
+    expect(url).toBe('http://localhost:8123/api/v1/sanctions/approvals/approval-42')
     expect(init.method).toBe('PATCH')
     expect(headersOf(init).Authorization).toBe('Bearer operator-token')
   })
@@ -186,7 +186,7 @@ describe('sanctions list routes relay the bearer too (#3336 leftovers)', () => {
     expect(res.status).toBe(202)
     const [url, init] = lastFetchCall()
     // v1 imported in-request and timed out on large feeds; only v2 answers 202 and queues.
-    expect(url).toBe('http://openbank-sanctions-service:8123/api/v2/sanctions/lists/OFAC_SDN/refresh')
+    expect(url).toBe('http://localhost:8123/api/v2/sanctions/lists/OFAC_SDN/refresh')
     expect(init.method).toBe('POST')
     expect(headersOf(init).Authorization).toBe('Bearer operator-token')
     expect(headersOf(init)['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/)

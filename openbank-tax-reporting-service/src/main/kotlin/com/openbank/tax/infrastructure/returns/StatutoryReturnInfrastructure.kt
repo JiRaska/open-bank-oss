@@ -13,6 +13,7 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.usecase.ReportingEntities
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.returns.DeadlineBasis
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
@@ -20,6 +21,7 @@ import com.openbank.tax.domain.returns.ReturnScope
 import com.openbank.tax.domain.returns.SignedTerm
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
+import com.openbank.tax.infrastructure.returns.ceu.CeuReturnDataAdapter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -76,6 +78,9 @@ object CatalogueParser {
         rules = (get("rules") ?: emptyList<JsonNode>()).map { it.toRule() },
         legalBasis = text("legalBasis"),
         lineSchema = (get("lineSchema") ?: emptyList<JsonNode>()).map { it.asText() },
+        deadlineBasis = get("deadlineBasis")?.let { DeadlineBasis.valueOf(it.asText()) } ?: DeadlineBasis.CALENDAR_DAYS,
+        onDemand = get("onDemand")?.asBoolean() ?: false,
+        filingObligation = get("filingObligation")?.asBoolean() ?: true,
     )
 
     private fun JsonNode.toRule(): ValidationRule = when (val type = text("type")) {
@@ -110,7 +115,10 @@ class ReportingEntitiesProducer {
         @ConfigProperty(name = "openbank.statutory-returns.company-id", defaultValue = "company") companyId: String,
         @ConfigProperty(name = "openbank.statutory-returns.fund-ids") fundIds: Optional<List<String>>,
         @ConfigProperty(name = "openbank.statutory-returns.reporting-start") reportingStart: Optional<String>,
+        @ConfigProperty(name = "openbank.ceu.reporting-start") ceuStart: Optional<String>,
     ): ReportingEntities = ReportingEntities(
+        catalogueStarts = ceuStart.map { mapOf(CeuReturnDataAdapter.CATALOGUE_ID to LocalDate.parse(it)) }
+            .orElse(emptyMap()),
         companyId = companyId,
         fundIds = fundIds.orElse(emptyList()).map { it.trim() }.filter { it.isNotEmpty() },
         reportingStart = reportingStart.map { LocalDate.parse(it) }.orElse(null),

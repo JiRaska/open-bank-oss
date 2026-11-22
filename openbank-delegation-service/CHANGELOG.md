@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.26.0...delegation-service-v0.27.0) (2026-11-21)
+
+
+### Features
+
+* **delegation:** MCP client grant resolve endpoint ([#16793](https://github.com/JiRaska/open-bank-oss/issues/16793)) ([a00aba8](https://github.com/JiRaska/open-bank-oss/commit/a00aba8c0e0f0b39e4db69d3f834bcc57097857a))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.2...delegation-service-v0.26.0) (2026-11-17)
+
+
+### Features
+
+* **delegation:** add MCP_CLIENT grantee class restricted to reads and propose (ADR-0383 D3) ([#16599](https://github.com/JiRaska/open-bank-oss/issues/16599)) ([494ed22](https://github.com/JiRaska/open-bank-oss/commit/494ed222ecdd9c26a2b355f199bd7cb53b9f912c))
+
+## [0.25.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.1...delegation-service-v0.25.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **delegation,domestic-payment,finrep:** reload outbound mTLS client certificates ([#16413](https://github.com/JiRaska/open-bank-oss/issues/16413)) ([cbd1aeb](https://github.com/JiRaska/open-bank-oss/commit/cbd1aeb831abe581bfd0d317808ca6d49cbf3d11))
+
+## [0.25.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.0...delegation-service-v0.25.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **delegation:** make the sealed disclosure path reachable, and declare D6 (ADR-0375) ([#16081](https://github.com/JiRaska/open-bank-oss/issues/16081)) ([45354ac](https://github.com/JiRaska/open-bank-oss/commit/45354ac8e1e87398577989aa9fdd74121c95804e))
+* **delegation:** stop offering object types that cannot be delivered (ADR-0375 D5a) ([#16115](https://github.com/JiRaska/open-bank-oss/issues/16115)) ([2ba79f0](https://github.com/JiRaska/open-bank-oss/commit/2ba79f0e0b7c9429059207dbf9c087db53bb5484))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.24.1...delegation-service-v0.25.0) (2026-11-14)
+
+
+### Features
+
+* **delegation:** settle domestic spend reservations from the payment outcome ([#16124](https://github.com/JiRaska/open-bank-oss/issues/16124)) ([62dd38c](https://github.com/JiRaska/open-bank-oss/commit/62dd38c25fb6a71f8df15e530a63c879871b6d39))
+
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.24.0...delegation-service-v0.24.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **customer-edge:** gate account detail and statement reads on their own capability (ADR-0375 D7) ([#15879](https://github.com/JiRaska/open-bank-oss/issues/15879)) ([747573d](https://github.com/JiRaska/open-bank-oss/commit/747573dc3c8e3b90ca14fa3645bec80b48c846c9))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.7...delegation-service-v0.24.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
+## [0.23.7](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.6...delegation-service-v0.23.7) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** bind approval replay to the frozen payment payload ([#15716](https://github.com/JiRaska/open-bank-oss/issues/15716)) ([ad63d63](https://github.com/JiRaska/open-bank-oss/commit/ad63d6306340cfff8c9be9350bfd6e3c399034f5))
+
+## [0.23.6](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.5...delegation-service-v0.23.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** require explicit sole authority for offers ([#15639](https://github.com/JiRaska/open-bank-oss/issues/15639)) ([25b2de9](https://github.com/JiRaska/open-bank-oss/commit/25b2de9c4040af4f3b22ac6f988834f894f6cb79))
+
 ## [0.23.5](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.4...delegation-service-v0.23.5) (2026-11-06)
 
 

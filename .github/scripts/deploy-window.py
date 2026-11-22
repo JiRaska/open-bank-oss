@@ -28,6 +28,9 @@ moment a deploy PR's auto-merge is ARMED does:
                 also refused when build inputs changed after that image's source commit.
   * `verify`  — before either deploy workflow arms a GitOps PR, proves every image in its diff
                 still represents the current main build inputs. Unknown sources fail closed.
+  * `prune`   — the producer's per-pin form of `verify` (#15977): a stale pin is reverted on
+                the PR branch in one signed App commit and the fresh pins proceed; with no
+                fresh pin left the PR is closed. `select` applies the same rule in the flusher.
 
 NO LOST DEPLOY. A deferred deploy is an open PR: the same durable record the pipeline used
 before this change. Nothing here closes a PR; the only closer is supersede-deploy-prs.sh, which
@@ -37,14 +40,17 @@ newer one cover them.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from functools import lru_cache
+from typing import NamedTuple
 
 DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
@@ -312,19 +318,339 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool],
     return []
 
 
-def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
-                     supersede: Callable[[dict], int]) -> dict | None:
+class PinVerdict(NamedTuple):
+    """Per-pin freshness of one GitOps deploy PR (#15977).
+
+    `refuse` refuses the WHOLE PR — a false tag/digest pair, a missing digest, a diff with no
+    pins — because then the diff itself cannot be trusted to name the images it deploys.
+    Staleness is different: it is a fact about ONE image, so it removes only that pin.
+    """
+    refuse: list[str]
+    stale: list[tuple]
+    fresh: list[tuple]
+
+
+def _pin_label(t: tuple) -> str:
+    return f"{t[1].rsplit('/', 1)[-1]}:{t[4]} in {t[0]}"
+
+
+def classify_pins(diff: str, fresh: Callable[[str, str], bool],
+                  require_digest: bool = False) -> PinVerdict:
+    """Split a deploy diff into refusals, stale pins and fresh pins.
+
+    Same inputs and the same refusals as `verify_pins`, but a stale pin no longer refuses the
+    others: 2026-11-13 run 43387673867 built treasury, kyc and sepa-instant, #15960 moved kyc on
+    main mid-build, and the one stale kyc pin left the two fresh ones undeployed in #15977.
+    """
+    identity = pin_identity_failures(diff, require_digest)
+    if identity:
+        return PinVerdict(identity, [], [])
+    pins = pin_transitions(diff)
+    if not pins:
+        return PinVerdict(["no image pins found in the GitOps diff"], [], [])
+    stale, ok = [], []
+    for t in pins:
+        (ok if fresh(t[1], t[4]) else stale).append(t)
+    return PinVerdict([], stale, ok)
+
+
+def revert_pins(text: str, transitions: list[tuple]) -> str:
+    """Put each transition's OLD tag@digest back where its new one stands; refuse a miss.
+
+    Matched pin by pin (image, tag and digest all equal), never by substring, so reverting
+    `sandbox-abc` cannot touch `sandbox-abcd`. A pin the text does not hold raises: a prune
+    that silently reverted nothing would leave the stale image in the PR it claims to clean.
+    """
+    for _rel, image, old, old_digest, new, new_digest in transitions:
+        hits = 0
+
+        def swap(m, image=image, new=new, new_digest=new_digest, old=old, old_digest=old_digest):
+            nonlocal hits
+            if m["image"] == image and m["tag"] == new and m["digest"] == new_digest:
+                hits += 1
+                return f"{image}:{old}" + (f"@{old_digest}" if old_digest else "")
+            return m.group(0)
+
+        text = PIN_RE.sub(swap, text)
+        if hits == 0:
+            raise ValueError(f"{_pin_label((_rel, image, old, old_digest, new, new_digest))} not found to revert")
+    return text
+
+
+def _gh(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, check=False)
+
+
+def prune_stale_on_branch(repo: str, number: int, stale: list[tuple], gh=_gh) -> str:
+    """Revert the stale pins on the PR branch in ONE signed commit; return its oid.
+
+    `createCommitOnBranch` with the App token is the endpoint GitHub signs (the same one
+    create-pull-request's `sign-commits` uses), and `expectedHeadOid` makes it compare-and-set:
+    if anything moved the branch since we read it, the write is refused rather than merged.
+    """
+    view = gh("pr", "view", str(number), "--repo", repo,
+              "--json", "headRefName,headRefOid,state,isDraft,labels")
+    meta = json.loads(view.stdout) if view.returncode == 0 else None
+    if not meta or meta.get("state") != "OPEN":
+        raise RuntimeError(f"#{number} not readable or not open")
+    if meta.get("isDraft") or any(l.get("name") == "blocked" for l in meta.get("labels") or []):
+        raise RuntimeError(f"#{number} is held (draft or blocked) - an owner decision, not pruned")
+    branch, head = meta["headRefName"], meta["headRefOid"]
+    by_file: dict[str, list[tuple]] = {}
+    for t in stale:
+        by_file.setdefault(t[0], []).append(t)
+    additions = []
+    for rel, ts in sorted(by_file.items()):
+        got = gh("api", f"repos/{repo}/contents/{rel}?ref={head}", "--jq", ".content")
+        if got.returncode != 0:
+            raise RuntimeError(f"{rel} unreadable at {head[:8]} (gh rc {got.returncode})")
+        text = base64.b64decode(got.stdout).decode("utf-8")
+        additions.append({"path": rel, "contents": base64.b64encode(
+            revert_pins(text, ts).encode("utf-8")).decode("ascii")})
+    services = ", ".join(sorted({t[1].rsplit("/", 1)[-1] for t in stale}))
+    payload = {
+        "query": "mutation($input: CreateCommitOnBranchInput!) "
+                 "{ createCommitOnBranch(input: $input) { commit { oid } } }",
+        "variables": {"input": {
+            "branch": {"repositoryNameWithOwner": repo, "branchName": branch},
+            "expectedHeadOid": head,
+            "message": {"headline": f"chore(gitops): drop stale image pins ({services})",
+                        "body": "Main changed these services' build inputs after their images "
+                                "were built, so deploying them would run stale code. Only these "
+                                "pins are reverted; every other pin in this PR is current.\n\n"
+                                + "\n".join(_pin_label(t) for t in stale)},
+            "fileChanges": {"additions": additions},
+        }},
+    }
+    done = gh("api", "graphql", "--input", "-", "--jq", ".data.createCommitOnBranch.commit.oid",
+              stdin=json.dumps(payload))
+    oid = done.stdout.strip()
+    if done.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", oid):
+        raise RuntimeError(f"createCommitOnBranch refused on #{number}: {done.stderr.strip() or oid}")
+    return oid
+
+
+# ── prune visibility (2026-11-17/18) ──────────────────────────────────────────────────────────
+# A prune is safe but was signalled only by ::warning/::notice in a workflow run: #16701 lost 10
+# of 12 pins, including domestic-payment's outbox pin, stayed undeployed for >12 h, and its body
+# still said "Built and scanned: 12 services". The PR itself now says what was dropped.
+PRUNE_MARKER = "<!-- deploy-prune -->"
+PRUNE_DATA_RE = re.compile(r"<!-- deploy-prune-data (\[.*?\]) -->", re.S)
+# The only identities whose prune comment is trusted: anyone can comment on a public PR, and a
+# forged marker comment must neither crash the deploy nor reach the PR body or an issue.
+# Only the `[bot]` form: GitHub forbids brackets in user logins, so no human account can carry it.
+# A bare `openbank-gitops-bot` is a registrable USER name and must never be trusted. The author's
+# account type must ALSO be "Bot" (is_trusted_author).
+BOT_LOGINS = frozenset({"openbank-gitops-bot[bot]"})
+BOT_TYPE = "Bot"
+
+
+def is_trusted_author(c: dict) -> bool:
+    """A comment dict carrying `login` and `type` (from .user) written by the deploy App."""
+    return c.get("login") in BOT_LOGINS and c.get("type") == BOT_TYPE
+
+
+def warn_if_untrusted_writer(write_stdout: str, number: int) -> bool:
+    """True when the comment just written was authored by someone the trust filter ignores.
+
+    The default GITHUB_TOKEN authors as github-actions[bot], not the App, so the prune comment
+    would be ignored by drops_from_comments and the dropped-pin watch would see nothing. Reading
+    the author off the write's own response checks the effect rather than guessing the token."""
+    try:
+        user = (json.loads(write_stdout or "{}") or {}).get("user") or {}
+    except ValueError:
+        return False  # unreadable response: say nothing rather than guess
+    if not user or is_trusted_author({"login": user.get("login"), "type": user.get("type")}):
+        return False
+    print(f"::warning::the prune comment on #{number} was authored by {user.get('login')!r}, not the "
+          "deploy App: the GITHUB_TOKEN fallback is in use. Prune comments by github-actions[bot] are "
+          "ignored by the trust filter, so the dropped-pin watch will see nothing for this PR. "
+          "Configure the App token (steps.app_token) for the announce step.", file=sys.stderr)
+    return True
+SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9._-]+")
+SAFE_PATH_RE = re.compile(r"[A-Za-z0-9._/-]+")
+BODY_BEGIN, BODY_END = "<!-- deploy-prune-body:begin -->", "<!-- deploy-prune-body:end -->"
+BODY_BLOCK_RE = re.compile(re.escape(BODY_BEGIN) + r".*?" + re.escape(BODY_END) + r"\n?", re.S)
+
+
+def drop_records(stale: list[tuple], main_sha: str, at: int) -> list[dict]:
+    """One record per dropped pin: the service, the pin that stays, the one dropped, and when."""
+    return [{"service": t[1].rsplit("/", 1)[-1], "kept": t[2], "dropped": t[4],
+             "main": main_sha, "at": at, "file": t[0]} for t in stale]
+
+
+def _valid_record(r) -> dict | None:
+    """A record only if every field has the exact type and a safe charset; else None. Values are
+    later rendered into a PR body and an issue, so nothing outside the pattern may pass."""
+    if not isinstance(r, dict):
+        return None
+    for k in ("service", "kept", "dropped"):
+        if not isinstance(r.get(k), str) or not SAFE_TOKEN_RE.fullmatch(r[k]):
+            return None
+    at = r.get("at")
+    if not isinstance(at, int) or isinstance(at, bool) or at < 0:
+        return None
+    main = r.get("main")
+    path = r.get("file")
+    return {"service": r["service"], "kept": r["kept"], "dropped": r["dropped"], "at": at,
+            "main": main if isinstance(main, str) and SAFE_TOKEN_RE.fullmatch(main) else "unknown",
+            "file": path if isinstance(path, str) and SAFE_PATH_RE.fullmatch(path) else ""}
+
+
+def parse_drop_records(comment: str) -> list[dict]:
+    """The validated records inside a prune comment; [] when it carries none or is malformed.
+    Callers must have established the comment's AUTHOR (BOT_LOGINS) first."""
+    m = PRUNE_DATA_RE.search(comment or "")
+    if not m:
+        return []
+    try:
+        data = json.loads(m.group(1))
+    except ValueError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [v for v in (_valid_record(r) for r in data) if v]
+
+
+def merge_records(existing: list[dict], new: list[dict]) -> list[dict]:
+    """Idempotent accumulation: a (service, dropped tag) is recorded once, first drop wins."""
+    seen = {(r["service"], r["dropped"]) for r in existing}
+    return existing + [r for r in new if (r["service"], r["dropped"]) not in seen]
+
+
+def render_comment(records: list[dict], remaining: list[str]) -> str:
+    lines = [PRUNE_MARKER, "## Stale image pins dropped from this deploy PR", "",
+             "A bot commit reverted the pins below to the tag main already holds: main changed those "
+             "services' build inputs after their images were built, so deploying them would run stale "
+             "code. Every service listed is **not deployed by this PR**; the next build of it on main "
+             "opens a fresh pin. `detect-auto-deploy-stuck.py --dropped-pins` reports one that is "
+             "still not re-pinned after a few hours.", "",
+             "| service | pin kept | pin dropped | reason |", "|---|---|---|---|"]
+    lines += [f"| `{r['service']}` | `{r['kept']}` | `{r['dropped']}` | stale: the inputs changed "
+              f"after that image was built (main at `{r['main']}`) |" for r in records]
+    lines += ["", "**Pins that remain in this PR:** " + (", ".join(f"`{x}`" for x in remaining) or "none"),
+              "", f"<!-- deploy-prune-data {json.dumps(records, sort_keys=True)} -->"]
+    return "\n".join(lines)
+
+
+def render_body(body: str, records: list[dict], remaining: list[str]) -> str:
+    """The PR body with ONE prune block (replaced in place), so "Built and scanned" cannot overclaim."""
+    block = "\n".join([
+        BODY_BEGIN,
+        "**Pruned after build (stale pins dropped):** "
+        + ", ".join(f"`{r['service']}:{r['dropped']}`" for r in records),
+        "",
+        "**Pins that remain in this PR:** " + (", ".join(f"`{x}`" for x in remaining) or "none"),
+        "",
+        "The *Built and scanned* list above is what this run built; the two lines here say what "
+        "survived. See the `deploy-prune` comment for the reason per service.",
+        BODY_END, ""])
+    base = BODY_BLOCK_RE.sub("", body or "").rstrip("\n")
+    return base + "\n\n" + block
+
+
+def announce_prune(repo: str, number: int, stale: list[tuple], fresh: list[tuple], main_sha: str,
+                   now: int, gh=_gh) -> bool:
+    """Post/refresh the ONE marker comment and the body block. Never raises: the prune already
+    landed, and a comment that failed must not turn a safe prune into a failed deploy."""
+    try:
+        got = gh("api", f"repos/{repo}/issues/{number}/comments", "--paginate",
+                 "--jq", ".[] | {id, body, login: .user.login, type: .user.type} | tojson")
+        if got.returncode != 0:
+            raise RuntimeError(f"comments unreadable (gh rc {got.returncode})")
+        mine = None
+        for line in got.stdout.splitlines():
+            c = json.loads(line)
+            if PRUNE_MARKER in (c.get("body") or "") and is_trusted_author(c):
+                mine = c
+                break
+        records = merge_records(parse_drop_records(mine["body"]) if mine else [],
+                                drop_records(stale, main_sha, now))
+        remaining = [f"{t[1].rsplit('/', 1)[-1]}:{t[4]}" for t in fresh]
+        text = json.dumps({"body": render_comment(records, remaining)})
+        write = (gh("api", "-X", "PATCH", f"repos/{repo}/issues/comments/{mine['id']}", "--input", "-",
+                    stdin=text) if mine
+                 else gh("api", "-X", "POST", f"repos/{repo}/issues/{number}/comments", "--input", "-",
+                         stdin=text))
+        if write.returncode != 0:
+            raise RuntimeError(f"comment write refused: {write.stderr.strip()[:200]}")
+        warn_if_untrusted_writer(write.stdout, number)
+        view = gh("pr", "view", str(number), "--repo", repo, "--json", "body", "--jq", ".body")
+        if view.returncode != 0:
+            raise RuntimeError(f"body unreadable (gh rc {view.returncode})")
+        edit = gh("api", "-X", "PATCH", f"repos/{repo}/pulls/{number}", "--input", "-",
+                  stdin=json.dumps({"body": render_body(view.stdout.rstrip("\n"), records, remaining)}))
+        if edit.returncode != 0:
+            raise RuntimeError(f"body write refused: {edit.stderr.strip()[:200]}")
+    except Exception as e:  # noqa: BLE001 - the prune already landed; nothing here may fail the deploy
+        print(f"::warning::could not announce the prune on #{number}: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        return False
+    return True
+
+
+def announce_safely(repo: str, number: int, stale: list[tuple], fresh: list[tuple], root: str,
+                    gh=_gh) -> bool:
+    """announce_prune plus everything a caller computes for it (main sha, clock): never raises."""
+    try:
+        return announce_prune(repo, number, stale, fresh, main_sha(root), int(time.time()), gh)
+    except Exception as e:  # noqa: BLE001
+        print(f"::warning::could not announce the prune on #{number}: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        return False
+
+
+def main_sha(root: str) -> str:
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short=8", "HEAD"], cwd=root, capture_output=True,
+                             text=True, check=False)
+    except OSError:
+        return "unknown"
+    sha = out.stdout.strip()
+    return sha if SAFE_TOKEN_RE.fullmatch(sha) else "unknown"
+
+
+def select_candidate(cands: list[dict], verify: Callable[[dict], "list[str] | PinVerdict"],
+                     supersede: Callable[[dict], int],
+                     close_stale: Callable[[dict, list[str]], None] | None = None,
+                     prune: Callable[[dict, list[tuple], list[tuple]], bool] | None = None) -> dict | None:
     """First candidate that passes freshness verify and supersede, or None.
 
     Any per-kind refusal falls through to the next kind: kinds are independent, and a refused
     PR is never armed. 2026-10-24..29 an owner hold, and from 2026-10-30 a stale audit-service
     pin, refused the gitops kind on every run while admin-ui was never tried.
+
+    A stale pin is permanent: the check compares the image's source tree with main's, and main
+    only moves forward, so it can never go green on that head. Staleness is per IMAGE, so it is
+    removed per pin (#15977): with fresh pins left, `prune` reverts only the stale ones and the
+    PR is armed on a later tick, once its required checks have re-run on the pruned head (the
+    head this tick read is gone). With no fresh pin left, `close_stale` closes the PR instead
+    of leaving it open as queue noise (2026-11-12: #15832, #15833 and #15846 sat red on exactly
+    this until a human closed them). An identity failure refuses the whole PR as before, and
+    an UNREADABLE diff is not evidence of staleness and never closes anything.
     """
     for c in cands:
-        stale = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else []
-        if stale:
-            for pin in stale:
+        v = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else PinVerdict([], [], [])
+        if isinstance(v, list):
+            v = PinVerdict(v, [], [])
+        if v.refuse:
+            for pin in v.refuse:
+                print(f"::error::GitOps deploy PR #{c['number']} refused: {pin}", file=sys.stderr)
+            if close_stale is not None and not any(r.startswith("diff of #") for r in v.refuse):
+                close_stale(c, v.refuse)
+        elif v.stale and not v.fresh:
+            labels = [_pin_label(t) for t in v.stale]
+            for pin in labels:
                 print(f"::error::stale GitOps image pin in #{c['number']}: {pin}", file=sys.stderr)
+            if close_stale is not None:
+                close_stale(c, labels)
+        elif v.stale:
+            for t in v.stale:
+                print(f"::warning::stale GitOps image pin in #{c['number']} pruned, the rest kept: "
+                      f"{_pin_label(t)}", file=sys.stderr)
+            if prune is not None and prune(c, v.stale, v.fresh):
+                print(f"::notice::#{c['number']} pruned to {len(v.fresh)} fresh pin(s); armed on a "
+                      "later tick once its checks re-run", file=sys.stderr)
         else:
             rc = supersede(c)
             if rc == 0:
@@ -353,6 +679,55 @@ def last_deploy_by_kind(commits: list[dict]) -> dict[str, int | None]:
 
 
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
+def prune_command(repo: str, number: int, diff: str, require_digest: bool,
+                  fresh: Callable[[str, str], bool], gh=_gh, prune=prune_stale_on_branch,
+                  announce=None) -> int:
+    """The producer's per-pin gate: 0 all fresh, 1 refused whole, 3 pruned, 4 every pin stale.
+
+    Exit 3 mirrors can-i-deploy's UnresolvedServicesError (#15955): the batch proceeds without
+    the members that failed, and says which. After pruning, the PR is read and classified again
+    and must come back all-fresh; anything else refuses, so a prune that did not take can never
+    be mistaken for one that did.
+    """
+    def read() -> PinVerdict | None:
+        got = gh("pr", "diff", str(number), "--repo", repo)
+        if got.returncode != 0:
+            print(f"::error::diff of #{number} unreadable (gh rc {got.returncode})", file=sys.stderr)
+            return None
+        return classify_pins(got.stdout, fresh, require_digest)
+
+    v = classify_pins(diff, fresh, require_digest)
+    for r in v.refuse:
+        print(f"::error::GitOps deploy PR #{number} refused: {r}", file=sys.stderr)
+    if v.refuse:
+        return 1
+    for t in v.stale:
+        print(f"::warning::stale GitOps image pin: {_pin_label(t)}", file=sys.stderr)
+    if not v.stale:
+        return 0
+    if not v.fresh:
+        print(f"::error::every image pin in #{number} is stale - nothing left to deploy", file=sys.stderr)
+        return 4
+    try:
+        oid = prune(repo, number, v.stale)
+    except (RuntimeError, ValueError) as e:
+        print(f"::error::could not prune #{number}: {e}", file=sys.stderr)
+        return 1
+    after = read()
+    if after is None or after.refuse or after.stale or not after.fresh:
+        print(f"::error::#{number} at {oid[:8]} is not all-fresh after pruning - refusing", file=sys.stderr)
+        return 1
+    for t in v.stale:
+        print(f"pruned={_pin_label(t)}")
+    if announce is not None:
+        try:
+            announce(repo, number, v.stale, v.fresh)
+        except Exception as e:  # noqa: BLE001 - the prune result never depends on the announcement
+            print(f"::warning::announce hook failed on #{number}: {type(e).__name__}: {e}", file=sys.stderr)
+    print(f"::notice::#{number} pruned at {oid[:8]}; {len(after.fresh)} fresh pin(s) proceed", file=sys.stderr)
+    return 3
+
+
 def self_test() -> int:
     fails = []
 
@@ -403,6 +778,17 @@ def self_test() -> int:
           select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3})) is cand_a)
     check("any supersede refusal falls through (rollback rc 1)",
           select_candidate([cand_g, cand_a], lambda c: [], sup({12: 1})) is cand_a)
+    closed = []
+    def closer(c, why):
+        closed.append(c["number"])
+    select_candidate([cand_g, cand_a], lambda c: ["openbank-audit-service:sandbox-x"], sup({}), closer)
+    check("a stale gitops pin closes that PR", closed == [12])
+    closed.clear()
+    select_candidate([cand_g, cand_a], lambda c: [f"diff of #{c['number']} unreadable (gh rc 1)"], sup({}), closer)
+    check("an unreadable diff closes nothing", closed == [])
+    closed.clear()
+    select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3}), closer)
+    check("a supersede refusal (owner hold) closes nothing", closed == [])
     check("every kind refused -> nothing armed",
           select_candidate([cand_g, cand_a], lambda c: ["x"], sup({11: 1})) is None)
     check("first armable candidate wins, later kinds untouched",
@@ -602,6 +988,201 @@ def self_test() -> int:
               and open(aml).read() == f"image: {reg}/openbank-aml:sandbox-bbb{dg('b')}\n")
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
+        # 6. #15977: kyc went stale mid-build; treasury and sepa-instant must still deploy.
+        def pin_hunk(svc, old, new):
+            return (f"--- a/g/{svc}.yaml\n+++ b/g/{svc}.yaml\n@@ -1 +1 @@\n"
+                    f"-image: {reg}/openbank-{svc}:{old}\n+image: {reg}/openbank-{svc}:{new}\n")
+        mixed = "".join(pin_hunk(s, f"sandbox-old{dg(o)}", f"sandbox-03f9ba58{dg(n)}")
+                        for s, o, n in (("treasury", "1", "2"), ("kyc", "3", "4"), ("sepa-instant", "5", "6")))
+        only_kyc_stale = lambda image, tag: not image.endswith("/openbank-kyc")
+        v = classify_pins(mixed, only_kyc_stale, require_digest=True)
+        check("mixed fresh + stale: only the stale pin is stale",
+              not v.refuse and [t[1].rsplit("/", 1)[-1] for t in v.stale] == ["openbank-kyc"]
+              and len(v.fresh) == 2)
+        pruned_diff = "".join(pin_hunk(s, f"sandbox-old{dg(o)}", f"sandbox-03f9ba58{dg(n)}")
+                              for s, o, n in (("treasury", "1", "2"), ("sepa-instant", "5", "6")))
+        kyc_text = f"a: {reg}/openbank-kyc:sandbox-03f9ba58{dg('4')}\nb: {reg}/openbank-kyc:sandbox-03f9ba58a{dg('4')}\n"
+        check("revert_pins restores the old tag@digest of exactly that pin",
+              revert_pins(kyc_text, v.stale) ==
+              f"a: {reg}/openbank-kyc:sandbox-old{dg('3')}\nb: {reg}/openbank-kyc:sandbox-03f9ba58a{dg('4')}\n")
+        try:
+            revert_pins("nothing here\n", v.stale)
+            check("revert_pins refuses a pin the file does not hold", False)
+        except ValueError:
+            check("revert_pins refuses a pin the file does not hold", True)
+
+        def fake_gh(after):
+            return lambda *args, stdin=None: subprocess.CompletedProcess(args, 0, after, "")
+        pruned_with = []
+        def fake_prune(repo, number, stale):
+            pruned_with.append([t[1].rsplit("/", 1)[-1] for t in stale])
+            return "a" * 40
+        rc = prune_command("o/r", 15977, mixed, True, only_kyc_stale, fake_gh(pruned_diff), fake_prune)
+        check("producer: mixed fresh + stale prunes ONLY the stale pin and proceeds (exit 3)",
+              rc == 3 and pruned_with == [["openbank-kyc"]])
+        pruned_with.clear()
+        rc = prune_command("o/r", 15977, mixed, True, lambda image, tag: False, fake_gh(mixed), fake_prune)
+        check("producer: every pin stale -> close the PR (exit 4), nothing pruned",
+              rc == 4 and pruned_with == [])
+        retagged = mixed + pin_hunk("aml", f"sandbox-aaa{dg('a')}", f"sandbox-bbb{dg('a')}")
+        rc = prune_command("o/r", 15977, retagged, True, only_kyc_stale, fake_gh(retagged), fake_prune)
+        check("producer: an identity failure still refuses the WHOLE PR (exit 1), nothing pruned",
+              rc == 1 and pruned_with == [])
+        rc = prune_command("o/r", 15977, mixed, True, only_kyc_stale, fake_gh(mixed), fake_prune)
+        check("producer: a prune that did not take refuses (exit 1)", rc == 1)
+        check("producer: all fresh -> exit 0, nothing pruned",
+              prune_command("o/r", 15977, mixed, True, always, fake_gh(mixed), fake_prune) == 0
+              and pruned_with == [["openbank-kyc"]])
+
+        closed.clear(); tried.clear(); pruned = []
+        def pruner(c, stale, fresh=()):
+            pruned.append((c["number"], [t[1].rsplit("/", 1)[-1] for t in stale]))
+            return True
+        got_pick = select_candidate([cand_g, cand_a], lambda c: classify_pins(mixed, only_kyc_stale, True),
+                                    sup({}), closer, pruner)
+        check("flusher: mixed fresh + stale prunes only the stale pin, closes nothing, arms the next kind",
+              pruned == [(12, ["openbank-kyc"])] and closed == [] and got_pick is cand_a and tried == [11])
+        pruned.clear()
+        select_candidate([cand_g, cand_a], lambda c: classify_pins(mixed, lambda i, t: False, True),
+                         sup({}), closer, pruner)
+        check("flusher: every pin stale closes the PR, prunes nothing", closed == [12] and pruned == [])
+        closed.clear()
+        select_candidate([cand_g, cand_a], lambda c: classify_pins(retagged, only_kyc_stale, True),
+                         sup({}), closer, pruner)
+        check("flusher: an identity failure refuses the whole PR, prunes nothing",
+              closed == [12] and pruned == [])
+
+        # Visibility (2026-11-17/18, #16701): a prune must leave a trace ON the PR.
+        pv = classify_pins(mixed, only_kyc_stale, True)
+        BOT = "openbank-gitops-bot[bot]"
+        store = {"comments": [], "body": "Built and scanned in this run: kyc, treasury, sepa-instant",
+                 "posts": 0, "patches": 0, "fail": False,
+                 "writer": {"login": "openbank-gitops-bot[bot]", "type": "Bot"}}
+
+        def store_gh(*args, stdin=None):
+            a_ = list(args)
+            if store["fail"]:
+                return subprocess.CompletedProcess(args, 1, "", "boom")
+            if a_[:2] == ["api", "-X"] and a_[2] == "POST":
+                store["comments"].append({"id": len(store["comments"]) + 1, "login": BOT, "type": "Bot",
+                                          "body": json.loads(stdin)["body"]})
+                store["posts"] += 1
+                return subprocess.CompletedProcess(args, 0, json.dumps({"user": store["writer"]}), "")
+            if a_[:2] == ["api", "-X"] and a_[2] == "PATCH" and "/issues/comments/" in a_[3]:
+                cid = int(a_[3].rsplit("/", 1)[-1])
+                store["comments"][cid - 1]["body"] = json.loads(stdin)["body"]
+                store["patches"] += 1
+                return subprocess.CompletedProcess(args, 0, json.dumps({"user": store["writer"]}), "")
+            if a_[:2] == ["api", "-X"] and a_[2] == "PATCH" and "/pulls/" in a_[3]:
+                store["body"] = json.loads(stdin)["body"]
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if a_[0] == "pr" and a_[1] == "view":
+                return subprocess.CompletedProcess(args, 0, store["body"] + "\n", "")
+            if a_[0] == "api" and a_[1].endswith("/comments"):
+                return subprocess.CompletedProcess(
+                    args, 0, "".join(json.dumps(c) + "\n" for c in store["comments"]), "")
+            return subprocess.CompletedProcess(args, 1, "", "unexpected " + " ".join(a_))
+
+        check("announce: first prune posts one comment", announce_prune(
+            "o/r", 16701, pv.stale, pv.fresh, "abcd1234", 1000, store_gh) and store["posts"] == 1)
+        c0 = store["comments"][0]["body"]
+        check("announce: comment is the marker comment and names the dropped service, both tags, "
+              "the reason and the surviving pins",
+              c0.startswith(PRUNE_MARKER) and "`openbank-kyc`" in c0 and "sandbox-old" in c0
+              and "sandbox-03f9ba58" in c0 and "stale:" in c0 and "abcd1234" in c0
+              and "openbank-treasury:sandbox-03f9ba58" in c0 and "openbank-sepa-instant" in c0)
+        check("announce: body keeps 'Built and scanned' and now states dropped and remaining",
+              "Built and scanned in this run" in store["body"] and BODY_BEGIN in store["body"]
+              and "openbank-kyc:sandbox-03f9ba58" in store["body"]
+              and "openbank-treasury:sandbox-03f9ba58" in store["body"])
+        announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 2000, store_gh)
+        check("announce: the same drop twice is idempotent (one comment, edited in place, one record)",
+              len(store["comments"]) == 1 and store["posts"] == 1
+              and len(parse_drop_records(store["comments"][0]["body"])) == 1
+              and store["body"].count(BODY_BEGIN) == 1)
+        other = [t for t in pv.fresh if "treasury" in t[1]]
+        announce_prune("o/r", 16701, other, [t for t in pv.fresh if t not in other], "ef567890", 3000, store_gh)
+        recs = parse_drop_records(store["comments"][0]["body"])
+        check("announce: a later prune ADDS its service to the same comment and replaces the body block",
+              len(store["comments"]) == 1 and {r["service"] for r in recs} == {"openbank-kyc", "openbank-treasury"}
+              and store["body"].count(BODY_BEGIN) == 1 and "openbank-treasury:sandbox-03f9ba58" in store["body"])
+        store["fail"] = True
+        check("announce: a gh failure is reported False and never raises",
+              announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 4000, store_gh) is False)
+        seen_ann = []
+        rc = prune_command("o/r", 15977, mixed, True, only_kyc_stale, fake_gh(pruned_diff), fake_prune,
+                           announce=lambda r, n, st, fr: seen_ann.append(([t[1].rsplit("/", 1)[-1] for t in st], len(fr))))
+        check("producer: a successful prune announces exactly the stale pin and the fresh count",
+              rc == 3 and seen_ann == [(["openbank-kyc"], 2)])
+        seen_ann.clear()
+        prune_command("o/r", 15977, mixed, True, always, fake_gh(mixed), fake_prune,
+                      announce=lambda *x: seen_ann.append(x))
+        prune_command("o/r", 15977, retagged, True, only_kyc_stale, fake_gh(retagged), fake_prune,
+                      announce=lambda *x: seen_ann.append(x))
+        check("producer: nothing stale, or a refusal, announces nothing", seen_ann == [])
+
+        # Review of #16731: the comment is attacker-writable on a public PR.
+        forged_ok = {"service": "openbank-x", "kept": "sandbox-a", "dropped": "sandbox-b", "at": 1}
+        bad_values = [dict(forged_ok, dropped=["x"]), dict(forged_ok, at="soon"), dict(forged_ok, at=True),
+                      dict(forged_ok, service="@everyone`<script>"), dict(forged_ok, kept=None), "str", 7]
+        forged = PRUNE_MARKER + "\n<!-- deploy-prune-data " + json.dumps(bad_values + [forged_ok]) + " -->"
+        check("forged records: every malformed or unsafe record is dropped, the valid one survives, no raise",
+              [r["service"] for r in parse_drop_records(forged)] == ["openbank-x"])
+        check("forged records: data that is not a list, or not JSON, parses to []",
+              parse_drop_records(PRUNE_MARKER + "<!-- deploy-prune-data [] -->") == []
+              and parse_drop_records("<!-- deploy-prune-data {\"a\": 1} -->") == [])
+        store.update(comments=[{"id": 1, "login": "mallory", "body": forged}], posts=0, patches=0, fail=False,
+                     body="Built and scanned in this run: kyc")
+        check("forged comment: a non-bot marker comment is ignored - the bot posts its own, never edits it",
+              announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5000, store_gh)
+              and store["posts"] == 1 and store["patches"] == 0 and store["comments"][0]["body"] == forged
+              and "openbank-x" not in store["body"] and "@" not in store["body"])
+        # Review nit 1: a USER named like the bot is not the bot; only the Bot-typed [bot] login is.
+        for who, kind, why in (("openbank-gitops-bot", "User", "user-type account with the bare name"),
+                               ("app/openbank-gitops-bot", "User", "user-type app/ spelling"),
+                               ("openbank-gitops-bot", "Bot", "bare name even if typed Bot"),
+                               ("openbank-gitops-bot[bot]", "User", "[bot] login that is not Bot-typed"),
+                               ("openbank-gitops-bot[bot]", None, "[bot] login with no type")):
+            store.update(comments=[{"id": 1, "login": who, "type": kind, "body": forged}], posts=0, patches=0,
+                         body="Built and scanned in this run: kyc")
+            announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5000, store_gh)
+            check(f"trust: {why} is ignored (bot posts its own, never edits it)",
+                  store["posts"] == 1 and store["patches"] == 0 and store["comments"][0]["body"] == forged)
+        store.update(comments=[{"id": 1, "login": BOT, "type": "Bot", "body": forged}], posts=0, patches=0)
+        announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5000, store_gh)
+        check("trust: the Bot-typed [bot] login IS trusted (its comment is edited in place)",
+              store["posts"] == 0 and store["patches"] == 1)
+        # Review nit 2: GITHUB_TOKEN fallback authors as github-actions[bot] -> loud warning.
+        import contextlib
+        import io
+        store.update(comments=[], posts=0, patches=0, writer={"login": "github-actions[bot]", "type": "Bot"})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ok = announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5100, store_gh)
+        check("token fallback: a comment authored by github-actions[bot] warns that the watch will see nothing",
+              ok and "::warning::" in err.getvalue() and "github-actions[bot]" in err.getvalue()
+              and "dropped-pin watch will see nothing" in err.getvalue())
+        store.update(comments=[], posts=0, patches=0, writer={"login": "openbank-gitops-bot[bot]", "type": "Bot"})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 5200, store_gh)
+        check("token fallback: the App-authored comment emits no warning", "::warning::" not in err.getvalue())
+        store.update(writer={"login": "openbank-gitops-bot[bot]", "type": "Bot"})
+        hostile = PRUNE_MARKER + "<!-- deploy-prune-data [{\"service\": {\"a\": 1}, \"kept\": 1, \"dropped\": 2, \"at\": []}] -->"
+        store.update(comments=[{"id": 1, "login": BOT, "type": "Bot", "body": hostile}], posts=0, patches=0)
+        check("malformed bot-authored data never raises out of announce_prune",
+              announce_prune("o/r", 16701, pv.stale, pv.fresh, "abcd1234", 6000, store_gh) is True)
+
+        def boom(*a, **k):
+            raise OSError("gh not found")
+        check("announce_prune catches an OSError from gh", announce_prune(
+            "o/r", 16701, pv.stale, pv.fresh, "abcd1234", 7000, boom) is False)
+        check("announce_safely catches everything, even a failing main_sha/clock/gh",
+              announce_safely("o/r", 1, pv.stale, pv.fresh, "/nonexistent-root", boom) is False)
+        rc = prune_command("o/r", 15977, mixed, True, only_kyc_stale, fake_gh(pruned_diff), fake_prune,
+                           announce=lambda *x: (_ for _ in ()).throw(TypeError("forged")))
+        check("producer: even a raising announce hook leaves the prune result exit 3", rc == 3)
+
     if fails:
         print(f"self-test: FAILED ({len(fails)})")
         return 1
@@ -631,6 +1212,11 @@ def main() -> int:
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
     v.add_argument("--require-digest", action="store_true")
+    pr = sub.add_parser("prune", help="stdin: the PR diff. Per-pin freshness; reverts only stale pins. "
+                        "exit 0 all fresh, 1 refused whole, 3 stale pins pruned, 4 every pin stale")
+    pr.add_argument("--root", default=".")
+    pr.add_argument("--number", type=int, required=True)
+    pr.add_argument("--require-digest", action="store_true")
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -684,7 +1270,18 @@ def main() -> int:
             if read.returncode != 0:
                 return [f"diff of #{c['number']} unreadable (gh rc {read.returncode})"]
             diff = read.stdout
-            return verify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag))
+            return classify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag),
+                                 require_digest=True)
+
+        def prune(c, stale, fresh):
+            try:
+                oid = prune_stale_on_branch(repo, c["number"], stale)
+            except (RuntimeError, ValueError) as e:
+                print(f"::error::could not prune #{c['number']}: {e}", file=sys.stderr)
+                return False
+            announce_safely(repo, c["number"], stale, fresh, a.root)
+            print(f"::notice::pruned #{c['number']} at {oid[:8]}", file=sys.stderr)
+            return True
 
         def supersede(c):
             prefix = next(x for x in DEPLOY_PREFIXES if c["head"].startswith(x))
@@ -692,12 +1289,35 @@ def main() -> int:
             return subprocess.run(["bash", ".github/scripts/supersede-deploy-prs.sh", prefix, str(c["number"])],
                                   stdout=sys.stderr).returncode
 
-        pick = select_candidate(cands, verify, supersede)
+        def close_stale(c, why):
+            # A held PR (draft, or labelled `blocked`) is an owner's decision: leave it open.
+            view = subprocess.run(["gh", "pr", "view", str(c["number"]), "--repo", repo,
+                                   "--json", "isDraft,labels,state"], capture_output=True, text=True)
+            try:
+                meta = json.loads(view.stdout) if view.returncode == 0 else None
+            except ValueError:
+                meta = None
+            if not meta or meta.get("state") != "OPEN" or meta.get("isDraft") \
+                    or any(l.get("name") == "blocked" for l in meta.get("labels") or []):
+                print(f"::notice::stale #{c['number']} left open (held, closed, or unreadable)", file=sys.stderr)
+                return
+            body = ("Closing: this deploy PR's image pin no longer matches main's source "
+                    f"({why[0]}), so it can never pass 'Verify exact-head GitOps image source'. "
+                    "The next build of the service on main opens a fresh pin.")
+            done = subprocess.run(["gh", "pr", "close", str(c["number"]), "--repo", repo,
+                                   "--comment", body], stdout=sys.stderr)
+            print(f"::notice::closed stale deploy PR #{c['number']} (rc {done.returncode})", file=sys.stderr)
+
+        pick = select_candidate(cands, verify, supersede, close_stale, prune)
         if pick is None:
             print("::error::every deploy kind was refused - nothing armed.", file=sys.stderr)
             return 1
         print(f"arm={pick['number']}")
         return 0
+    if a.cmd == "prune":
+        return prune_command(os.environ["GITHUB_REPOSITORY"], a.number, sys.stdin.read(), a.require_digest,
+                             lambda image, tag: image_source_is_current(a.root, image, tag),
+                             announce=lambda r, n, st, fr: announce_safely(r, n, st, fr, a.root))
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
                             lambda image, tag: image_source_is_current(a.root, image, tag),

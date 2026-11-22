@@ -17,3 +17,10 @@ store timing; neither status is proof that an action was executed.
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Trace-contract testing
+
+`CopilotTraceContractIT` boots the service under its own test profile and asserts the span shape the
+shared trace contract requires (see `openbank-libs/docs/trace-contract-testing.en.md`). Because that
+second Quarkus application shares the test fork, `build.gradle.kts` raises the test task heap to
+2 GiB; the setting affects tests only and changes nothing in the packaged service.

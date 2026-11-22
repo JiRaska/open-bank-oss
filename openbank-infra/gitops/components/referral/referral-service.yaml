@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: referral-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-11c6d7de@sha256:45695b25822a9f90d06d8a959105652fa6227e1b267571d2fa357618ccba47fb
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-4a97efb4@sha256:dcc2139c7b46f054403dbca393d8367550247a67d3b8748e4b47f4273324a12b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -60,6 +60,10 @@ spec:
               value: "0.1"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/referral-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/referral-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -197,20 +201,3 @@ spec:
     - name: management
       port: 8086
       targetPort: management
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: referral-service
-  namespace: referral
-  labels:
-    app.kubernetes.io/name: referral-service
-    app.kubernetes.io/part-of: referral
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: referral-service
-  podMetricsEndpoints:
-    - port: management
-      path: /q/metrics
-      interval: 30s

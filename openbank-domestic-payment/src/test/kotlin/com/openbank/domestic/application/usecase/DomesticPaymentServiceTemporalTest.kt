@@ -164,10 +164,10 @@ class DomesticPaymentServiceTemporalTest {
     ) = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = UUID.randomUUID(),
-        debtorAccountNumber = " 1234567890 ",
+        debtorAccountNumber = " 1234567899 ",
         debtorBankCode = " 0800 ",
         debtorName = "  Alice Example ",
-        creditorAccountNumber = " 9876543210 ",
+        creditorAccountNumber = " 9876543211 ",
         creditorBankCode = creditorBankCode,
         creditorName = "  Brno Utility ",
         amount = Money.parseInbound(BigDecimal("1500.00"), " czk "),
@@ -187,5 +187,6 @@ class DomesticPaymentServiceTemporalTest {
     class NoOpDomesticPaymentWorkflow : DomesticPaymentWorkflow {
         override fun process(paymentId: UUID): DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED
         override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
+        override fun holdChanged() = Unit
     }
 }

@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.application.workflow
 
+import com.openbank.domestic.application.admission.DomesticScreeningScope
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.CustomerNotificationPort
@@ -17,6 +18,7 @@ import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
 import com.openbank.domestic.application.port.out.SanctionsScreeningPort
 import com.openbank.domestic.application.port.out.SchemeGatewayPort
 import com.openbank.domestic.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.domestic.application.port.out.SchemeSubmissionOutcome
 import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
@@ -24,7 +26,6 @@ import com.openbank.domestic.application.port.out.customerSafeReason
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
-import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.libs.fincrime.FraudVerdict
 import com.openbank.libs.fincrime.ScreeningDecision
@@ -87,12 +88,9 @@ open class DomesticPaymentActivitiesImpl(
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during screening activity")
 
-        when (payment.transferScope) {
-            DomesticTransferScope.OWN_ACCOUNTS, DomesticTransferScope.TECHNICAL_ACCOUNT -> {
-                log.infof("%s transfer %s — sanctions screening skipped (SDD)", payment.transferScope, paymentId)
-                return@vtx ScreeningDecision.CLEAR
-            }
-            else -> Unit
+        if (!DomesticScreeningScope.isScreened(payment.transferScope)) {
+            log.infof("%s transfer %s — sanctions screening skipped (SDD)", payment.transferScope, paymentId)
+            return@vtx ScreeningDecision.CLEAR
         }
 
         val results = try {
@@ -129,11 +127,8 @@ open class DomesticPaymentActivitiesImpl(
     /** SDD for INTERNAL_CLIENT: bank holds full KYC on both parties — POTENTIAL_HIT is not
      *  actionable and must not escalate to REVIEW hold (AMLD4 Art. 15–17). */
     private fun applySddPolicy(payment: DomesticPayment, raw: ScreeningDecision, paymentId: UUID): ScreeningDecision =
-        if (payment.transferScope == DomesticTransferScope.INTERNAL_CLIENT && raw == ScreeningDecision.REVIEW) {
-            log.infof("INTERNAL_CLIENT payment %s: downgrading REVIEW → CLEAR under SDD", paymentId)
-            ScreeningDecision.CLEAR
-        } else {
-            raw
+        DomesticScreeningScope.apply(payment.transferScope, raw).also {
+            if (it != raw) log.infof("INTERNAL_CLIENT payment %s: downgrading REVIEW → CLEAR under SDD", paymentId)
         }
 
     private suspend fun openSanctionsCase(
@@ -411,11 +406,11 @@ open class DomesticPaymentActivitiesImpl(
             } else {
                 DomesticPaymentStatus.REJECTED to rejectReasonFor(outcome.reasonCode)
             }
-            val rejectDetail = if (nextStatus == DomesticPaymentStatus.REJECTED) {
-                "scheme reject: ${outcome.reasonCode}"
-            } else {
-                null
-            }
+            val rejectDetail = if (nextStatus == DomesticPaymentStatus.REJECTED) rejectDetailFor(outcome) else null
+            // #16772: a verdict reached locally sent nothing, so the marker claimed above must not
+            // keep asserting a dispatch. Cleared before the status write: if that write fails,
+            // Temporal retries, re-claims, and the adapter answers the same local AC01 again.
+            if (!outcome.transmitted) paymentRepository.clearSchemeDispatch(paymentId)
             val updated = payment.transitionTo(nextStatus, reason, rejectDetail, clock = clock)
             val event = OutboxMessage(
                 aggregateId = updated.id,
@@ -535,7 +530,15 @@ open class DomesticPaymentActivitiesImpl(
 // its intended class silently steals that annotation.
 
 /** Map the scheme's `pacs.002` reason code to the rail's reject reason (ADR-0104 D4). */
+/** #16772: a verdict reached locally must not claim the scheme said it. */
+private fun rejectDetailFor(outcome: SchemeSubmissionOutcome): String = if (outcome.transmitted) {
+    "scheme reject: ${outcome.reasonCode}"
+} else {
+    "rejected before transmission: ${outcome.reasonCode}"
+}
+
 private fun rejectReasonFor(reasonCode: String?): DomesticRejectReason = when (reasonCode) {
+    "AC01" -> DomesticRejectReason.INVALID_ACCOUNT_NUMBER
     "AC04", "AC06" -> DomesticRejectReason.BENEFICIARY_ACCOUNT_CLOSED
     "RC01" -> DomesticRejectReason.INVALID_BANK_CODE
     "AM05" -> DomesticRejectReason.INSUFFICIENT_FUNDS

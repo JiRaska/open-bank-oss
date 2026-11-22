@@ -8,9 +8,16 @@ nor a certificate that every other governance requirement was satisfied.
 import ast
 import base64
 import hashlib
+import os
 import re
+import subprocess
 
 POLICY_PATH = '.github/scripts/merge-train.py'
+# A payload sanity bound, not a policy decision. It was 500_000 until merge-train.py passed it on
+# 2026-11-07 (#14891, 508_801 B), after which every App-merged agent PR lost its merge record
+# (#16187). The base64 bound follows from it: 4/3 expansion plus GitHub's newline every 60 chars.
+MAX_POLICY_BLOB_BYTES = 4_000_000
+MAX_POLICY_BLOB_BASE64 = (MAX_POLICY_BLOB_BYTES + 2) // 3 * 4 * 61 // 60 + 64
 # Deliberately bounded reconstruction, not a Python sandbox. Whole-source identities from
 # the canonical first parents of #13750, #13725, #13794 and #13770/#13847 were independently reviewed.
 # Any additional whole-source identity requires the same explicit review before extension.
@@ -42,6 +49,86 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '4a1ee1d5b71c0866893c86c1d56a4f686b3f3d8d',
     '6e04deb65dc7f6594a5037592e95321b41a53bf3',
     '8e5b4dfe28d6bf527fa8e677f21e902b35ca3949',
+    # #16187: pre-merge sources of App-merged agent PRs whose records failed since 2026-11-07.
+    # Whole source is in git history (no fixture); each passes requires_exact_head for agent/
+    # and codex/ heads, census in #16187. PRs per identity follow.
+    'c3c231206bd89e1a6e4cc82087c47861849925ec',  # #14599
+    'c3f5f84addc56993e48fc6f7584d13c56f116dd1',  # #14878
+    '52f3adac4f19689cdea66469f38eab941cdac70a',  # #14950
+    '878155c9d9551e81368eedbb080a4180df4a3e6b',  # #15030, #15052
+    'cc286f6df37486f27da067d09b398c2b463dbd70',  # #15045
+    'd5ac0cb4874158b37b2efa58ecffea12c39f03bb',  # #15117, #15129, #15194, #15217, #15227, #15242
+    'aa9e387f7ad18478ef0a715663b2a1b9c5bb25d2',  # #15254, #15258, #15285, #15293, #15295, #15345, #15364, #15365, #15408
+    'c4a78ce15a290af44c6fda30557dd615ac5934b2',  # #15429, #15432, #15454
+    'b8f977da6f6f493fdd1f9097c1e6517b85015c42',  # #15527, #15528, #15531
+    'dca24c7fe6f72939b8de3d6945f5b90effe01226',  # #15534, #15535, #15537, #15540, #15544, #15547, #15548, #15686, #15691, #15692, #15720, #15743, #15783
+    '4c030ee32eed2424d3842e8742e2c6fe4665d400',  # #15697
+    'cd5f45e08b013b172805f2b9282cec2b2c550a8c',  # #15699, #15701, #15726, #15740, #15745, #15768, #15771, #15824, #15889, #15892
+    # Pre-merge policy for #15897, #15960, #16005; structural check passes, see #16187.
+    'bdc11a54da45ff594f12d72eb7b2b3bf35139a0f',
+    # Pre-merge policy for #15898, #15948, #15983, #15989, #16017, #16020, #16021; structural check passes, see #16187.
+    '9337dc5bf351dd3c9310b1ac9dafeea6ee1f2976',
+    # Pre-merge policy for #15879, #15959, #15976, #16018, #16026, #16032, #16041, #16097; structural check passes, see #16187.
+    'b03f72aa290b53f9826007b8a745fb77ea15b9ec',
+    # Pre-merge policy for #16102, #16114, #16119, #16124; structural check passes, see #16187.
+    '19f3b8c002b9f09439ca152b581121eba0e83274',
+    # Pre-merge policy for main at 2026-11-14 (d907564cdc); structural check passes, see #16187.
+    '231ad0e824f57749b3cfa482ba10593557cbec2f',
+    # main merge-train.py after #16148 (ecbfaaa97b), #16180 (de481eb1d5) and #16105 (c80c311b04);
+    # each is the first-parent source for PRs merged behind it. Structural check passes, see #16187.
+    '31799f5c2ec415da6f968b5b0e8c725ccbd82b7e',  # after #16148
+    '6df70b126a750a2a9f6e8fc658efc43b1cf2433a',  # after #16180
+    '38c70e23111a78639f9aaae62b0494a90d3c0512',  # after #16105
+    # merge-train.py of #16290 (disjoint judge members share a strict carrier), reviewed with that PR.
+    'd6740b723531449f329c61dd26120e8840e3652d',
+    # merge-train.py of the #16290 follow-up (cross-module test reads are not shareable).
+    'bc0c3a48a9c1508194982f8538e3efd1ba2b94f9',
+    # merge-train.py of #16700 (a train fix pre-empts strict carriers), reviewed with that PR.
+    '964c354b0c4d18cce3ac9f8ff61b4b6e014304d0',
+    # merge-train.py of #16675 (unfalsified gates cannot back a fix claim), reviewed with that PR.
+    '67d8f953ed7ccf43ad395711306b457f95388de1',
+    # merge-train.py of #16700 after merging main at 321e26ad7f (re-derived declaration budget,
+    # #16785), reviewed with that PR.
+    '7887f1058488cea4f26939b5ab39e7d9d909e538',
+    # merge-train.py of #16760 (fix evidence judged per gate, strongest evidence served first).
+    'e8976bdaa91f35f698ceb44a956b03998f1486a1',
+    # merge-train.py of #16760 after merging main at 76402bc5d1, reviewed with that PR.
+    'd4c5ccdabee1e86687f096075120deb0b6df17a3',
+    # merge-train.py of #16760 after merging main at 0118e99327 (#16700: relevance ranking of main-red fixes), reviewed with that PR.
+    '67641bd6ce24a54b632c50d16d229ce1bd579843',
+    # merge-train.py of #16832 after merging #16760 at 0dbf1b25c9 (main with #16700), reviewed with that PR.
+    '25f1786d171b1ab122685d39314fd850fc019b85',
+    # merge-train.py of the #16843/#16874 follow-up stacked on #16832 (c5e853c27d), reviewed with that PR.
+    '82746dd0548f1f2e352fefbe97cb2aa9a801df5b',
+    # merge-train.py of #16885 after its review fix (judge directories code runs from, opaque-shell fallback).
+    '15c3e1510c102bdd91e8006e1a04207b1abb83ef',
+    # merge-train.py of #16856 (urgent strict path, ADR-0343 amendment 2026-11-19) after merging main at
+    # 35b69fe982 (#16760), reviewed with that PR.
+    '16a1391170f232a21f6e84c875cae5ad04316d0b',
+    # merge-train.py of #16856 after the re-review (a released urgent head holds no one back), reviewed with that PR.
+    '287818084655bc5e34d0a700430e354b1ffb4c97',
+    # merge-train.py of #16832 after merging main at 7ac3c508dc (#16856 urgent strict path), reviewed with that PR.
+    '0c35ce9601da83a44dd580d42b451e95a6bd1f6a',
+    # merge-train.py of #16943's fix (deploy fix claim for auto-deploy gitops PRs), reviewed with that PR.
+    '1a4024d26828985dd9a620c49b7deac393bc70ed',
+    # Independently reviewed canonical first-parent source: #16947.
+    'eef9500b378c7630aff90490b68686b4f0f02cf8',
+    # merge-train.py of #16932's fix (a natively merged carrier member at the verified head continues), reviewed with that PR.
+    '0706fa384166e6be506fa7dc5393a3d69906b6ea',
+    # merge-train.py of #16986 (a member natively merged inside the train's merge call continues) merged with #16972, reviewed with #16986.
+    '5e1458d0abd19d575cd667e4fae834a5f5aebe00',
+    # merge-train.py of the repo-variable knobs change (caps, operational knobs, guarded stacking, strict-lane aging), reviewed with that PR.
+    '3e8b1a854530ad67b8b2c15e6b68b32788519ef2',
+    # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
+    '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
+    # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
+    '1e5e9f5b334f640d8102054b8155a9526d035e79',
+    # merge-train.py of #16972's tick-speed change merged with #16973's claim_evidence(now) fix, reviewed with that PR.
+    'bffe20f4c51c3b6fe3a7d961617d4f484276478e',
+    # merge-train.py of the stale-base refresh (armed PR red over an old base, green on main: one capped update-branch) stacked on #16986 and merged with #16972, reviewed with #16988.
+    '82f517cde74e25753d7c498401c4cc9d861074b5',
+    # merge-train.py of #16885 stacked on #16988 and #16986, merged with #16972 (ruff B007 + stale-ref fix kept), reviewed with #16885.
+    'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
@@ -114,6 +201,33 @@ def _sha(value):
     return isinstance(value, str) and _SHA.fullmatch(value) is not None
 
 
+def unattested_policy_change(repo, base_ref='refs/remotes/origin/main'):
+    """PR-time attestation: return the blob id when THIS change edits POLICY_PATH without listing it.
+
+    Diff-scoped on purpose (#16187): a change that leaves merge-train.py alone is never asked about
+    main's controller, so main moving cannot redden it. The PR that changes the controller is the one
+    that must add its resulting blob to REVIEWED_POLICY_BLOBS, where its review covers that entry.
+    Returns None when the policy is unchanged or its resulting blob is listed. Raises ValueError when
+    the comparison cannot be made, so an unanswerable check fails instead of passing.
+    """
+    # Inherited GIT_DIR/GIT_WORK_TREE (set by hooks and some runners) would silently answer about
+    # a different repository than `repo`.
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+
+    def git(*args):
+        return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True,
+                              timeout=60, check=True, env=env).stdout.strip()
+    try:
+        base = git('merge-base', '--end-of-options', base_ref, 'HEAD')
+        changed = git('diff', '--name-only', base, '--', POLICY_PATH) or git('status', '--porcelain', '--', POLICY_PATH)
+        if not changed:
+            return None
+        blob = git('hash-object', '--', POLICY_PATH)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError(f'cannot compare {POLICY_PATH} against {base_ref}: {error}') from error
+    return None if blob in REVIEWED_POLICY_BLOBS else blob
+
+
 def premerge_policy_context(pull, repo, github, expected_context):
     """Read only the first parent's policy tree; never use the PR's policy or current main's copy."""
     merge_sha = pull['merge_commit_sha']
@@ -149,8 +263,8 @@ def premerge_policy_context(pull, repo, github, expected_context):
             tree_sha = entry['sha']
     blob = github.get(f'/repos/{repo}/git/blobs/{blob_sha}')
     if (blob.get('sha') != blob_sha or blob.get('encoding') != 'base64'
-            or type(blob.get('size')) is not int or not 0 < blob['size'] <= 500_000
-            or not isinstance(blob.get('content'), str) or len(blob['content']) > 700_000):
+            or type(blob.get('size')) is not int or not 0 < blob['size'] <= MAX_POLICY_BLOB_BYTES
+            or not isinstance(blob.get('content'), str) or len(blob['content']) > MAX_POLICY_BLOB_BASE64):
         raise ValueError('pre-merge policy blob is invalid')
     try:
         raw = base64.b64decode(''.join(blob['content'].split()), validate=True)

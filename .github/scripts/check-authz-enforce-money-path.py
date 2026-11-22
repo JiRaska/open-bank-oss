@@ -55,9 +55,14 @@ COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 # Deliberately-advisory money-path services (issue #8470 B): service -> target flip date.
 # The manifest must repeat BOTH the issue reference and the date (see module docstring); a date
 # living only here would drift from the file a deployer actually reads.
-ADVISORY_ALLOWLIST = {
-    "openbank-card-issuance-service": "2026-10-05",
-}
+# Empty since card-issuance-service flipped to enforce (its advisory decision log showed no
+# would-DENY for any principal the current bundle does not allow). An entry added here needs the
+# same in-file justification and date as before.
+ADVISORY_ALLOWLIST: dict[str, str] = {}
+
+# The self-test exercises the allowlist path with its own fixture so it keeps working while the
+# production allowlist is empty.
+_SELFTEST_ALLOWLIST = {"openbank-card-issuance-service": "2026-10-05"}
 
 ISSUE_REF = "#8470"
 
@@ -219,7 +224,7 @@ def self_test() -> int:
         deploy("openbank-card-issuance-service", "false",
                raw_extra="# Advisory while decision logs accumulate (#8470, flip target 2026-10-05).\n")
 
-        violations, checked, missing = run(root)
+        violations, checked, missing = run(root, _SELFTEST_ALLOWLIST)
         case("one latent fail-open deployment flags", [v[0] for v in violations], ["openbank-open-service"])
         case("all three services were checked", checked, 3)
         case("nothing is missing a workload", missing, [])
@@ -227,13 +232,13 @@ def self_test() -> int:
         # The same allowlisted service WITHOUT the justification in its manifest must flag —
         # otherwise the allowlist quietly becomes a permanent waiver.
         deploy("openbank-card-issuance-service", "false")
-        violations, _, _ = run(root)
+        violations, _, _ = run(root, _SELFTEST_ALLOWLIST)
         case("allowlist without in-file justification flags",
              sorted(v[0] for v in violations), ["openbank-card-issuance-service", "openbank-open-service"])
 
         # A money-path service with NO workload at all is reported missing, never skipped.
         (root / COMPONENTS / "x" / "openbank-ok-service.yaml").unlink()
-        violations, _, missing = run(root)
+        violations, _, missing = run(root, _SELFTEST_ALLOWLIST)
         case("a service with no manifest is missing", missing, ["openbank-ok-service"])
 
     # THE #8947 CASE, in its own tree so it cannot perturb the cases above.
@@ -259,7 +264,7 @@ def self_test() -> int:
             workload("openbank-card-issuance-service",
                      "# Advisory while decision logs accumulate (#8470, flip target 2026-10-05).\n")
             + "---\n" + workload("openbank-sanctions-service"))
-        violations, _, _ = run(root)
+        violations, _, _ = run(root, _SELFTEST_ALLOWLIST)
         flagged = sorted(v[0] for v in violations)
         case("a sibling's justification in the same FILE does not cover an unjustified workload",
              flagged, ["openbank-sanctions-service"])
@@ -275,7 +280,8 @@ def self_test() -> int:
     return 0
 
 
-def run(root: pathlib.Path) -> tuple[list[tuple[str, str]], int, list[str]]:
+def run(root: pathlib.Path, allowlist: dict[str, str] | None = None) -> tuple[list[tuple[str, str]], int, list[str]]:
+    allowlist = ADVISORY_ALLOWLIST if allowlist is None else allowlist
     violations: list[tuple[str, str]] = []
     missing: list[str] = []
     services = money_path_services(root)
@@ -287,7 +293,7 @@ def run(root: pathlib.Path) -> tuple[list[tuple[str, str]], int, list[str]]:
         effective = manifest_value if manifest_value is not None else app_enforce_default(root, service)
         if effective is True:
             continue
-        target = ADVISORY_ALLOWLIST.get(service)
+        target = allowlist.get(service)
         if target and manifest_has_justification(path, target, service):
             continue
         reason = "manifest supplies AUTHZ_ENFORCE=false" if manifest_value is False else \

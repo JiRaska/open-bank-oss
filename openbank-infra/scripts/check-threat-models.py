@@ -76,8 +76,6 @@ IMAGE_REF = re.compile(r"image:[^\n]*?(openbank-[a-z0-9-]+)")
 # has a different answer from a bounded context nobody has modelled yet, and flattening the two
 # would make this list read as 23 identical omissions.
 DEPLOYED_BASELINE: dict[str, str] = {
-    "openbank-aml-service":
-        "#9167 — bounded context, not yet modelled",
     "openbank-analytics-sink":
         "#9167 — bounded context, not yet modelled",
     "openbank-ap2-service":
@@ -106,16 +104,12 @@ DEPLOYED_BASELINE: dict[str, str] = {
         "#9167 — bounded context, not yet modelled",
     "openbank-finops-agent":
         "#9167 — agent, not yet modelled",
-    "openbank-finrep-service":
-        "#9167 — bounded context, not yet modelled",
     "openbank-flaky-test-hunter":
         "#9167 — agent, not yet modelled",
     "openbank-governance-auditor":
         "#9167 — agent, not yet modelled",
     "openbank-keycloak":
         "#9167 — third-party image; a model here is about its CONFIGURATION, not code this repo ships",
-    "openbank-kyb-service":
-        "#9167 — bounded context, not yet modelled",
     "openbank-kyc-service":
         "#9167 — bounded context, not yet modelled",
     "openbank-onboarding-service":
@@ -123,8 +117,6 @@ DEPLOYED_BASELINE: dict[str, str] = {
     "openbank-party-service":
         "#9167 — bounded context, not yet modelled",
     "openbank-pid-service":
-        "#9167 — bounded context, not yet modelled",
-    "openbank-product-catalog":
         "#9167 — bounded context, not yet modelled",
     "openbank-pyroscope-agent":
         "#9167 — third-party image; a model here is about its CONFIGURATION, not code this repo ships",

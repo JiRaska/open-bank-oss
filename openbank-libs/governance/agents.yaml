@@ -27,7 +27,7 @@ defaults:
   policy_decision: deny               # deny-by-default; OPA must find a matching allow rule
   enforced: block                     # ADR-0031 D8 gate flipped (#700/#638): declaration now matches
                                       # the deployed AGENT_POLICY_ENFORCEMENT=block (reconcile #743).
-                                      # A PDP connectivity error still degrades to advisory (fail-safe).
+                                      # A PDP connectivity error denies the call (fail closed, #15758).
   audit:
     actor_type: AI_AGENT              # every action -> AuditEvent (ADR-0031 D5)
     capture: [model_id, model_version, prompt_hash, tool_calls, policy_decision]
@@ -191,6 +191,9 @@ tool_tiers:
     - product.explain             # ruleId / instruction -> IR path (ADR-0352 §12)
   write_proposal: # produces a reviewable artifact, never a direct effect
     - draft.ticket
+    - propose.aml.decision # AML case decision as a HITL proposal; the human records it under their own identity
+    - sanctions.review.maker # EXCEPTION to "never a direct effect": a real sanctions.clear upstream, but only as four-eyes
+                             # MAKER (CLEAR only, server-side); nothing happens until a distinct human checker approves (ADR-0155)
     - gh.pr.open
     - draft.adr
     - git.branch
@@ -276,7 +279,9 @@ agents:
       allow: [query.ledger.readonly, query.gl.readonly, query.catalog.readonly, read.logs, read.governance,
               draft.ticket, query.compliance.readonly, query.payments.readonly, query.disputes.readonly,
               query.observability.readonly,   # Prometheus/Loki/Alertmanager read (oversight telemetry)
-              flags.write]    # feature-flag flip proposals (ADR-0067 / issue #419)
+              flags.write,    # feature-flag flip proposals (ADR-0067 / issue #419)
+              propose.aml.decision,   # AML false-positive triage as a HITL proposal; never decides
+              sanctions.review.maker] # sanctions hit review as four-eyes maker; a human checker approves
       deny:  ["money.*", "gh.pr.*"]
     requires_human:
       # Control-plane output is ALWAYS a proposal into the admin-ui approval queue (ADR-0031 D4).
@@ -513,6 +518,86 @@ agents:
         Art. 13 — transparency: every filed issue cites the bulletin it came from and the capability
         it was mapped to, so a reader can check the mapping rather than trust it.
       dora: ICT third-party change awareness — a scheme mandate is a supplier-imposed change
+  # Regulatory obligations watcher (ADR-0367 decision 6).
+  #
+  # stale-ref-ok: the register file lands with the sibling PR #15358, merged before this charter is enabled.
+  #
+  # WHY IT EXISTS: openbank-libs/governance/regulatory-obligations.yaml cites, for every duty, the
+  # legal text and the authority's specification. Those sources change — a decree is amended, ČNB
+  # republishes a reporting calendar, GSFT changes its file format — and the register says nothing
+  # when they do. Most of its deadlines are still marked `unverified`, too, so the useful daily
+  # work is mostly confirmation: fetch the cited source, compare it with the row, and propose the
+  # correction with the quote that justifies it.
+  #
+  # WHY IT IS PROPOSAL-ONLY: a regulatory duty is an interpretation of law. The agent's only
+  # output is a governance issue (draft.ticket) citing the source; it opens no PR and never writes
+  # the register. A human decides and changes the register in a reviewed PR.
+  #
+  # ENFORCEMENT, STATED HONESTLY: the write and execute tiers are listed under tools.deny, but
+  # agents.rego only evaluates a tier/resource deny when the caller sends input.tier; the MCP and
+  # REST paths do not. What actually protects today is deny-by-default (nothing outside the allow
+  # list is granted), not the deny list. The PR that enables this charter must carry an `opa eval`
+  # run against the served bundle with a must-DENY (write/execute) and a must-ALLOW (read,
+  # draft.ticket) control.
+  #
+  # `enabled: false` ON PURPOSE: it needs an allow-listed outbound fetch of the cited public
+  # sources (zakonyprolidi.cz, e-sbirka.cz, eur-lex.europa.eu, cnb.cz, gsft.cz, fau.gov.cz,
+  # financnisprava.gov.cz) and a prompt in prompts/registry.yaml. Enable both in the same PR.
+  - id: regulatory-obligations-watcher
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0367
+    description: >
+      Re-reads the legal texts and authority specifications cited by the regulatory obligations
+      register, flags amendments, changed deadlines or formats and still-unverified rows, and files
+      one governance issue per finding citing the source. It reads sources and may only file a
+      governance issue (draft.ticket); it opens no PR and never writes the register, a report or
+      a filing.
+    enabled: false
+    enforcement: block
+    schedule:
+      weekly: Monday 06:30 UTC
+    data_scope:
+      read:
+        - read.governance
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - every: proposal
+      - any_legal_interpretation
+      - any_register_change
+    limits:
+      tokens_per_run: 60000
+      runs_per_day: 1
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - obligation_id
+        - source_url
+        - source_quote
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: every issue cites the obligation id, the source URL and the quoted
+        passage, so a reader checks the finding against the law instead of trusting it.
+      dora: not applicable — no ICT system or third-party arrangement is changed
   # Card dispute evidence drafter (ADR-0283 phase 4, issue #8869).
   #
   # WHY IT EXISTS: a chargeback is won or lost on what was filed before the network's respond-by
@@ -1117,6 +1202,9 @@ agents:
         - tier: write_proposal
           resources: [github-pr]      # opens a GitHub issue (draft.ticket) by default; gh.pr.open
                                        # stays wired but is rarely used (ADR-0168 Decision)
+          # The only refs gh.pr.open may target (agents.rego pr_base_ref_denied). Must equal
+          # WriterBaseRef; check-agent-bounded-write-surface.py holds the two together.
+          base_refs: [main, qualification/flaky-test-hunter]
       deny:
         - tier: write
           resources: ["*"]            # explicit: no direct write to any test file ever

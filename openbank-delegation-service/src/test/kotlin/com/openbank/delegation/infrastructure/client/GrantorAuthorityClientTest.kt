@@ -32,10 +32,12 @@ class GrantorAuthorityClientTest {
     }
 
     @Test
-    fun `active organization requires principal in actor mandate set`(): Unit = runBlocking {
+    fun `active organization requires an explicit sole mandate for the actor`(): Unit = runBlocking {
         coEvery { rest.getParty(principal) } returns
             AuthorityPartyResponse(principal, "COMPANY", "ACTIVE", "Acme s.r.o.")
-        coEvery { rest.actingFor(actor) } returns listOf(ActingForResponse(principal))
+        coEvery { rest.actingFor(actor) } returns listOf(
+            ActingForResponse(principal, MandateResponse(actor, "SOLE", 1, "ACTIVE")),
+        )
 
         val result = client.authorityFor(principal, actor)
 
@@ -43,6 +45,27 @@ class GrantorAuthorityClientTest {
         assertThat(result.displayName).isEqualTo("Acme s.r.o.")
         assertThat(result.partyType).isEqualTo("COMPANY")
         coVerify(exactly = 1) { rest.getParty(principal) }
+    }
+
+    @Test
+    fun `joint incomplete and conflicting mandates do not establish sole authority`(): Unit = runBlocking {
+        coEvery { rest.getParty(principal) } returns AuthorityPartyResponse(principal, "COMPANY", "ACTIVE")
+        val sole = MandateResponse(actor, "SOLE", 1, "ACTIVE")
+        val joint = MandateResponse(actor, "JOINT", 2, "ACTIVE")
+        val authoritySets = listOf(
+            listOf(null),
+            listOf(joint),
+            listOf(sole.copy(requiredSignatures = null)),
+            listOf(sole.copy(agentPartyId = UUID.randomUUID())),
+            listOf(sole, joint),
+        )
+
+        authoritySets.forEach { mandates ->
+            coEvery { rest.actingFor(actor) } returns mandates.map { ActingForResponse(principal, it) }
+
+            assertThat(client.authorityFor(principal, actor).verdict)
+                .isEqualTo(GrantorAuthorityVerdict.MANDATE_ONLY)
+        }
     }
 
     @Test

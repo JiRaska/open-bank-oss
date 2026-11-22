@@ -6,6 +6,7 @@ package com.openbank.sanctions.infrastructure.persistence.entity
 
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
+import com.openbank.sanctions.domain.model.ScreeningProfile
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -78,4 +79,18 @@ class SanctionsCheckEntity {
 
     @field:Column(name = "clearance_expires_at")
     var clearanceExpiresAt: Instant? = null
+
+    @field:Column(name = "profile")
+    @field:Enumerated(EnumType.STRING)
+    var profile: ScreeningProfile? = null
+
+    @field:Column(name = "country")
+    var country: String? = null
+
+    @field:Column(name = "bank_identifier")
+    var bankIdentifier: String? = null
+
+    @field:Column(name = "pep_status")
+    @field:Enumerated(EnumType.STRING)
+    var pepStatus: SanctionsCheckStatus? = null
 }

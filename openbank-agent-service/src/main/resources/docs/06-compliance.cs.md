@@ -11,7 +11,7 @@
 | **EU AI Act** | AI systém operující uvnitř banky — potřebuje lidský dohled, logování, transparentnost | deny-by-default policy gate; AI-atribuovaný audit každého volání modelu i nástroje; HITL přes detekci návrhů (D4); per-agent kill-switch (D7, přes `agents.yaml`/OPA) |
 | **DORA** (Nař. (EU) 2022/2554) | ICT/operační odolnost interní služby | health probes, fail-closed PDP, ladná degradace při výpadku modelu, audit důkazy, SLO/runbooky ([05 — Provoz](./05-operations.md)) |
 | **GDPR** | Asistent může číst zákaznická data přes nástroje | charter je `pii: masked`; gateway ukládá jen SHA-256 `prompt_hash`, nikdy syrové prompty; žádné PII perzistované v klidu (žádné úložiště) |
-| **PSD2 / AML** | Asistent může *číst* AML/sanctions/payments povrchy | pouze read-only capabilities (`query.compliance.readonly`, `query.payments.readonly`); nikdy zapisovací/rozhodovací nástroj; **není** systém záznamu pro SAR/screening |
+| **PSD2 / AML** | Asistent může *číst* AML/sanctions/payments povrchy | pouze read-only capabilities (`query.compliance.readonly`, `query.payments.readonly`); nikdy zapisovací/rozhodovací nástroj (`aml_propose_case_decision`, jen compliance-officer, zakládá HITL návrh a nic nerozhoduje); **není** systém záznamu pro SAR/screening |
 | **NIS2** | Síťová a informační bezpečnost | OIDC příchozí, least-privilege `openbank-services` Bearer odchozí, mTLS v clusteru (Istio), bezpečnostní response hlavičky |
 | **ADR-0030 SSDLC** | Dodavatelský řetězec / bezpečný SDLC | podepsané commity, governance závislostí, žádný lock-in na third-party agent SDK (otevřený runtime, ADR-0031 D6) |
 
@@ -24,7 +24,7 @@
 | **D4 — human-in-the-loop** | `ProposalDetector` označuje odpovědi doporučující akci; admin UI je vykreslí jako návrhy ke schválení. Asistent sám nikdy nejedná. |
 | **D5 — AI atribuce** | `ModelGateway` a `AgentPolicyGate` emitují `AuditEvent {actorType=AI_AGENT}` pro každý completion / rozhodnutí (model_id, model_version, prompt_hash, tokeny, policy_decision, reason). |
 | **D6 — model gateway** | jediná hranice důvěry, kterou prochází každé volání modelu; provider-agnostická, citlivý kontext připnut k self-hosted modelu. |
-| **D9 — fázované vynucení** | `EnforcementMode` ADVISORY (jen audit, default) → BLOCK; fail-closed PDP s bezpečnostním fallbackem `pdpError`, takže mrtvý OPA nikdy nezamkne asistenta. |
+| **D9 — fázované vynucení** | `EnforcementMode` ADVISORY (jen audit, default) → BLOCK; fail-closed PDP: v režimu BLOCK chyba rozhodovacího bodu zamítne každé volání nástroje (`pdp_unavailable_denied`); ADVISORY jen audituje. |
 | **Fáze 3 — zaznamenané lidské merge** | `POST /api/v1/agent-merge-records` ingestuje mimo pásmo (CI workflow `record-agent-merge`, `ROLE_MERGE_RECORDER`) trvalý záznam toho, KDO mergoval PR autora agentem — agent své merge nikdy nenahlašuje sám. `agent_merge_record.pr_number` UNIQUE deduplikuje znovudoručení webhooku; každý merge je auditován jednou jako `agent.pr.merged` s `actorType=HUMAN` pod mergujícím člověkem, přes odolný outbox ([04 — Data](./04-data.md)). |
 
 ## Charter `ui-assistant` (agents.yaml)

@@ -6,7 +6,25 @@ info:
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
-  version: 1.7.0
+  # 1.7.0 -> 1.8.0: additive — related-party sanctions / PEP screening: `Case.screening` (operator
+  # view only), the operator disposition route for a finding, the 503 SCREENING_PENDING refusal on
+  # `sign` and `review/resolve`, and the 422 SCREENING_FINDING_* refusal on `review/resolve`.
+  # 1.8.0 -> 1.9.0: additive — ongoing monitoring of approved cases (ADR-0376). Operator-only
+  # response fields `Case.monitoring` (the findings reported after approval, each with its own
+  # decision, and the exit state read off them) and `ScreeningSubject.monitoringState`; two
+  # operator routes, `monitoring/findings/{findingId}/disposition` and `monitoring/exit/complete`;
+  # and the `monitoring=open` filter on `GET /cases`. Nothing existing changes: a case's `status`,
+  # `updatedAt` and every existing route answer the same whatever monitoring found, and
+  # `status=MANUAL_REVIEW` still returns MANUAL_REVIEW cases only.
+  # 1.9.0 -> 1.10.0: additive — representation mode on the attestation and current-attestation corroboration for Delegation.
+  # 1.10.0 -> 1.11.0: monitoring switch-on blockers (#16028), operator routes only, never live
+  # (monitoring has been switched off since 1.9.0). Exit completion is four-eyes: a new
+  # `monitoring/exit/propose`, and `monitoring/exit/complete` now confirms a proposal made by a
+  # DIFFERENT reviewer, repeating its evidence; both need the relationship to have ended (case
+  # REJECTED or ABANDONED and the entity party CLOSED). The holds queue moves from the
+  # `monitoring=open` filter of `GET /cases` to its own `GET /monitoring/holds`. Additive response
+  # field `Monitoring.exitProposal`. A confirmed sanctions match publishes no event.
+  version: 1.11.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -479,7 +497,15 @@ paths:
         signature any AML risk flag (PEP, FATCA status other than ACTIVE_NFFE, a tax residency
         outside the entity's country, cash-intensive, a high-risk country, a UBO discrepancy, a PEP
         declaration contradicting the customer profile) moves the case to MANUAL_REVIEW with every
-        flag named in `reviewReason`; activation then waits for the reviewer.
+        flag named in `reviewReason`; activation then waits for the reviewer. Where related-party
+        screening is switched on, the LAST required signature is refused with 503 SCREENING_PENDING
+        (and not recorded) until the entity, every listed representative and every reportable
+        beneficial owner and every person named in the declarations has a screening answer and the
+        beneficial-owner lookup is available. The subject list is rebuilt from the case's current
+        parties on every attempt. A sanctions hit, a potential hit or a PEP match moves the case to
+        MANUAL_REVIEW and adds nothing to `reviewReason`; the finding is in the operator-only
+        `Case.screening`. On a customer response an AML review reads "AML risk review before
+        activation" whatever raised it; the flags are in the operator's `reviewReason` only.
       operationId: signCase
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -503,6 +529,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/AgreementConflict'
+        '503':
+          $ref: '#/components/responses/ScreeningPending'
   /api/v1/kyb/cases/{id}/abandon:
     post:
       tags: [KYB]
@@ -544,6 +572,10 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ScreeningFinding'
+        '503':
+          $ref: '#/components/responses/ScreeningPending'
   /api/v1/kyb/representation/{scheme}/{identifier}:
     get:
       tags: [KYB]
@@ -600,6 +632,220 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Attestation'
+  /api/v1/kyb/cases/{id}/screening/findings/{subjectKey}/disposition:
+    post:
+      tags: [KYB]
+      summary: Operator decides one screening finding
+      description: >-
+        Sets the disposition of one OPEN finding (a sanctions hit, a potential hit or a PEP match)
+        to CLEARED_FALSE_POSITIVE or CONFIRMED, recording the authenticated operator, the reason
+        and the time. Accepted only while the case is in MANUAL_REVIEW (409 otherwise). It never
+        moves the case: approval stays a separate act, and a case that has ever had a finding is
+        approved only by an operator resolving the review, never by the last signature alone. A CONFIRMED sanctions
+        finding leaves only rejection. A decided finding cannot be decided again (409).
+      operationId: disposeScreeningFinding
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: subjectKey
+          in: path
+          required: true
+          description: '`key` of the subject in `Case.screening.subjects`.'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisposeFindingRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/findings/{findingId}/disposition:
+    post:
+      tags: [KYB]
+      summary: Operator decides one finding of ongoing monitoring on an approved case
+      description: >-
+        Sets the disposition of one OPEN monitoring finding to CLEARED_FALSE_POSITIVE or CONFIRMED,
+        recording the authenticated operator, the reason and the time. Each finding is decided by
+        itself and once (409 after that): a later finding about the same subject never reopens or
+        replaces an earlier decision. The case's `status` and `updatedAt` do not change. The first
+        CONFIRMED finding that is not a PEP match makes an exit owed
+        (`monitoring.exitOwedSince`); nothing is published about it. A confirmed PEP match is a
+        risk fact. The case stays monitored. A case held this way does not become ACTIVE when its
+        entity party is activated: the activation waits, and the decision that clears the last
+        hold applies it (status ACTIVE, `completed` published); after a confirmed sanctions match
+        it is never applied. Requires ROLE_KYC_REVIEWER.
+      operationId: decideMonitoringFinding
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: findingId
+          in: path
+          required: true
+          description: '`findingId` of the finding in `Case.monitoring.findings`.'
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisposeFindingRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/monitoring/holds:
+    get:
+      tags: [KYB]
+      summary: Operators' queue of cases ongoing monitoring holds
+      description: >-
+        The cases with a finding awaiting a decision, or a confirmed sanctions match whose exit is
+        not yet recorded, oldest first. Such a case keeps the status it was approved in. Refused
+        (403) for any request made on a customer's behalf, before anything is looked up. Requires
+        ROLE_KYC_REVIEWER.
+      operationId: listMonitoringHolds
+      parameters:
+        - $ref: '#/components/parameters/customerPartyId'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/kyb/cases/{id}/monitoring/exit/propose:
+    post:
+      tags: [KYB]
+      summary: A reviewer proposes that the exit a confirmed sanctions match requires has been carried out
+      description: >-
+        First half of a four-eyes record. Accepted when an exit is owed, no finding is undecided,
+        and the relationship has demonstrably ended: the case is REJECTED or ABANDONED and
+        party-service records the entity party as CLOSED (409 otherwise). Records the
+        authenticated reviewer, the time and the evidence in `monitoring.exitProposal`, bound to
+        the reviewer's PERSON (token claim person_id; a token without it is refused, 409) and open
+        for 72 hours (`expiresAt`). A pending proposal is never replaced: 409 until its proposer
+        withdraws it (`exit/withdraw`) or it expires. Ends nothing: the case stays monitored.
+        Requires ROLE_KYC_REVIEWER.
+      operationId: proposeMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteExitRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/exit/complete:
+    post:
+      tags: [KYB]
+      summary: A second reviewer confirms the proposed exit; monitoring ends
+      description: >-
+        The only way monitoring of a case with a confirmed sanctions match ends. Confirms the
+        pending, unexpired `monitoring.exitProposal`: the authenticated reviewer must be a different
+        PERSON than its proposer (token claim person_id, so a second account of the proposer is
+        refused) and must carry a second factor (token amr contains otp); a token without
+        person_id is refused. `evidence` must repeat the proposal's evidence (so a proposal replaced after it
+        was read is not confirmed), and the conditions of `exit/propose` must still hold. 409
+        otherwise, and 409 when already recorded. Records the confirmer and withdraws the case's
+        subjects from the monitored-subject registry. The case's `status` does not change. This
+        service does not carry the exit out; it records that it was. Requires ROLE_KYC_REVIEWER.
+      operationId: completeMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteExitRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/monitoring/exit/withdraw:
+    post:
+      tags: [KYB]
+      summary: The proposer withdraws their pending exit proposal
+      description: >-
+        The proposer's PERSON (any of their accounts, token claim person_id) withdraws the pending
+        `monitoring.exitProposal`; who and when stay on it until a new proposal is made. Nobody else
+        can withdraw it; another reviewer waits until it expires (`expiresAt`). Nothing ends. 409
+        when the caller is not the proposer's person, there is no pending proposal, or the exit is
+        already confirmed. Requires ROLE_KYC_REVIEWER.
+      operationId: withdrawMonitoringExit
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/kyb/cases/{id}/reject:
     post:
       tags: [KYB]
@@ -652,6 +898,60 @@ paths:
               schema: { $ref: '#/components/schemas/UboFinding' }
         '400':
           description: Missing or unparseable scheme/identifier
+  /api/v1/kyb/cases/{id}/statutory-representation:
+    post:
+      tags: [KYB]
+      summary: Publish an active case's verified statutory representation rule to party-service
+      description: >-
+        Staff publication requires a current human attestation and identity-linked signers from
+        the case's verified document ceremony. A fixed quorum requires enough verified signers
+        for the attested count and offices. Joint-all requires all register representatives.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attestationId]
+              properties:
+                attestationId: {type: string, format: uuid, description: The current confirmation displayed to the reviewer}
+      responses:
+        '200':
+          description: The exact attestation published
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attestationId]
+                properties:
+                  attestationId: {type: string, format: uuid}
+        '400': {description: Missing attestation identifier}
+        '403': {description: Only authenticated KYB staff can publish, and never the staff member who attested the rule (SEPARATION_OF_DUTIES)}
+        '404': {description: Case or complete verified statutory evidence unavailable, or the attestation changed}
+  /api/v1/kyb/cases/{id}/statutory-representation/{attestationId}/current:
+    get:
+      tags: [KYB]
+      summary: Verify that an exact statutory representation attestation remains current
+      description: This check is restricted to the verified delegation service identity.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: attestationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: entityPartyId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204':
+          description: The case's verified statutory attestation is current
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+        '400': {description: Missing entity party}
+        '403': {description: Only delegation-service can verify the source revision}
+        '404':
+          description: Case or entity mismatch, incomplete evidence, or superseded attestation
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
 components:
   securitySchemes:
     bearerAuth:
@@ -704,14 +1004,37 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Conflict:
-      description: The transition is not valid in the case's current state
+      description: >-
+        The transition is not valid in the case's current state (`error` = INVALID_TRANSITION), or
+        the case was changed concurrently and nothing was written (`error` = CASE_CONCURRENT_UPDATE)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ScreeningFinding:
+      description: >-
+        Operator routes only. The review cannot be resolved while a screening finding has no
+        disposition (`error` = SCREENING_FINDING_OPEN), or after a sanctions finding was confirmed
+        (`error` = SCREENING_FINDING_CONFIRMED; the case can only be rejected). Any finding the
+        call itself discovered is stored and visible in `Case.screening`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ScreeningPending:
+      description: >-
+        Approval was asked for before the related-party screening has a complete answer
+        (`error` = SCREENING_PENDING). Nothing was recorded; the same request succeeds once the
+        screening has finished. The body is identical for every case.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
     AgreementConflict:
       description: >-
-        A state conflict. `error` is INVALID_TRANSITION, or one of the agreement codes
+        A state conflict. `error` is CASE_CONCURRENT_UPDATE when the case was changed by someone
+        else between this caller's read and its write (nothing was written; read it again), or
+        INVALID_TRANSITION, or one of the agreement codes
         (AGREEMENT_PREREQUISITES_MISSING, AGREEMENT_NOT_PREPARED, AGREEMENT_LOCKED, DISCLOSURES_STALE,
         DISCLOSURES_NOT_ACCEPTED, SIGNATURE_REF_MISMATCH, CEREMONY_NOT_FOUND, CEREMONY_CASE_MISMATCH,
         CEREMONY_NOT_SIGNED).
@@ -764,6 +1087,10 @@ components:
           type: integer
           minimum: 1
           description: What the human decided. This is what binds an agreement.
+        confirmedMode:
+          type: [string, 'null']
+          enum: [SOLE, JOINT_N, JOINT_ALL, null]
+          description: Explicitly confirmed mode. Legacy count-only attestations have no confirmed mode.
         confirmedRoles:
           type: array
           items: { type: string }
@@ -777,6 +1104,10 @@ components:
       required: [confirmedSigners, ruleTextHash]
       properties:
         confirmedSigners: { type: integer, minimum: 1 }
+        confirmedMode:
+          type: string
+          enum: [SOLE, JOINT_N, JOINT_ALL]
+          description: An explicit mode is required to publish a joint statutory representation revision.
         confirmedRoles:
           type: array
           items: { type: string }
@@ -1150,6 +1481,9 @@ components:
             $ref: '#/components/schemas/Signer'
         reviewReason:
           type: [string, 'null']
+          description: >-
+            Why the case is under review. On a customer response an AML review carries no flags and
+            no cause; an operator response carries the flags the customer's own answers raised.
         questionnaire:
           oneOf:
             - $ref: '#/components/schemas/Questionnaire'
@@ -1162,11 +1496,223 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AgreementSummary'
             - type: 'null'
+        screening:
+          description: >-
+            Related-party sanctions / PEP screening. Operator view only — always null on a response
+            a customer can read.
+          oneOf:
+            - $ref: '#/components/schemas/CaseScreening'
+            - type: 'null'
+        monitoring:
+          description: >-
+            What ongoing monitoring reported after approval and what was decided. Null when
+            nothing was reported. Operator view only — always null on a response a customer can
+            read. The case's `status` and `updatedAt` are the same whatever is here.
+          oneOf:
+            - $ref: '#/components/schemas/CaseMonitoring'
+            - type: 'null'
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
+          format: date-time
+    DisposeFindingRequest:
+      type: object
+      required: [disposition, reason]
+      properties:
+        disposition:
+          type: string
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED]
+          description: >-
+            CLEARED_FALSE_POSITIVE or CONFIRMED. OPEN is the state a finding starts in and is
+            refused here with 400: a decision cannot be withdrawn through this route.
+        reason:
+          type: string
+          minLength: 10
+    CaseScreening:
+      type: object
+      required: [complete, openFindings, subjects]
+      properties:
+        openFindings:
+          type: integer
+          description: Findings with no disposition. The case cannot be approved while this is above zero.
+        complete:
+          type: boolean
+          description: >-
+            Every subject has an answer and the beneficial owners were established. False while any
+            subject is PENDING, and while `ownerSource` is UNAVAILABLE.
+        ownerSource:
+          type: [string, 'null']
+          enum: [REGISTER, SELF_DECLARATION, UNAVAILABLE, null]
+          description: Where the beneficial owners among the subjects came from when the list was last built.
+        subjects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScreeningSubject'
+    ScreeningSubject:
+      type: object
+      required: [key, kind, name, organisation, sanctions, pep, current]
+      properties:
+        key:
+          type: string
+          description: Identifies the subject on the disposition route.
+        current:
+          type: boolean
+          description: False for a subject that left the case and is kept because of its finding.
+        disposition:
+          type: [string, 'null']
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED, null]
+          description: Null when there is nothing to decide.
+        disposedBy:
+          type: [string, 'null']
+        dispositionReason:
+          type: [string, 'null']
+        disposedAt:
+          type: [string, 'null']
+          format: date-time
+        kind:
+          type: string
+          enum: [ENTITY, REPRESENTATIVE, BENEFICIAL_OWNER, DECLARED_PERSON]
+        name:
+          type: string
+        organisation:
+          type: boolean
+          description: True for a legal person, false for a natural person.
+        sanctions:
+          type: string
+          enum: [PENDING, CLEAR, POTENTIAL_HIT, HIT]
+          description: PENDING means no answer was obtained — never "clear".
+        pep:
+          type: boolean
+          description: A politically exposed person match. A customer-risk fact, never a sanctions hit.
+        matchedName:
+          type: [string, 'null']
+        screenedAt:
+          type: [string, 'null']
+          format: date-time
+        monitoringState:
+          type: [string, 'null']
+          description: >-
+            Where the subject stands with the monitored-subject registry: PENDING (owed), SYNCED
+            (accepted) or REFUSED (the registry's validation rejects it as it is — the subject is
+            approved and NOT monitored). Null when the subject is not to be registered, and on
+            list responses.
+    CaseMonitoring:
+      type: object
+      required: [findings]
+      properties:
+        reviewSince:
+          type: [string, 'null']
+          format: date-time
+          description: Since when a finding has been waiting for a decision; null when none is.
+        exitOwedSince:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            Since when a confirmed sanctions match requires an exit that is not yet recorded as
+            carried out. Read off the findings; nobody sets it.
+        exitCompleted:
+          oneOf:
+            - $ref: '#/components/schemas/ExitCompletion'
+            - type: 'null'
+        exitProposal:
+          description: The exit proposal awaiting a second reviewer, or the one that was confirmed.
+          oneOf:
+            - $ref: '#/components/schemas/ExitProposal'
+            - type: 'null'
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/MonitoringFinding'
+    ExitCompletion:
+      type: object
+      required: [completedAt, completedBy, evidence]
+      properties:
+        completedAt:
+          type: string
+          format: date-time
+        completedBy:
+          type: string
+        evidence:
+          type: string
+    ExitProposal:
+      type: object
+      required: [proposedAt, proposedBy, evidence]
+      properties:
+        proposedAt:
+          type: string
+          format: date-time
+        proposedBy:
+          type: string
+        evidence:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: After this instant the proposal cannot be confirmed and may be replaced.
+        withdrawnBy:
+          type: string
+          nullable: true
+          description: Account that withdrew the proposal (always the proposer's person).
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+    CompleteExitRequest:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: string
+          minLength: 10
+          description: >-
+            What was done and where the record of it is; on `exit/complete`, the evidence of the
+            proposal being confirmed. Who records it is the authenticated reviewer.
+    MonitoringFinding:
+      type: object
+      description: >-
+        One finding of sanctions-service's ongoing monitoring, as received on
+        MONITORED_SUBJECT_MATCHED, and its decision. It names a list entry and a subject key,
+        never a person. `matchKind`, `listType`, `matchStatus` and `detection` are the producer's
+        values kept verbatim as text, so a value added there is shown here rather than rejected.
+      required: [findingId, subjectKey, matchKind, listType, listEntryRef, listEntryVersion, matchScore, matchStatus, detection, receivedAt, disposition]
+      properties:
+        findingId:
+          type: string
+          format: uuid
+        subjectKey:
+          type: string
+          description: '`key` of the subject in `Case.screening.subjects`.'
+        matchKind:
+          type: string
+          description: SANCTIONS, TERRORIST, PEP or JURISDICTION today. A confirmed PEP match is a risk fact; every other confirmed value requires an exit.
+        listType:
+          type: string
+        listEntryRef:
+          type: string
+        listEntryVersion:
+          type: string
+        matchScore:
+          type: number
+        matchStatus:
+          type: string
+        detection:
+          type: string
+          description: LIST_DELTA, BASELINE_SWEEP or PERIODIC_SWEEP today.
+        receivedAt:
+          type: string
+          format: date-time
+        disposition:
+          type: string
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED]
+        decidedBy:
+          type: [string, 'null']
+        decisionReason:
+          type: [string, 'null']
+        decidedAt:
+          type: [string, 'null']
           format: date-time
     Questionnaire:
       type: object

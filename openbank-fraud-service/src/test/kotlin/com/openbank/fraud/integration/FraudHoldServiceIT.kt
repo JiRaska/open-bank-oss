@@ -14,6 +14,7 @@ import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.infrastructure.persistence.FraudOutboxRepositoryImpl
 import com.openbank.fraud.infrastructure.persistence.entity.FraudOutboxEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.quarkus.test.common.QuarkusTestResource
@@ -191,9 +192,16 @@ class FraudHoldServiceIT {
                 )
             }
         }
-        runSuspend { outboxWriter.markFailed(secondEventId, "boom") }
+        val status = runSuspend { outboxWriter.markFailed(secondEventId, "boom") }
+        assertThat(status).isEqualTo(OutboxStatus.FAILED)
+        // ADR-0327 D4: a failed row backs off; it is not eligible again until next_attempt_at.
         val afterFailure = runSuspend { outboxWriter.listProcessable(10) }
-        assertThat(afterFailure.map { it.eventId }).contains(secondEventId)
+        assertThat(afterFailure.map { it.eventId }).doesNotContain(secondEventId)
+        val failedRow = VertxContextSupport.subscribeAndAwait {
+            Panache.withSession { outboxRepository.find("eventId", secondEventId).firstResult() }
+        }
+        assertThat(failedRow?.status).isEqualTo(OutboxStatus.FAILED.name)
+        assertThat(failedRow?.nextAttemptAt).isAfter(Instant.now())
     }
 
     private fun runSuspendUni(block: () -> io.smallrye.mutiny.Uni<Void>) {

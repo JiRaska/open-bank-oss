@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -25,6 +26,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
@@ -169,4 +171,28 @@ kover {
             }
         }
     }
+}
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266).
+// Weekly + manual via pitest.yml, advisory — never a per-PR gate. The recorded OVER_THIN_BASELINE
+// exclusion is paid down with this block; see check-pitest-money-path-coverage.py.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.swift.domain.*")
+    // PIT's `*` glob does NOT cross package boundaries: the domain tests live in
+    // domain.model / domain.institution, and the institution rail's tests in institution.* —
+    // each package is listed explicitly (sepa-payment's flat layout needed only two).
+    targetTests = setOf(
+        "com.openbank.swift.domain.model.*",
+        "com.openbank.swift.domain.institution.*",
+        "com.openbank.swift.institution.*",
+        "com.openbank.swift.application.usecase.*",
+    )
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.swift.domain.*Kt")
 }

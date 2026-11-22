@@ -704,7 +704,10 @@ spec:
           # and a CronJob without it still emits the series with no such label.
           # Dropping this flag makes CronJobMaxSuccessAgeUndeclared fire for every CronJob.
           metricAnnotationsAllowList:
-            - cronjobs=[openbank.tech/max-success-age-seconds]
+            # openbank.tech/failure-is-finding (2026-11-14): a scanner whose non-zero exit IS
+            # its finding opts out of the generic CronJob failure rules; its own domain alert
+            # carries the finding instead of four alerts carrying one fact.
+            - cronjobs=[openbank.tech/max-success-age-seconds,openbank.tech/failure-is-finding]
           # admin-ui reads the RUNNING node shape live (src/lib/live-platform-versions.ts):
           # kube_node_labels only carries labels named here, and by default carries none.
           metricLabelsAllowlist:

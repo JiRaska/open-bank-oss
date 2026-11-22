@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "aml.monitoring-severities.synthetic",
+  "revision": 1,
+  "domain": "aml",
+  "purpose": "synthetic",
+  "provenance": "synthetic-fixture-v1",
+  "effectiveFrom": "2026-01-01T00:00:00Z",
+  "effectiveUntil": "2100-01-01T00:00:00Z",
+  "entries": [
+    { "code": "LOW", "label": "Low", "meaning": "Synthetic scale entry.", "rank": 1 },
+    { "code": "MEDIUM", "label": "Medium", "meaning": "Synthetic scale entry.", "rank": 2 },
+    { "code": "HIGH", "label": "High", "meaning": "Synthetic scale entry.", "rank": 3 },
+    { "code": "CRITICAL", "label": "Critical", "meaning": "Synthetic scale entry.", "rank": 4 }
+  ]
+}

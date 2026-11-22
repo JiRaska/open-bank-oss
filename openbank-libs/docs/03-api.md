@@ -54,6 +54,21 @@ iban.bankCode       // "0800"
 Iban.isValid("nonsense")  // false (no throw)
 ```
 
+`Iban.isValid` ověřuje podle ISO 13616: země z registru SWIFT, přesná délka pro danou zemi,
+kontrolní číslice 02..98, BBAN jen `[A-Z0-9]` a mod-97 == 1. Na chybný vstup vrací `false`,
+nikdy nevyhodí výjimku.
+
+## identity — RodneCislo
+
+`RodneCislo.parse` vrací `Parsed` (kanonický tvar, datum narození, pohlaví) nebo `Invalid`.
+Odmítá čísla, která nikdy nebyla vydána: 9místný tvar po roce 1953, výjimku „zbytek 10 → 0“
+po roce 1985 a měsíc +20/+70 před rokem 2004. Zdroje: zákon č. 133/2000 Sb. § 13 pro 9/10místný tvar a přičtení měsíce od 2004; praxe MV ČR pro výjimku se zbytkem 10.
+
+`parse(raw)` kontroluje jen strukturu: neodmítá datum narození v budoucnosti. Kdo přijímá osobu,
+volá `parse(raw, clock)` (a `isValid(raw, clock)`) s vlastními hodinami `Clock`: „dnešek“ si libs počítá
+v `Europe/Prague`, protože rodné číslo je české občanské datum, a pro pozdější datum narození vrací
+`Invalid("birthdate is in the future")`.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin
@@ -312,3 +327,23 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 `openbank-build-info.properties` generuje `openbank-libs-domain` (vedle `BuildInfo`, který ho čte) z version catalogu. Dřív žil v umbrella JARu `openbank-libs`, který služby závislé přímo na domain/runtime nemají, a `/api/v1/info` proto hlásilo Quarkus/Gradle/libs jako `unknown`. Git commit ani čas buildu se do `libs-domain` nerazítkují (JAR zůstává mezi commity stejný); `buildTime` je proto `unknown` a commit běžící služby pochází z `openbank-service-build.properties`. `BuildInfoTest` porovnává hodnoty s catalogem, takže chybějící resource build shodí.
 
 `ServiceInfoResource` automaticky vrací `toStack()` v `/api/v1/info` response.
+## storage — ObjectStorePort
+
+`ObjectStorePort.get` vrací celý objekt jako `ByteArray`. Při použití `S3ObjectStore`
+vlastní SDK response stream adaptér a uzavírá jej po úspěšném čtení, po přečtení
+prázdného objektu i při chybě čtení. Volající žádný stream k uzavření nedostává.
+Pokud selže čtení i uzavření, chyba čtení zůstává primární a chyba uzavření je
+potlačená výjimka (`suppressed`). Diagnostika coroutines může původní výjimku
+zachovat jako příčinu obnovené výjimky. Samotná chyba uzavření po úspěšném čtení
+se také propaguje volajícímu.
+
+S3 backend nadále vybírá konzument konfigurací a přidáním AWS SDK do vlastních
+závislostí; SDK zůstává v `libs-runtime` jako `compileOnly`. Vlastnictví response
+streamu nevyjadřuje limit velikosti objektu ani garanci omezené doby rušení
+přenosu. Chování transportu při `close` a `abort` je nutné posuzovat samostatně.
+
+## Identifier primitives (#16748)
+
+- `CurrencyCode.of` rejects ISO 4217 codes withdrawn from circulation (List Three: `DEM`, `FRF`, `HRK`, `SKK`, `VEF`, `ZWL`, ...) even though `java.util.Currency` still resolves them. `CurrencyCode.isCanonical(code)` answers "is this exact string an active, upper-case code" for validators that store the string.
+- `IbanCheckDigits.compute/build` is the single ISO 7064 MOD 97-10 generator; validation stays in `Iban.isValid`.
+- `CzechPaymentSymbol.VARIABLE|SPECIFIC|CONSTANT` with `isValid` / `normalise`: VS and SS are 1-10 ASCII digits, KS 1-4 (the domestic-payment column limit); blank counts as absent.

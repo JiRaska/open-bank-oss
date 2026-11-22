@@ -76,6 +76,12 @@ Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její
 
 Idempotentní opakování existujícího podání vrátí uloženou platbu bez druhé události. Tato migrace zpětně nevytváří historické přechody; případná chybějící auditní fakta vyžadují samostatnou schválenou rekonciliaci.
 
+Příznak syntetického původu smí nastavit důvěryhodný servisní účet prostřednictvím sdíleného vstupního filtru. Jeho rozhodnutí se při založení uloží k platbě. Každý přechod s událostí přenese uložený příznak do outboxu a následně do hlavičky Kafka. Schémata odpovědí i těl událostí zůstávají stejná. Starší platby mají v PostgreSQL původ neznámý a při odeslání zůstávají bez příznaku.
+
 ## Odolnost a rate limiting
 
 Konfigurováno pod `openbank.resilience` / `openbank.rate-limit` (SmallRye Fault Tolerance): circuit breaker (volume 20, failure ratio 0.3, success threshold 10, 5 s delay), retry (max 2, 100 ms delay, 50 ms jitter), timeout (10 s) a strop souběhu (`max-concurrent-requests: 500`).
+
+## Volání fraud scoringu (ADR-0084, ADR-0377 D3)
+
+Po screeningu linka volá `POST /api/v1/fraud/score` ve fraud-service přes `FraudScoringPort` po stávajícím vzájemně autentizovaném interním spojení. Požadavek nově nese příjemce: IBAN věřitele jako typovanou protistranu (`CounterpartyRef.fromIban`, nikdy null) a způsob iniciace. Klientské DTO hodnotu v `toString()` maskuje, takže se nedostane do logů. Fraud-service z ní vytvoří HMAC pseudonym a surovou hodnotu zahodí; tato služba ji pro účely fraud nehashuje ani neukládá. Scoring na této lince zůstává jen ve stínovém režimu: verdikt jiný než ALLOW se zaloguje, platba se nepodrží a selhání scoringu platbu neblokuje.

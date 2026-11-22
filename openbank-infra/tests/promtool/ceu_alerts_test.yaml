@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for openbank-ceu-alerts (ADR-0367, #15292): a must-FIRE case and a
+# must-NOT-fire control. Intervals stay at 1m so `for:` is reachable.
+rule_files:
+  - prometheus-rules-ceu.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "an unfiled overview past the cutoff fires CeuDailyOverviewNotFiled"
+    input_series:
+      - series: 'openbank_ceu_overview_unfiled_past_cutoff{pod="t1"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CeuDailyOverviewNotFiled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: "Today's CEÚ change overview is not filed with ČNB"
+              description: "The CEÚ daily change overview (CEUSIFE10) for today's working day is not SUBMITTED or ACKNOWLEDGED, and ČNB's 12:00 deadline is less than an hour away. Approve it (four-eyes), deliver it through SDAT and record the submission reference."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/ceu-alerts.md#ceudailyoverviewnotfiled"
+
+  - interval: 1m
+    name: "a filed overview (0) does NOT fire CeuDailyOverviewNotFiled"
+    input_series:
+      - series: 'openbank_ceu_overview_unfiled_past_cutoff{pod="t1"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CeuDailyOverviewNotFiled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a brief blip shorter than for: does NOT fire"
+    input_series:
+      - series: 'openbank_ceu_overview_unfiled_past_cutoff{pod="t1"}'
+        values: "1 1 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CeuDailyOverviewNotFiled
+        exp_alerts: []

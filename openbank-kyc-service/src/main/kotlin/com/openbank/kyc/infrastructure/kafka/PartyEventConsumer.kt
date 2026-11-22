@@ -6,8 +6,8 @@ package com.openbank.kyc.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.kyc.application.CustomerScreeningService
 import com.openbank.kyc.application.KycService
-import com.openbank.kyc.application.PepScreeningService
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.domain.model.SubjectType
 import com.openbank.libs.messaging.EventRetry
@@ -55,7 +55,7 @@ class PartyEventConsumer {
     lateinit var kycCaseRepository: KycCaseRepository
 
     @Inject
-    lateinit var pepScreeningService: PepScreeningService
+    lateinit var customerScreeningService: CustomerScreeningService
 
     @Inject
     lateinit var objectMapper: ObjectMapper
@@ -103,16 +103,18 @@ class PartyEventConsumer {
                     partyId,
                 )
             }
-            // First-increment PEP screen (ADR-0116 delivery note): only for a case still in an
-            // active, non-terminal state — the sandbox auto-approve path (openbank.kyc.auto-approve)
-            // may have already settled the case to APPROVED, and re-screening a closed case here
-            // would race the terminal state rather than extend it. legalName comes straight from
-            // the PARTY_CREATED payload (party-service's KafkaPartyEventPublisher).
+            // Customer screen (sanctions, terrorist and PEP lists in one call) for a case still
+            // in a non-terminal state. legalName comes straight from the PARTY_CREATED payload
+            // (party-service's KafkaPartyEventPublisher); a party without one cannot be screened,
+            // so its sanctions check stays PENDING and it is not auto-approved.
+            if (case.status.isTerminal) return@withRetry
             val legalName = node.path("legalName").asText(null)
-            if (!case.status.isTerminal && !legalName.isNullOrBlank()) {
-                pepScreeningService.screenCase(case.id, legalName)
-                log.infof("[party-events-in] PEP-screened KYC case %s for party %s", case.id, partyId)
+            if (!legalName.isNullOrBlank()) {
+                customerScreeningService.screenOnOpen(case, legalName)
+                log.infof("[party-events-in] Screened KYC case %s for party %s", case.id, partyId)
             }
+            // Sandbox straight-through approval, only for a case the screen settled clear.
+            kycService.sandboxAutoApprove(case.id)
         }
     }
 

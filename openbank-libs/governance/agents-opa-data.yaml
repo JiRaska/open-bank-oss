@@ -38,6 +38,8 @@ tool_tiers:
   - product.explain
   write_proposal:
   - draft.ticket
+  - propose.aml.decision
+  - sanctions.review.maker
   - gh.pr.open
   - draft.adr
   - git.branch
@@ -67,6 +69,8 @@ agents:
     - query.disputes.readonly
     - query.observability.readonly
     - flags.write
+    - propose.aml.decision
+    - sanctions.review.maker
     deny:
     - money.*
     - gh.pr.*
@@ -167,6 +171,22 @@ agents:
     - '*.write'
     - secrets.read.raw
 - id: card-scheme-bulletin-agent
+  tools:
+    allow:
+    - tier: read
+      resources:
+      - read.governance
+    - tier: write_proposal
+      resources:
+      - draft.ticket
+    deny:
+    - tier: write
+      resources:
+      - '*'
+    - tier: execute
+      resources:
+      - '*'
+- id: regulatory-obligations-watcher
   tools:
     allow:
     - tier: read
@@ -355,6 +375,9 @@ agents:
     - tier: write_proposal
       resources:
       - github-pr
+      base_refs:
+      - main
+      - qualification/flaky-test-hunter
     deny:
     - tier: write
       resources:

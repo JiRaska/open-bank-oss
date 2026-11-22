@@ -188,6 +188,25 @@ as username-field autofill (conditional UI) and as a button.
 - The template is imported on cold start only (see above). On a running realm, apply the same
   attributes with `kcadm.sh update realms/openbank -s webAuthnPolicyPasswordlessPasskeysEnabled=true ...`.
 
+## Admin UI login theme
+
+`openbank-admin-ui` selects `openbank-admin` through its `login_theme` client attribute.
+Keycloak uses the shared `openbank` theme for clients without an override. The Admin UI
+theme inherits Keycloak's PatternFly 5 templates, including the password and WebAuthn
+forms. The theme bundles Czech and English copy. The language selector follows the realm's
+localization settings.
+
+Run `bash gen-theme-configmap.sh` from this directory after changing theme sources or
+the Prague lion in `openbank-admin-ui/public/brand/`. The generated checksum rolls the
+Keycloak pod. Verify the mount paths, asset and client scope with
+`python3 openbank-infra/scripts/keycloak_theme_configmap_test.py` from the repository root.
+
+After the reviewed GitOps change syncs and Keycloak is ready, set `attributes.login_theme`
+to `openbank-admin` on the existing Admin UI client in the staff realm. Preserve the other
+client attributes. An existing realm skips startup import, so apply the same attribute to
+the disaster-recovery import through [runbook 0009](../../../../docs/runbooks/0009-keycloak-realm-import-reconcile.md).
+To roll back the running client, remove the attribute so it inherits the realm theme.
+
 ## Relocated prose
 
 The five comments removed from `customers-realm-template.json`, by path.
@@ -233,6 +252,18 @@ this contract. It exercises real Keycloak with synthetic assertions, including
 negative audience, identity and signature cases. Apply the reviewed attributes to
 the live realm separately; persist the verified template using runbook 0009 so a
 fresh realm has the same behavior. No custom provider or image rebuild is needed.
+
+### `clients[openbank-app].redirectUris` / `webOrigins`
+
+Exactly two callbacks, both matched literally: the claimed HTTPS link
+`https://open-bank.tech/app/oauth/callback` (App Links / AASA) and the private-scheme floor
+`tech.openbank.app://oauth/callback`. Those are the only two the app sends (its
+`RedirectUriNegotiator` picks one of them). There is no loopback entry: a `http://localhost:*`
+pattern let any local process start an authorize request, ride the browser SSO session and mint
+a token with `azp=openbank-app`, which defeats the app-session checks downstream (#16612).
+A local or desktop flow that needs loopback gets its own dev-only client, never this one.
+`webOrigins` is empty because the app is a native client and makes no CORS requests; `+` would
+have widened CORS to every redirect origin.
 
 ### `clients[openbank-app].protocolMappers[sub]`
 

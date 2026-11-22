@@ -182,6 +182,8 @@ try {
     // completed?per_page= listing, which the API returns newest-first).
     const latest = history[0]
     const lastRed = history.find((h) => h.status === 'failed' || h.status === 'unfalsified')
+    // ADR-0379 phase 2: the compliance hub ages a control's evidence by its gates' newest pass.
+    const lastOk = history.find((h) => h.status === 'ok')
     const distinctShas = new Set(history.map((h) => h.sha))
     const statuses = new Set(history.map((h) => h.status))
     const flaky = distinctShas.size > 1 && statuses.has('ok') &&
@@ -192,6 +194,7 @@ try {
       mode: latest.mode,
       status: latest.status,
       lastRed: lastRed ? { runId: lastRed.runId, sha: lastRed.sha, createdAt: lastRed.createdAt } : null,
+      lastOk: lastOk ? { runId: lastOk.runId, sha: lastOk.sha, createdAt: lastOk.createdAt } : null,
       flaky,
       selftestDeclared: latest.selftest_declared,
       minSubjects: latest.min_subjects,

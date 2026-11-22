@@ -80,6 +80,8 @@ ABS_TOLERANCE_BYTES = 16.0
 # has a baseline entry is a finding, so it can only shrink by being noticed. Re-measure with
 # `-f 5` before adding to it; a sharp before/after difference is NOT bimodality.
 UNSTABLE: dict[str, str] = {
+    "com.openbank.libs.benchmarks.OutboxDispatchBench.concurrentReadyBatch":
+        "2026-11-09: five unchanged-source forks (SerialGC, 512 MiB, 3+3x1s) measured 11088 / 11088 / 11064 / 12664 / 12688 B/op; two allocation plateaus on the ready path. Runs and is reported, not compared.",
     "com.openbank.libs.benchmarks.MoneyBench.allocate":
         "2026-09-30: 1592 / 1680 / 1680 / 1680 B/op over four -f 1 runs, then 1680 / 1560 / 1680 with "
         "a 5-iteration warmup (7.7 % spread, no code change) — C2 escape analysis on the BigInteger "
@@ -149,6 +151,24 @@ def load_baseline(path: pathlib.Path) -> dict[str, float]:
     return {str(k): float(v) for k, v in bench.items()}
 
 
+def fork_floor(metric: dict) -> float:
+    """B/op as the LOWEST per-fork mean, not JMH's mean over every iteration of every fork.
+
+    Escape analysis stays on, because production runs with it. What C2 scalar-replaces is decided
+    once per fork, so a fork is internally constant but forks disagree: unchanged code measured
+    LendingBench.aprcTinyAnnual at 592 / 616 / 632 / 656 B/op across CI forks (2026-11-10..14).
+    A mean over forks moves with the number of unlucky forks; the floor does not. A real
+    regression adds bytes on EVERY plateau, so it moves the floor as well, and a fork landing on
+    the high plateau can no longer make unchanged code red. What this cannot see is a change that
+    moves only the upper plateaus: that would need every fork to land high before it shows.
+    Without per-fork raw data (a hand-built fixture) the reported score is used.
+    """
+    forks = [f for f in (metric.get("rawData") or []) if f]
+    if not forks:
+        return float(metric["score"])
+    return min(sum(float(x) for x in f) / len(f) for f in forks)
+
+
 def load_results(path: pathlib.Path) -> dict[str, float]:
     """R: benchmark -> B/op. A result without the gc profiler's metric is an error, not a zero."""
     out: dict[str, float] = {}
@@ -160,7 +180,7 @@ def load_results(path: pathlib.Path) -> dict[str, float]:
         secondary = entry.get("secondaryMetrics") or {}
         if METRIC not in secondary:
             raise ValueError(f"{path}: {name} has no {METRIC} — was JMH run with -prof gc?")
-        value = float(secondary[METRIC]["score"])
+        value = fork_floor(secondary[METRIC])
         if not math.isfinite(value) or value < 0:
             raise ValueError(f"{path}: {name} has invalid allocation measurement {value}")
         out[name] = value
@@ -212,6 +232,7 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
     findings: list[str] = []
     notices: list[str] = []
     base = set(baseline)
+    unstable_required = declared & set(UNSTABLE)
     for name in sorted(set(UNSTABLE) - declared):
         findings.append(f"{name}: UNSTABLE entry names no @Benchmark in {SOURCES} — remove it")
     for name in sorted(set(UNSTABLE) & base):
@@ -223,6 +244,8 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
         findings.append(f"{name}: stale baseline entry — no such @Benchmark in {SOURCES}")
     if results is None:
         return findings, notices
+    for name in sorted(unstable_required - set(results)):
+        findings.append(f"{name}: missing from the results — UNSTABLE benchmarks must still run and be reported")
     ran = set(results) - set(UNSTABLE)
     for name in sorted(set(UNSTABLE) & set(results)):
         notices.append(f"{name}: {results[name]:.1f} B/op reported, NOT compared (UNSTABLE: {UNSTABLE[name]})")
@@ -407,6 +430,8 @@ def _self_test() -> int:
     try:
         UNSTABLE[u] = "fixture: bimodal"
         unstable_cases = [
+            ("an UNSTABLE benchmark that did not run is red", ["alpha", "unstable"], {a: 1000.0},
+             {a: 1000.0}, 1, f"{u}: missing from the results"),
             ("an UNSTABLE benchmark 50 % over is not a finding", ["alpha", "unstable"], {a: 1000.0},
              {a: 1000.0, u: 3000.0}, 0, f"::notice::{u}: 3000.0 B/op reported, NOT compared"),
             ("an UNSTABLE entry naming no @Benchmark is red", ["alpha"], {a: 1000.0}, None, 1,

@@ -14,6 +14,7 @@ import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.CaseVerdict
 import com.openbank.pid.domain.model.ContactAttributes
 import com.openbank.pid.domain.model.CoreAttributes
+import com.openbank.pid.domain.model.ErasedIdentifierKey
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.Gender
 import com.openbank.pid.domain.model.KycAttributes
@@ -30,8 +31,11 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.Optional
 import java.util.UUID
 
@@ -60,6 +64,9 @@ class IdentityResolutionServiceTest {
     // The caseId the adjudication port returns when a fresh four-eyes case is opened.
     private val testCaseId: UUID = UUID.fromString("cccccccc-dddd-eeee-ffff-000000000000")
 
+    private val today = LocalDate.of(2026, 11, 19)
+    private val testClock: Clock = Clock.fixed(Instant.parse("2026-11-19T12:00:00Z"), ZoneOffset.UTC)
+
     private lateinit var repo: PartyRepository
     private lateinit var adjudication: IdentityAdjudicationUseCase
     private lateinit var svc: IdentityResolutionService
@@ -73,10 +80,21 @@ class IdentityResolutionServiceTest {
         coEvery { adjudication.openOrReuse(any()) } returns testCaseId
         // Default: no tier-2′ probabilistic candidates (tests that need them override this).
         coEvery { repo.findCandidatesForProbabilistic(any(), any()) } returns emptyList()
-        svc = IdentityResolutionService(repo, adjudication, Optional.of(testPepperHex))
+        svc = IdentityResolutionService(repo, adjudication, Optional.of(testPepperHex), testClock)
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    // Builds a synthetic, checksum-valid 10-digit birth number for [d] from parts (no literal in source).
+    private fun rcFor(d: LocalDate): String {
+        val head = "%02d%02d%02d".format(d.year % 100, d.monthValue, d.dayOfMonth)
+        for (suffix in 100..999) {
+            val nine = head + suffix
+            val r = (nine.toLong() % 11).toInt()
+            if (r != 10) return nine + r
+        }
+        error("no valid suffix")
+    }
 
     private fun blindIndexOf(rc: String): String {
         val canonical = rc.replace("/", "").trim()
@@ -244,8 +262,101 @@ class IdentityResolutionServiceTest {
     }
 
     @Test
+    fun `tier-1 — an RC whose birthdate is tomorrow is rejected and falls through to tier-2`(): Unit = runBlocking {
+        coEvery { repo.findCandidatesByMatchKey(any()) } returns emptyList()
+
+        val result = svc.resolve(cmd(birthNumberRaw = rcFor(today.plusDays(1))))
+
+        assertThat(result).isEqualTo(ResolutionResult.NoMatch)
+        coVerify(exactly = 0) { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, any()) }
+        coVerify(exactly = 1) { repo.findCandidatesByMatchKey(any()) }
+    }
+
+    @Test
+    fun `tier-1 — an RC whose birthdate is today is accepted`(): Unit = runBlocking {
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, any()) } returns null
+
+        val result = svc.resolve(cmd(birthNumberRaw = rcFor(today)))
+
+        assertThat(result).isEqualTo(ResolutionResult.NoMatch)
+        coVerify(exactly = 1) { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, any()) }
+        coVerify(exactly = 0) { repo.findCandidatesByMatchKey(any()) }
+    }
+
+    @Test
+    fun `tier-1 — an RC from far in the past is accepted`(): Unit = runBlocking {
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, any()) } returns null
+
+        val result = svc.resolve(cmd(birthNumberRaw = rcFor(LocalDate.of(1960, 3, 4))))
+
+        assertThat(result).isEqualTo(ResolutionResult.NoMatch)
+        coVerify(exactly = 1) { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, any()) }
+    }
+
+    @Test
+    fun `computeBlindIndex accepts an RC dated today in Prague at 00-30 CET while the UTC date is still yesterday`() {
+        val boundary = Clock.fixed(Instant.parse("2026-11-19T23:30:00Z"), ZoneOffset.UTC)
+        val atBoundary = IdentityResolutionService(repo, adjudication, Optional.of(testPepperHex), boundary)
+
+        assertThat(atBoundary.computeBlindIndex(rcFor(LocalDate.of(2026, 11, 20)))).isNotNull()
+        assertThat(atBoundary.computeBlindIndex(rcFor(LocalDate.of(2026, 11, 21)))).isNull()
+    }
+
+    @Test
+    fun `computeBlindIndex rejects tomorrow, accepts today and the distant past`() {
+        assertThat(svc.computeBlindIndex(rcFor(today.plusDays(1)))).isNull()
+        assertThat(svc.computeBlindIndex(rcFor(today))).isNotNull()
+        assertThat(svc.computeBlindIndex(rcFor(LocalDate.of(1960, 3, 4)))).isNotNull()
+    }
+
+    @Test
+    fun `tier-1 miss still blocks an RČ whose REJECT survived the holder's erasure`(): Unit = runBlocking {
+        val idx = blindIndexOf(validRc)
+        val rejected = UUID.randomUUID()
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, idx) } returns null
+        coEvery { adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(idx)) } returns
+            PriorAdjudication(caseId = rejected, verdict = CaseVerdict.REJECT, linkPartyId = null)
+
+        val result = svc.resolve(
+            ResolveIdentityCommand(
+                givenName = "Jan",
+                familyName = "Novak",
+                birthdate = validRcBirthdate,
+                birthNumberRaw = validRc,
+            ),
+        )
+
+        assertThat(result).isInstanceOf(ResolutionResult.NeedsManualVerification::class.java)
+        assertThat((result as ResolutionResult.NeedsManualVerification).caseId).isEqualTo(rejected)
+    }
+
+    @Test
+    fun `tier-1 collision honours a REJECT that survived the previous holder's erasure`(): Unit = runBlocking {
+        val idx = blindIndexOf(validRc)
+        val rejected = UUID.randomUUID()
+        // Someone registered the number again after the erasure, with a divergent birthdate.
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, idx) } returns
+            makeParty(birthdate = LocalDate.of(1985, 3, 4))
+        coEvery { adjudication.priorDecision("RN:$idx") } returns null
+        coEvery { adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(idx)) } returns
+            PriorAdjudication(caseId = rejected, verdict = CaseVerdict.REJECT, linkPartyId = null)
+
+        val result = svc.resolve(
+            ResolveIdentityCommand(
+                givenName = "Jan",
+                familyName = "Novak",
+                birthdate = validRcBirthdate,
+                birthNumberRaw = validRc,
+            ),
+        )
+
+        assertThat((result as ResolutionResult.NeedsManualVerification).caseId).isEqualTo(rejected)
+        coVerify(exactly = 0) { adjudication.openOrReuse(any()) }
+    }
+
+    @Test
     fun `tier-1 — missing pepper falls through to tier-2 with warning`(): Unit = runBlocking {
-        val svcNoPepper = IdentityResolutionService(repo, adjudication, Optional.empty())
+        val svcNoPepper = IdentityResolutionService(repo, adjudication, Optional.empty(), testClock)
         coEvery { repo.findCandidatesByMatchKey(any()) } returns emptyList()
 
         val result = svcNoPepper.resolve(cmd(birthNumberRaw = validRc))
@@ -399,7 +510,7 @@ class IdentityResolutionServiceTest {
 
     @Test
     fun `computeBlindIndex returns null when pepper is absent`() {
-        val svcNoPepper = IdentityResolutionService(repo, adjudication, java.util.Optional.empty())
+        val svcNoPepper = IdentityResolutionService(repo, adjudication, java.util.Optional.empty(), testClock)
         val result = svcNoPepper.computeBlindIndex(validRc)
         assertThat(result).isNull()
     }

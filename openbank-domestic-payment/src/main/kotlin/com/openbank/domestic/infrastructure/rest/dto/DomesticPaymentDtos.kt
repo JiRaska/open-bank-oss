@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.TransitionDomesticPaymentStatusCommand
+import com.openbank.domestic.application.usecase.CzechDomesticIban
 import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
@@ -39,6 +40,7 @@ data class CreateDomesticPaymentRequest(
     val technicalAccountCode: String? = null,
     val statementLabel: String?,
     val endToEndId: String?,
+    val customerSubmissionScope: String? = null,
 ) {
     fun toCommand(
         idempotencyKey: String,
@@ -48,10 +50,10 @@ data class CreateDomesticPaymentRequest(
     ): CreateDomesticPaymentCommand = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = debtorAccountId,
-        debtorAccountNumber = debtorAccountNumber,
+        debtorAccountNumber = czechAccount(debtorAccountNumber, debtorBankCode, "debtorAccountNumber"),
         debtorBankCode = debtorBankCode,
         debtorName = debtorName,
-        creditorAccountNumber = creditorAccountNumber,
+        creditorAccountNumber = czechAccount(creditorAccountNumber, creditorBankCode, "creditorAccountNumber"),
         creditorBankCode = creditorBankCode,
         creditorName = creditorName,
         // #11604: build kernel Money here, before the use case looks up or binds the Idempotency-Key.
@@ -73,12 +75,92 @@ data class CreateDomesticPaymentRequest(
     )
 }
 
+/**
+ * #16000 part 3 — a payment the verified customer-edge creates for a delegate, bound to the spend
+ * reservation delegation-service already holds for it.
+ *
+ * [reservationId] selects the projection row; [delegationId] and [actingPartyId] are what the edge
+ * believes and are CHECKED against that row, never trusted in place of it. The debtor account,
+ * amount and currency are checked against the reservation too (amount and currency in the
+ * repository, under the binding row lock). There is no `customerSubmissionScope`: the delegate's
+ * replay binding is the reservation itself.
+ */
+data class CreateDelegatedDomesticPaymentRequest(
+    val reservationId: UUID?,
+    val delegationId: UUID?,
+    val actingPartyId: UUID?,
+    val debtorAccountId: UUID?,
+    val debtorAccountNumber: String?,
+    val debtorBankCode: String?,
+    val debtorName: String?,
+    val creditorAccountNumber: String?,
+    val creditorBankCode: String?,
+    val creditorName: String?,
+    val amount: BigDecimal?,
+    val currency: String?,
+    val variableSymbol: String? = null,
+    val specificSymbol: String? = null,
+    val constantSymbol: String? = null,
+    val messageForPayee: String? = null,
+    val priority: String? = null,
+    val statementLabel: String? = null,
+    val endToEndId: String? = null,
+) {
+    fun toCommand(idempotencyKey: String, synthetic: Boolean): CreateDomesticPaymentCommand =
+        CreateDomesticPaymentCommand(
+            idempotencyKey = idempotencyKey,
+            debtorAccountId = requireNotNull(debtorAccountId) { "debtorAccountId is required" },
+            debtorAccountNumber = czechAccount(
+                requireNotNull(debtorAccountNumber) { "debtorAccountNumber is required" },
+                requireNotNull(debtorBankCode) { "debtorBankCode is required" },
+                "debtorAccountNumber",
+            ),
+            debtorBankCode = requireNotNull(debtorBankCode) { "debtorBankCode is required" },
+            debtorName = requireNotNull(debtorName) { "debtorName is required" },
+            creditorAccountNumber = czechAccount(
+                requireNotNull(creditorAccountNumber) { "creditorAccountNumber is required" },
+                requireNotNull(creditorBankCode) { "creditorBankCode is required" },
+                "creditorAccountNumber",
+            ),
+            creditorBankCode = requireNotNull(creditorBankCode) { "creditorBankCode is required" },
+            creditorName = requireNotNull(creditorName) { "creditorName is required" },
+            amount = inboundAmount(amount, currency),
+            variableSymbol = variableSymbol,
+            specificSymbol = specificSymbol,
+            constantSymbol = constantSymbol,
+            messageForPayee = messageForPayee,
+            priority = DomesticPaymentPriority.valueOf(priority ?: DomesticPaymentPriority.STANDARD.name),
+            statementLabel = statementLabel,
+            endToEndId = endToEndId,
+            synthetic = synthetic,
+        )
+}
+
+/**
+ * #16748: presence and length are not validity. The account number must be one a Czech bank could
+ * issue (ČNB mod-11 on prefix and base; the bank code is checked for four-digit shape only — there
+ * is no registry of assigned codes here), or it is a 400 here — before any Idempotency-Key is bound
+ * and long before the scheme adapter would have to build an IBAN for it.
+ */
+internal fun czechAccount(accountNumber: String, bankCode: String, field: String): String {
+    requireValid(CzechDomesticIban.fromAccountNumber(accountNumber, bankCode) != null, field) {
+        "$field is not a valid Czech account number for bank code $bankCode"
+    }
+    return accountNumber
+}
+
 /** A domestic payment moves a strictly positive amount; Money itself admits zero and negatives. */
 internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money {
     val parsed = Money.parseInbound(amount, currency)
     requireValid(parsed.isPositive(), "amount") { "amount must be greater than zero" }
     return DomesticSchemeRules.requireSchemeCurrency(parsed)
 }
+
+data class DomesticPaymentSubmissionLookup(
+    val debtorAccountId: UUID?,
+    val customerSubmissionScope: String?,
+    val originalSubmissionKeyDigest: String? = null,
+)
 
 data class TransitionDomesticPaymentStatusRequest(
     val targetStatus: String,

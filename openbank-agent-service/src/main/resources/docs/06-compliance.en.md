@@ -11,7 +11,7 @@
 | **EU AI Act** | An AI system operating inside a bank — needs human oversight, logging, transparency | deny-by-default policy gate; AI-attributed audit of every model + tool call; HITL via proposal detection (D4); per-agent kill-switch (D7, via `agents.yaml`/OPA) |
 | **DORA** (Reg. (EU) 2022/2554) | ICT/operational resilience of an internal service | health probes, fail-closed PDP, graceful model-outage degradation, audit evidence, SLO/runbooks ([05 — Operations](./05-operations.md)) |
 | **GDPR** | The assistant can read customer data through tools | charter is `pii: masked`; gateway stores only a SHA-256 `prompt_hash`, never raw prompts; no PII persisted at rest (no datastore) |
-| **PSD2 / AML** | The assistant can *read* AML/sanctions/payments surfaces | read-only capabilities only (`query.compliance.readonly`, `query.payments.readonly`); never a write/decision tool; **not** the SAR/screening system of record |
+| **PSD2 / AML** | The assistant can *read* AML/sanctions/payments surfaces | read-only capabilities only (`query.compliance.readonly`, `query.payments.readonly`); never a write/decision tool (`aml_propose_case_decision`, compliance-officer only, queues a HITL proposal and decides nothing); **not** the SAR/screening system of record |
 | **NIS2** | Network & info security | OIDC inbound, least-privilege `openbank-services` Bearer outbound, mTLS in-cluster (Istio), security response headers |
 | **ADR-0030 SSDLC** | Supply-chain / secure SDLC | signed commits, dependency governance, no third-party agent SDK lock-in (open runtime, ADR-0031 D6) |
 
@@ -24,7 +24,7 @@
 | **D4 — human-in-the-loop** | `ProposalDetector` flags replies that recommend an action; the admin UI renders them as proposals for approval. The assistant itself never acts. |
 | **D5 — AI attribution** | `ModelGateway` and `AgentPolicyGate` emit `AuditEvent {actorType=AI_AGENT}` for every completion / decision (model_id, model_version, prompt_hash, tokens, policy_decision, reason). |
 | **D6 — model gateway** | the single trust boundary every model call passes through; provider-agnostic, sensitive context pinned to a self-hosted model. |
-| **D9 — phased enforcement** | `EnforcementMode` ADVISORY (audit-only, default) → BLOCK; fail-closed PDP with a `pdpError` safety fallback so a dead OPA never locks the assistant out. |
+| **D9 — phased enforcement** | `EnforcementMode` ADVISORY (audit-only, default) → BLOCK; fail-closed PDP: in BLOCK mode a decision-point error denies every tool call (`pdp_unavailable_denied`); ADVISORY only audits. |
 | **Phase 3 — recorded human merge** | `POST /api/v1/agent-merge-records` ingests, out-of-band by the `record-agent-merge` CI workflow (`ROLE_MERGE_RECORDER`), a durable record of WHO merged an agent-authored PR — the agent never self-reports. `agent_merge_record.pr_number` UNIQUE dedupes webhook redeliveries; each merge is audited once as `agent.pr.merged` with `actorType=HUMAN` under the merging human, via the durable outbox ([04 — Data](./04-data.md)). |
 
 ## The `ui-assistant` charter (agents.yaml)

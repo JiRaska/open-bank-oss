@@ -90,7 +90,11 @@ sequenceDiagram
 
 In **production** the decision endpoint is the only path to a terminal `CLEARED`/`BLOCKED`. The **sandbox** `openbank.aml.auto-clear` flag (default `false`) skips it for non-production onboarding flows, attributing the decision to the sentinel `decidedBy = SANDBOX_SYSTEM` — that string outside the sandbox is a compliance incident (ADR-0268 §3).
 
+> ADR-0371 slice 3 changed two of the facts below: `decidedBy` is now the authenticated caller, and a case opened by the pack evaluation is closed only through a proposal a second, different person approves. Onboarding cases and the `TRANSACTION_MONITORING` cases payment rails open are still decided by one person.
+>
 > ⚠️ **Not four-eyes today.** This paragraph used to claim "four-eyes accountability via `decidedBy`/`assignedAnalyst`". It does not hold: `decidedBy` arrives in the **request body**, not from the authenticated security context, and is only checked for non-blankness — so one operator can clear a case and self-declare any attribution. There is also no maker-checker separation (`OPEN → CLEARED` is a legal transition), `openbank-aml-service` is not in `rules.yaml: money_path_services` so OPA's `four_eyes_required` can never derive an `aml` scope, and `AUTHZ_ENFORCE` is `false` here so `@Authorize` is advisory. ADR-0268 §4 records this and §5 lists what is owed before a non-sandbox environment. Contrast ADR-0116 §3, which requires the reviewer identity to come from the security context for the KYC twin.
+
+> **Held payment's case: four-eyes.** A case of origin `PAYMENT_HOLD_INTAKE` is decided `CLEARED` or `BLOCKED` only by a proposal of one analyst and a confirmation by a different one, both taken from the authenticated caller (ADR-0374 point 3; see 03-api). Other cases are as described above.
 
 ## Audit trail
 
@@ -108,3 +112,9 @@ Every case creation and transition emits a versioned domain event → `audit-ser
 - ✅ Audit: every state change → audit-service via outbox event
 - ⚠️ OPA authz is **advisory** by default (`AUTHZ_ENFORCE=false`) — flip to enforce before relying on policy denials
 - ⚠️ `openapi.yaml` is out of sync with the implemented contract — reconcile before publishing the spec as authoritative (see [03-api](./03-api.md))
+
+## Case-create callers
+
+`POST` case creation is accepted only from the named machine identities of the services that run a
+screening gate (`AML_CASE_CREATE_CALLERS` in `AmlCaseResource`, mirrored by `aml_rest_ext.rego`).
+sdd-service is one of them: it opens a case when its collection sanctions gate holds or blocks.

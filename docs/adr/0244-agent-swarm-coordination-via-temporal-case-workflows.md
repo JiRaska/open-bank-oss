@@ -1,6 +1,6 @@
 ---
 date: 2026-08-05
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 followup: "none — Phase 1 (CaseWorkflow + case schema) is live; the D7 oversight surface is ADR-0246, itself planned"
 authors: [Jiri Raska]

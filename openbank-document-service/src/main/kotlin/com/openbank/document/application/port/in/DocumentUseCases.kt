@@ -85,6 +85,24 @@ interface DocumentRenderUseCase {
     suspend fun render(cmd: RenderDocumentCommand): Document
 }
 
+/**
+ * ADR-0375 D5 — the ownership projection, the document twin of account-service's
+ * `account.verifyOwnership` (ADR-0335 D2).
+ *
+ * delegation-service must answer "does this grantor own that document?" before it mints an
+ * object grant, and it had no way to ask: `ResourceOwnershipClient` returned UNVERIFIABLE for
+ * DOCUMENT, on which the offer path correctly fails closed, so NO object grant could be created
+ * at all while the customer-edge reader for one was already built.
+ *
+ * Deliberately not `document.read`: that action carries the whole metadata record and is granted
+ * to other subjects. This returns the owning party and nothing else, under its own OPA action, so
+ * the grant needed to mint a delegation cannot be used to read a document's contents or template.
+ */
+interface DocumentOwnershipUseCase {
+    /** The owning party of [id], or null when the document does not exist OR has no owner. */
+    suspend fun ownerOf(id: UUID): UUID?
+}
+
 /** Reads document metadata and content bytes. */
 interface DocumentQueryUseCase {
     suspend fun getMetadata(id: UUID): Document?

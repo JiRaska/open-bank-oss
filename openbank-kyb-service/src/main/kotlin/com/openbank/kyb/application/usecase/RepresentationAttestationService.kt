@@ -66,7 +66,7 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
     private val log = Logger.getLogger(RepresentationAttestationService::class.java)
 
     override suspend fun decisionFor(scheme: IdentifierScheme, identifier: String): RepresentationDecision? {
-        LegalEntityIdentifier.of(scheme, identifier)
+        LegalEntityIdentifier.of(scheme, identifier, clock)
         val extract = lookup.lookup(LookupCommand(scheme, identifier)) ?: return null
         return decide(extract)
     }
@@ -127,7 +127,7 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
     }
 
     override suspend fun attest(cmd: AttestRepresentationCommand): RepresentationAttestation {
-        val id = LegalEntityIdentifier.of(cmd.scheme, cmd.identifier)
+        val id = LegalEntityIdentifier.of(cmd.scheme, cmd.identifier, clock)
         val extract = lookup.lookup(LookupCommand(cmd.scheme, cmd.identifier))
             ?: throw StaleAttestationException("no register record for ${id.scheme.displayName} ${id.value}")
         val rule = extract.representationRule
@@ -138,6 +138,11 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
             throw StaleAttestationException(
                 "the register text changed since this form was opened; re-read it and confirm again",
             )
+        }
+        if (cmd.confirmedMode == RepresentationMode.JOINT_ALL) {
+            require(cmd.confirmedSigners == extract.representatives.size) {
+                "joint-all mode requires every registered representative"
+            }
         }
         val now = Instant.now(clock)
         val attestation = RepresentationAttestation(
@@ -157,6 +162,7 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
             attestedBy = cmd.operator,
             attestedAt = now,
             note = cmd.note,
+            confirmedMode = cmd.confirmedMode,
         )
         val saved = attestations.attest(attestation)
         log.infof(
@@ -177,5 +183,5 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
     }
 
     override suspend fun history(scheme: IdentifierScheme, identifier: String): List<RepresentationAttestation> =
-        attestations.listFor(LegalEntityIdentifier.of(scheme, identifier))
+        attestations.listFor(LegalEntityIdentifier.of(scheme, identifier, clock))
 }

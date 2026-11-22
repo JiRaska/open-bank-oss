@@ -21,6 +21,8 @@ class CustomerSafeReasonTest {
         DomesticRejectReason.SANCTIONS_HIT,
         DomesticRejectReason.AML_HOLD,
         DomesticRejectReason.FRAUD_SUSPECTED,
+        // The neutral stand-in for those three on the customer edge reads as neutrally as they do.
+        DomesticRejectReason.DECLINED,
     )
 
     /**
@@ -65,5 +67,11 @@ class CustomerSafeReasonTest {
     @Test
     fun `a missing reason still renders`() {
         assertThat(customerSafeReason(null)).isNotBlank()
+    }
+
+    @Test
+    fun `an invalid account number does not blame the recipient`() {
+        // #16772 review: INVALID_ACCOUNT_NUMBER now also covers a non-issuable DEBTOR account.
+        assertThat(customerSafeReason(DomesticRejectReason.INVALID_ACCOUNT_NUMBER)).doesNotContain("recipient")
     }
 }

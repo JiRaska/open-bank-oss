@@ -58,6 +58,7 @@ NO_CORPUS = {
     # `gh`/`aws`/`curl` stub them inside the self-test (ensure-ecr-repository.sh even validates its
     # own stub first). No repo corpus to floor.
     "agent-review-proof-falsifiable",
+    "verify-added-checksums-falsifiable",
     "argocd-sync-integrity-unit-test",
     "agent-review-scope-falsifiable",
     "alert-rca-ledger-guards",
@@ -150,7 +151,6 @@ DEBT = {
     "api-contract-gate": DEBT_MARKER,
     "asvs-l3-mechanical-subset": DEBT_MARKER,
     "authz-enforce-pdp-sidecar-parity": DEBT_MARKER,
-    "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
     # Diff-scoped: the corpus is "yaml files this PR ADDS", legitimately empty on most PRs.

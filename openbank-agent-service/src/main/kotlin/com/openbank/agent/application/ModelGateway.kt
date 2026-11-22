@@ -93,7 +93,7 @@ class ModelGateway {
         val provider = providersByKey[descriptor.provider]
             ?: error("no ModelProvider registered for key '${descriptor.provider}' (model '${descriptor.id}')")
 
-        val effective = request.copy(model = descriptor.id)
+        val effective = request.copy(model = descriptor.id, endUserId = actorId)
         return try {
             val response = provider.complete(descriptor, effective)
             audit(descriptor, effective, response, AuditResult.SUCCESS, actorId)

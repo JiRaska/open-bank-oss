@@ -1,6 +1,6 @@
 ---
 date: 2026-10-29
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []

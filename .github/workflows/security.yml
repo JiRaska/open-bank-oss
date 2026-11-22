@@ -56,6 +56,9 @@ jobs:
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
           BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          # Kill switch: repo variable CODEQL_JAVA_ON_PR=true restores the java-kotlin leg on every PR.
+          CODEQL_JAVA_ON_PR: ${{ vars.CODEQL_JAVA_ON_PR }}
         run: |
           # Code paths that warrant CodeQL semantic analysis. A gitops/docs/*.md-only PR
           # (e.g. an auto-generated deploy image-bump) changes none of these, so the
@@ -76,6 +79,24 @@ jobs:
           JS_RE='(\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$)'
           # General workflow-only changes do not require semantic analysis. This workflow
           # and its compiler policy do: their changes must exercise actual extraction.
+
+          # java-kotlin on pull requests runs once per merge-train CARRIER, not once per push to
+          # every PR (#15483). The leg is a ~20 min traced fleet compile, it is not a required
+          # check, and the same commits are analysed again on the main push and weekly. Measured
+          # 2026-11-11: 37 of 60 sampled PR runs carried the leg (2 of them carriers), about 150
+          # hosted job-minutes an hour out of ~1200 on the 20-job cap, while carriers queued for
+          # runners. A carrier holds every member's code, so each change is still analysed before
+          # it merges. Exceptions that keep the leg on an ordinary PR: a change to this workflow
+          # or its compiler policy (must exercise real extraction), and the kill switch.
+          # 0 = run the java-kotlin leg on this pull request, 1 = leave it to the carrier.
+          java_leg_on_pr() {
+            if [ "${CODEQL_JAVA_ON_PR:-}" = "true" ]; then return 0; fi
+            if [[ "${HEAD_REF:-}" =~ ^train/(strict-)?[0-9]+-[0-9]+$ ]]; then return 0; fi
+            if grep -qE '^\.github/(scripts/codeql-force-compilers\.init\.gradle|workflows/security\.yml)$' <<< "$1"; then
+              return 0
+            fi
+            return 1
+          }
 
           # Emits codeql_matrix as a JSON array of matrix entries; '[]' means skip the job.
           # The `actions` leg (workflow files, no build, ~1 min) runs on EVERY event so every
@@ -121,10 +142,19 @@ jobs:
               # quiet fallback to "run everything" is indistinguishable from "scoping decided
               # to run everything", so the scoping can stop working and nothing reports it.
               echo "::warning::merge-base against $BASE_REF could not be resolved — running CodeQL for ALL languages (scoping did not engage)"
-              echo "run_codeql=true" >> "$GITHUB_OUTPUT"; emit_matrix true true
+              J=true
+              if ! java_leg_on_pr ""; then
+                echo "::notice::java-kotlin CodeQL is left to the merge-train carrier for this pull request (#15483)"
+                J=false
+              fi
+              echo "run_codeql=true" >> "$GITHUB_OUTPUT"; emit_matrix "$J" true
             else
               CHANGED="$(git diff --name-only "$BASE" HEAD)"
               classify "$CHANGED"
+              if [ "$J" = "true" ] && ! java_leg_on_pr "$CHANGED"; then
+                echo "::notice::java-kotlin CodeQL is left to the merge-train carrier for this pull request (#15483)"
+                J=false
+              fi
               if [ "$J" = "false" ] && [ "$S" = "false" ]; then
                 echo "run_codeql=false" >> "$GITHUB_OUTPUT"
               else
@@ -179,6 +209,18 @@ jobs:
       contents: read
       security-events: write # upload-sarif
     timeout-minutes: 40
+    # Job-level lane, per language: main pushes queue behind the running analysis and a newer
+    # push replaces only the PENDING leg, so N commits landing within minutes cost two analyses
+    # per language instead of N (java-kotlin measured at ~21 hosted minutes each, 2026-11-11).
+    # cancel-in-progress is false, so a started analysis always finishes and uploads; this is
+    # not the cancel-the-running-run shape of issue #3390. The WORKFLOW group above stays per
+    # commit on purpose: Trivy is a per-commit gate input and must report on every main commit.
+    # A replaced leg ends `cancelled` with no step started, which the watches read as
+    # not-a-verdict and the spot-kill retry reads as a queue cancel. Every other event gets a
+    # lane of its own (run id), so pull requests and the weekly audit are untouched.
+    concurrency:
+      group: codeql-${{ matrix.language }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main-push' || github.run_id }}
+      cancel-in-progress: false
     # The java-kotlin leg's build step shells out to its own `./gradlew classes`
     # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
     # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
@@ -199,12 +241,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
-          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          q=$(gh api rate_limit --jq '
+            .resources.core
+            | "used=\(.used) remaining=\(.remaining) reset=\(.reset)",
+              (select((.limit | type) == "number" and (.remaining | type) == "number")
+               | select(.limit > 0 and .remaining >= 0 and .remaining * 5 <= .limit)
+               | "low")' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start ${q%%$'\n'*}"
           echo "::notice title=quota-meter::$line"
+          if [[ "$q" == *$'\n'low ]]; then
+            echo "::warning title=GitHub API quota nearing exhaustion::$line (20% or less remaining)"
+          fi
           echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
@@ -228,7 +281,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -267,7 +320,7 @@ jobs:
           python3 .github/scripts/check-codeql-compile-coverage.py \
             --root . --log "${RUNNER_TEMP:-/tmp}/codeql-build.log"
 
-      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           category: "/language:${{ matrix.language }}"
       # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
@@ -277,10 +330,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
-          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          q=$(gh api rate_limit --jq '
+            .resources.core
+            | "used=\(.used) remaining=\(.remaining) reset=\(.reset)",
+              (select((.limit | type) == "number" and (.remaining | type) == "number")
+               | select(.limit > 0 and .remaining >= 0 and .remaining * 5 <= .limit)
+               | "low")' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end ${q%%$'\n'*}"
           echo "::notice title=quota-meter::$line"
+          if [[ "$q" == *$'\n'low ]]; then
+            echo "::warning title=GitHub API quota nearing exhaustion::$line (20% or less remaining)"
+          fi
           echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
 
   # ---------------------------------------------------------------------------
   # Trivy filesystem + IaC scan
@@ -409,7 +474,7 @@ jobs:
         # reporting only: GitHub's installation API rate limit can reject it after a
         # clean scan, and must not turn that clean security decision into a false red.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -418,7 +483,7 @@ jobs:
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
         # Keep reporting availability independent from the blocking IaC scan above.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -471,7 +536,7 @@ jobs:
     if: needs.detect-deps.outputs.run_sbom == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "25"

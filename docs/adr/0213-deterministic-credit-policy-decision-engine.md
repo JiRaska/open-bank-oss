@@ -1,6 +1,6 @@
 ---
 date: 2026-07-29
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 followup: "#5708 — triage of the wider code-cited-but-planned ADR set; this ADR's own remaining slice is tracked there"
 authors: [Jiri Raska]

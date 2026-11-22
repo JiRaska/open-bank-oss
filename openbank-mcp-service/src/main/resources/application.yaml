@@ -3,6 +3,22 @@ quarkus:
     name: openbank-mcp-service
   http:
     port: 8150
+    limits:
+      # ADR-0383 D5: bound a request body before it is parsed. Global to this service, which only
+      # serves small JSON-RPC and session-control bodies; oversize requests get HTTP 413.
+      max-body-size: ${MCP_MAX_BODY_SIZE:64K}
+    # ADR-0383 D5 / #16847: behind the edge, quarkus-oidc's own DPoP check (enabled for the
+    # customers tenant by `token.authorization-scheme: DPoP`, BearerAuthenticationMechanism) compares
+    # the proof `htu` with HttpServerRequest.absoluteURI() — measured: "DPoP proof HTTP request uri
+    # claim https://… does not match the request HTTP uri http://localhost:…". This service's own
+    # admission checks `htu` against the static published resource; it is the TENANT that needs the
+    # external scheme/host. Off by default. Quarkus applies these headers ONLY from
+    # `quarkus.http.proxy.trusted-proxies` (deliberately not defined here: set it in the deployment);
+    # ProxyForwardingGuard refuses to boot with any forwarding switch on and no narrow literal list.
+    proxy:
+      proxy-address-forwarding: ${MCP_PROXY_FORWARDING:false}
+      allow-x-forwarded: ${MCP_PROXY_FORWARDING:false}
+      enable-forwarded-host: ${MCP_PROXY_FORWARDING:false}
   management:
     enabled: true
     port: 8085
@@ -18,6 +34,18 @@ quarkus:
     # deny, not a framework-level 401. A PRESENT-but-invalid/expired token IS rejected by Quarkus
     # OIDC itself before reaching the endpoint (fail-closed either way).
     tenant-enabled: true
+    # ADR-0383 D1: the customers realm is a SEPARATE tenant selected by the token's `iss`. Both the
+    # tenant and issuer-based resolution stay OFF unless the customer channel is enabled, so the staff
+    # tenant's behaviour is unchanged by default. Not yet verified against a live Keycloak (ADR-0383 P3).
+    resolve-tenants-with-issuer: ${MCP_CUSTOMER_ENABLED:false}
+    customers:
+      tenant-enabled: ${MCP_CUSTOMER_ENABLED:false}
+      auth-server-url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      token:
+        # Keycloak signs with its frontend URL, not the in-cluster discovery URL.
+        issuer: ${mcp.customer.issuer}
+        # RFC 9449: customer tokens arrive as `Authorization: DPoP <token>`.
+        authorization-scheme: DPoP
   # Outbound M2M client-credentials auth (ADR-0195 step 3) — mirrors agent-service's oidc-client
   # exactly: DownstreamClients / ConsentValidateClient (@RegisterProvider
   # OidcClientRequestReactiveFilter) mint an `openbank-services` token and attach it as a Bearer, so
@@ -126,6 +154,17 @@ mcp:
     name: openbank-mcp
     version: "0.1.0"
     protocol-version: "2025-06-18"
+  # Customer MCP channel (ADR-0383 / ADR-0385, #16590). OFF by default. With it on, the service
+  # refuses to boot unless the issuer is set and the client allowlist exists and parses
+  # (CustomerChannel is @Startup).
+  # #16847: `mcp.edge.client-address-header` (env MCP_EDGE_CLIENT_ADDRESS_HEADER) names the ONE
+  # edge-set header carrying the client address (e.g. X-Envoy-External-Address), read only from a peer
+  # in quarkus.http.proxy.trusted-proxies. Deliberately not defined here: unset = never read.
+  # ClientAddressResolver never uses Quarkus' leftmost X-Forwarded-For for the audit key.
+  customer:
+    enabled: ${MCP_CUSTOMER_ENABLED:false}
+    issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
+    allowlist: ${MCP_CUSTOMER_ALLOWLIST:classpath:mcp-client-allowlist.yaml}
 
 # Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`
@@ -141,6 +180,10 @@ openbank:
       enabled: ${MCP_RATE_LIMIT_ENABLED:true}
       calls-per-minute: ${MCP_RATE_LIMIT_PER_MINUTE:60}
       calls-per-day: ${MCP_RATE_LIMIT_PER_DAY:1000}
+      # Shared by ALL requests with no resolvable caller (ADR-0383 D5).
+      anonymous-calls-per-minute: ${MCP_RATE_LIMIT_ANON_PER_MINUTE:10}
+      # Concurrent in-flight tool calls per caller.
+      max-in-flight: ${MCP_RATE_LIMIT_MAX_IN_FLIGHT:4}
 
 "%dev":
   quarkus:

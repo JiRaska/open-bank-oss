@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# ADR-0367 declared return spec — the CEÚ daily change overview (pilot, issue #15292).
+#
+# The first file under governance/returns/. Its shape is the one ADR-0367 D1 lists; the checker
+# `check-regulatory-return-specs.py` that will hold every catalogue entry to a spec does not exist
+# yet, so nothing reads this file in CI today. It is still the source of truth for the facts below,
+# and the service's own constants cite it.
+id: ceu-daily
+name: Centrální evidence účtů — denní přehled změn
+kind: granular-feed
+authority: CNB
+legal_basis:
+  - ref: zákon č. 300/2016 Sb., o centrální evidenci účtů
+    effective_from: 2017-01-01
+  - ref: vyhláška č. 30/2017 Sb., ve znění vyhlášky č. 163/2021 Sb.
+    effective_from: 2021-07-01
+owning_service: openbank-tax-reporting-service
+computed_in: openbank-tax-reporting-service
+# ČNB report code and methodology as published by ČNB (checked 2026-11-08): the daily report is
+# CEUSIFE10, methodology CEU20211201, valid since 2021-12-01.
+template:
+  report_code: CEUSIFE10
+  methodology: CEU20211201
+cadence: working-day
+# ČNB FAQ for institutions: the overview is submitted by 12:00 on the next working day after the
+# change; Friday-to-Sunday changes are submitted on Monday by 12:00. Working days follow the Czech
+# CERTIS calendar.
+deadline:
+  rule: next-working-day
+  calendar: CERTIS
+  time: "12:00"
+  zone: Europe/Prague
+transport: SDAT
+# The CEUSIFE10 data-file XSD is published only inside SDAT ("Metodické informace"), behind the
+# institution login. It is not publicly obtainable, so the wire format is NOT modelled: rendering
+# sits behind a port that reports itself unavailable until the XSD is obtained and checked in.
+wire_format_verified: false
+unit: one working-day delta of the account register (initial full load = delta against empty)
+subjects:
+  - account
+  - holder
+  - disposer
+  - beneficial-owner
+synthetic_policy: exclude
+validation_rule_set: ceu-daily-v1
+semantic_ref: null

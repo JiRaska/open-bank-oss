@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.11...mcp-service-v0.18.0) (2026-11-21)
+
+
+### Features
+
+* **mcp-service:** ADR-0384 slice 1 — customer MCP channel metrics, alerts and admin view ([#16779](https://github.com/JiRaska/open-bank-oss/issues/16779)) ([c421931](https://github.com/JiRaska/open-bank-oss/commit/c4219319f7fa372e8899c4a775ce3fa99c626299))
+
+## [0.17.11](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.10...mcp-service-v0.17.11) (2026-11-20)
+
+
+### Security
+
+* **mcp-service:** admit customer-realm tokens on a DPoP-bound channel ([#16721](https://github.com/JiRaska/open-bank-oss/issues/16721)) ([1223f79](https://github.com/JiRaska/open-bank-oss/commit/1223f7981e477f48e1c57c911a597c4645009c37))
+
+## [0.17.10](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.9...mcp-service-v0.17.10) (2026-11-18)
+
+
+### Security
+
+* **mcp:** bound JSON-RPC input before dispatch, audit and downstream calls ([#16644](https://github.com/JiRaska/open-bank-oss/issues/16644)) ([6c37533](https://github.com/JiRaska/open-bank-oss/commit/6c3753381a47674a0c9b2971fd5f1b6a23e157da))
+
+## [0.17.9](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.8...mcp-service-v0.17.9) (2026-11-17)
+
+
+### Security
+
+* **mcp:** require this server's audience on every /mcp token ([#16626](https://github.com/JiRaska/open-bank-oss/issues/16626)) ([800e795](https://github.com/JiRaska/open-bank-oss/commit/800e795e2292ea193bd1cad63862d024aaba716e)), closes [#16622](https://github.com/JiRaska/open-bank-oss/issues/16622) [#16590](https://github.com/JiRaska/open-bank-oss/issues/16590)
+
+## [0.17.8](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.7...mcp-service-v0.17.8) (2026-11-17)
+
+
+### Bug Fixes
+
+* **mcp:** throttle before policy for call and list, bound flood audit, cap body size ([#16596](https://github.com/JiRaska/open-bank-oss/issues/16596)) ([fb6600c](https://github.com/JiRaska/open-bank-oss/commit/fb6600cb1abe6c01bebdc485c9a1de6521d4d6fa))
+
 ## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.6...mcp-service-v0.17.7) (2026-11-07)
 
 

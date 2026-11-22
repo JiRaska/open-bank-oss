@@ -24,6 +24,9 @@ interest-service ──outbox──▶ openbank.interest.accrual.event ──(Ka
                                          openbank.dlq.tax-reporting.withholding-remitted-in ◀──┘      └── OPA sidecar (localhost:8181)
 operator / auditor ──(OIDC)──▶ admin-ui ──(bearer)──▶ tax-reporting-service
 tax-reporting-service ──(OIDC machine bearer; production mTLS prerequisite)──▶ pension-company ledger
+account-service   ──outbox──▶ openbank.accounts.account.created ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ register)
+delegation-service ──outbox──▶ openbank.delegation.events       ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ register)
+party-service      ──outbox──▶ openbank.party.events            ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ classification)
 ```
 
 Trust boundaries: Kafka (mTLS, the `tax-reporting-service` KafkaUser holds Read on the source topic
@@ -34,6 +37,14 @@ NetworkPolicy admits admin-ui and the platform scrapers only, no ingress); servi
 ledger authorization). This code PR does not prove deployment, credential projection or transport
 reachability. Production named TLS configuration and the separate ledger deployment are supplied
 by the follow-up #12500 and require rollout verification before company-books reporting is enabled.
+
+Outbound reads for the ČNB pension returns (#12468): tax-reporting-service ──(own client
+`service-account-openbank-tax-reporting`, ROLE_API)──▶ pension-service (`pension`, participant
+aggregates) and pension-fund-service (`pension-fund`, fund period figures), over the providers'
+private-CA TLS listeners (8443). The default TLS bucket trusts only the fleet CA
+(`tax-reporting-internal-tls` ca.crt) with hostname verification on, so the bearer token never
+crosses the cluster network in cleartext. The providers' NetworkPolicies admit the `tax-reporting` namespace; each side's
+grant and STRIDE rows live in the provider's own model (pension §4b, pension-fund boundary 4).
 
 ## 3. Authn/Authz
 
@@ -105,3 +116,25 @@ by the follow-up #12500 and require rollout verification before company-books re
 - There is no alert yet on the dead-letter topic's depth. One dead-lettered remittance means an
   understated return. That alert, and a replay procedure, belong with the first operational
   review after deploy.
+
+- **CEÚ register projection (ADR-0367, #15292).** The service now reads account lifecycle and
+  delegation events into `ceu_register_fact`, an append-only bitemporal projection holding
+  identifiers only (account, party, grant ids; account number; currency). No name, birth number or
+  address is stored; CEÚ person data is to be read from party-service at render time. The new
+  KafkaUser grants are Read on both source topics and Write on their two dead-letter topics only.
+  Two risks carried forward: (1) **synthetic leakage** — an ADR-0252-tainted account reported to
+  ČNB would be a misstatement to a central register; tainted facts are recorded with their flag and
+  excluded at snapshot time with a counted drop, and a party-service `SYNTHETIC` classification
+  excludes the party's accounts and ties even when the account or grant event was untainted; and the header parse is fail-to-real (an absent or
+  malformed header reads as real, so leakage is bounded by canary activity, never suppression of
+  real accounts); (2) **dead-lettered register events** — a parked AccountCreated is an account
+  missing from the next overview until replayed, the same shape as a parked remittance above.
+
+## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
+
+Outbound edges are now set in the deployed manifest, after `quarkus.rest-client` started binding (#16056):
+- pension-fund-service, party-service and account-service are called over 8443 private-CA mTLS. The client identity is `tax-reporting-internal-tls`, through the `%prod` TLS bucket `internal-authority`, with server hostnames verified.
+- pension-service is called on 8443 with server TLS, verified against openbank-ca; pension-service does not yet require a client certificate.
+- balance-service is called over plaintext 8103, because no mTLS listener exists there yet. This is declared V9.1 debt, tracked in #16075.
+
+Every call carries this service's own client token (`openbank-tax-reporting`, ROLE_API), never the shared services client. Each upstream's rego admits that principal id for the reporting reads only. Regenerated network policies admit this namespace on the five upstreams and nothing else. Residual risk: the bearer token crosses the balance hop in plaintext until #16075 lands.

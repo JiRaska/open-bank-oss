@@ -42,7 +42,7 @@ class OpaPolicyDecisionPoint : PolicyDecisionPoint {
         }
         return try {
             val result = opa.decision(OpaRequest(input)).result
-                ?: return denied(query, "OPA returned no decision")
+                ?: return pdpError(query, "OPA returned no decision (missing result), fail-closed")
             PolicyDecision(
                 allow = result.allow,
                 agent = query.agent,
@@ -57,25 +57,19 @@ class OpaPolicyDecisionPoint : PolicyDecisionPoint {
                 query.tool.sanitizeForLog(),
                 query.agent.sanitizeForLog(),
             )
-            // pdpError=true signals AgentPolicyGate that the PDP itself errored (not a policy DENY),
-            // so BLOCK mode can safely fall back to advisory without being exploited by rules whose
-            // reason text happens to contain "unavailable".
-            PolicyDecision(
-                allow = false,
-                agent = query.agent,
-                tool = query.tool,
-                resource = query.resource,
-                reason = "OPA unreachable, fail-closed: ${e.message}",
-                pdpError = true,
-            )
+            pdpError(query, "OPA unreachable, fail-closed: ${e.message}")
         }
     }
 
-    private fun denied(query: PolicyQuery, reason: String) = PolicyDecision(
+    // pdpError=true is a structured signal for AgentPolicyGate that the PDP itself failed (transport
+    // error, or a missing/unparseable result) as opposed to a policy DENY. It selects the
+    // `pdp_unavailable_denied` metric outcome only; the call is denied in BLOCK mode either way.
+    private fun pdpError(query: PolicyQuery, reason: String) = PolicyDecision(
         allow = false,
         agent = query.agent,
         tool = query.tool,
         resource = query.resource,
         reason = reason,
+        pdpError = true,
     )
 }

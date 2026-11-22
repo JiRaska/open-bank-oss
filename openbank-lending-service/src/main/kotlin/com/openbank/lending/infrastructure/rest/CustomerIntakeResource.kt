@@ -6,6 +6,7 @@ package com.openbank.lending.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
+import com.openbank.lending.domain.model.FirstDueDate
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.authz.Authorize
@@ -160,8 +161,8 @@ class CustomerIntakeResource(
         return null
     }
 
-    /** First day of the month after next — a full month of runway before instalment one. */
-    private fun firstDueDate(): LocalDate = LocalDate.now(clock).withDayOfMonth(1).plusMonths(2)
+    /** [FirstDueDate]: the one rule, shared with the quote and the decline-review successor. */
+    private fun firstDueDate(): LocalDate = FirstDueDate.forApplicationOn(LocalDate.now(clock))
 
     private fun error(status: Int, message: String): Response =
         Response.status(status).entity(mapOf("error" to message)).build()

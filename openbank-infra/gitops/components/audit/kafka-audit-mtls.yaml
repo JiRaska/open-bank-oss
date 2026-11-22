@@ -107,6 +107,12 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.party.audit
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.kyc.events
           patternType: literal
         operations: [Read, Describe]
@@ -273,6 +279,13 @@ spec:
       - resource:
           type: topic
           name: openbank.delegation.approval-events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0383 D6 customer MCP payment-proposal lifecycle (#16590); topic declared with this consumer.
+      - resource:
+          type: topic
+          name: openbank.delegation.payment-proposal-events
           patternType: literal
         operations: [Read, Describe]
         host: "*"

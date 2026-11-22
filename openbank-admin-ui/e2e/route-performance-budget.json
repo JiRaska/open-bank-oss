@@ -1,0 +1,53 @@
+{
+  "_comment": "ADR-0370 U6 per-route budgets, measured 2026-11-11 on the production build. jsBytes = decoded client JS the route loads (deterministic per build), set 5% above the measurement, rounded up to 10 KiB. lcpMs = Largest Contentful Paint with an empty BFF; local LCP varied 2-3x between runs, so it is a coarse 2500 ms ceiling (Web Vitals 'good'), not a ratchet. Raise a budget only with a reason in the PR.",
+  "routes": {
+    "/": {
+      "jsBytes": 1955840,
+      "lcpMs": 2500
+    },
+    "/payments": {
+      "jsBytes": 1126400,
+      "lcpMs": 2500
+    },
+    "/ledger": {
+      "jsBytes": 1095680,
+      "lcpMs": 2500
+    },
+    "/approvals": {
+      "jsBytes": 1085440,
+      "lcpMs": 2500
+    },
+    "/finops": {
+      "jsBytes": 1228800,
+      "lcpMs": 2500
+    },
+    "/accounts": {
+      "jsBytes": 1075200,
+      "lcpMs": 2500
+    },
+    "/parties": {
+      "jsBytes": 1075200,
+      "lcpMs": 2500
+    },
+    "/reporting": {
+      "jsBytes": 1075200,
+      "lcpMs": 2500
+    },
+    "/system/tests": {
+      "jsBytes": 1228800,
+      "lcpMs": 2500
+    },
+    "/sanctions": {
+      "jsBytes": 1126400,
+      "lcpMs": 2500
+    },
+    "/lending": {
+      "jsBytes": 1075200,
+      "lcpMs": 2500
+    },
+    "/cards": {
+      "jsBytes": 1126400,
+      "lcpMs": 2500
+    }
+  }
+}

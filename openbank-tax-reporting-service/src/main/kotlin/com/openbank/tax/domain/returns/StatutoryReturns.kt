@@ -4,6 +4,7 @@
 
 package com.openbank.tax.domain.returns
 
+import com.openbank.libs.domain.calendar.BusinessCalendar
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.checkConflict
@@ -27,7 +28,22 @@ import java.util.UUID
 /** Who a return is about: the licensed company itself, or each fund it manages separately. */
 enum class ReturnScope { COMPANY, FUND }
 
-enum class Periodicity { MONTH, QUARTER, YEAR }
+/**
+ * MONTH / QUARTER / YEAR are calendar periods. WORKING_DAY (ADR-0367, CEÚ) is the window one
+ * Czech working-day overview covers: it ENDS on the day before a CERTIS working day, so the Monday
+ * window ends on Sunday and spans Friday to Sunday. Its due date is its end + 1, the working day
+ * itself. DAY (GSFT, #15356) is one calendar day — a relevant day (rozhodný den) can be any day,
+ * a weekend included, so it is not tied to the working-day calendar.
+ */
+enum class Periodicity { MONTH, QUARTER, YEAR, WORKING_DAY, DAY }
+
+/**
+ * How [ReturnDefinition.deadlineDaysAfterPeriodEnd] counts. CALENDAR_DAYS is every day;
+ * WORKING_DAYS counts Czech working days ([ReportingPeriod.WORKING_DAYS]) after the period end, so
+ * "within 3 working days of the relevant day" (zákon č. 21/1992 Sb. § 41d odst. 4) is due on the
+ * third working day after it.
+ */
+enum class DeadlineBasis { CALENDAR_DAYS, WORKING_DAYS }
 
 /** One reporting period, identified by its periodicity and its last day (the reference date). */
 data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate) : Comparable<ReportingPeriod> {
@@ -38,6 +54,8 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
                 endDate.monthValue % MONTHS_PER_QUARTER == 0 &&
                     endDate == YearMonth.from(endDate).atEndOfMonth()
             Periodicity.YEAR -> endDate.monthValue == MONTHS_PER_YEAR && endDate.dayOfMonth == LAST_DAY_OF_DECEMBER
+            Periodicity.WORKING_DAY -> WORKING_DAYS.isBusinessDay(endDate.plusDays(1))
+            Periodicity.DAY -> true
         }
         requireValid(valid) { "$endDate is not the last day of a $periodicity" }
     }
@@ -47,6 +65,7 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
         Periodicity.MONTH -> "%04d-%02d".format(endDate.year, endDate.monthValue)
         Periodicity.QUARTER -> "%04d-Q%d".format(endDate.year, endDate.monthValue / MONTHS_PER_QUARTER)
         Periodicity.YEAR -> "%04d".format(endDate.year)
+        Periodicity.WORKING_DAY, Periodicity.DAY -> endDate.toString()
     }
 
     /** The period immediately before this one. */
@@ -56,6 +75,8 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
             Periodicity.MONTH -> YearMonth.from(endDate).minusMonths(1).atEndOfMonth()
             Periodicity.QUARTER -> YearMonth.from(endDate).minusMonths(MONTHS_PER_QUARTER.toLong()).atEndOfMonth()
             Periodicity.YEAR -> endDate.minusYears(1)
+            Periodicity.WORKING_DAY -> WORKING_DAYS.previousBusinessDay(endDate.plusDays(1)).minusDays(1)
+            Periodicity.DAY -> endDate.minusDays(1)
         },
     )
 
@@ -68,6 +89,10 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
         private val QUARTER = Regex("""^(\d{4})-Q([1-4])$""")
         private val MONTH = Regex("""^(\d{4})-(\d{2})$""")
         private val YEAR = Regex("""^(\d{4})$""")
+        private val DAY = Regex("""^\d{4}-\d{2}-\d{2}$""")
+
+        /** Czech interbank (CERTIS) working days — the calendar ČNB's CEÚ deadline counts in. */
+        val WORKING_DAYS: BusinessCalendar = BusinessCalendar.certis()
 
         /** The most recent period of [periodicity] that has fully ended strictly before [today]. */
         fun lastEndedBefore(periodicity: Periodicity, today: LocalDate): ReportingPeriod {
@@ -86,6 +111,9 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
                 periodicity,
                 LocalDate.of(date.year, MONTHS_PER_YEAR, LAST_DAY_OF_DECEMBER),
             )
+            // The window containing [date] ends the day before the next working day after it.
+            Periodicity.WORKING_DAY -> ReportingPeriod(periodicity, WORKING_DAYS.nextBusinessDay(date).minusDays(1))
+            Periodicity.DAY -> ReportingPeriod(periodicity, date)
         }
 
         /** Parse an operator label; the periodicity must match the return being addressed. */
@@ -106,6 +134,9 @@ data class ReportingPeriod(val periodicity: Periodicity, val endDate: LocalDate)
                 }
                 Periodicity.YEAR -> YEAR.matchEntire(label)?.let { m ->
                     LocalDate.of(m.groupValues[1].toInt(), MONTHS_PER_YEAR, LAST_DAY_OF_DECEMBER)
+                }
+                Periodicity.WORKING_DAY, Periodicity.DAY -> DAY.matchEntire(label)?.let {
+                    runCatching { LocalDate.parse(label) }.getOrNull()
                 }
             }
             requireValid(parsed != null) { "'$label' is not a $periodicity period label" }
@@ -158,6 +189,18 @@ data class ReturnDefinition(
      * Empty for figure-only returns (the pension catalogue) — those assemble with no lines.
      */
     val lineSchema: List<String> = emptyList(),
+    val deadlineBasis: DeadlineBasis = DeadlineBasis.CALENDAR_DAYS,
+    /**
+     * An event-driven return (GSFT: the relevant day is named by an insured event or a test
+     * request, never by the calendar). No period is EXPECTED, so the deadline check never reports
+     * one as NOT_ASSEMBLED; a stored revision still breaches when it is not filed by its due date.
+     */
+    val onDemand: Boolean = false,
+    /**
+     * False for a return nobody is obliged to file (GSFT's TEST dry run): it follows the lifecycle
+     * but is never a deadline breach, assembled or not.
+     */
+    val filingObligation: Boolean = true,
 ) {
     init {
         requireValid(code.isNotBlank()) { "return code must not be blank" }
@@ -178,7 +221,11 @@ data class ReturnDefinition(
         }
     }
 
-    fun dueDate(period: ReportingPeriod): LocalDate = period.endDate.plusDays(deadlineDaysAfterPeriodEnd.toLong())
+    fun dueDate(period: ReportingPeriod): LocalDate = when (deadlineBasis) {
+        DeadlineBasis.CALENDAR_DAYS -> period.endDate.plusDays(deadlineDaysAfterPeriodEnd.toLong())
+        DeadlineBasis.WORKING_DAYS ->
+            ReportingPeriod.WORKING_DAYS.addBusinessDays(period.endDate, deadlineDaysAfterPeriodEnd)
+    }
 
     /**
      * Every finding for [values]; empty means valid. Missing datapoints are findings, never zeroes:
@@ -235,7 +282,25 @@ data class ReturnCatalogue(
 class ReturnValidationException(val findings: List<ValidationFinding>) :
     RuntimeException("Return failed validation: " + findings.joinToString("; ") { it.message })
 
-enum class ReturnStatus { ASSEMBLED, APPROVED, SUBMITTED }
+/**
+ * ACKNOWLEDGED / REJECTED record the regulator's answer to a SUBMITTED revision (ADR-0367: ČNB
+ * accepts or rejects each SDAT delivery). A REJECTED revision is not filed; a correction is a new
+ * revision, exactly as after any submission.
+ */
+enum class ReturnStatus {
+    ASSEMBLED,
+    APPROVED,
+    SUBMITTED,
+    ACKNOWLEDGED,
+    REJECTED,
+    ;
+
+    /** The regulator holds this revision: submitted and not rejected. */
+    val filed: Boolean get() = this == SUBMITTED || this == ACKNOWLEDGED
+
+    /** A new revision may follow: the regulator has this one, or refused it. */
+    val closed: Boolean get() = this == SUBMITTED || this == ACKNOWLEDGED || this == REJECTED
+}
 
 /**
  * One revision of one return for one entity and period (ADR-0336).
@@ -269,6 +334,10 @@ data class StatutoryReturn(
     val submittedBy: String? = null,
     val submittedAt: Instant? = null,
     val submissionReference: String? = null,
+    val acknowledgedBy: String? = null,
+    val acknowledgedAt: Instant? = null,
+    /** The regulator's acknowledgement reference, or its rejection reason. */
+    val acknowledgement: String? = null,
     val version: Long = 0L,
 ) {
     /** The approver must not be the assembler; approval pins the content hash as the attestation. */
@@ -317,9 +386,38 @@ data class StatutoryReturn(
         )
     }
 
-    fun isOverdueAt(date: LocalDate): Boolean = status != ReturnStatus.SUBMITTED && date.isAfter(dueDate)
+    /** Record the regulator's answer to this submission: its acknowledgement reference, or a rejection reason. */
+    fun acknowledge(accepted: Boolean, detail: String, by: String, at: Instant): StatutoryReturn {
+        // A malformed request, not a business-rule failure: IllegalArgumentException → 400 (libs-runtime).
+        require(detail.length <= MAX_ACKNOWLEDGEMENT_LENGTH) {
+            "An acknowledgement reference or rejection reason is at most $MAX_ACKNOWLEDGEMENT_LENGTH characters"
+        }
+        // A retried POST of the SAME answer is a no-op that returns the current state; a different
+        // answer to an already-answered submission is a conflict.
+        val answered = if (accepted) ReturnStatus.ACKNOWLEDGED else ReturnStatus.REJECTED
+        if (status == answered && acknowledgement == detail) return this
+        checkConflict(status == ReturnStatus.SUBMITTED) {
+            "$returnCode ${period.label} is not SUBMITTED (status=$status) — nothing to acknowledge"
+        }
+        requireValid(detail.isNotBlank()) {
+            if (accepted) "An acknowledgement reference is required" else "A rejection reason is required"
+        }
+        requireValid(by.isNotBlank()) { "Recording an acknowledgement requires an actor" }
+        return copy(
+            status = if (accepted) ReturnStatus.ACKNOWLEDGED else ReturnStatus.REJECTED,
+            acknowledgedBy = by,
+            acknowledgedAt = at,
+            acknowledgement = detail,
+            version = version + 1,
+        )
+    }
+
+    fun isOverdueAt(date: LocalDate): Boolean = !status.filed && date.isAfter(dueDate)
 
     companion object {
+        /** Upper bound on the regulator's acknowledgement reference or rejection reason. */
+        const val MAX_ACKNOWLEDGEMENT_LENGTH = 1024
+
         /** Validate and assemble; invalid figures never become a stored return. */
         @Suppress("LongParameterList")
         fun assemble(

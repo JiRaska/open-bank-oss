@@ -40,7 +40,7 @@ describe('sanctions pending-approvals queue BFF', () => {
 
     expect(res.status).toBe(200)
     const [url, init] = lastFetchCall()
-    expect(url).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals')
+    expect(url).toBe('http://localhost:8123/api/v1/sanctions/approvals')
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer operator-token')
   })
 
@@ -52,7 +52,7 @@ describe('sanctions pending-approvals queue BFF', () => {
 
     // The BFF must not silently swallow the parameter, or a supervisor's "show me more" does
     // nothing.
-    expect(lastFetchCall()[0]).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals?limit=5')
+    expect(lastFetchCall()[0]).toBe('http://localhost:8123/api/v1/sanctions/approvals?limit=5')
   })
 
   it('refuses to build a path out of a non-numeric limit', async () => {
@@ -65,7 +65,7 @@ describe('sanctions pending-approvals queue BFF', () => {
 
     await GET(new NextRequest('http://localhost/api/sanctions/approvals?limit=abc%0AInjected'))
 
-    expect(lastFetchCall()[0]).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals')
+    expect(lastFetchCall()[0]).toBe('http://localhost:8123/api/v1/sanctions/approvals')
   })
 
   it('clamps an out-of-range limit instead of forwarding it', async () => {
@@ -74,7 +74,7 @@ describe('sanctions pending-approvals queue BFF', () => {
 
     await GET(new NextRequest('http://localhost/api/sanctions/approvals?limit=100000'))
 
-    expect(lastFetchCall()[0]).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals?limit=200')
+    expect(lastFetchCall()[0]).toBe('http://localhost:8123/api/v1/sanctions/approvals?limit=200')
   })
 
   it('refuses without a session before touching the backend', async () => {

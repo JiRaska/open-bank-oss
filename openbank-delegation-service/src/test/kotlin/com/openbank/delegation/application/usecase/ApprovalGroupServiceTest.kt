@@ -144,7 +144,7 @@ class ApprovalGroupServiceTest {
     @Test
     fun `organization actor authority is revalidated and the human actor consumes SCA`(): Unit = runBlocking {
         coEvery { authority.authorityFor(owner, organizationActor) } returns
-            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
+            GrantorAuthority(GrantorAuthorityVerdict.MANDATE_ONLY)
         coEvery { sca.getChallenge(scaId) } returns
             ScaChallengeSnapshot(scaId, organizationActor, "DELEGATION_APPROVAL_GROUP", "PENDING")
         coEvery { sca.consumeChallenge(scaId, organizationActor, any()) } returns

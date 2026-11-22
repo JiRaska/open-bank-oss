@@ -27,11 +27,26 @@ jobs:
   wake:
     name: Wake the train for a head current with main
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository
+    # Coalesce wakes PER HEAD (2026-11-19: 13 of the first 100 queued hosted runs repo-wide were
+    # this workflow, ahead of fleet CI jobs). One head completes up to three watched workflows (CI,
+    # Services CI, Security scan), and each completion asks the SAME question — "does this head
+    # contain main?" — whose only effect is a dispatch that carries no authority: merge-train reads
+    # live state and coalesces dispatches itself. So a newer wake for the same head is a strict
+    # superset of an older one: same question, main at least as new, and more of the head's CI
+    # finished. Nothing here is a status, check or evidence anyone requires, so cancelling the
+    # older one can drop no verdict. Two rules keep that true:
+    #   * keyed by head SHA, never coarser: a wake for head B says nothing about head A, and
+    #     cancelling A's wake would strand a green holder until the */10 heartbeat GitHub drops;
+    #   * JOB-level, not workflow-level: the `if:` above runs first, so a completion that is not a
+    #     wake candidate (a failure, a push) never enters the group and cannot cancel a real wake.
+    concurrency:
+      group: merge-train-wake-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: true
     permissions:
       contents: read
       actions: write   # POST /actions/workflows/merge-train.yml/dispatches, nothing else
@@ -43,9 +58,28 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::unexpected head sha"; exit 1; }
-          behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${HEAD_SHA}" --jq .behind_by)"
-          if [ "$behind" != "0" ]; then
-            echo "head is ${behind} behind main: the train cannot merge it next, no wake"
+          # "Does this head contain main?" is a git question. Answer it from a commits-only fetch
+          # (no trees, no blobs) instead of GET /compare: this job runs on every successful PR CI,
+          # Services CI and Security scan completion (~76 runs/h measured 2026-11-14), and the REST
+          # call came out of the GITHUB_TOKEN core quota every other workflow shares. Git transport
+          # is not metered against it. Only if git cannot answer does the REST call run.
+          contains=""
+          if git init -q "$RUNNER_TEMP/wake" \
+            && git -C "$RUNNER_TEMP/wake" fetch -q --filter=tree:0 --no-tags \
+                 "https://github.com/${GITHUB_REPOSITORY}.git" "+refs/heads/main:refs/remotes/origin/main" "$HEAD_SHA"; then
+            if git -C "$RUNNER_TEMP/wake" merge-base --is-ancestor refs/remotes/origin/main "$HEAD_SHA"; then
+              contains=yes
+            else
+              contains=no
+            fi
+          fi
+          if [ -z "$contains" ]; then
+            echo "::warning::git could not answer the ancestry question; falling back to the REST compare"
+            behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${HEAD_SHA}" --jq .behind_by)"
+            if [ "$behind" = "0" ]; then contains=yes; else contains=no; fi
+          fi
+          if [ "$contains" != yes ]; then
+            echo "head does not contain main: the train cannot merge it next, no wake"
             exit 0
           fi
           gh workflow run merge-train.yml -R "$GITHUB_REPOSITORY" --ref main

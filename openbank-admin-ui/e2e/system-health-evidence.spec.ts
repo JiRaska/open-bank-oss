@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const sample = { source: 'kubernetes', discoveryStatus: 'complete', services: [{ name: 'ledger-service', port: 8101, status: 'UP', reachable: true, latencyMs: 12 }] }

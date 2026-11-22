@@ -1,0 +1,1873 @@
+{
+  "_comment": "DERIVED, not hand-written. Regenerate with .github/scripts/derive-gate-runtime-measurements.py.",
+  "_provenance": {
+    "source": "ci.yml gate-results-* artifacts (ADR-0255 --json), field `seconds`",
+    "query": "gh api 'repos/JiRaska/open-bank-oss/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=30'",
+    "runs_used": 30,
+    "newest_run": 44318606328,
+    "oldest_run": 44237321361,
+    "derived_at": "2026-11-18T15:13:51Z"
+  },
+  "gates": {
+    "accounting-clock-gate": {
+      "n": 30,
+      "p95_seconds": 3.02,
+      "max_seconds": 3.04
+    },
+    "admin-ui-a11y-route-coverage": {
+      "n": 30,
+      "p95_seconds": 0.68,
+      "max_seconds": 0.72
+    },
+    "admin-ui-e2e-contract-guard": {
+      "n": 30,
+      "p95_seconds": 0.4,
+      "max_seconds": 0.42
+    },
+    "admin-ui-flake-quarantine": {
+      "n": 30,
+      "p95_seconds": 0.44,
+      "max_seconds": 0.48
+    },
+    "admin-ui-module-coverage-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "admin-ui-mutation-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "admin-ui-request-trace-fixtures": {
+      "n": 30,
+      "p95_seconds": 24.5,
+      "max_seconds": 24.83
+    },
+    "admin-ui-version-sync-guard": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.73
+    },
+    "adr-delivery-evidence": {
+      "n": 30,
+      "p95_seconds": 0.44,
+      "max_seconds": 0.51
+    },
+    "adr-delivery-scripts": {
+      "n": 30,
+      "p95_seconds": 6.91,
+      "max_seconds": 7.11
+    },
+    "adr-partial-followup": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.58
+    },
+    "adr-proposed-staleness": {
+      "n": 30,
+      "p95_seconds": 0.91,
+      "max_seconds": 0.91
+    },
+    "adr-registry-integrity-check": {
+      "n": 30,
+      "p95_seconds": 41.88,
+      "max_seconds": 43.13
+    },
+    "adversarial-contract-test": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "advisory-finding-staleness": {
+      "n": 30,
+      "p95_seconds": 1.39,
+      "max_seconds": 1.51
+    },
+    "advisory-gate-registration": {
+      "n": 30,
+      "p95_seconds": 4.58,
+      "max_seconds": 4.7
+    },
+    "agent-bounded-write-surface": {
+      "n": 30,
+      "p95_seconds": 1.37,
+      "max_seconds": 1.41
+    },
+    "agent-case-schema": {
+      "n": 30,
+      "p95_seconds": 0.36,
+      "max_seconds": 0.54
+    },
+    "agent-charter-registry-parity": {
+      "n": 30,
+      "p95_seconds": 0.91,
+      "max_seconds": 0.92
+    },
+    "agent-merge-authorization-selftest": {
+      "n": 30,
+      "p95_seconds": 0.62,
+      "max_seconds": 0.63
+    },
+    "agent-merge-pr-policy-selftest": {
+      "n": 30,
+      "p95_seconds": 13.69,
+      "max_seconds": 14.15
+    },
+    "agent-merge-recorder-selftest": {
+      "n": 30,
+      "p95_seconds": 21.85,
+      "max_seconds": 22.43
+    },
+    "agent-model-parity": {
+      "n": 30,
+      "p95_seconds": 0.58,
+      "max_seconds": 0.6
+    },
+    "agent-pr-guard": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "agent-review-proof-falsifiable": {
+      "n": 30,
+      "p95_seconds": 0.57,
+      "max_seconds": 0.58
+    },
+    "agent-review-scope-falsifiable": {
+      "n": 30,
+      "p95_seconds": 0.25,
+      "max_seconds": 0.25
+    },
+    "agent-schedule-matches-charter": {
+      "n": 30,
+      "p95_seconds": 0.69,
+      "max_seconds": 0.72
+    },
+    "agent-virtual-keys": {
+      "n": 30,
+      "p95_seconds": 12.19,
+      "max_seconds": 12.46
+    },
+    "aggregate-type-case-fold": {
+      "n": 30,
+      "p95_seconds": 0.95,
+      "max_seconds": 0.97
+    },
+    "ai-act-high-risk-inventory-vs-code": {
+      "n": 30,
+      "p95_seconds": 9.87,
+      "max_seconds": 9.99
+    },
+    "ai-governance-snapshot-drift": {
+      "n": 30,
+      "p95_seconds": 0.53,
+      "max_seconds": 0.59
+    },
+    "alert-metric-emitted": {
+      "n": 30,
+      "p95_seconds": 1.98,
+      "max_seconds": 2.17
+    },
+    "alert-rca-ledger-guards": {
+      "n": 30,
+      "p95_seconds": 0.43,
+      "max_seconds": 0.43
+    },
+    "alert-rule-hygiene": {
+      "n": 30,
+      "p95_seconds": 15.67,
+      "max_seconds": 15.72
+    },
+    "alert-window-vs-subject-period": {
+      "n": 30,
+      "p95_seconds": 26.85,
+      "max_seconds": 27.35
+    },
+    "alertmanager-url-route-prefix": {
+      "n": 30,
+      "p95_seconds": 1.09,
+      "max_seconds": 1.24
+    },
+    "api-call-budget-coverage": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.58
+    },
+    "api-contract-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "approval-store-redis-host": {
+      "n": 30,
+      "p95_seconds": 20.24,
+      "max_seconds": 20.3
+    },
+    "appyaml-secret-literals": {
+      "n": 30,
+      "p95_seconds": 1.62,
+      "max_seconds": 1.67
+    },
+    "apt-pin-verdicts-falsifiable": {
+      "n": 30,
+      "p95_seconds": 0.13,
+      "max_seconds": 0.17
+    },
+    "argocd-sync-integrity-unit-test": {
+      "n": 30,
+      "p95_seconds": 4.46,
+      "max_seconds": 4.74
+    },
+    "argocd-valuesobject-no-null": {
+      "n": 30,
+      "p95_seconds": 0.59,
+      "max_seconds": 0.64
+    },
+    "asvs-l3-mechanical-subset": {
+      "n": 30,
+      "p95_seconds": 6.8,
+      "max_seconds": 6.97
+    },
+    "asyncapi-doc-discriminator": {
+      "n": 30,
+      "p95_seconds": 2.56,
+      "max_seconds": 2.56
+    },
+    "audit-anchor-offline-verifier-unit-test": {
+      "n": 30,
+      "p95_seconds": 0.97,
+      "max_seconds": 1.76
+    },
+    "audit-money-path-subscription": {
+      "n": 30,
+      "p95_seconds": 1.24,
+      "max_seconds": 1.33
+    },
+    "authz-enforce-money-path": {
+      "n": 30,
+      "p95_seconds": 6.43,
+      "max_seconds": 6.72
+    },
+    "authz-enforce-pdp-sidecar-parity": {
+      "n": 30,
+      "p95_seconds": 4.57,
+      "max_seconds": 5.41
+    },
+    "auto-deploy-reconcile-probe-unit-test": {
+      "n": 30,
+      "p95_seconds": 71.68,
+      "max_seconds": 71.96
+    },
+    "auto-deploy-red-watch-declaration": {
+      "n": 30,
+      "p95_seconds": 0.38,
+      "max_seconds": 0.53
+    },
+    "auto-update-armed-prs-declaration": {
+      "n": 30,
+      "p95_seconds": 0.35,
+      "max_seconds": 0.37
+    },
+    "blocking-counterpart-probe-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.26,
+      "max_seconds": 1.46
+    },
+    "build-time-bean-selection": {
+      "n": 30,
+      "p95_seconds": 17.01,
+      "max_seconds": 17.24
+    },
+    "buildx-push-single-manifest": {
+      "n": 30,
+      "p95_seconds": 0.62,
+      "max_seconds": 0.7
+    },
+    "can-i-deploy-block-classifier-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.47,
+      "max_seconds": 1.49
+    },
+    "can-i-deploy-codeploy-selector-unit-test": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.76
+    },
+    "can-i-deploy-version-selector-unit-test": {
+      "n": 30,
+      "p95_seconds": 0.29,
+      "max_seconds": 0.31
+    },
+    "capacity-profile-consistency": {
+      "n": 30,
+      "p95_seconds": 1.59,
+      "max_seconds": 1.59
+    },
+    "card-capability-matrix-drift": {
+      "n": 30,
+      "p95_seconds": 0.33,
+      "max_seconds": 0.35
+    },
+    "catalog-kernel-industry-neutral": {
+      "n": 30,
+      "p95_seconds": 1.01,
+      "max_seconds": 1.06
+    },
+    "ci-artifact-fetch-via-resolver": {
+      "n": 30,
+      "p95_seconds": 1.06,
+      "max_seconds": 1.14
+    },
+    "ci-artifact-lock-integrity": {
+      "n": 30,
+      "p95_seconds": 9.48,
+      "max_seconds": 9.61
+    },
+    "ci-reconcile-selector-selftest": {
+      "n": 30,
+      "p95_seconds": 0.13,
+      "max_seconds": 0.13
+    },
+    "ci-runner-pool-capacity": {
+      "n": 30,
+      "p95_seconds": 2.71,
+      "max_seconds": 2.71
+    },
+    "ci-script-tests-previously-unreachable": {
+      "n": 30,
+      "p95_seconds": 192.33,
+      "max_seconds": 193.12
+    },
+    "claude-md-identifiers-exist": {
+      "n": 30,
+      "p95_seconds": 8.67,
+      "max_seconds": 8.73
+    },
+    "clickhouse-ddl-configmap-parity": {
+      "n": 30,
+      "p95_seconds": 0.31,
+      "max_seconds": 0.31
+    },
+    "clickhouse-migration-configmap-sync": {
+      "n": 30,
+      "p95_seconds": 0.5,
+      "max_seconds": 0.52
+    },
+    "clock-injection-gate": {
+      "n": 30,
+      "p95_seconds": 6.61,
+      "max_seconds": 7.02
+    },
+    "close-participants-declared": {
+      "n": 30,
+      "p95_seconds": 1.44,
+      "max_seconds": 1.44
+    },
+    "cnpg-backup-declared-gate": {
+      "n": 30,
+      "p95_seconds": 12.09,
+      "max_seconds": 12.1
+    },
+    "cnpg-postgres-minor-floor": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "cnpg-scrape-coverage": {
+      "n": 30,
+      "p95_seconds": 1.57,
+      "max_seconds": 1.6
+    },
+    "cnpg-update-resilience": {
+      "n": 30,
+      "p95_seconds": 1.08,
+      "max_seconds": 1.12
+    },
+    "co-deploy-set-derivation-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.4,
+      "max_seconds": 1.5
+    },
+    "compliance-trace": {
+      "n": 30,
+      "p95_seconds": 1.4,
+      "max_seconds": 1.45
+    },
+    "config-inventory": {
+      "n": 30,
+      "p95_seconds": 3.63,
+      "max_seconds": 3.69
+    },
+    "configproperty-kotlin-defaults": {
+      "n": 30,
+      "p95_seconds": 0.48,
+      "max_seconds": 0.56
+    },
+    "configproperty-supplied": {
+      "n": 30,
+      "p95_seconds": 1.6,
+      "max_seconds": 1.63
+    },
+    "container-listen-port-collisions": {
+      "n": 30,
+      "p95_seconds": 3.72,
+      "max_seconds": 3.8
+    },
+    "coverage-floor-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "credential-deadline-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "credential-expiry-watch-coverage": {
+      "n": 30,
+      "p95_seconds": 0.28,
+      "max_seconds": 0.43
+    },
+    "critical-alert-egress": {
+      "n": 30,
+      "p95_seconds": 1.87,
+      "max_seconds": 2.0
+    },
+    "cronjob-max-success-age": {
+      "n": 30,
+      "p95_seconds": 1.88,
+      "max_seconds": 1.89
+    },
+    "dashboard-metric-emitted": {
+      "n": 30,
+      "p95_seconds": 1.62,
+      "max_seconds": 1.62
+    },
+    "dast-zap-coverage-selftest": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.74
+    },
+    "datasource-pool-self-heal": {
+      "n": 30,
+      "p95_seconds": 0.26,
+      "max_seconds": 0.3
+    },
+    "db-backup-association-gate": {
+      "n": 30,
+      "p95_seconds": 2.61,
+      "max_seconds": 2.63
+    },
+    "db-backup-prefix-scope": {
+      "n": 30,
+      "p95_seconds": 2.28,
+      "max_seconds": 2.3
+    },
+    "db-migration-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "default-nodepool-budget-shape": {
+      "n": 30,
+      "p95_seconds": 0.25,
+      "max_seconds": 0.27
+    },
+    "delegation-capability-enforcement": {
+      "n": 30,
+      "p95_seconds": 2.02,
+      "max_seconds": 2.08
+    },
+    "delegation-exposure-sealed": {
+      "n": 30,
+      "p95_seconds": 0.82,
+      "max_seconds": 0.83
+    },
+    "demo-only-flags": {
+      "n": 30,
+      "p95_seconds": 16.21,
+      "max_seconds": 16.83
+    },
+    "deploy-code-lag-report-unit-test": {
+      "n": 30,
+      "p95_seconds": 3.04,
+      "max_seconds": 3.07
+    },
+    "deploy-coverage-guard": {
+      "n": 30,
+      "p95_seconds": 3.73,
+      "max_seconds": 3.76
+    },
+    "deploy-drift-declaration": {
+      "n": 30,
+      "p95_seconds": 0.69,
+      "max_seconds": 0.8
+    },
+    "deploy-hold-image-pins": {
+      "n": 30,
+      "p95_seconds": 4.86,
+      "max_seconds": 4.98
+    },
+    "deploy-pin-branch-contract": {
+      "n": 30,
+      "p95_seconds": 18.41,
+      "max_seconds": 20.03
+    },
+    "deploy-pin-monotonic": {
+      "n": 30,
+      "p95_seconds": 2.65,
+      "max_seconds": 2.92
+    },
+    "deploy-script-tests-previously-unreachable": {
+      "n": 30,
+      "p95_seconds": 292.37,
+      "max_seconds": 296.87
+    },
+    "deploy-window-decision": {
+      "n": 30,
+      "p95_seconds": 12.39,
+      "max_seconds": 12.51
+    },
+    "dockerfile-runtime-only": {
+      "n": 30,
+      "p95_seconds": 0.46,
+      "max_seconds": 0.65
+    },
+    "domain-purity-gate": {
+      "n": 30,
+      "p95_seconds": 1.78,
+      "max_seconds": 2.02
+    },
+    "domainevent-occurredat-constructor-guard": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.55
+    },
+    "dotted-mp-messaging-key-guard": {
+      "n": 30,
+      "p95_seconds": 1.39,
+      "max_seconds": 1.51
+    },
+    "dr-restore-orchestration": {
+      "n": 30,
+      "p95_seconds": 23.52,
+      "max_seconds": 23.56
+    },
+    "duplicate-test-files": {
+      "n": 30,
+      "p95_seconds": 0.96,
+      "max_seconds": 0.99
+    },
+    "duplicate-yaml-key-guard": {
+      "n": 30,
+      "p95_seconds": 7.08,
+      "max_seconds": 7.19
+    },
+    "dynamic-db-roles-declared": {
+      "n": 30,
+      "p95_seconds": 0.44,
+      "max_seconds": 0.44
+    },
+    "ecr-live-tags-selftest": {
+      "n": 30,
+      "p95_seconds": 0.13,
+      "max_seconds": 0.25
+    },
+    "edge-decoy-rule-parity": {
+      "n": 30,
+      "p95_seconds": 1.14,
+      "max_seconds": 1.22
+    },
+    "enforcement-reachability": {
+      "n": 30,
+      "p95_seconds": 7.93,
+      "max_seconds": 8.45
+    },
+    "ensure-ecr-repository": {
+      "n": 30,
+      "p95_seconds": 0.55,
+      "max_seconds": 0.65
+    },
+    "entity-column-names": {
+      "n": 30,
+      "p95_seconds": 1.05,
+      "max_seconds": 1.11
+    },
+    "enum-reference-data-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.33,
+      "max_seconds": 1.36
+    },
+    "eso-crd-api-version": {
+      "n": 30,
+      "p95_seconds": 1.25,
+      "max_seconds": 1.26
+    },
+    "eu-ai-act-inventory-drift": {
+      "n": 30,
+      "p95_seconds": 1.37,
+      "max_seconds": 1.66
+    },
+    "evals-gate-replay": {
+      "n": 30,
+      "p95_seconds": 0.37,
+      "max_seconds": 0.37
+    },
+    "evals-registry-integrity": {
+      "n": 30,
+      "p95_seconds": 0.56,
+      "max_seconds": 0.58
+    },
+    "event-consumer-liveness": {
+      "n": 30,
+      "p95_seconds": 1.78,
+      "max_seconds": 1.8
+    },
+    "event-contract-code-agreement": {
+      "n": 30,
+      "p95_seconds": 22.51,
+      "max_seconds": 22.52
+    },
+    "event-contract-coverage-ratchet": {
+      "n": 30,
+      "p95_seconds": 3.56,
+      "max_seconds": 3.76
+    },
+    "event-handler-swallows": {
+      "n": 30,
+      "p95_seconds": 4.84,
+      "max_seconds": 4.86
+    },
+    "extension-bean-config": {
+      "n": 30,
+      "p95_seconds": 4.22,
+      "max_seconds": 4.32
+    },
+    "external-feed-declaration-drift": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.7
+    },
+    "feature-flag-governance": {
+      "n": 30,
+      "p95_seconds": 1.23,
+      "max_seconds": 1.27
+    },
+    "field-crypto-in-libs": {
+      "n": 30,
+      "p95_seconds": 4.22,
+      "max_seconds": 4.37
+    },
+    "finops-tier-drift": {
+      "n": 30,
+      "p95_seconds": 0.31,
+      "max_seconds": 0.33
+    },
+    "fleet-attestation-classifier": {
+      "n": 30,
+      "p95_seconds": 9.91,
+      "max_seconds": 9.97
+    },
+    "fleet-scanning-test-edges": {
+      "n": 30,
+      "p95_seconds": 1.85,
+      "max_seconds": 2.0
+    },
+    "flyway-default-datasource": {
+      "n": 30,
+      "p95_seconds": 2.93,
+      "max_seconds": 3.07
+    },
+    "flyway-version-commit-order": {
+      "n": 30,
+      "p95_seconds": 26.58,
+      "max_seconds": 26.73
+    },
+    "four-eyes-enforce-deployed": {
+      "n": 30,
+      "p95_seconds": 1.98,
+      "max_seconds": 2.11
+    },
+    "four-eyes-verb-grantable": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "gate-graduation-guard": {
+      "n": 30,
+      "p95_seconds": 0.86,
+      "max_seconds": 1.1
+    },
+    "gate-invocation-reachability": {
+      "n": 30,
+      "p95_seconds": 0.6,
+      "max_seconds": 0.62
+    },
+    "gate-lifecycle-metadata": {
+      "n": 30,
+      "p95_seconds": 1.47,
+      "max_seconds": 1.61
+    },
+    "gate-observability-declarations": {
+      "n": 30,
+      "p95_seconds": 1.01,
+      "max_seconds": 1.16
+    },
+    "gate-runner-self-test": {
+      "n": 30,
+      "p95_seconds": 27.38,
+      "max_seconds": 27.54
+    },
+    "gate-script-registration": {
+      "n": 30,
+      "p95_seconds": 3.83,
+      "max_seconds": 4.13
+    },
+    "gate-selftest-declaration": {
+      "n": 30,
+      "p95_seconds": 1.45,
+      "max_seconds": 1.49
+    },
+    "gate-subject-floor": {
+      "n": 30,
+      "p95_seconds": 1.31,
+      "max_seconds": 1.33
+    },
+    "gates-not-deregistered": {
+      "n": 30,
+      "p95_seconds": 2.82,
+      "max_seconds": 3.18
+    },
+    "gen-network-policies-drift-gate": {
+      "n": 30,
+      "p95_seconds": 16.33,
+      "max_seconds": 16.77
+    },
+    "gen-service-alert-rules-drift-gate": {
+      "n": 30,
+      "p95_seconds": 0.64,
+      "max_seconds": 0.65
+    },
+    "gh-call-counter-passthrough": {
+      "n": 30,
+      "p95_seconds": 0.84,
+      "max_seconds": 0.91
+    },
+    "gh-repo-context-in-checkoutless-jobs": {
+      "n": 30,
+      "p95_seconds": 2.01,
+      "max_seconds": 2.02
+    },
+    "gh-retry-selftest": {
+      "n": 30,
+      "p95_seconds": 3.66,
+      "max_seconds": 3.79
+    },
+    "git-fixture-hermetic": {
+      "n": 30,
+      "p95_seconds": 2.45,
+      "max_seconds": 2.48
+    },
+    "gitops-duplicate-resources": {
+      "n": 30,
+      "p95_seconds": 0.88,
+      "max_seconds": 0.99
+    },
+    "gitops-image-pin-only": {
+      "n": 30,
+      "p95_seconds": 4.82,
+      "max_seconds": 5.49
+    },
+    "gitops-ref-integrity-guard": {
+      "n": 30,
+      "p95_seconds": 11.9,
+      "max_seconds": 12.05
+    },
+    "governance-lineage-vs-code-audit": {
+      "n": 30,
+      "p95_seconds": 1.0,
+      "max_seconds": 1.12
+    },
+    "governance-manifest": {
+      "n": 30,
+      "p95_seconds": 3.0,
+      "max_seconds": 3.15
+    },
+    "governance-script-unit-tests": {
+      "n": 30,
+      "p95_seconds": 124.41,
+      "max_seconds": 124.72
+    },
+    "gradle-cache-writer-budget": {
+      "n": 30,
+      "p95_seconds": 2.67,
+      "max_seconds": 2.84
+    },
+    "gradle-distribution-pinned": {
+      "n": 30,
+      "p95_seconds": 0.8,
+      "max_seconds": 0.81
+    },
+    "gradle-home-isolation-on-self-hosted-runners": {
+      "n": 30,
+      "p95_seconds": 2.05,
+      "max_seconds": 2.06
+    },
+    "helm-values-key-effect": {
+      "n": 30,
+      "p95_seconds": 22.09,
+      "max_seconds": 22.89
+    },
+    "hibernate-sequence-guard": {
+      "n": 30,
+      "p95_seconds": 10.86,
+      "max_seconds": 10.87
+    },
+    "honeytoken-wiring": {
+      "n": 30,
+      "p95_seconds": 8.93,
+      "max_seconds": 9.36
+    },
+    "idempotency-contract-parity": {
+      "n": 30,
+      "p95_seconds": 8.02,
+      "max_seconds": 8.37
+    },
+    "idempotency-coverage-money-path": {
+      "n": 30,
+      "p95_seconds": 1.48,
+      "max_seconds": 1.55
+    },
+    "identifier-intent-guard": {
+      "n": 30,
+      "p95_seconds": 0.84,
+      "max_seconds": 0.88
+    },
+    "incluster-hostname-resolution": {
+      "n": 30,
+      "p95_seconds": 4.07,
+      "max_seconds": 4.39
+    },
+    "incoming-dlq-wiring": {
+      "n": 30,
+      "p95_seconds": 1.65,
+      "max_seconds": 1.7
+    },
+    "issue-kind-classifier-self-test": {
+      "n": 30,
+      "p95_seconds": 0.53,
+      "max_seconds": 0.7
+    },
+    "jaxrs-path-not-hijacked-by-toplevel-fun": {
+      "n": 30,
+      "p95_seconds": 0.81,
+      "max_seconds": 0.91
+    },
+    "jaxrs-path-prefix-leading-slash": {
+      "n": 30,
+      "p95_seconds": 1.71,
+      "max_seconds": 1.73
+    },
+    "journey-catalog-integrity": {
+      "n": 30,
+      "p95_seconds": 13.51,
+      "max_seconds": 13.8
+    },
+    "journey-money-path-accountability": {
+      "n": 30,
+      "p95_seconds": 0.78,
+      "max_seconds": 0.86
+    },
+    "json-logging-extension-present": {
+      "n": 30,
+      "p95_seconds": 0.68,
+      "max_seconds": 0.68
+    },
+    "kafka-acl-coverage": {
+      "n": 30,
+      "p95_seconds": 0.99,
+      "max_seconds": 1.0
+    },
+    "kafka-cert-reader-grant": {
+      "n": 30,
+      "p95_seconds": 0.86,
+      "max_seconds": 0.98
+    },
+    "kafka-deployment-wiring": {
+      "n": 30,
+      "p95_seconds": 12.78,
+      "max_seconds": 13.66
+    },
+    "kafka-dotted-key-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.88,
+      "max_seconds": 1.98
+    },
+    "kafka-topic-existence": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.47
+    },
+    "label-description-length": {
+      "n": 30,
+      "p95_seconds": 0.51,
+      "max_seconds": 0.54
+    },
+    "ledger-instance-switches-off": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.52
+    },
+    "lib-test-only-not-code-global": {
+      "n": 30,
+      "p95_seconds": 0.22,
+      "max_seconds": 0.23
+    },
+    "libs-annotations-implemented": {
+      "n": 30,
+      "p95_seconds": 5.46,
+      "max_seconds": 5.57
+    },
+    "libs-bench-alloc-baseline": {
+      "n": 30,
+      "p95_seconds": 0.35,
+      "max_seconds": 0.75
+    },
+    "libs-change-dependents": {
+      "n": 30,
+      "p95_seconds": 1.46,
+      "max_seconds": 1.57
+    },
+    "libs-core-purity": {
+      "n": 30,
+      "p95_seconds": 0.4,
+      "max_seconds": 0.52
+    },
+    "license-header-consistency": {
+      "n": 30,
+      "p95_seconds": 5.03,
+      "max_seconds": 5.07
+    },
+    "litellm-config-revision": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "litellm-model-costs": {
+      "n": 30,
+      "p95_seconds": 0.25,
+      "max_seconds": 0.34
+    },
+    "llm-price-book": {
+      "n": 30,
+      "p95_seconds": 0.23,
+      "max_seconds": 0.26
+    },
+    "log-trace-id-path": {
+      "n": 30,
+      "p95_seconds": 0.34,
+      "max_seconds": 0.36
+    },
+    "loki-rule-load-test": {
+      "n": 30,
+      "p95_seconds": 43.96,
+      "max_seconds": 44.7
+    },
+    "loki-rule-self-match": {
+      "n": 30,
+      "p95_seconds": 0.57,
+      "max_seconds": 0.66
+    },
+    "main-push-concurrency": {
+      "n": 30,
+      "p95_seconds": 1.02,
+      "max_seconds": 1.04
+    },
+    "main-red-watch-declaration": {
+      "n": 30,
+      "p95_seconds": 2.27,
+      "max_seconds": 2.27
+    },
+    "manifest-types-only": {
+      "n": 30,
+      "p95_seconds": 0.2,
+      "max_seconds": 0.22
+    },
+    "matrix-sa-excluded-actions": {
+      "n": 30,
+      "p95_seconds": 0.72,
+      "max_seconds": 0.73
+    },
+    "matrix-write-grants": {
+      "n": 30,
+      "p95_seconds": 0.9,
+      "max_seconds": 0.9
+    },
+    "mcp-charter-data-scope-binding": {
+      "n": 30,
+      "p95_seconds": 0.5,
+      "max_seconds": 0.53
+    },
+    "mcp-customer-channel-propose-only": {
+      "n": 22,
+      "p95_seconds": 4.68,
+      "max_seconds": 5.69
+    },
+    "mcp-real-port-requires-caller-auth-first": {
+      "n": 30,
+      "p95_seconds": 2.64,
+      "max_seconds": 2.88
+    },
+    "merge-train-carrier-fetch-selftest": {
+      "n": 30,
+      "p95_seconds": 0.79,
+      "max_seconds": 0.84
+    },
+    "merge-train-declaration": {
+      "n": 30,
+      "p95_seconds": 329.76,
+      "max_seconds": 335.89
+    },
+    "merge-train-stall-watch-declaration": {
+      "n": 30,
+      "p95_seconds": 0.33,
+      "max_seconds": 0.39
+    },
+    "merged-past-red-check-declaration": {
+      "n": 30,
+      "p95_seconds": 0.38,
+      "max_seconds": 0.38
+    },
+    "mermaid-parses": {
+      "n": 30,
+      "p95_seconds": 20.83,
+      "max_seconds": 20.84
+    },
+    "metric-name-prefix": {
+      "n": 30,
+      "p95_seconds": 1.74,
+      "max_seconds": 2.11
+    },
+    "model-residency-claims": {
+      "n": 30,
+      "p95_seconds": 16.43,
+      "max_seconds": 16.86
+    },
+    "money-path-pact-coverage": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.53
+    },
+    "money-rounding-inline-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.91,
+      "max_seconds": 0.93
+    },
+    "msg-channel-image-parity": {
+      "n": 30,
+      "p95_seconds": 1.6,
+      "max_seconds": 1.63
+    },
+    "mtls-bearer-only": {
+      "n": 30,
+      "p95_seconds": 2.05,
+      "max_seconds": 2.12
+    },
+    "mtls-keeps-http-port": {
+      "n": 30,
+      "p95_seconds": 1.52,
+      "max_seconds": 1.6
+    },
+    "nat-ami-pinned": {
+      "n": 30,
+      "p95_seconds": 0.34,
+      "max_seconds": 0.35
+    },
+    "native-auto-merge-holds": {
+      "n": 30,
+      "p95_seconds": 3.83,
+      "max_seconds": 4.06
+    },
+    "netpol-coverage-kpi": {
+      "n": 30,
+      "p95_seconds": 0.29,
+      "max_seconds": 0.29
+    },
+    "network-policy-code-edges": {
+      "n": 30,
+      "p95_seconds": 5.05,
+      "max_seconds": 5.09
+    },
+    "no-allow-all-pdp-in-main": {
+      "n": 30,
+      "p95_seconds": 1.85,
+      "max_seconds": 1.94
+    },
+    "no-dead-code-service-principal-rego-rule": {
+      "n": 30,
+      "p95_seconds": 2.69,
+      "max_seconds": 3.09
+    },
+    "no-epoch-instant-default": {
+      "n": 30,
+      "p95_seconds": 5.42,
+      "max_seconds": 5.46
+    },
+    "no-handrolled-cosign": {
+      "n": 30,
+      "p95_seconds": 4.32,
+      "max_seconds": 4.51
+    },
+    "no-local-daycount-or-calendar": {
+      "n": 30,
+      "p95_seconds": 2.83,
+      "max_seconds": 3.36
+    },
+    "no-runblocking-in-a-scheduled-body": {
+      "n": 30,
+      "p95_seconds": 1.7,
+      "max_seconds": 1.74
+    },
+    "no-service-local-exceptionmapper-collision-with-libs-runtime": {
+      "n": 30,
+      "p95_seconds": 1.3,
+      "max_seconds": 1.49
+    },
+    "nonnull-jaxrs-param-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.19,
+      "max_seconds": 1.19
+    },
+    "noop-not-success-ratchet": {
+      "n": 30,
+      "p95_seconds": 2.79,
+      "max_seconds": 2.81
+    },
+    "null-array-element-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.81,
+      "max_seconds": 1.83
+    },
+    "object-store-blobs-migration": {
+      "n": 30,
+      "p95_seconds": 0.59,
+      "max_seconds": 0.59
+    },
+    "oidc-client-configured": {
+      "n": 30,
+      "p95_seconds": 1.26,
+      "max_seconds": 1.29
+    },
+    "oidc-client-secret-wiring": {
+      "n": 30,
+      "p95_seconds": 11.37,
+      "max_seconds": 11.41
+    },
+    "oidc-secret-convention": {
+      "n": 30,
+      "p95_seconds": 2.07,
+      "max_seconds": 2.08
+    },
+    "oidc-tls-verification-profile-scoped": {
+      "n": 30,
+      "p95_seconds": 1.24,
+      "max_seconds": 1.3
+    },
+    "opa-bundle-apply-size": {
+      "n": 30,
+      "p95_seconds": 15.1,
+      "max_seconds": 15.15
+    },
+    "opa-bundle-parses": {
+      "n": 30,
+      "p95_seconds": 5.62,
+      "max_seconds": 5.66
+    },
+    "opa-sidecar-bundle-shape": {
+      "n": 30,
+      "p95_seconds": 0.8,
+      "max_seconds": 0.82
+    },
+    "openapi-enum-domain-drift": {
+      "n": 30,
+      "p95_seconds": 1.18,
+      "max_seconds": 1.42
+    },
+    "openapi-route-conformance": {
+      "n": 30,
+      "p95_seconds": 1.34,
+      "max_seconds": 1.34
+    },
+    "openapi-server-port": {
+      "n": 30,
+      "p95_seconds": 0.33,
+      "max_seconds": 0.35
+    },
+    "openapi-version-not-taken": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "openssf-gold-evidence": {
+      "n": 30,
+      "p95_seconds": 0.27,
+      "max_seconds": 0.28
+    },
+    "operator-write-naming": {
+      "n": 30,
+      "p95_seconds": 0.22,
+      "max_seconds": 0.23
+    },
+    "ops-cli-client-contract": {
+      "n": 30,
+      "p95_seconds": 0.35,
+      "max_seconds": 0.38
+    },
+    "otel-endpoint-declared": {
+      "n": 30,
+      "p95_seconds": 3.32,
+      "max_seconds": 3.47
+    },
+    "otel-exporter-endpoint": {
+      "n": 30,
+      "p95_seconds": 1.14,
+      "max_seconds": 1.34
+    },
+    "outbox-claim-sql-ratchet": {
+      "n": 30,
+      "p95_seconds": 5.57,
+      "max_seconds": 5.83
+    },
+    "outbox-conformance-it-present": {
+      "n": 30,
+      "p95_seconds": 6.0,
+      "max_seconds": 6.17
+    },
+    "outbox-dispatch-enabled-guard": {
+      "n": 30,
+      "p95_seconds": 1.86,
+      "max_seconds": 1.94
+    },
+    "outbox-has-writer": {
+      "n": 30,
+      "p95_seconds": 8.54,
+      "max_seconds": 8.58
+    },
+    "outbox-sent-retention": {
+      "n": 30,
+      "p95_seconds": 5.82,
+      "max_seconds": 5.97
+    },
+    "pact-deployed-record-reconcile": {
+      "n": 30,
+      "p95_seconds": 0.15,
+      "max_seconds": 0.15
+    },
+    "pact-provider-replay-coverage": {
+      "n": 30,
+      "p95_seconds": 0.63,
+      "max_seconds": 0.64
+    },
+    "pact-provider-version-proof-unit-test": {
+      "n": 30,
+      "p95_seconds": 9.05,
+      "max_seconds": 9.79
+    },
+    "pact-reconcile-decision-table": {
+      "n": 30,
+      "p95_seconds": 0.8,
+      "max_seconds": 0.8
+    },
+    "pact-twin-state-parity": {
+      "n": 30,
+      "p95_seconds": 10.42,
+      "max_seconds": 10.91
+    },
+    "pact-version-probe-fail-closed-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.66,
+      "max_seconds": 2.13
+    },
+    "pact-version-tree-equivalence-unit-test": {
+      "n": 30,
+      "p95_seconds": 31.51,
+      "max_seconds": 32.72
+    },
+    "pacticipant-matches-module": {
+      "n": 30,
+      "p95_seconds": 0.27,
+      "max_seconds": 0.29
+    },
+    "pdp-flag-rollout-complete": {
+      "n": 30,
+      "p95_seconds": 8.64,
+      "max_seconds": 9.07
+    },
+    "pdp-flag-rollout-probe-self-test": {
+      "n": 30,
+      "p95_seconds": 0.77,
+      "max_seconds": 0.79
+    },
+    "pitest-money-path-coverage": {
+      "n": 30,
+      "p95_seconds": 1.14,
+      "max_seconds": 1.2
+    },
+    "pitest-threshold-single-source": {
+      "n": 30,
+      "p95_seconds": 0.81,
+      "max_seconds": 0.88
+    },
+    "podmonitor-namespace-coverage": {
+      "n": 30,
+      "p95_seconds": 8.29,
+      "max_seconds": 8.86
+    },
+    "pr-build-cloud-credentials": {
+      "n": 30,
+      "p95_seconds": 0.42,
+      "max_seconds": 0.46
+    },
+    "pr-component-span": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "pr-file-overlap": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "pr-shared-files": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "principal-name-trust": {
+      "n": 30,
+      "p95_seconds": 4.03,
+      "max_seconds": 4.57
+    },
+    "probe-lib-known-positive": {
+      "n": 30,
+      "p95_seconds": 1.93,
+      "max_seconds": 2.05
+    },
+    "probe-scrape-port-has-a-listener": {
+      "n": 30,
+      "p95_seconds": 1.42,
+      "max_seconds": 1.43
+    },
+    "product-ir-authoring-parity": {
+      "n": 30,
+      "p95_seconds": 0.32,
+      "max_seconds": 0.32
+    },
+    "product-ir-determinism": {
+      "n": 30,
+      "p95_seconds": 0.45,
+      "max_seconds": 0.45
+    },
+    "product-ir-formal-properties": {
+      "n": 30,
+      "p95_seconds": 0.55,
+      "max_seconds": 0.62
+    },
+    "product-ir-purity": {
+      "n": 30,
+      "p95_seconds": 1.23,
+      "max_seconds": 1.39
+    },
+    "product-ir-run-limits": {
+      "n": 30,
+      "p95_seconds": 0.54,
+      "max_seconds": 0.55
+    },
+    "product-ir-version-lifecycle": {
+      "n": 30,
+      "p95_seconds": 0.38,
+      "max_seconds": 0.39
+    },
+    "product-revision-pinned": {
+      "n": 30,
+      "p95_seconds": 1.17,
+      "max_seconds": 1.28
+    },
+    "prompt-registry-integrity": {
+      "n": 30,
+      "p95_seconds": 0.5,
+      "max_seconds": 0.52
+    },
+    "promql-alert-unit-tests": {
+      "n": 30,
+      "p95_seconds": 141.38,
+      "max_seconds": 144.27
+    },
+    "provenance": {
+      "n": 30,
+      "p95_seconds": 55.56,
+      "max_seconds": 60.03
+    },
+    "provider-type-classpath": {
+      "n": 30,
+      "p95_seconds": 0.5,
+      "max_seconds": 0.52
+    },
+    "psd2-anonymous-grant-stays-behind-eidas-mtls": {
+      "n": 30,
+      "p95_seconds": 0.36,
+      "max_seconds": 0.52
+    },
+    "public-workload-ha": {
+      "n": 30,
+      "p95_seconds": 0.72,
+      "max_seconds": 0.72
+    },
+    "python-lint": {
+      "n": 30,
+      "p95_seconds": 4.0,
+      "max_seconds": 4.38
+    },
+    "quarkus-application-version-override-guard": {
+      "n": 30,
+      "p95_seconds": 1.63,
+      "max_seconds": 1.64
+    },
+    "quarkus-test-ports-ephemeral": {
+      "n": 30,
+      "p95_seconds": 0.92,
+      "max_seconds": 1.1
+    },
+    "quoted-sequence-name-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.41,
+      "max_seconds": 0.57
+    },
+    "rail-screening-port": {
+      "n": 30,
+      "p95_seconds": 0.73,
+      "max_seconds": 0.76
+    },
+    "raw-colour-literal-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.6
+    },
+    "raw-http-client-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.13,
+      "max_seconds": 1.15
+    },
+    "readiness-attestation-format": {
+      "n": 30,
+      "p95_seconds": 0.63,
+      "max_seconds": 0.67
+    },
+    "readiness-collectors-agree": {
+      "n": 30,
+      "p95_seconds": 61.45,
+      "max_seconds": 63.04
+    },
+    "realm-devci-artifact-parity": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.47
+    },
+    "realm-import-secret-sources": {
+      "n": 30,
+      "p95_seconds": 0.46,
+      "max_seconds": 0.47
+    },
+    "realm-template-importable": {
+      "n": 30,
+      "p95_seconds": 0.42,
+      "max_seconds": 0.42
+    },
+    "record-deployment-version-resolver": {
+      "n": 30,
+      "p95_seconds": 1.48,
+      "max_seconds": 1.54
+    },
+    "regen-derived-inventory": {
+      "n": 30,
+      "p95_seconds": 0.3,
+      "max_seconds": 0.37
+    },
+    "rego-service-account-profile-scope": {
+      "n": 30,
+      "p95_seconds": 1.69,
+      "max_seconds": 1.81
+    },
+    "regulatory-obligations-register": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.56
+    },
+    "release-evidence-coverage": {
+      "n": 30,
+      "p95_seconds": 16.2,
+      "max_seconds": 16.35
+    },
+    "release-registration-consistency": {
+      "n": 30,
+      "p95_seconds": 0.36,
+      "max_seconds": 0.41
+    },
+    "release-scope-mismatch-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "release-support-period-derivation": {
+      "n": 30,
+      "p95_seconds": 0.34,
+      "max_seconds": 0.35
+    },
+    "remote-build-cache-write-scope": {
+      "n": 30,
+      "p95_seconds": 3.23,
+      "max_seconds": 3.37
+    },
+    "requirements-traceability": {
+      "n": 30,
+      "p95_seconds": 0.94,
+      "max_seconds": 0.97
+    },
+    "resilience-profile": {
+      "n": 30,
+      "p95_seconds": 1.38,
+      "max_seconds": 1.43
+    },
+    "resolve-tracking-issue-selftest": {
+      "n": 30,
+      "p95_seconds": 0.31,
+      "max_seconds": 0.33
+    },
+    "rest-client-timeouts": {
+      "n": 30,
+      "p95_seconds": 0.38,
+      "max_seconds": 0.52
+    },
+    "restclient-url-supplied": {
+      "n": 30,
+      "p95_seconds": 9.37,
+      "max_seconds": 9.48
+    },
+    "rolesallowed-realm-parity": {
+      "n": 30,
+      "p95_seconds": 1.87,
+      "max_seconds": 2.72
+    },
+    "route-exports": {
+      "n": 30,
+      "p95_seconds": 0.72,
+      "max_seconds": 0.75
+    },
+    "ruleset-bypass-actors": {
+      "n": 30,
+      "p95_seconds": 21.25,
+      "max_seconds": 21.66
+    },
+    "ruleset-context-parity": {
+      "n": 30,
+      "p95_seconds": 15.21,
+      "max_seconds": 15.51
+    },
+    "runtime-conformance-comparators": {
+      "n": 30,
+      "p95_seconds": 0.39,
+      "max_seconds": 0.41
+    },
+    "scheduled-trigger-emitted": {
+      "n": 30,
+      "p95_seconds": 5.72,
+      "max_seconds": 6.08
+    },
+    "scheduler-cron-syntax": {
+      "n": 30,
+      "p95_seconds": 1.55,
+      "max_seconds": 1.6
+    },
+    "scheduler-exercised-in-tests": {
+      "n": 30,
+      "p95_seconds": 1.82,
+      "max_seconds": 1.84
+    },
+    "scheduler-liveness-adoption": {
+      "n": 30,
+      "p95_seconds": 0.73,
+      "max_seconds": 0.74
+    },
+    "schema-compat-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "security-checklist-append-helper": {
+      "n": 30,
+      "p95_seconds": 0.13,
+      "max_seconds": 0.42
+    },
+    "security-checklist-money-path": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "security-sensitive-paths-coverage": {
+      "n": 30,
+      "p95_seconds": 13.27,
+      "max_seconds": 14.31
+    },
+    "security-txt-policy-reachable": {
+      "n": 30,
+      "p95_seconds": 1.02,
+      "max_seconds": 1.03
+    },
+    "selftest-inputs-traced": {
+      "n": 30,
+      "p95_seconds": 1.92,
+      "max_seconds": 2.1
+    },
+    "service-application-readiness": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "service-ci-explicit-jobs": {
+      "n": 30,
+      "p95_seconds": 14.5,
+      "max_seconds": 14.63
+    },
+    "service-ci-path-selection-scenarios": {
+      "n": 30,
+      "p95_seconds": 108.21,
+      "max_seconds": 109.2
+    },
+    "service-ci-select-modules": {
+      "n": 30,
+      "p95_seconds": 16.28,
+      "max_seconds": 16.99
+    },
+    "service-runbook-drift": {
+      "n": 30,
+      "p95_seconds": 13.51,
+      "max_seconds": 13.88
+    },
+    "shellcheck": {
+      "n": 30,
+      "p95_seconds": 38.74,
+      "max_seconds": 40.12
+    },
+    "single-replica-rollout-strategy": {
+      "n": 30,
+      "p95_seconds": 1.28,
+      "max_seconds": 1.42
+    },
+    "slo-dashboard-drift": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.55
+    },
+    "slo-registry-consistency": {
+      "n": 30,
+      "p95_seconds": 0.76,
+      "max_seconds": 0.78
+    },
+    "source-service-convention": {
+      "n": 30,
+      "p95_seconds": 1.43,
+      "max_seconds": 1.46
+    },
+    "source-service-presence": {
+      "n": 30,
+      "p95_seconds": 0.83,
+      "max_seconds": 0.88
+    },
+    "spot-kill-retry-selftest": {
+      "n": 30,
+      "p95_seconds": 9.96,
+      "max_seconds": 10.47
+    },
+    "stale-comment-references": {
+      "n": 30,
+      "p95_seconds": 8.87,
+      "max_seconds": 9.03
+    },
+    "standing-critical-digest-guards": {
+      "n": 30,
+      "p95_seconds": 0.1,
+      "max_seconds": 0.11
+    },
+    "standing-red-sentinel-selftest": {
+      "n": 30,
+      "p95_seconds": 1.99,
+      "max_seconds": 2.03
+    },
+    "stateful-not-on-spot": {
+      "n": 30,
+      "p95_seconds": 1.23,
+      "max_seconds": 1.24
+    },
+    "supersede-deploy-prs-ancestry": {
+      "n": 30,
+      "p95_seconds": 6.33,
+      "max_seconds": 6.5
+    },
+    "synthetic-customer-identity": {
+      "n": 30,
+      "p95_seconds": 0.66,
+      "max_seconds": 0.67
+    },
+    "synthetic-outbox-taint-persistence": {
+      "n": 30,
+      "p95_seconds": 4.61,
+      "max_seconds": 4.73
+    },
+    "synthetic-taint-rest-client-boundaries": {
+      "n": 30,
+      "p95_seconds": 1.1,
+      "max_seconds": 1.15
+    },
+    "temporal-namespace-registration": {
+      "n": 30,
+      "p95_seconds": 2.26,
+      "max_seconds": 2.52
+    },
+    "temporal-worker-switch-naming": {
+      "n": 30,
+      "p95_seconds": 1.3,
+      "max_seconds": 1.32
+    },
+    "test-intelligence-ecosystem": {
+      "n": 30,
+      "p95_seconds": 23.81,
+      "max_seconds": 24.07
+    },
+    "test-layer-applicability": {
+      "n": 30,
+      "p95_seconds": 0.81,
+      "max_seconds": 0.87
+    },
+    "test-provenance-cache": {
+      "n": 30,
+      "p95_seconds": 93.43,
+      "max_seconds": 93.59
+    },
+    "test-runblocking-unit-guard": {
+      "n": 30,
+      "p95_seconds": 0.51,
+      "max_seconds": 0.51
+    },
+    "test-script-reachability": {
+      "n": 30,
+      "p95_seconds": 1.32,
+      "max_seconds": 1.37
+    },
+    "threat-model-claims-resolve": {
+      "n": 30,
+      "p95_seconds": 15.1,
+      "max_seconds": 15.52
+    },
+    "threat-model-coverage": {
+      "n": 30,
+      "p95_seconds": 0.58,
+      "max_seconds": 0.61
+    },
+    "threat-model-test-evidence": {
+      "n": 30,
+      "p95_seconds": 17.91,
+      "max_seconds": 19.64
+    },
+    "threat-model-updated-on-trust-boundary-change": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "tls-certificate-reload": {
+      "n": 30,
+      "p95_seconds": 3.74,
+      "max_seconds": 3.74
+    },
+    "tofu-image-pull-through": {
+      "n": 30,
+      "p95_seconds": 0.28,
+      "max_seconds": 0.45
+    },
+    "trace-contract-evidence": {
+      "n": 30,
+      "p95_seconds": 1.11,
+      "max_seconds": 1.14
+    },
+    "treasury-parity-fixtures": {
+      "n": 30,
+      "p95_seconds": 0.8,
+      "max_seconds": 0.88
+    },
+    "untrusted-pg-extension": {
+      "n": 30,
+      "p95_seconds": 13.59,
+      "max_seconds": 13.97
+    },
+    "value-movement-admission-coverage": {
+      "n": 30,
+      "p95_seconds": 2.16,
+      "max_seconds": 2.2
+    },
+    "verification-metadata-additive-check": {
+      "n": 30,
+      "p95_seconds": 0.59,
+      "max_seconds": 0.63
+    },
+    "verify-added-checksums-falsifiable": {
+      "n": 30,
+      "p95_seconds": 0.43,
+      "max_seconds": 0.58
+    },
+    "vex-overlay-coverage": {
+      "n": 30,
+      "p95_seconds": 0.55,
+      "max_seconds": 0.56
+    },
+    "vex-range-reasoning": {
+      "n": 30,
+      "p95_seconds": 0.63,
+      "max_seconds": 0.66
+    },
+    "vex-resolved-version-current": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.6
+    },
+    "watch-outcome-declared": {
+      "n": 30,
+      "p95_seconds": 0.32,
+      "max_seconds": 0.39
+    },
+    "workflow-gh-token-declared": {
+      "n": 30,
+      "p95_seconds": 0.78,
+      "max_seconds": 0.82
+    },
+    "workflow-run-step-size": {
+      "n": 30,
+      "p95_seconds": 5.04,
+      "max_seconds": 5.35
+    },
+    "workflow-supply-chain": {
+      "n": 30,
+      "p95_seconds": 20.01,
+      "max_seconds": 20.4
+    },
+    "xml-factory-hardened": {
+      "n": 30,
+      "p95_seconds": 2.1,
+      "max_seconds": 2.13
+    },
+    "yamllint": {
+      "n": 30,
+      "p95_seconds": 19.06,
+      "max_seconds": 19.09
+    }
+  }
+}

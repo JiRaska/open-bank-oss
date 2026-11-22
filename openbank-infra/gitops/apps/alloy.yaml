@@ -80,6 +80,11 @@ spec:
               operator: Equal
               value: "true"
               effect: NoSchedule
+            # Node-key migration to open-bank.tech, stage 1: tolerate both taint keys.
+            - key: open-bank.tech/stateful
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
         alloy:
           # Read container logs from the node's /var/log/pods (read-only hostPath), not
           # through the API server. See "tail container stdout/stderr" in the config below

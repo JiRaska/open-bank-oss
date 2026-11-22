@@ -65,21 +65,36 @@ export default defineConfig({
         'src/instrumentation*.ts',
       ],
       // ── Ratchet (repo convention: coverage may never go down) ──────────────
-      // Pinned just BELOW the level ACTUALLY MEASURED when coverage was first
-      // switched on (2026-07-16, full suite):
-      //   statements 36.53% · branches 18.78% · functions 29.98% · lines 38.79%
-      // For scale: without the 81-page render-smoke suite the same run measures
-      // statements 7.03% · branches 4.09% · functions 5.30% · lines 7.40% —
-      // mounting the pages is what moved it, and these floors would collapse back
-      // to single digits if that suite ever stopped being collected.
-      // The floors sit ~0.5–1pt under each measurement so ordinary churn doesn't
-      // red-CI a good PR. They are a floor, NOT a target: raise them as real
-      // coverage rises; never lower one to make CI pass.
+      // ADR-0370 U3. Until 2026-11-11 these floors were 36/18/29/38 and CI never ran with
+      // --coverage, so they were enforced nowhere. Measured that day on the full suite:
+      //   statements 73.3% · branches 62.22% · functions 69.2% · lines 77.26%
+      // Each floor sits 1pt (floored) under its measurement so ordinary churn does not red a
+      // good PR. The global floor alone lets decision logic lose tests while page smoke tests
+      // keep the total up, so each src/lib decision module carries its own floor as well.
+      // Floors only go up: gate admin-ui-module-coverage-ratchet fails a lowered or removed
+      // one unless the PR carries `coverage-floor-lowered: #<issue>`.
       thresholds: {
-        statements: 36,
-        branches: 18,
-        functions: 29,
-        lines: 38,
+        statements: 72,
+        branches: 61,
+        functions: 68,
+        lines: 76,
+        'src/lib/aml/**': { statements: 92, branches: 87, functions: 99, lines: 99 },
+        'src/lib/approvals/**': { statements: 94, branches: 92, functions: 99, lines: 99 },
+        'src/lib/auth/**': { statements: 85, branches: 80, functions: 81, lines: 87 },
+        'src/lib/closings/**': { statements: 90, branches: 90, functions: 95, lines: 99 },
+        'src/lib/consents/**': { statements: 88, branches: 85, functions: 99, lines: 96 },
+        'src/lib/delegations/**': { statements: 90, branches: 79, functions: 99, lines: 93 },
+        'src/lib/disputes/**': { statements: 87, branches: 91, functions: 99, lines: 99 },
+        'src/lib/fees/**': { statements: 85, branches: 74, functions: 99, lines: 99 },
+        'src/lib/format/**': { statements: 89, branches: 99, functions: 99, lines: 89 },
+        'src/lib/fraud/**': { statements: 85, branches: 83, functions: 99, lines: 99 },
+        'src/lib/interest/**': { statements: 83, branches: 80, functions: 99, lines: 99 },
+        'src/lib/ledger/**': { statements: 80, branches: 80, functions: 90, lines: 93 },
+        'src/lib/lending/**': { statements: 95, branches: 99, functions: 99, lines: 93 },
+        'src/lib/mutations/**': { statements: 96, branches: 87, functions: 99, lines: 96 },
+        'src/lib/payments/**': { statements: 93, branches: 90, functions: 99, lines: 99 },
+        'src/lib/sanctions/**': { statements: 79, branches: 92, functions: 65, lines: 84 },
+        'src/lib/settlement/**': { statements: 99, branches: 93, functions: 99, lines: 99 },
       },
     },
   },

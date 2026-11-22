@@ -114,3 +114,11 @@ This service's `application.yaml` does not declare the management interface (`qu
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Advisory authorization (ADR-0034 Phase 5)
+
+Every endpoint carries `@Authorize`, and the deployed pod runs an OPA sidecar reached through `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). Enforcement stays advisory: `authz.enforce` defaults to `false`, so `@RolesAllowed` still decides the response and a would-deny decision is only logged. `openbank.authz.opa-pdp-producer.enabled` is a build-time switch that supplies the policy decision point client; it is off in the test profile, where policy is covered by the rego tests instead. Flipping enforcement is a separate, later change.
+
+Onboarding inspection actions require a verified human staff principal in the advisory policy. Each action
+is scoped to an individual endpoint and carries no tenant target. This keeps the shared read and tenant
+grants from allowing service accounts that carry staff roles.

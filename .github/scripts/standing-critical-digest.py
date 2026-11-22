@@ -52,10 +52,13 @@ def render(alerts: list[dict], now: dt.datetime) -> str:
     return "\n".join(lines) + "\n"
 
 
-def fetch(url: str, token: str) -> list[dict]:
+def fetch(url: str, token: str | None) -> list[dict]:
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         url.rstrip("/") + "/api/v2/alerts?filter=severity%3D%22critical%22",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -88,8 +91,13 @@ def main() -> int:
         self_test()
         return 0
     url, token = os.environ.get("ALERTMANAGER_URL"), os.environ.get("ALERTMANAGER_DIGEST_TOKEN")
-    if not url or not token:
-        print("ERROR: ALERTMANAGER_URL and ALERTMANAGER_DIGEST_TOKEN are required", file=sys.stderr)
+    # ALERTMANAGER_AUTH=none is the in-cluster path (ADR-0382): the URL is the GET-only relay,
+    # which takes no credential. It must be stated explicitly — a merely MISSING token still
+    # fails closed, so a misconfigured CI run cannot silently go unauthenticated.
+    unauthenticated = os.environ.get("ALERTMANAGER_AUTH") == "none"
+    if not url or (not token and not unauthenticated):
+        print("ERROR: ALERTMANAGER_URL and ALERTMANAGER_DIGEST_TOKEN are required "
+              "(or ALERTMANAGER_AUTH=none for the in-cluster relay)", file=sys.stderr)
         return 2
     now = dt.datetime.now(dt.timezone.utc)
     try:

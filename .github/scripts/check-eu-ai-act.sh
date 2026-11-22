@@ -46,7 +46,7 @@ PYGEN
     out=$(EU_AI_ACT_ROOT="$d" bash "$SELF" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<< "$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
     fi
   }

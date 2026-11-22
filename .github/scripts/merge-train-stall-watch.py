@@ -19,6 +19,11 @@ The census reads the newest successful "Merge train" settle log, takes each arme
 decision line (`# 15381 skip      <reason>`, `strict`, `fix`, `fast`, `CANDIDATE`), normalises
 the reason (PR numbers, SHAs, numbers stripped) and groups. A reason shared by >= SYSTEMIC_MIN
 armed PRs, or by every non-candidate armed PR (at least two), is SYSTEMIC and leads the issue.
+Train CANDIDATES carry no reason, so they are attributed to the train-level state read from the
+settle log's non-PR lines (strict carrier holding main > main red > fast carrier in flight > idle
+with no carrier); that leads when it covers >= SYSTEMIC_MIN PRs (#15449). A run that attributes
+nothing says "unattributed" — the systemic hash is never that of the empty string. The clock counts
+every merge except deploy-pin heads (`counts_as_merge`), whoever authored it.
 
 OUTPUT. Exactly one open issue labelled STALL_LABEL: created on a stall, its body rewritten
 (only when it changed) while the stall lasts, a comment only when the systemic cause changes,
@@ -29,6 +34,7 @@ cannot read its inputs must never report "no stall" — that is the failure this
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -50,6 +56,13 @@ STATUS_CONTEXT = "merge-train"       # the train's own status; never a main verd
 SYSTEMIC_MARK = re.compile(r"<!-- stall-systemic: ([0-9a-f]{12}) -->")
 DECISION_RE = re.compile(r"#\s*(\d+) (CANDIDATE|skip|strict|fix|fast)\s+(.*)$")  # `notice` is not a decision
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Deploy-pin PRs merge outside the train (the gitops bot merges them itself), so they must not reset the
+# clock. Same head-ref classifier as deploy-window.py and auto-update-armed-prs.py (BOT_DEPLOY_PREFIXES).
+DEPLOY_PIN_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
+STRICT_HOLD_RE = re.compile(r"^strict carrier #(\d+): CI running — it holds the strict reservation")
+FAST_FLIGHT_RE = re.compile(r"^carrier #(\d+): (?:CI still running|inconclusive .* in flight)")
+MAIN_RED_LINE_RE = re.compile(r"^train: none while main \S+ is red on (.+?) — ")
+SABOTAGE: set[str] = set()           # --sabotage=<rule>: switch one rule off; the self-test MUST then fail
 
 
 class CouldNotLook(Exception):
@@ -84,6 +97,83 @@ def parse_settle_log(text: str) -> dict[int, tuple[str, str]]:
 
 def is_candidate(kind: str, reason: str) -> bool:
     return kind == "CANDIDATE" or (kind == "strict" and reason.startswith("green:"))
+
+
+def counts_as_merge(head_ref: str, author_type: str = "") -> bool:
+    """Does a merged PR reset the stall clock? Every merge the TRAIN made does, whoever authored it
+    (#15378, a gitops-bot app-status refresh, rode the train). Only deploy-pin PRs do not: the bot
+    merges those itself, so they prove nothing about train throughput (#15447).
+
+    Why the head ref and not the merger or the `merge-train` status: a train merge is performed by
+    auto-merge, so `merged_by` is whoever ARMED it (#15378 reads JiRaska, not the App), and the list
+    endpoint carries neither `merged_by` nor statuses — both would cost one call per PR. The head ref
+    is already in the page we fetch, and the deploy-pin prefixes are the repo's existing classifier."""
+    if "botmerge" in SABOTAGE:        # the #15407 rule: every Bot-authored merge excluded
+        return author_type != "Bot"
+    if "deploypin" in SABOTAGE:
+        return True
+    return not head_ref.startswith(DEPLOY_PIN_PREFIXES)
+
+
+def last_merge_of(prs: list[dict]) -> tuple[float, int]:
+    merged = [(ts(p["merged_at"]), p["number"]) for p in prs
+              if p.get("merged_at") and counts_as_merge(((p.get("head") or {}).get("ref")) or "",
+                                                           (p.get("user") or {}).get("type") or "")]
+    if not merged:
+        raise CouldNotLook("no counted merge among the 100 most recently updated closed PRs")
+    return max(merged)
+
+
+def parse_train_state(text: str) -> dict:
+    """Train-level state from the settle log's NON-PR lines: the `settle: {...}` summary (structured,
+    last one wins) plus the carrier lines. Header-echoed script text never starts with these after a
+    timestamp, and a literal_eval failure leaves the line-derived facts standing."""
+    st: dict = {"strict_carrier": None, "main_red": [], "fast_in_flight": []}
+    for line in text.splitlines():
+        line = ANSI_RE.sub("", line)
+        m = re.match(r"^\d{4}-\d\d-\d\dT[\d:.]+Z (.*)$", line)
+        body = (m.group(1) if m else line).strip()
+        if (h := STRICT_HOLD_RE.match(body)):
+            st["strict_carrier"] = int(h.group(1))
+        elif (f := FAST_FLIGHT_RE.match(body)) and int(f.group(1)) not in st["fast_in_flight"]:
+            st["fast_in_flight"].append(int(f.group(1)))
+        elif (r := MAIN_RED_LINE_RE.match(body)):
+            st["main_red"] = sorted(c.strip() for c in r.group(1).split(","))
+        elif body.startswith("settle: {"):
+            try:
+                d = ast.literal_eval(body[len("settle: "):])
+            except (ValueError, SyntaxError):
+                continue
+            if isinstance(d, dict):
+                if d.get("strict_carrier"):
+                    st["strict_carrier"] = int(d["strict_carrier"])
+                if d.get("main_red"):
+                    st["main_red"] = sorted(str(c) for c in d["main_red"])
+    return st
+
+
+def attribute_candidates(state: dict, carriers: dict[int, tuple[str, float]], main_desc: str,
+                         now: float) -> tuple[str, str]:
+    """Candidates have no blocking reason of their own, so they are attributed to the dominant
+    train-level state. -> (stable key for the systemic hash, display text with names and ages)."""
+    def age(n):
+        c = carriers.get(n)
+        return f", open {int((now - c[1]) // 60)} min" if c else ""
+    sc = state.get("strict_carrier")
+    if sc and "strict" not in SABOTAGE:
+        return ("train: strict carrier #N holds main",
+                f"strict carrier #{sc} holds main (CI running, it holds the strict reservation{age(sc)})")
+    red = state.get("main_red") or ([c.strip() for c in main_desc[len("red: "):].split(",")]
+                                     if main_desc.startswith("red: ") else [])
+    if red and "mainred" not in SABOTAGE:
+        return (f"train: main red on {', '.join(sorted(red))}",
+                f"main red on {', '.join(sorted(red))} — the train serves fixes only")
+    fast = state.get("fast_in_flight") or []   # only the log says "in flight"; an open carrier may be yielded
+    if fast:
+        return ("train: fast carrier in flight",
+                "fast carrier in flight: " + ", ".join(f"#{n}{age(n)}" for n in fast))
+    return ("train: candidates idle with no carrier",
+            "candidates idle with no carrier and main green — the train is not building (bug signal)")
 
 
 def census(armed: list[int], decisions: dict[int, tuple[str, str]]):
@@ -124,10 +214,11 @@ def render(v: dict) -> str:
     if v["systemic"]:
         L.append("## SYSTEMIC cause(s)")
         for k in v["systemic"]:
-            L.append(f"- **{k}** — {len(v['groups'][k])} PRs: {', '.join(f'#{n}' for n in v['groups'][k])}")
+            L.append(f"- **{v.get('detail', {}).get(k, k)}** — {len(v['groups'][k])} PRs: "
+                     f"{', '.join(f'#{n}' for n in v['groups'][k]) or 'none'}")
         L.append("")
     L.append("## Full census")
-    for k, prs in sorted(v["groups"].items(), key=lambda kv: (-len(kv[1]), kv[0])):
+    for k, prs in sorted(((k, p) for k, p in v["groups"].items() if p), key=lambda kv: (-len(kv[1]), kv[0])):
         L.append(f"- {len(prs)} × `{k}`: {', '.join(f'#{n}' for n in prs)}")
     L += ["", f"_Kept by `merge-train-stall-watch.yml` ({v['watch_url']}); one issue, body rewritten, "
                "closed automatically when merges resume._"]
@@ -194,18 +285,17 @@ class Api:
 
     # reads
     def last_merge(self) -> tuple[float, int]:
-        prs = self.get("/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100")
-        # Bot PRs (gitops deploys) merge outside the train and would reset the clock on a real stall.
-        merged = [(ts(p["merged_at"]), p["number"]) for p in prs
-                  if p.get("merged_at") and (p.get("user") or {}).get("type") != "Bot"]
-        if not merged:
-            raise CouldNotLook("no merged PR among the 100 most recently updated closed PRs")
-        return max(merged)
+        return last_merge_of(self.get("/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100"))
+
+    carriers: dict[int, tuple[str, float]] = {}
 
     def armed(self) -> list[int]:
-        out, page = [], 1
+        """Armed PRs; open `train/` carriers are recorded from the SAME pages (no extra call)."""
+        out, page, self.carriers = [], 1, {}
         while page <= 10:
             prs = self.get(f"/pulls?state=open&base=main&per_page=100&page={page}")
+            self.carriers.update({p["number"]: (p["head"]["ref"], ts(p["created_at"])) for p in prs
+                                  if p["head"]["ref"].startswith("train/")})
             out += [p["number"] for p in prs if p.get("auto_merge") and not p.get("draft")
                     and not p["head"]["ref"].startswith("train/")]
             if len(prs) < 100:
@@ -348,6 +438,21 @@ def evaluate(api, now: float, run_id: str | None, watch_url: str) -> tuple[bool,
             raise CouldNotLook(f"settle log {url} holds no decision line — census unreadable")
         v["groups"], v["systemic"], v["candidates"] = census(armed, parse_settle_log(text))
         v["settle_url"] = url
+        v["detail"] = {}
+        if v["candidates"]:
+            # Candidates carry no reason of their own; without this they fell outside the census and
+            # #15449 published the empty-string hash while a strict carrier held main.
+            key, lead_text = attribute_candidates(parse_train_state(text), getattr(api, "carriers", {}),
+                                             main_desc, now)
+            v["groups"][key] = list(v["candidates"])
+            v["detail"][key] = lead_text
+            if len(v["candidates"]) >= SYSTEMIC_MIN:
+                v["systemic"] = [key] + [k for k in v["systemic"] if k != key]
+        if not v["systemic"]:
+            v["systemic"] = ["unattributed: no reason shared by enough armed PRs"]
+            v["detail"][v["systemic"][0]] = (f"could not attribute — no reason or train state covers "
+                                             f">= {SYSTEMIC_MIN} armed PRs; read the census below")
+            v["groups"].setdefault(v["systemic"][0], [])
         v["systemic_key"] = hashlib.sha256("\n".join(v["systemic"]).encode()).hexdigest()[:12]
     return stalled, v
 
@@ -367,6 +472,7 @@ class FakeApi:
         self.calls: list[tuple] = []
         self.last_watch = None
         self.fail, self._merged, self._armed, self._red, self._log = fail, merged, list(armed), red, log
+        self.carriers: dict[int, tuple[str, float]] = {}
 
     def _chk(self, what):
         if self.fail == what:
@@ -545,6 +651,60 @@ def self_test() -> int:
           and api.issues[0]["state"] == "closed" and ("close", api.issues[0]["number"]) in api.calls)
     api.calls.clear()
     check("closed and healthy: no further writes", reconcile_issue(api, st, v) == "none" and api.calls == [])
+    # --- #15449 (2026-11-10): 17 candidates, a strict carrier holding main; real strings, run 42738299740
+    cands17 = [15299, 15328, 15358, 15359, 15370, 15399, 15400, 15411, 15421, 15429, 15430, 15432, 15433,
+               15437, 15440, 15443, 15446]
+    live = "\n".join(
+        [f"2026-11-10T01:49:40.1Z # {n} CANDIDATE armed + all required green" for n in cands17] + [
+            "2026-11-10T01:49:40.2Z # 15362 fast      held: a strict carrier is open over main (#15452) — next tick",
+            "2026-11-10T01:49:40.2Z # 15451 fast      held: a strict carrier is open over main (#15452) — next tick",
+            "2026-11-10T01:49:40.2Z # 14881 skip      codex PR needs owner approval on this exact head",
+            "2026-11-10T01:49:40.2Z # 15453 skip      required context never reported: Validate manifests",
+            "2026-11-10T01:49:40.2Z # 14940 strict    behind main, not updated: a strict carrier is open over main"
+            " — next tick",
+            "2026-11-10T01:49:41.0Z strict carrier #15452: CI running — it holds the strict reservation",
+            "2026-11-10T01:49:41.1Z settle: {'in_flight': True, 'merged': [], 'culprits': [], 'bisected': [], "
+            "'rejected': [], 'fast': [], 'inconclusive': [], 'rerun': [], 'refreshed': [], 'culprit_refreshed': [], "
+            "'strict_carrier': 15452, 'main_red': [], 'strict': [], 'updated': [], 'waiting': [], 'stuck': []}"])
+    larmed = cands17 + [15362, 15451, 14881, 15453, 14940]
+    lapi = FakeApi(merged=(0.0, 15407), armed=larmed, log=live)
+    lapi.carriers = {15452: ("train/strict-42733073616-1", 2 * T - 95 * 60)}
+    st, v = evaluate(lapi, 2 * T, None, "w")
+    lead = v["systemic"][0] if v["systemic"] else ""
+    check("#15449: 17 candidates + strict-carrier line -> SYSTEMIC lead 'strict carrier #N holds main'",
+          st and lead == "train: strict carrier #N holds main" and v["groups"][lead] == sorted(cands17)
+          and "#15452" in v["detail"][lead] and "95 min" in v["detail"][lead])
+    check("#15449: systemic hash is never the empty-string hash",
+          v["systemic_key"] != hashlib.sha256(b"").hexdigest()[:12] and "#15452 holds main" in render(v))
+    red_log = "\n".join(ln for ln in live.splitlines() if "strict carrier #" not in ln).replace(
+        "'strict_carrier': 15452, 'main_red': []", "'strict_carrier': None, 'main_red': ['Gitleaks']")
+    red_log += ("\n2026-11-10T01:49:41.2Z train: none while main 3f2a9c1d0b7e is red on Gitleaks"
+                " — fixes go first, alone")
+    st, v = evaluate(FakeApi(merged=(0.0, 15407), armed=larmed, log=red_log), 2 * T, None, "w")
+    check("candidates + red main -> SYSTEMIC lead 'main red on Gitleaks'",
+          v["systemic"][:1] == ["train: main red on Gitleaks"])
+    st, v = evaluate(FakeApi(merged=(0.0, 15407), armed=[1, 2], log="2026-11-10T00:00:00Z # 1 skip      a\n"
+                             "2026-11-10T00:00:00Z # 2 skip      b"), 2 * T, None, "w")
+    idle = "\n".join(ln for ln in live.splitlines() if "strict carrier #" not in ln and "settle:" not in ln)
+    _, vi = evaluate(FakeApi(merged=(0.0, 15407), armed=larmed, log=idle), 2 * T, None, "w")
+    check("candidates, no carrier, main green -> 'candidates idle with no carrier'",
+          vi["systemic"][:1] == ["train: candidates idle with no carrier"])
+    _, vi = evaluate(FakeApi(merged=(0.0, 15407), armed=larmed, log=idle + "\n2026-11-10T01:49:41.0Z carrier #15460: "
+                            "CI still running after > 45 min — no longer holds the strict lane"), 2 * T, None, "w")
+    check("candidates + fast carrier line -> 'fast carrier in flight'",
+          vi["systemic"][:1] == ["train: fast carrier in flight"] and "#15460" in vi["detail"][vi["systemic"][0]])
+    check("a run that cannot attribute says so explicitly (non-empty hash)",
+          v["systemic"][0].startswith("unattributed")
+          and v["systemic_key"] != hashlib.sha256(b"").hexdigest()[:12])
+    # --- merges: real PR-list shape 2026-11-09/10 (#15378 train-merged bot PR, #15447 deploy pin)
+    prs = [{"number": 15378, "merged_at": "2026-11-10T00:58:20Z", "user": {"type": "Bot"},
+            "head": {"ref": "chore/app-status-refresh"}},
+           {"number": 15447, "merged_at": "2026-11-10T00:03:16Z", "user": {"type": "Bot"},
+            "head": {"ref": "chore/admin-ui-deploy-639f40568b8b9ca7747afc85da16af01df57491d"}},
+           {"number": 15407, "merged_at": "2026-11-09T23:19:18Z", "user": {"type": "User"},
+            "head": {"ref": "ci/merge-train-stall-watch"}}]
+    check("a train-merged bot PR (#15378) resets the clock", last_merge_of(prs)[1] == 15378)
+    check("a deploy-pin bot merge (#15447) does not", last_merge_of(prs[1:])[1] == 15407)
     print(f"self-test: {'PASS' if fails == 0 else f'FAIL ({fails})'}")
     return 1 if fails else 0
 
@@ -621,6 +781,9 @@ def check_declaration(root: str = ".") -> int:
 
 
 def main(argv: list[str]) -> int:
+    for a in argv:
+        if a.startswith("--sabotage="):    # strict | mainred | botmerge | deploypin — self-test MUST fail
+            SABOTAGE.add(a.split("=", 1)[1])
     if "--self-test" in argv:
         return self_test()
     if "--check-declaration" in argv:

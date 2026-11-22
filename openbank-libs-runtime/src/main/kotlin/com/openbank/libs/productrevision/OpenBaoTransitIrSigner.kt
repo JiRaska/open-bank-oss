@@ -107,7 +107,7 @@ class OpenBaoTransitIrSigner(
             .header("X-Vault-Token", token)
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
-        transport.httpClient.send(request, OpenBaoTransport.boundedBody())
+        transport.send(request)
     } catch (e: InterruptedException) {
         Thread.currentThread().interrupt()
         throw IrSigningException("Transit $operation for key '$keyName' interrupted", e)

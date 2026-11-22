@@ -41,6 +41,26 @@ Config (`flaky-test-hunter.policy-gate`):
 | `opa-url` | `http://localhost:8181` | OPA sidecar base URL |
 | `timeout` | `PT0.5S` | per-call connect + request timeout; exceeding it fails closed (`pdp_unreachable`) |
 
+### Target ref (ADR-0031 D9 amendment 2026-11-14)
+
+`openbank.flaky-test-hunter.writer-base-ref` (`FLAKY_TEST_HUNTER_WRITER_BASE_REF`, default `main`)
+is a closed enum, `main` or `qualification`. It names the one ref the writer reads, branches from and
+opens its PR against; an unknown value stops the service at boot. The GitOps init container clones
+the scan snapshot from `SNAPSHOT_REF`, which must name the same ref, or the agent would scan one tree
+and repair another.
+
+Both policy layers decide the ref as well. The OPA input carries `base_ref`, and `agents.rego`
+allows `gh.pr.open` only when it is listed in `base_refs` of the charter's `write_proposal` /
+`github-pr` grant (`[main, qualification/flaky-test-hunter]`). `AgentCharterGrantVerifier` applies
+the same rule in process. The audit payload records `pr_base_ref`.
+
+`qualification` exists only for the phase-3 live-write proof. The writer's one eligible repair is a
+shape `test-runblocking-unit-guard` keeps off `main`, so the proof runs against the protected branch
+`qualification/flaky-test-hunter` carrying one seeded defect. A PR there says in its body that the
+defect was seeded. Switch both refs back to `main` after the run.
+`check-agent-bounded-write-surface.py` holds the enum, the charter's `base_refs` and both GitOps
+refs together.
+
 Writer activation and the governance roadmap are separate observations. GitOps declares a bounded
 pilot with `FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=true` and a read-only own-test snapshot; verify the
 effective switch and source revision on the running deployment. Setting the switch to false denies
@@ -56,7 +76,9 @@ Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent
 
 Fleet execution evidence comes from Admin UI Test Intelligence snapshots at `POST /api/v1/flaky-test-hunter/evidence/analyze`. The operator-triggered source pilot reads only this module's tests from a read-only sparse snapshot of public main, taken at pod startup with its exact revision logged. It never builds or executes that source. No JUnit execution reports are mounted; the scanner keeps a missing execution count unknown. A deployment refreshes the snapshot. Source scans remain reachable through the operator trigger and CI-failure webhook; no periodic fleet sweep is enabled.
 
-A finding with no mechanical fix opens a GitHub issue labelled `flaky-test` with the finding and diagnosis. An open issue with the same title is reused, so a re-run does not flood the tracker. The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. Ticket and diagnosis text from an issue is treated as untrusted input.
+A finding with no mechanical fix reuses an open GitHub issue carrying its stable finding marker, regardless of the issue's title or labels. The writer checks up to 20 pages of 100 entries and skips pull requests. It creates a new issue with the `flaky-test` label only after reading the complete list and finding no match. An unreadable response or a full last page at the limit prevents creation.
+
+The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. It treats finding and diagnosis text as untrusted input.
 
 ## Build identity
 

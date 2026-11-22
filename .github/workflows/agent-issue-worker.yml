@@ -112,7 +112,13 @@ jobs:
           if [ "$PROBE" = true ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
-            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+            # REST quota exhaustion falls back to GraphQL (fetch-open-prs.py). The guard keeps the old
+            # listing for a base that predates the script; drop it once main has carried it a while.
+            if [ -f .github/scripts/fetch-open-prs.py ]; then
+              python3 .github/scripts/fetch-open-prs.py "$GITHUB_REPOSITORY" "$RUNNER_TEMP/agent-prs.json"
+            else
+              gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+            fi
             python3 .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" >> "$GITHUB_OUTPUT"
           fi
 

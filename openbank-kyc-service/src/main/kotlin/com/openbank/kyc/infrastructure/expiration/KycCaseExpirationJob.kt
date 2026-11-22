@@ -136,8 +136,8 @@ class KycCaseExpirationJob(
             // tick's query, so the sweep just picks it up again; the warnf log is the failure signal.
             try {
                 val expiredCase = expire(case, threshold)
-                repo.update(expiredCase, KycEvents.caseStatusChanged(expiredCase, threshold))
-                expired++
+                // Null: erased since the batch was read; nothing was written and nothing published.
+                if (repo.update(expiredCase, KycEvents.caseStatusChanged(expiredCase, threshold)) != null) expired++
             } catch (err: Exception) {
                 log.warnf(err, "kyc.case.expiration could not expire case %s — retried next tick", case.id)
             }

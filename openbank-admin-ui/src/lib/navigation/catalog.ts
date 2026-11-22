@@ -73,6 +73,7 @@ import {
   Undo2,
   TrainFront,
   Rocket,
+  KeyRound,
 } from 'lucide-react'
 import { hasPermission, type Permission } from '@/lib/auth/roles'
 import { DOMAIN_GROUPS, domainLabel } from '@/lib/governance/domains'
@@ -151,6 +152,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view', owner: 'pid' },
   { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view', owner: 'kyb' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view', owner: 'delegation' },
+  { nameCs: 'MCP kanál', nameEn: 'MCP channel', href: '/delegations/mcp-channel', icon: Bot, permission: 'delegations:view', owner: 'mcp' },
 ]
 
 const paymentsNav: NavItem[] = [
@@ -186,6 +188,9 @@ export const complianceNav: NavItem[] = [
   { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view', owner: 'lending' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view', owner: 'audit' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view', owner: 'finrep' },
+  // ADR-0336: the statutory-return workbench (GSFT, CEÚ). OPERATOR is the only role that can act
+  // on it and cannot open /regulatory, so the button inside that page never reached them.
+  { nameCs: 'Statutární výkazy',  nameEn: 'Statutory Returns', href: '/regulatory/statutory-returns', icon: Landmark, permission: 'statutory-returns:view', owner: 'tax-reporting' },
   // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
   { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
 ]
@@ -200,6 +205,7 @@ export const opsNav: NavItem[] = [
   { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view', owner: 'notification' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
+  { nameCs: 'Klíče a certifikáty',  nameEn: 'Keys & Certificates', href: '/security/keys',   icon: KeyRound,     permission: 'keys:view', badge: 'LIVE' },
 ]
 
 export const docsNav: NavItem[] = [
@@ -209,6 +215,7 @@ export const docsNav: NavItem[] = [
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
   { nameCs: 'QR fotoaparátem', nameEn: 'Camera QR',        href: '/docs/spayd-uri',   icon: QrCode,     permission: 'docs:view' },
+  { nameCs: 'Kanál MCP pro zákazníky', nameEn: 'Customer MCP channel', href: '/docs/mcp-channel', icon: Bot, permission: 'docs:view' },
   { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },

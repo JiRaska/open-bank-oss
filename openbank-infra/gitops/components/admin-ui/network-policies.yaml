@@ -31,7 +31,7 @@ metadata:
   namespace: admin-ui
   labels:
     app.kubernetes.io/part-of: admin-ui
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

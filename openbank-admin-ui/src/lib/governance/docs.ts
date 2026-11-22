@@ -28,6 +28,9 @@ import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 export type AdrStatus = 'Accepted' | 'Proposed' | 'Superseded' | 'Deprecated' | 'Rejected' | 'Unknown'
 
+/** The ADR front-matter build axis (docs/adr/SCHEMA.md); null when the ADR carries no front-matter value. */
+export type AdrDeliveryStatus = 'shipped' | 'partial' | 'planned' | 'n-a'
+
 export interface AdrMeta {
   /** Filename without .md, e.g. "0029-versioning-release-and-governance-as-code". */
   slug: string
@@ -37,6 +40,8 @@ export interface AdrMeta {
   numberLabel: string
   title: string
   status: AdrStatus
+  /** Front-matter `delivery-status`, read verbatim; null when absent or outside the schema enum. */
+  deliveryStatus: AdrDeliveryStatus | null
   date: string | null
   authors: string | null
 }
@@ -122,13 +127,15 @@ function parseAdr(slug: string, md: string): AdrDoc {
   try { const parsed: unknown = front ? parseYaml(front[1], { maxAliasCount: 20 }) : null; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed as Record<string, unknown> } catch { /* Legacy metadata remains readable. */ }
   const authoredBody = front ? md.slice(front[0].length).replace(/^\s+/, '') : md
   const status = normaliseStatus(typeof metadata['decision-status'] === 'string' ? metadata['decision-status'] : front ? 'Unknown' : md.match(/^Status:\s*(.+)$/m)?.[1]?.trim() ?? 'Unknown')
+  const rawDelivery = metadata['delivery-status']
+  const deliveryStatus = rawDelivery === 'shipped' || rawDelivery === 'partial' || rawDelivery === 'planned' || rawDelivery === 'n-a' ? rawDelivery : null
   const date = typeof metadata.date === 'string' ? metadata.date : front ? null : md.match(/^Date:\s*(.+)$/m)?.[1]?.trim() ?? null
   const authors = Array.isArray(metadata.authors) ? metadata.authors.filter(author => typeof author === 'string').join(', ') || null
     : typeof metadata.authors === 'string' ? metadata.authors : front ? null : md.match(/^Author\(?s?\)?:\s*(.+)$/m)?.[1]?.trim() ?? null
   const withoutHeading = authoredBody.replace(/^#\s+.+?\r?\n/, '').replace(/^\s+/, '')
   const body = (front ? withoutHeading : withoutHeading.replace(/^(?:(?:Date|Status|Author\(?s?\)?):[^\r\n]*(?:\r?\n|$)|[ \t]*\r?\n)+/, '')).replace(/^\s+/, '')
 
-  return { slug, number, numberLabel, title, status, date, authors, body }
+  return { slug, number, numberLabel, title, status, deliveryStatus, date, authors, body }
 }
 
 export async function loadAdrRegistry(): Promise<{ items: AdrMeta[]; contentSource: ContentSourceMetadata }> {

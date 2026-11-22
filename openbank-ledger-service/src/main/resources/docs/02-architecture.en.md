@@ -123,7 +123,13 @@ sequenceDiagram
   end
 ```
 
-**Why outbox (ADR-0050):** the DB write and the Kafka publish must be atomic-ish. Money-path delivery is regulatory-grade: a single in-JVM writer (`concurrentExecution = SKIP`) plus `replicas: 1` guarantee exactly one dispatcher claims a row; per-row failures are isolated and bounded by a DEAD transition. The dispatcher runs fully on the Vert.x event loop (reactive Panache) to avoid worker-thread session errors.
+**Outbox (ADR-0050, ADR-0327).** The journal and its outbox row commit in one PostgreSQL
+transaction. The relay claims one head per aggregate and publishes independent aggregates
+concurrently. A publish acknowledgement can change a row only while its claim token owns
+the row. Failures back off and reach `DEAD` at the attempt cap. Kafka delivery is at least
+once, with the event ID available for consumer deduplication. The scheduler skips overlapping
+ticks within each replica and runs on the Vert.x event loop. The cutover quiesces the earlier
+dispatcher before V2 sends begin.
 
 ## Partition lifecycle
 

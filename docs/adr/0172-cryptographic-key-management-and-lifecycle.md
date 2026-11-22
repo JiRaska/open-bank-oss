@@ -45,7 +45,7 @@ secret rotation (ADR-0099).
 | **Unseal** | `alias/openbank-vault-unseal` — OpenBao auto-unseal | AWS KMS | **None** |
 | **Envelope** | `aws_kms_key.secrets` (EKS etcd), `aws_kms_key.audit` (S3/CloudTrail) | AWS KMS, OpenTofu | Annual, automatic |
 | **DNSSEC** | `aws_kms_key.dnssec` (Route53 KSK) | AWS KMS, OpenTofu | **Disabled** (`enable_key_rotation = false`) |
-| **Transport CA** | Strimzi cluster CA + clients CA, ~33 KafkaUser certs | Strimzi operator, `messaging` ns | Strimzi defaults — **not configured, not documented** |
+| **Transport CA** | Strimzi cluster CA + clients CA, ~33 KafkaUser certs | Strimzi operator, `messaging` ns | Declared in `kafka.yaml`: 365-day CAs, renewed 30 days before expiry (D3) |
 | **Document signing** | `pki-document-signing` root (RSA-2048, 10y) → per-ceremony leaf (300s, `no_store`) | OpenBao PKI, in-cluster | Root: **none**. Leaf: ephemeral |
 | **Institutional seal** | the bank's own long-lived PAdES-sealing PKCS12 — `openbank/document-service-signing-seal` (`KEYSTORE_P12_BASE64` + `KEYSTORE_PASSWORD`). Distinct from the row above: that mints the *client's* one-time cert, this is the *bank's* identity on every sealed document | OpenBao KV, seeded out-of-band by an operator (runbook 0008) | **None** — and **not yet seeded**: `PdfBoxPadesSealAdapter` falls back to a DEV-ONLY ephemeral cert (#1284) |
 | **Agent identity** | `pki-agent` CA (ADR-0031 D3b) | OpenBao PKI | Not documented |
@@ -101,7 +101,7 @@ later.
   mount therefore produces legally worthless signatures that look successful. Make fail-closed the
   default outside `%dev`. *(Pending — highest value here.)*
 - **D3 — Document the Kafka CA lifetimes.** `kafka.yaml` has no `clusterCa`/`clientsCa` block, so
-  Strimzi defaults silently apply. State the validity/renewal figures, or set them. *(Pending)*
+  Strimzi defaults silently apply. State the validity/renewal figures, or set them. *(Delivered: `clusterCa`/`clientsCa` set explicitly to the values that already applied, so no CA renewed and no broker rolled.)*
 - **D4 — DNSSEC KSK rotation.** `enable_key_rotation = false` with no compensating manual procedure.
   Enable it or write the runbook. *(Pending)*
 - **D5 — Separate the EUDI issuer key from the RČ pepper.** Both sit in the same OpenBao KV path. A

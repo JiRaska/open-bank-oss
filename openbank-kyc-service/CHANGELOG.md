@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.19.0...kyc-service-v0.19.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **kyc:** one master switch for the re-screening loop; record list changes while off ([#16032](https://github.com/JiRaska/open-bank-oss/issues/16032)) ([5f71ca9](https://github.com/JiRaska/open-bank-oss/commit/5f71ca9b0bd5720f9408f4d9ef4a2a5c1babf2ee))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.18.1...kyc-service-v0.19.0) (2026-11-13)
+
+
+### Features
+
+* **kyc:** measure and alert on the re-screening backlog ([#16021](https://github.com/JiRaska/open-bank-oss/issues/16021)) ([5320f60](https://github.com/JiRaska/open-bank-oss/commit/5320f6003697bc105b55c753b5d0e26f576fe564))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.18.0...kyc-service-v0.18.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **kyc:** dispatch sanctions list-change events on the ce-type header ([#15901](https://github.com/JiRaska/open-bank-oss/issues/15901)) ([71b5570](https://github.com/JiRaska/open-bank-oss/commit/71b5570becfddffae4f53f0cebeeaf46a7bd7c25)), closes [#15900](https://github.com/JiRaska/open-bank-oss/issues/15900)
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.1...kyc-service-v0.18.0) (2026-11-12)
+
+
+### Features
+
+* **kyc:** screen new customers automatically and gate sandbox auto-approval on it ([#15736](https://github.com/JiRaska/open-bank-oss/issues/15736)) ([08d28df](https://github.com/JiRaska/open-bank-oss/commit/08d28df4ea0530c9c7ad6c8e66fd3a7f96551b7f))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.0...kyc-service-v0.17.1) (2026-10-26)
 
 

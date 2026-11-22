@@ -91,6 +91,25 @@ async function fetchFromPrometheus(query: string, prometheusUrl: string): Promis
   }
 }
 
+// Label values are interpolated into PromQL below; accept only charter-id shaped values.
+const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
+
+async function fetchAgentIds(prometheusUrl: string): Promise<string[]> {
+  try {
+    const query = 'count by (agent_id) (langfuse_agent_tokens_total)'
+    const url = `${prometheusUrl}/api/v1/query?query=${encodeURIComponent(query)}`
+    const res = await fetch(url, { signal: AbortSignal.timeout(PROMETHEUS_QUERY_TIMEOUT_MS) })
+    if (!res.ok) return []
+    const json = await res.json() as { data?: { result?: Array<{ metric?: { agent_id?: unknown } }> } }
+    const ids = (json?.data?.result ?? [])
+      .map(entry => entry?.metric?.agent_id)
+      .filter((id): id is string => typeof id === 'string' && AGENT_ID_PATTERN.test(id))
+    return [...new Set(ids)].sort()
+  } catch {
+    return []
+  }
+}
+
 export async function GET() {
   const now = new Date()
   const prometheusUrl = process.env.PROMETHEUS_URL ?? 'http://prometheus-operated.observability:9090'
@@ -112,7 +131,11 @@ export async function GET() {
   }
 
   // Live path: query Langfuse bridge metrics
-  const agentIds = ['copilot', 'holmes-rca', 'finops-agent', 'fleet-monitor', 'code-review']
+  // Agent ids come from the series the bridge exports, not a hand-kept list: the exporter's
+  // agent_id is the Langfuse userId, which agent-service sets to the charter id from agents.yaml,
+  // and anything without one lands in 'unattributed'. A fixed list here silently dropped every
+  // id it did not name.
+  const agentIds = await fetchAgentIds(prometheusUrl)
   const completeMeasurements: boolean[] = []
   const agentResults = await Promise.all(agentIds.map(async (agentId): Promise<AgentCostEntry | null> => {
     const [tokens24h, cost24h, cost7d, cost30d] = await Promise.all([

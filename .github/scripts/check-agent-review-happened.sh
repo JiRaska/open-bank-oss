@@ -121,7 +121,7 @@ self_test() {
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: ${label} — expected rc=${want}, got rc=${rc}" >&2
       fails=$((fails + 1))
-    elif [ -n "$want_msg" ] && ! printf '%s' "$msg" | grep -qF -- "$want_msg"; then
+    elif [ -n "$want_msg" ] && ! grep -qF -- "$want_msg" <<< "$msg"; then
       echo "::error::self-test: ${label} — rc was right but the reason was not: expected a message containing '${want_msg}', got '${msg}'" >&2
       fails=$((fails + 1))
     fi

@@ -48,8 +48,10 @@ jobs:
     name: ${{ inputs.service }} (build)
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service)
-      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini'
-      || 'ubuntu-latest') }}
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+      && inputs.ref == '' && 'openbank-mini' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name
+      == github.repository && contains(fromJSON('["openbank-pr"]'), vars.PR_RUNNER_POOL) && vars.PR_RUNNER_POOL) || 'ubuntu-latest')
+      }}
     timeout-minutes: 45
     environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'gradle-cache-writer' || '' }}
@@ -110,7 +112,7 @@ jobs:
       continue-on-error: true
       timeout-minutes: 1
       run: bash -e "$SERVICE_CI_HELPERS/raise-aio-max-nr.sh"
-    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+    - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880
       with:
         distribution: temurin
         java-version: '21

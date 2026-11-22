@@ -28,7 +28,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sca-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "2baacfc13d90b45f"
+        openbank.tech/policy-checksum: "9ecf0bd0466caa0d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sca-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-45b874d6@sha256:622e6bd5fd0ca7a27e85a69c38d609abed7c19d2a82f8788d216e24e86efd834
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sca-service:sandbox-bd011ccf@sha256:d39ca085b66aa203986ef32f93e9d9913f8de607a73b1538174b54c03dc544f3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -56,6 +56,10 @@ spec:
             # sca-service's CLIENT certificate for its read of party-service — a different object.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT

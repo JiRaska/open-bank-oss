@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.3...kyb-service-v0.11.4) (2026-11-20)
+
+
+### Bug Fixes
+
+* **kyb:** check-digit rules for SK VAT, SIREN and the remaining EU member states (refs [#16774](https://github.com/JiRaska/open-bank-oss/issues/16774), [#16748](https://github.com/JiRaska/open-bank-oss/issues/16748)) ([#16887](https://github.com/JiRaska/open-bank-oss/issues/16887)) ([e46fa46](https://github.com/JiRaska/open-bank-oss/commit/e46fa4640783e1ffb353c920669e2cadcf7a874c))
+
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.2...kyb-service-v0.11.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **kyb:** validate CZ DIČ and EU VAT check digits ([#16771](https://github.com/JiRaska/open-bank-oss/issues/16771)) ([61a5464](https://github.com/JiRaska/open-bank-oss/commit/61a546479e4d181ba7bb0917cf4af738c1e18b8c))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.1...kyb-service-v0.11.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **fx,interest,kyb:** reload outbound mTLS client certificates ([#16414](https://github.com/JiRaska/open-bank-oss/issues/16414)) ([afceb60](https://github.com/JiRaska/open-bank-oss/commit/afceb607acaadd6a5d4e44619795f5fabf18f63c))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.0...kyb-service-v0.11.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **kyb:** screen related parties with registration country, birth date and nationality ([#16215](https://github.com/JiRaska/open-bank-oss/issues/16215)) ([dfba096](https://github.com/JiRaska/open-bank-oss/commit/dfba0963ba2070d605dfb2757015a4859eae3f36))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.10.0...kyb-service-v0.11.0) (2026-11-14)
+
+
+### Features
+
+* **kyb:** publish verified statutory representation rules ([#15662](https://github.com/JiRaska/open-bank-oss/issues/15662)) ([3e1956f](https://github.com/JiRaska/open-bank-oss/commit/3e1956fab5bc3cc9c83adffcc5351ddf1172289e))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.9.0...kyb-service-v0.10.0) (2026-11-13)
+
+
+### Features
+
+* **kyb:** keep approved business cases under ongoing sanctions monitoring ([#15989](https://github.com/JiRaska/open-bank-oss/issues/15989)) ([daa6829](https://github.com/JiRaska/open-bank-oss/commit/daa6829c02fc75f2bcec673b3a2a8e1bce6605a9))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.5...kyb-service-v0.9.0) (2026-11-13)
+
+
+### Features
+
+* **kyb:** screen the entity and its related parties, and gate approval on it ([#15768](https://github.com/JiRaska/open-bank-oss/issues/15768)) ([f5dc9e5](https://github.com/JiRaska/open-bank-oss/commit/f5dc9e586d7d46ed5a788f375414728400cf5174))
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.4...kyb-service-v0.8.5) (2026-10-14)
 
 

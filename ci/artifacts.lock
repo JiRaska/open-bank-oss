@@ -21,6 +21,17 @@
       }
     },
     {
+      "name": "gradle-distribution",
+      "kind": "binary-archive",
+      "version": "9.9.1",
+      "platforms": {
+        "any": {
+          "url": "https://services.gradle.org/distributions/gradle-9.9.1-bin.zip",
+          "sha256": "d8a18a7a841dd5df825d35a685fad6f2d7f12ac0c280e57b67c27b4a520ba228"
+        }
+      }
+    },
+    {
       "name": "promtool",
       "kind": "binary-archive",
       "version": "3.14.0",

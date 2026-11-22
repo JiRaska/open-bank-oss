@@ -223,8 +223,8 @@ def scan(gitops: Path, tofu: Path, filter_src: Path = FILTER, workflow: Path = D
         findings.append(f"token-bearing ServiceAccount {ns}/{name} has no metric filter naming it — unwired")
     if not wired:
         findings.append("no metric filter names a ServiceAccount — the cluster tripwire is gone")
-    for path in _candidates(gitops, "openbank.io/deception"):
-        findings.append(f"{path.relative_to(gitops)} carries an openbank.io/deception marker — it marks the object for an attacker")
+    for path in _candidates(gitops, "open-bank.tech/deception"):
+        findings.append(f"{path.relative_to(gitops)} carries an open-bank.tech/deception marker — it marks the object for an attacker")
     for ns, name in sorted(sas & bound_subjects(gitops)):
         findings.append(f"ServiceAccount {ns}/{name} is a subject of a RoleBinding/ClusterRoleBinding — armed")
 
@@ -311,7 +311,7 @@ def selftest() -> int:
             "no metric filter names a ServiceAccount"),
         "marker label back on the object": (
             "gitops", rel_sa,
-            lambda s: s.replace("    app.kubernetes.io/part-of: openbank-ci\n", "    app.kubernetes.io/part-of: openbank-ci\n    openbank.io/deception: marker\n", 1),
+            lambda s: s.replace("    app.kubernetes.io/part-of: openbank-ci\n", "    app.kubernetes.io/part-of: openbank-ci\n    open-bank.tech/deception: marker\n", 1),
             "marks the object"),
         "armed SA": (
             "gitops", rel_sa,

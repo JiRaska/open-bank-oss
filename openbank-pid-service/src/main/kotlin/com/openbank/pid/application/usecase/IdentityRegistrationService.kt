@@ -66,6 +66,8 @@ class IdentityRegistrationService(
 
         val indices = Indices(blindIndex, eudiIndex)
         val existing = partyRepository.findById(command.partyId)
+        // GDPR Art. 17 (#15755): an erased id must not be re-populated.
+        if (existing?.erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
         return if (existing == null) {
             partyRepository.save(newIndexParty(command, indices, now))
         } else {
@@ -160,9 +162,9 @@ class IdentityRegistrationService(
             )
             return null
         }
-        val parsed = RodneCislo.parse(raw)
+        val parsed = RodneCislo.parse(raw, clock)
         if (parsed !is RodneCislo.Parsed) {
-            Log.warn("IdentityRegistrationService: RČ unparseable — registering without the RČ blind index")
+            Log.warn("IdentityRegistrationService: RČ invalid or future-dated — registering without the RČ blind index")
             return null
         }
         return BlindIndex.compute(pepper.decodeHex(), parsed.canonical)

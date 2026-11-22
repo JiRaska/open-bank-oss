@@ -69,6 +69,13 @@ erDiagram
 
 The model is the Kotlin domain in `domain/Product.kt`. PostgreSQL stores the complete representation in JSONB while canonical identity, lookup/filter fields and the optimistic row version remain relational and indexed.
 
+The opt-in `fincrime-shadow` pack provides separate AML and fraud synthetic replay schemas.
+An approval digest covers the candidate and baseline artifact pins, the replay digest and counts,
+and the revision's effective date. AML and fraud use distinct human role and scope bindings.
+Maker and checker identities use a derived issuer-and-subject key, so account renaming does not
+change who authored the revision. Editing any approved field requires fresh approval. Catalog
+publication preserves the revision for the SHADOW publisher to verify against recomputed replay.
+
 The additive v2 model keeps identity, lifecycle, effective dates, locks and lookups relational:
 `catalog_schemas`, `catalog_specifications`, `catalog_offerings`, immutable
 `catalog_revisions`, exact `catalog_price_components NUMERIC(38,18)`, relationships, approvals,
@@ -114,3 +121,23 @@ Nested catalog objects retain their existing serialized field representation. Th
 ## Reference offerings and classification schemas (ADR-0341)
 
 The banking pack gains `deposit-v3`, `loan-v3` and `treasury-instrument-v1` schemas and the retirement pack gains `pension-savings-v3`, which carry the accounting and regulatory classification of an offering. A scheduled seeder, `CatalogReferenceOfferingSeeder`, creates the treasury own-dealing instrument offering (banking pack) and the CZ DPS and DIP pension offerings (from `catalog-seeds/retirement/cz-illustrative-offerings.json`, retirement pack), each only when its pack is enabled. Every offering is seeded with an open DRAFT revision under a system maker. A different human checker must publish it, so seeding never makes a revision pinnable by itself, and the pension values stay illustrative until legal and commercial review. The seeder is idempotent: an offering that already exists is left alone whatever the state of its revisions. It is controlled by `openbank.catalog.reference-offerings-enabled`, which is on by default and off in the standalone profile.
+
+### Passport grant and account permit storage (ADR-0380)
+
+The grant stores the bank, establishment, offering, country, mode, customer segment, channel,
+approved pack digest, evidence and effective period. A permit binds an account operation and
+its exact inputs. The issue and consume functions acquire the grant row lock. Revocation
+updates the same row, so revocation and first consumption are ordered by PostgreSQL.
+Only the exact operation can replay its prior receipt after a revocation. An unconsumed
+permit expires after at most 30 seconds and cannot be consumed after revocation.
+
+Staff use the passport-grant routes to propose, approve and revoke a grant. Both writing
+roles require the catalogue scope on a verified, MFA-backed staff token. The database
+compares the staff person identifiers, so a second login for the maker cannot approve.
+Approval attests the immutable proposed evidence reference and pack digest. Account
+integration and durable recovery are required before exposing a cross-border route.
+
+The internal account endpoint accepts only the named account-service principal. On first
+consumption a trusted, unexpired grant-to-subject evidence binding is required. The current
+account route supports FOS home booking. Branch admission stays disabled pending branch
+booking support. Testing provisions synthetic evidence. The production publisher is C4.

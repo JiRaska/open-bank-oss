@@ -13,60 +13,24 @@ import java.math.RoundingMode
 import java.time.LocalDate
 
 /**
- * Maps the risk engine's LCR result into COREP C 76.00 "Liquidity coverage — calculations" (EBA
- * reporting framework, Delegated Regulation (EU) 2015/61 Art. 4 ratio, Art. 17 / Annex I Level 2 caps,
- * Art. 33 inflow cap). finrep computes no ratio of its own: every value is the engine's, from the same
- * TIED_OUT snapshot C 72.00 / C 73.00 / C 74.00 read, and each is tied to the engine's other figures.
+ * COREP LCR calculation preview on EBA 4.2 total-currency table C_76.00.a. Figures come
+ * from the same TIED_OUT risk-engine view as C 72.00 / C 73.00 / C 74.00. The engine
+ * models only the general 75% inflow cap. Fully exempt and 90% cap amounts and reductions
+ * are gaps, and the preview exposes its 75% calculation separately.
  *
- * Column c0010 "Value / percentage". NO row code below was checked against the EBA DPM (the reporting
- * framework 4.2 datapoint extract this service carries has no C 76.00 fact), so every label carries
- * `[row code UNVERIFIED]` ([UNVERIFIED_ROWS]):
- *   r0010 Liquidity buffer                                — the engine's `stock` (after haircuts and
- *                                                           after the 15 % Level 2B and 40 % Level 2 caps)
- *   r0020 Net liquidity outflow                           — the engine's `netOutflows`
- *   r0030 Liquidity coverage ratio (%)                    — the engine's `ratio` × 100, 2 dp HALF_EVEN
- *   r0180 Total outflows                                  — the engine's `totalOutflows`
- *   r0190 Fully exempt inflows                            — DATA GAP (the engine applies no exemption)
- *   r0200 Inflows subject to the higher cap of 90 %       — DATA GAP (the engine applies no 90 % cap)
- *   r0210 Inflows subject to the cap of 75 %              — the engine's uncapped `totalInflows`
- *   r0220 Reduction for fully exempt inflows              — DATA GAP (as r0190)
- *   r0230 Reduction for inflows subject to the 90 % cap   — DATA GAP (as r0200)
- *   r0240 Reduction for inflows subject to the 75 % cap   — the engine's `cappedInflows`
- * The numerator detail rows (each HQLA level unadjusted / adjusted, the cap adjustments themselves)
- * are not emitted: their codes could not be confirmed, and the cap adjustments are instead used to
- * tie the buffer. No row is invented.
- *
- * Ties (the render fails if they do not hold, tolerance [RiskEngineFigures.roundingTolerance]):
- *  - buffer = level1 + level2a + level2b − adjustmentFor15Cap − adjustmentFor40Cap;
- *  - net outflows = total outflows − capped inflows;
- *  - ratio × net outflows = buffer (within the rounding of both figures and the ratio's 6 dp);
- *  - the capped inflows are min(uncapped, 75 % × outflows) — C 74.00's [C7400Mapper.checkCap], reused.
- * A buffer the engine does not report after the caps (no `stock` or no cap adjustments) is a gap,
- * never a figure finrep derives: a pre-cap sum would overstate the buffer whenever a cap binds.
- *
- * Data gaps (ADR-0097): every row under the whole-template conditions of C 74.00 (read disabled, no
- * tied snapshot, empty book, no combined CZK view or one in another currency — a multi-currency book
- * is read from the engine's combined view, EU 2015/61 Art. 4(5) — unclassified balances); every value row when the run's
- * parameter set is not the 2015/61 set; r0030 when net outflows are not positive (the ratio is
- * undefined, not infinite); and r0010 (buffer) and r0030 (ratio, whose numerator is the buffer) when
- * the engine's notes say the collateral pledged for a secured central-bank borrowing is not modelled
- * ([RiskEngineFigures.pledgedCollateralGap]) — encumbered assets would not be HQLA, so the buffer and
- * the ratio may be overstated. The engine's figures are still tied before that gap is applied.
+ * The buffer is the engine's post-cap stock. The ratio is converted to percent, and the
+ * buffer and ratio are gaps when pledged collateral is unmodelled. Buffer, net outflows,
+ * ratio and capped inflows must tie to the engine's source figures before rendering.
  */
 object C7600Mapper {
 
     const val TEMPLATE_ID = "C_76.00"
     private const val COL = "c0010"
-    private const val UNVERIFIED = " [row code UNVERIFIED]"
     private const val PERCENT_UNIT = "%"
     private const val RATIO_SCALE_DP = 6
 
     /** Figures summed into the buffer tie: three level sums and two cap adjustments. */
     private const val BUFFER_TERMS = 5
-
-    /** Every row this mapper emits: none has been checked against the EBA DPM. */
-    val UNVERIFIED_ROWS: Set<String> =
-        setOf("r0010", "r0020", "r0030", "r0180", "r0190", "r0200", "r0210", "r0220", "r0230", "r0240")
 
     const val EXEMPT_REASON =
         "The risk engine applies no Article 33(2) exemption from the inflow cap: every inflow it computes " +
@@ -92,10 +56,12 @@ object C7600Mapper {
 
         fun cell(row: String, label: String, value: BigDecimal?, reason: String?, unit: String = currency) =
             (valueGap ?: reason).let { why ->
-                CorepCell(row, COL, label + UNVERIFIED, value ?: BigDecimal.ZERO, unit, why != null, why)
+                CorepCell(row, COL, label, value ?: BigDecimal.ZERO, unit, why != null, why)
             }
 
         val buffer = r?.hqlaStock?.takeIf { r.level2bCapAdjustment != null && r.level2CapAdjustment != null }
+        val cappedView = r?.takeIf { it.inflowCap != null }
+        val capReason = C7400Mapper.MISSING_CAP_REASON.takeIf { cappedView == null }
         val cells = listOf(
             cell("r0010", "Liquidity buffer", buffer, bufferReason(r, buffer)),
             cell("r0020", "Net liquidity outflow", r?.netOutflows, null),
@@ -106,13 +72,13 @@ object C7600Mapper {
                 ratioReason(r),
                 PERCENT_UNIT,
             ),
-            cell("r0180", "Total outflows", r?.totalOutflows, null),
-            cell("r0190", "Fully exempt inflows", null, EXEMPT_REASON),
-            cell("r0200", "Inflows subject to higher cap of 90 %", null, HIGHER_CAP_REASON),
-            cell("r0210", "Inflows subject to cap of 75 %", r?.totalInflows, null),
-            cell("r0220", "Reduction for fully exempt inflows", null, EXEMPT_REASON),
-            cell("r0230", "Reduction for inflows subject to higher cap of 90 %", null, HIGHER_CAP_REASON),
-            cell("r0240", "Reduction for inflows subject to cap of 75 %", r?.cappedInflows, null),
+            cell("r0300", "Total outflows", r?.totalOutflows, null),
+            cell("r0310", "Fully exempt inflows", null, EXEMPT_REASON),
+            cell("r0320", "Inflows subject to higher cap of 90 %", null, HIGHER_CAP_REASON),
+            cell("r0330", "Inflows subject to cap of 75 %", cappedView?.totalInflows, capReason),
+            cell("r0340", "Reduction for fully exempt inflows", null, EXEMPT_REASON),
+            cell("r0350", "Reduction for inflows subject to higher cap of 90 %", null, HIGHER_CAP_REASON),
+            cell("r0360", "Reduction for inflows subject to cap of 75 %", cappedView?.cappedInflows, capReason),
         )
         return CorepTemplate(
             TEMPLATE_ID,

@@ -70,6 +70,27 @@ class BusinessSigningApiIT {
         scaSeam.delegate = sca
     }
 
+    @Test
+    fun `a consumed payment challenge only replays its original frozen payload`() {
+        register.joint(entity, 2, alice, bob)
+        val challenge = sca.initiator(alice)
+        val original = paymentBody(alice, challenge)
+        val created = post("/approval-requests", original).then().statusCode(HTTP_CREATED).extract().jsonPath()
+        val id = created.getString("id")
+
+        val replay = post("/approval-requests", original).then().statusCode(HTTP_CREATED).extract().jsonPath()
+        assertThat(replay.getString("id")).isEqualTo(id)
+        assertThat(replay.getString("payloadSha256")).isEqualTo(created.getString("payloadSha256"))
+
+        val changed = post("/approval-requests", paymentBody(alice, challenge, amount = "120001.00"))
+        assertThat(changed.statusCode).isEqualTo(409)
+        assertThat(changed.jsonPath().getString("code")).isEqualTo("SCA_CHALLENGE_USED")
+        assertThat(get(UUID.fromString(id)).getString("status")).isEqualTo("PENDING")
+        val ids = RestAssured.given().get("/api/v1/entities/$entity/approval-requests")
+            .then().statusCode(HTTP_OK).extract().jsonPath().getList<String>("data.id")
+        assertThat(ids).containsExactly(id)
+    }
+
     // ------------------------------------------------------------------ happy path + events
 
     @Test
@@ -565,20 +586,25 @@ class BusinessSigningApiIT {
     }
 
     /** Exactly the body customer-edge (#10314) sends. */
-    private fun paymentBody(initiator: UUID, challenge: UUID, expiresInSeconds: Long? = null) = buildMap<String, Any?> {
+    private fun paymentBody(
+        initiator: UUID,
+        challenge: UUID,
+        expiresInSeconds: Long? = null,
+        amount: String = "120000.00",
+    ) = buildMap<String, Any?> {
         put("kind", "PAYMENT")
         put("initiatorSignature", mapOf("partyId" to initiator, "scaChallengeId" to challenge))
         put(
             "payload",
             mapOf(
                 "rail" to "DOMESTIC",
-                "amount" to "120000.00",
+                "amount" to amount,
                 "currency" to "CZK",
                 "creditorIban" to CREDITOR,
                 "creditorName" to "Dodavatel s.r.o.",
                 "reference" to "INV-2026-09",
                 "railRequest" to
-                    mapOf("amount" to "120000.00", "currency" to "CZK", "creditorAccount" to mapOf("iban" to CREDITOR)),
+                    mapOf("amount" to amount, "currency" to "CZK", "creditorAccount" to mapOf("iban" to CREDITOR)),
             ),
         )
         expiresInSeconds?.let { put("expiresInSeconds", it) }

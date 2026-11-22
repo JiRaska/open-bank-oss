@@ -45,6 +45,15 @@ class PilotSourceTest(unittest.TestCase):
             git('add', *files)
             git('-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture',
                 '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture')
+            # The snapshot ref gets its OWN commit, so a clone that ignores SNAPSHOT_REF and
+            # takes main reports a different revision and the test below goes red.
+            snapshot_ref = next(e['value'] for e in INIT['env'] if e['name'] == 'SNAPSHOT_REF')
+            if snapshot_ref != 'main':
+                git('checkout', '-q', '-b', snapshot_ref)
+            git('-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture',
+                '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'snapshot')
+            snapshot_revision = git('rev-parse', 'HEAD').stdout.strip()
+            git('checkout', '-q', 'main')
             destination = root/'source'/'repo'; destination.parent.mkdir()
             # Prove retries clean only the owned scratch checkout.
             destination.mkdir(); (destination/'incomplete').write_text('partial clone')
@@ -59,11 +68,11 @@ class PilotSourceTest(unittest.TestCase):
                                'sys.exit(subprocess.run(sys.argv[2:],timeout=120).returncode)\n')
             timeout.chmod(0o700)
             result = subprocess.run(['bash', '-ec', script], capture_output=True, text=True, timeout=20,
-                                    env={**os.environ, 'PATH':str(commands)+os.pathsep+os.environ['PATH']})
+                                    env={**os.environ, **{e['name']: e['value'] for e in INIT.get('env', [])},
+                                         'PATH':str(commands)+os.pathsep+os.environ['PATH']})
             present = sorted(str(p.relative_to(destination)) for p in destination.rglob('*')
                              if p.is_file() and '.git' not in p.relative_to(destination).parts)
-            revision = git('rev-parse', 'HEAD').stdout.strip()
-            return result, present, revision
+            return result, present, snapshot_revision
 
     def test_only_the_writer_module_test_tree_is_checked_out_and_revision_is_reported(self):
         result, present, revision = self.run_checkout()
@@ -87,7 +96,13 @@ class PilotSourceTest(unittest.TestCase):
         mount = next(m for m in APP['volumeMounts'] if m['name']=='test-sources')
         self.assertIs(mount['readOnly'], True)
         self.assertEqual(mount['mountPath'], '/source')
-        self.assertEqual(INIT.get('env', []), [])
+        # The fetcher's only input is the literal snapshot ref (ADR-0031 D9 amendment 2026-11-14):
+        # no secret, no valueFrom, and it must name the ref the writer targets.
+        self.assertEqual([e['name'] for e in INIT.get('env', [])], ['SNAPSHOT_REF'])
+        self.assertTrue(all(set(e) == {'name', 'value'} for e in INIT['env']))
+        writer_ref = {e['name']: e.get('value') for e in APP['env']}['FLAKY_TEST_HUNTER_WRITER_BASE_REF']
+        expected = {'main': 'main', 'qualification': 'qualification/flaky-test-hunter'}[writer_ref]
+        self.assertEqual(INIT['env'][0]['value'], expected)
         self.assertEqual(INIT.get('envFrom', []), [])
         self.assertIs(POD['automountServiceAccountToken'], False)
         self.assertEqual([m['name'] for m in INIT['volumeMounts']], ['test-sources'])
@@ -97,6 +112,23 @@ class PilotSourceTest(unittest.TestCase):
         self.assertEqual(env['FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED'], 'true')
         runner = (ROOT/'openbank-infra/aws/envs/sandbox-platform/arc-runners.tf').read_text()
         self.assertIn(INIT['image'].split('@sha256:')[1], runner)
+
+    def test_model_credential_reaches_the_existing_optional_config_lookup(self):
+        # A healthy pod and a completed scan also occur when every diagnosis uses fallback.
+        # Follow the secret reference through ESO to the exact property read by the producer.
+        env = next(e for e in APP['env'] if e['name'] == 'FLAKY_TEST_HUNTER_MODEL_API_KEY')
+        ref = env['valueFrom']['secretKeyRef']
+        self.assertIs(ref['optional'], True)
+        secrets = list(yaml.safe_load_all((MANIFEST.parent/'model-externalsecret.yaml').read_text()))
+        model = next(s for s in secrets if s['spec']['target']['name'] == ref['name'])
+        binding = next(d for d in model['spec']['data'] if d['secretKey'] == ref['key'])
+        self.assertEqual(binding['remoteRef'], {'key': 'litellm', 'property': 'KEY_FLAKY_TEST_HUNTER'})
+        self.assertNotEqual(ref['name'], 'flaky-test-hunter-secrets')
+        producer = (ROOT/'openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/'
+                    'infrastructure/config/LlmGatewayProducer.kt').read_text()
+        self.assertIn('"flaky-test-hunter.model.api-key"', producer)
+        self.assertEqual(env['name'].lower().replace('_', ''),
+                         'flaky-test-hunter.model.api-key'.replace('-', '').replace('.', ''))
 
 
 if __name__ == '__main__':

@@ -110,6 +110,12 @@ WATCH_WORKFLOW = ".github/workflows/main-red-watch.yml"
 # R2 exclusions. Each needs a reason, and the reason has to survive being read out loud: every
 # entry here is a lane whose red nobody will be told about.
 NOT_WATCHED: dict[str, str] = {
+    "Admin UI engines nightly": (
+        "Owns its own escalation (ADR-0370 U8): a failing Firefox/WebKit run opens or refreshes one "
+        "tracking issue naming the failing tests. Red there is an engine-specific finding about a page, "
+        "not main's tree being broken for the Chromium suite every PR runs, so a main-red issue on top "
+        "would duplicate that signal and teach people to filter the label."
+    ),
     "Auto deploy": (
         "Owns its own escalation. It reconciles on a 3-hourly cron and a transient cluster or "
         "registry failure is not a defect in main's source tree, so watching it would make this "

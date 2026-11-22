@@ -74,11 +74,32 @@ block_class='{}'
 block_reason='{}'
 reconcile_blocked='[]'
 reconcile_source_blocked=0
+# Set when GitHub's API quota, not the evidence, stopped source resolution (exit 4 from
+# verify-successful-service-ci.py). Still refuses, but says "retry later" instead of "no source".
+reconcile_source_transient=0
 source_not_evaluated=0
+
+# none | some | unknown: does the broker hold ANY integration (pact) naming this service?
+# Asked fresh immediately before a contract-free reconcile verdict, because the resolver's
+# "no committed pact names it" is a git fact about the source SHA and the broker is the live
+# side. Every failure is `unknown`, which refuses.
+broker_integrations_naming() {
+  local body auth
+  auth="${PACT_BROKER_USERNAME:-}:${PACT_BROKER_PASSWORD:-}"
+  if ! body="$(curl -sf --max-time 20 -u "$auth" "${PACT_BROKER_URL:-}/integrations" 2>/dev/null)"; then
+    echo unknown; return
+  fi
+  jq -r --arg svc "$1" '
+    if (._embedded.integrations | type) != "array" then "unknown"
+    elif any(._embedded.integrations[];
+             (.consumer.name? // "") == $svc or (.provider.name? // "") == $svc) then "some"
+    else "none" end
+  ' <<< "$body" 2>/dev/null || echo unknown
+}
 
 refuse_reconcile_source() {
   local svc="$1"
-  local why="Broker has no Pacticipant and no verified Pact source"
+  local why="${2:-Broker has no Pacticipant and no verified Pact source}"
   echo "::error::reconcile source refused for ${svc}: ${why}"
   reconcile_source_blocked=1
   reconcile_blocked="$(jq -cn --argjson old "$reconcile_blocked" --arg svc "$svc" '$old + [$svc] | unique')"
@@ -127,6 +148,8 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     fi
   fi
   historical_services='[]'
+  exact_ci_verified='[]'
+  exact_candidates='{}'
   source_probe_map='{}'
   historical_source_map='{}'
   if [ "$source_failure" -eq 0 ] && [ "$use_explicit_sources" != true ]; then
@@ -135,7 +158,22 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
         --arg present "$present" '$old + {($svc): $present}')"
       case "$present" in
-        yes|equivalent:*) ;;
+        yes|equivalent:*)
+          # A Pact version at (or equivalent to) this SHA is not proof that Services CI
+          # built the service there: push CI is path-scoped, so a docs- or CI-only main
+          # commit carries the Pact version but never builds the service. Without this
+          # fallback every reconcile tick on such a commit refuses the service forever
+          # (2026-11-08..10: every scheduled run, 39 services stranded). Fall back to the
+          # historical resolver, which demands the same proof (ancestor of main, green
+          # build+contract, exact Pact version, tree-equivalent inputs) at an earlier SHA.
+          # Collected here and proven in ONE batch call after the loop: the per-service
+          # check re-lists every job of the run (~45 s each) and a 12-service batch ran
+          # out the job's 10-minute timeout before deploying anything.
+          candidate_sha="$GITHUB_SHA"
+          [ "$present" = yes ] || candidate_sha="${present#equivalent:}"
+          exact_candidates="$(jq -cn --argjson old "$exact_candidates" --arg svc "$svc" \
+            --arg sha "$candidate_sha" '$old + {($svc): $sha}')"
+          ;;
         no)
           historical_services="$(jq -cn --argjson old "$historical_services" \
             --arg svc "$svc" '$old + [$svc]')"
@@ -150,18 +188,71 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       esac
     done
   fi
+  if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$exact_candidates")" -gt 0 ]; then
+    exact_rc=0
+    exact_proven="$(python3 .github/scripts/verify-successful-service-ci.py \
+      --verify-services "$exact_candidates")" || exact_rc=$?
+    if [ "$exact_rc" -eq 4 ]; then
+      # Quota, not evidence: the historical resolver would hit the same wall.
+      reconcile_source_transient=1
+      source_failure=1
+      exact_ci_verified='[]'
+    elif [ "$exact_rc" -eq 0 ] && jq -e 'type == "object"' >/dev/null <<< "$exact_proven"; then
+      exact_ci_verified="$(jq -c 'keys' <<< "$exact_proven")"
+    else
+      # An API failure proves nothing; the historical resolver demands the same evidence.
+      exact_ci_verified='[]'
+    fi
+    for svc in $(jq -r 'keys[]' <<< "$exact_candidates"); do
+      if ! jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$exact_ci_verified"; then
+        echo "  ${svc}: no exact Services CI evidence at $(jq -r --arg svc "$svc" '.[$svc]' <<< "$exact_candidates"); resolving an earlier equivalent source"
+        historical_services="$(jq -cn --argjson old "$historical_services" \
+          --arg svc "$svc" '$old + [$svc]')"
+        source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
+          '$old + {($svc): "no"}')"
+      fi
+    done
+  fi
   if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then
+    resolver_rc=0
     historical_source_map="$(python3 .github/scripts/verify-successful-service-ci.py \
-      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || {
+      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || resolver_rc=$?
+    # Exit 3 is trusted only when its two halves exactly partition what was asked: a name the
+    # resolver invents, drops, or reports both ways falls through to the whole-set refusal.
+    if [ "$resolver_rc" -eq 3 ] && jq -e --argjson asked "$historical_services" '
+         type == "object" and (.resolved | type == "object") and
+         (.unresolved | type == "array" and length > 0 and all(.[]; type == "string")) and
+         (((.resolved | keys) + .unresolved | sort) == ($asked | sort))
+       ' >/dev/null <<< "$historical_source_map"; then
+      # The evidence was read in full; only the named services have no proven source. Refuse
+      # each of them as a member (the same per-member path as an absent Pacticipant) and let
+      # every proven peer continue under the unchanged proof below. A failure to READ the
+      # evidence (any other non-zero exit) still refuses the whole set.
+      unresolved_reason="no successful main Services CI build+contract with an exact Pact version at a tree-equivalent source"
+      if jq -e '.budget_exhausted == true' >/dev/null <<< "$historical_source_map"; then
+        # Not searched-and-absent: the search ran out of time before reaching these services.
+        unresolved_reason="not reached before the source-resolution time budget ran out; reconcile it alone via reconcile_services"
+      fi
+      for svc in $(jq -r '.unresolved[]' <<< "$historical_source_map"); do
+        refuse_reconcile_source "$svc" "$unresolved_reason"
+      done
+      historical_services="$(jq -c --argjson gone "$(jq -c '.unresolved' <<< "$historical_source_map")" \
+        '[.[] | select(. as $s | $gone | index($s) | not)]' <<< "$historical_services")"
+      historical_source_map="$(jq -c '.resolved' <<< "$historical_source_map")"
+    elif [ "$resolver_rc" -eq 4 ]; then
+      reconcile_source_transient=1
+      source_failure=1
+    elif [ "$resolver_rc" -ne 0 ]; then
       echo "::error::reconcile source refused: no verified historical Services CI source for every requested service"
       source_failure=1
-    }
+    fi
     if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
       type == "object" and (keys | sort) == ($services | sort) and
       all(.[]; type == "object" and
         (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
         (.run_id | type == "string" and length > 0) and
-        (.attempt | type == "number" and . > 0))
+        (.attempt | type == "number" and . > 0) and
+        ((has("contract_free") | not) or .contract_free == true))
     ' >/dev/null <<< "$historical_source_map"; then
       echo "::error::reconcile source refused: historical source resolver returned incomplete or malformed evidence"
       source_failure=1
@@ -180,14 +271,25 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       else
         present="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$source_probe_map")"
         case "$present" in
-          yes) source_sha="$GITHUB_SHA" ;;
-          equivalent:*) source_sha="${present#equivalent:}" ;;
+          yes|equivalent:*)
+            if [ "$present" = yes ]; then source_sha="$GITHUB_SHA"; else source_sha="${present#equivalent:}"; fi
+            if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$exact_ci_verified"; then
+              source_ci_verified=true
+            fi
+            ;;
           no)
             source_sha="$(jq -er --arg svc "$svc" '.[$svc].sha' <<< "$historical_source_map")"
             resolved="$(jq -c --arg svc "$svc" '.[$svc]' <<< "$historical_source_map")"
             present="equivalent:${source_sha}"
             source_ci_verified=true
-            echo "  ✓ ${svc} will use exact successful Services CI/Pact source ${source_sha} from run $(jq -r '.run_id' <<< "$resolved")"
+            if jq -e '.contract_free == true' >/dev/null <<< "$resolved"; then
+              # No committed pact names it, so there is no Pact version to bind. The broker's
+              # integrations are re-read immediately before the verdict (see nocontract below).
+              present="nocontract"
+              echo "  ✓ ${svc} has no contract in any committed pact; successful Services CI source ${source_sha} from run $(jq -r '.run_id' <<< "$resolved")"
+            else
+              echo "  ✓ ${svc} will use exact successful Services CI/Pact source ${source_sha} from run $(jq -r '.run_id' <<< "$resolved")"
+            fi
             ;;
           absent)
             # Reconcile is retried independently of the original push. Without a
@@ -232,6 +334,19 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       reconcile_present="$(jq -cn --argjson old "$reconcile_present" --arg svc "$svc" \
         --arg present "$present" '$old + {($svc): $present}')"
     done
+  fi
+  if [ "$source_failure" -ne 0 ] && [ "$reconcile_source_transient" -eq 1 ]; then
+    echo 'GATE_VERDICT=NOT_EVALUATED'
+    echo "::error::reconcile source NOT EVALUATED: the GitHub API quota ran out while reading Services CI evidence. This is transient, not a missing source; the next reconcile tick retries."
+    echo "deployable=[]" >> "$GITHUB_OUTPUT"
+    echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+    echo "source_transient=true" >> "$GITHUB_OUTPUT"
+    {
+      echo "### can-i-deploy: reconcile source not evaluated (API quota, retry later)"
+      echo "GitHub refused the Services CI evidence reads for quota. Nothing is known to be missing; no verdict or image-pin mutation was allowed, and the next tick retries."
+      echo "Requested services: \`$(echo "$SERVICES" | jq -r 'join(" ")')\`."
+    } >> "$GITHUB_STEP_SUMMARY"
+    exit 1
   fi
   if [ "$source_failure" -ne 0 ]; then
     echo "deployable=[]" >> "$GITHUB_OUTPUT"
@@ -451,6 +566,22 @@ fi
 
 for svc in $(echo "$SERVICES" | jq -r '.[]'); do
   if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$reconcile_blocked"; then
+    rc=1
+    printf '===SERVICE %s\tNOT_ASKED\n' "$svc" >> "$BLOCKS_FILE"
+    continue
+  fi
+  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ] && \
+     [ "$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")" = nocontract ]; then
+    # Contract-free source (no committed pact names it, green build+contract at a
+    # tree-equivalent SHA). There is no Pact version to ask about; what makes it safe is
+    # that the broker holds no integration for it either, re-read NOW.
+    integ="$(broker_integrations_naming "$svc")"
+    if [ "$integ" = none ]; then
+      echo "  ✓ ${svc} has no integration in the broker and none in any committed pact — no contract to verify (ADR-0092)"
+      deployable_list+=("$svc")
+      continue
+    fi
+    refuse_reconcile_source "$svc" "contract-free source, but the broker integrations answer is '${integ}'"
     rc=1
     printf '===SERVICE %s\tNOT_ASKED\n' "$svc" >> "$BLOCKS_FILE"
     continue

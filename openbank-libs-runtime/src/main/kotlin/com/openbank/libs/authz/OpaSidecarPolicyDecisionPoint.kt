@@ -6,6 +6,8 @@ package com.openbank.libs.authz
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.security.BoundedBodyHandlers
+import com.openbank.libs.security.HttpExchangeDeadline
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URI
@@ -51,14 +53,21 @@ class OpaSidecarPolicyDecisionPoint(
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(mapOf("input" to query.toInput()))))
             .build()
 
-        val response = runCatching { http.send(request, BoundedBodyHandlers.ofString()) }
-            .getOrElse { throw PolicyDecisionException("OPA call failed: ${it.message}", it) }
+        val response = runCatching {
+            HttpExchangeDeadline.sendCancellable(http, request, BoundedBodyHandlers.ofString())
+        }
+            .getOrElse(::policyFailure)
 
         if (response.statusCode() !in 200..299) {
             throw PolicyDecisionException("OPA returned HTTP ${response.statusCode()}: ${response.body()}")
         }
 
         parseResponse(response.body())
+    }
+
+    private fun policyFailure(failure: Throwable): Nothing {
+        if (failure is CancellationException) throw failure
+        throw PolicyDecisionException("OPA call failed: ${failure.message}", failure)
     }
 
     private fun AuthzQuery.toInput(): Map<String, Any?> = buildMap {

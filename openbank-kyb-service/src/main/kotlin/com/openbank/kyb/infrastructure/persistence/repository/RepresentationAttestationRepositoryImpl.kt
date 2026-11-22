@@ -74,6 +74,7 @@ class RepresentationAttestationRepositoryImpl :
         parsedMode = a.parsedMode.name
         parsedSigners = a.parsedSigners
         confirmedSigners = a.confirmedSigners
+        confirmedMode = a.confirmedMode?.name
         confirmedRoles = KybJson.writeStrings(a.confirmedRoles)
         attestedBy = a.attestedBy
         attestedAt = a.attestedAt
@@ -83,7 +84,7 @@ class RepresentationAttestationRepositoryImpl :
 
     private fun RepresentationAttestationEntity.toDomain() = RepresentationAttestation(
         id = attestationId,
-        identifier = LegalEntityIdentifier.of(IdentifierScheme.valueOf(identifierScheme), identifierValue),
+        identifier = LegalEntityIdentifier.restore(IdentifierScheme.valueOf(identifierScheme), identifierValue),
         ruleTextHash = ruleTextHash,
         ruleText = ruleText,
         parsedMode = RepresentationMode.valueOf(parsedMode),
@@ -94,5 +95,6 @@ class RepresentationAttestationRepositoryImpl :
         attestedAt = attestedAt,
         supersededAt = supersededAt,
         note = note,
+        confirmedMode = confirmedMode?.let(RepresentationMode::valueOf),
     )
 }

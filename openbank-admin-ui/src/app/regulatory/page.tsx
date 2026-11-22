@@ -339,8 +339,10 @@ const REPORT_CATALOG = [
     authority: bi('CNB', 'CNB'),
     regulation: bi('IAS/IFRS + EBA ITS', 'IAS/IFRS + EBA ITS'),
     frequency: bi('Čtvrtletně', 'Quarterly'),
-    deadline: bi('30 dní po konci čtvrtletí', '30 days after quarter end'),
-    deadlineRule: { kind: 'days-after-quarter', days: 30 } as DeadlineRule,
+    // EBA remittance dates 12 May / 11 Aug / 11 Nov / 11 Feb = 42 days after quarter end
+    // (register: cnb-finrep cadence).
+    deadline: bi('Podle remitenčních dat EBA (12. 5., 11. 8., 11. 11., 11. 2.)', 'Per EBA remittance dates (12 May, 11 Aug, 11 Nov, 11 Feb)'),
+    deadlineRule: { kind: 'days-after-quarter', days: 42 } as DeadlineRule,
     description: bi('Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky', 'Financial Reporting — balance sheet, profit and loss, off-balance-sheet items'),
     sdatCode: 'FINREP',
     fields: [bi('Aktiva celkem', 'Total assets'), bi('Závazky celkem', 'Total liabilities'), bi('Vlastní kapitál', 'Equity'), bi('Čistý úrokový výnos', 'Net interest income'), bi('Provozní náklady', 'Operating expenses')],
@@ -351,8 +353,8 @@ const REPORT_CATALOG = [
     authority: bi('CNB', 'CNB'),
     regulation: bi('CRR/CRD IV (EU 575/2013) + nařízení v přenesené pravomoci (EU) 2015/61', 'CRR/CRD IV (EU 575/2013) + Delegated Regulation (EU) 2015/61'),
     frequency: bi('Měsíčně', 'Monthly'),
-    deadline: bi('30 dní po konci měsíce', '30 days after month end'),
-    deadlineRule: { kind: 'days-after-month', days: 30 } as DeadlineRule,
+    deadline: bi('15 kalendářních dnů po referenčním dni', '15 calendar days after the reference date'),
+    deadlineRule: { kind: 'days-after-month', days: 15 } as DeadlineRule,
     description: bi('Liquidity Coverage Ratio — likvidní aktiva, odtoky, přítoky a výpočet ukazatele LCR', 'Liquidity Coverage Ratio — liquid assets, outflows, inflows and the LCR calculation'),
     sdatCode: 'LCR',
     // Per-template Czech labels rather than field names: this report is a bundle of four COREP
@@ -389,26 +391,63 @@ const REPORT_CATALOG = [
     name: bi('DORA — ICT Incident Reporting', 'DORA — ICT Incident Reporting'),
     authority: bi('CNB / EBA', 'CNB / EBA'),
     regulation: bi('DORA (EU 2022/2554) — od 17.1.2025', 'DORA (EU 2022/2554) — since 17 Jan 2025'),
-    frequency: bi('Ad-hoc (do 4h od zjištění)', 'Ad-hoc (within 4h of detection)'),
-    deadline: bi('Počáteční hlášení do 4 hodin', 'Initial report within 4 hours'),
+    frequency: bi('Ad-hoc (při závažném incidentu)', 'Ad-hoc (on a major incident)'),
+    deadline: bi('Počáteční hlášení do 4 h od klasifikace, nejpozději 24 h od zjištění', 'Initial report within 4h of classification, at the latest 24h from detection'),
     deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
     description: bi('Hlášení závažných ICT incidentů dle DORA — počáteční, průběžné a závěrečné hlášení', 'Reporting of major ICT incidents under DORA — initial, intermediate and final reports'),
     sdatCode: 'DORA-INC',
     fields: [bi('Klasifikace incidentu', 'Incident classification'), bi('Dopad na zákazníky', 'Customer impact'), bi('RTO/RPO', 'RTO/RPO'), bi('Příčina', 'Root cause'), bi('Nápravná opatření', 'Remediation')],
+  },
+  // Assembled, approved and delivered by tax-reporting-service (ADR-0336); this page only
+  // lists them and links to the statutory-returns workbench, which owns their lifecycle.
+  {
+    id: 'cz-gsft',
+    name: bi('GSFT — Údaje o pojištěných vkladech', 'GSFT — Insured deposit data'),
+    authority: bi('Garanční systém finančního trhu', 'Financial Market Guarantee System'),
+    regulation: bi('Zákon č. 21/1992 Sb., o bankách — pojištění vkladů', 'Act No. 21/1992 Coll., on Banks — deposit insurance'),
+    frequency: bi('Na vyžádání GSFT', 'On request of GSFT'),
+    deadline: bi('Ve lhůtě stanovené GSFT', 'Within the period set by GSFT'),
+    deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
+    description: bi('Pojištěné nároky na vkladatele k rozhodnému dni, předávané GSFT zašifrovaným balíkem', 'Insured claims per depositor as of the relevant day, delivered to GSFT as an encrypted package'),
+    sdatCode: 'GSFT',
+    fields: [bi('Vkladatel', 'Depositor'), bi('Pojištěný nárok', 'Insured claim'), bi('Rozhodný den', 'Relevant day')],
+    workbench: '/regulatory/statutory-returns',
+  },
+  {
+    id: 'cz-ceu',
+    name: bi('CEÚ — Denní přehled změn účtů', 'CEÚ — Daily account change overview'),
+    authority: bi('CNB', 'CNB'),
+    regulation: bi('Zákon č. 300/2016 Sb., o centrální evidenci účtů', 'Act No. 300/2016 Coll., on the Central Register of Accounts'),
+    frequency: bi('Každý pracovní den', 'Every working day'),
+    deadline: bi('Do 12:00 pracovního dne za změny od předchozího pracovního dne', 'By 12:00 each working day, for changes since the previous working day'),
+    deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
+    description: bi('Přehled změn účtů a jejich vazeb pro centrální evidenci účtů ČNB, předávaný přes SDAT', 'Account and relationship changes for the ČNB central register of accounts, delivered through SDAT'),
+    sdatCode: 'CEUSIFE10',
+    fields: [bi('Změny účtů', 'Account changes'), bi('Vazby osob na účty', 'Person–account ties'), bi('Reference SDAT', 'SDAT reference')],
+    workbench: '/regulatory/statutory-returns',
   },
 ]
 
 const DATA_SOURCE_CONFIG = {
   implemented: { label: bi('Implementovaný náhled', 'Implemented preview'), text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)', icon: <FileText size={13} /> },
   catalog: { label: bi('Katalog — bez zdroje', 'Catalogue — no source'), text: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)', icon: <AlertTriangle size={13} /> },
+  workbench: { label: bi('Statutární výkaz — workbench', 'Statutory return — workbench'), text: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', icon: <CheckCircle2 size={13} /> },
+}
+
+function workbenchOf(report: Report): string | null {
+  return ('workbench' in report && report.workbench) || null
 }
 
 function dataSourceOf(report: Report): keyof typeof DATA_SOURCE_CONFIG {
+  if (workbenchOf(report)) return 'workbench'
   return TEMPLATE_PATHS[report.id] || isGeneratedReportId(report.id) ? 'implemented' : 'catalog'
 }
 
 /** Next filing deadline computed from the report's rule — never a stale literal date. */
 function dueOf(report: Report): string {
+  // Workbench returns (GSFT on request, CEÚ every working day) have no calendar rule here;
+  // their deadline text is the honest answer, and the workbench shows the live revisions.
+  if (workbenchOf(report)) return report.frequency
   return nextDeadline(report.deadlineRule, new Date()) ?? 'Ad-hoc'
 }
 
@@ -598,6 +637,10 @@ export default function RegulatoryPage() {
         <Link href="/regulatory/statutory-returns" className="btn btn-secondary">
           {t('Statutární výkazy a termíny', 'Statutory returns and deadlines')}
         </Link>
+        {' '}
+        <Link href="/regulatory/obligations" className="btn btn-secondary">
+          {t('Regulatorní povinnosti a jejich zdroje', 'Regulatory obligations and their sources')}
+        </Link>
       </p>
 
       {/* Summary */}
@@ -619,7 +662,7 @@ export default function RegulatoryPage() {
         <div className="card" style={{ padding: '16px' }}>
           <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><FileText size={14} /> {t('Pokrytí implementovanými náhledy', 'Implemented preview coverage')}</h3>
           <div style={{ display: 'flex', height: '20px', borderRadius: '6px', overflow: 'hidden', marginBottom: '16px' }}>
-            {(['implemented', 'catalog'] as const).map(st => {
+            {(['implemented', 'workbench', 'catalog'] as const).map(st => {
               const count = REPORTS.filter(r => dataSourceOf(r) === st).length
               if (count === 0) return null;
               const percent = (count / REPORTS.length) * 100;
@@ -628,7 +671,7 @@ export default function RegulatoryPage() {
             })}
           </div>
           <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
-            {(['implemented', 'catalog'] as const).map(st => {
+            {(['implemented', 'workbench', 'catalog'] as const).map(st => {
               const count = REPORTS.filter(r => dataSourceOf(r) === st).length;
               const cfg = DATA_SOURCE_CONFIG[st];
               return (
@@ -687,7 +730,7 @@ export default function RegulatoryPage() {
           const cfg = DATA_SOURCE_CONFIG[source]
           const isSelected = selected === report.id
           return (
-            <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
+            <div key={report.id} id={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
               <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
                 <button type="button" aria-expanded={isSelected} aria-controls={`regulatory-report-${report.id}`}
                   aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
@@ -721,7 +764,11 @@ export default function RegulatoryPage() {
 
                 {/* Actions remain a sibling of the disclosure button, never a nested interactive control. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, padding: '10px 16px 10px 0' }}>
-                  {source === 'implemented' ? (
+                  {source === 'workbench' ? (
+                    <Link href={workbenchOf(report)!} className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}>
+                      <ExternalLink size={11} /> {t('Otevřít workbench', 'Open workbench')}
+                    </Link>
+                  ) : source === 'implemented' ? (
                     <button type="button" className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
                       onClick={(e) => openPreview(report.id, e)}>
                       {downloadMessage === report.id ? <><Check size={11} style={{ color: 'var(--success-text)' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
@@ -748,7 +795,9 @@ export default function RegulatoryPage() {
                         <strong>{t('Termín:', 'Deadline:')}</strong> {report.deadline}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {isGeneratedReportId(report.id)
+                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {source === 'workbench'
+                          ? t('tax-reporting-service; sestavení, schválení a odeslání ve workbenchi statutárních výkazů', 'tax-reporting-service; assembly, approval and delivery in the statutory-returns workbench')
+                          : isGeneratedReportId(report.id)
                           ? t('generováno z provozních systémů záznamu (agregace při načtení, bez částečných čtení)', 'generated from the operational systems of record (aggregated on load, no partial reads)')
                           : source === 'implemented'
                             ? t('implementovaný náhled přes finrep-service; dostupnost se ověřuje při načtení', 'implemented preview through finrep-service; availability is checked on load')

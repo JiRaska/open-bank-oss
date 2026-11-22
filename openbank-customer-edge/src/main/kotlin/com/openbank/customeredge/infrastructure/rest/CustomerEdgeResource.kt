@@ -15,7 +15,11 @@ import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.domain.account.CzechPaymentSymbol
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.web.SyntheticTaintContext
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -40,10 +44,12 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.HexFormat
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -99,6 +105,14 @@ class CustomerEdgeResource(
 
     @Inject
     lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var syntheticTransferFixture: SyntheticTransferFixture
+
+    @Inject
+    lateinit var syntheticTransferTaint: SyntheticTaintContext
+
+    private val syntheticTransferCalendar = AccountingClock.bank(clock)
 
     @Inject
     lateinit var keycloakAdmin: KeycloakAdminClient
@@ -224,6 +238,17 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.identity-resume-enabled", defaultValue = "false")
     var identityResumeEnabled: Boolean = false
 
+    // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created
+    // through domestic-payment's reservation-bound route and its reservation is settled by the
+    // payment's outcome in delegation-service, not confirmed here on the rail's 2xx. Default off =
+    // the legacy create + confirm-on-2xx, byte for byte. Turn on only after the delegation outcome
+    // consumer and the rail's bound route are live (switch-on order in the threat model).
+    @field:ConfigProperty(name = "openbank.edge.delegated-payment-bound-create.enabled", defaultValue = "false")
+    var delegatedPaymentBoundCreateEnabled: Boolean = false
+
+    /** Back-off between bound-create retries; a seam so tests do not sleep. */
+    internal var boundCreateSleeper: (Long) -> Unit = { Thread.sleep(it) }
+
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
@@ -332,10 +357,21 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Read one of the caller's OWN accounts. account-service scopes by id only (the X-Customer-Party-Id
-     * header is advisory there), so ownership is enforced HERE — same IDOR guard as the transactions /
-     * statements reads. [fetchAccount] already returns the body, so we serve it rather than re-fetching.
-     * A non-owned (or non-existent) id returns 403, deliberately not 404, to avoid an existence oracle.
+     * Read one of the caller's OWN accounts, or one shared with them by a grant carrying
+     * `ACCOUNT_VIEW_DETAILS`. account-service scopes by id only (the X-Customer-Party-Id header is
+     * advisory there), so ownership is enforced HERE — same IDOR guard as the transactions /
+     * statements reads. [fetchAccount] already returns the body, so we serve it rather than
+     * re-fetching. A non-owned (or non-existent) id returns 403, deliberately not 404, to avoid an
+     * existence oracle.
+     *
+     * ADR-0375 D7: this asked for `ACCOUNT_READ_BALANCES` until 2026-11-12, so the detail record was
+     * reachable with the balances authority and `ACCOUNT_VIEW_DETAILS` was read by nothing. Balances
+     * have their own route; this one serves the account record, so it asks for the capability that
+     * names it. Consequence worth knowing: the `Účetní` and `Pokladník` presets granted
+     * READ_BALANCES WITHOUT VIEW_DETAILS, which is why they could drill in at all — the presets are
+     * corrected forward by a migration, and a grant already minted from the old preset keeps exactly
+     * what it was given (grants are immutable snapshots by design) and loses this drill-down until
+     * the grantor re-shares.
      */
     @GET
     @Path("/accounts/{accountId}")
@@ -346,7 +382,7 @@ class CustomerEdgeResource(
         val accountJson = fetchAccount(accountId, customer.partyId)
             ?: return forbidden("Account does not belong to caller")
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString() &&
-            !hasGrant(customer.partyId, "ACCOUNT", accountId, "ACCOUNT_READ_BALANCES")
+            !hasGrant(customer.partyId, "ACCOUNT", accountId, CAP_ACCOUNT_VIEW_DETAILS)
         ) {
             return forbidden("Account does not belong to caller")
         }
@@ -2730,13 +2766,22 @@ class CustomerEdgeResource(
     internal fun fetchDelegatedPaymentDecision(
         accountId: UUID,
         partyId: UUID,
-        amount: String,
-        currency: String,
+        amount: String? = null,
+        currency: String? = null,
     ): DelegatedPaymentDecision? {
-        val url = "$accountServiceUrl/api/v1/accounts/$accountId/delegation/payment-authorization" +
-            "?partyId=$partyId&amount=${URLEncoder.encode(amount, StandardCharsets.UTF_8)}" +
-            "&currency=${URLEncoder.encode(currency, StandardCharsets.UTF_8)}"
-        val resp = upstream.get(url, partyId.toString())
+        val query = buildMap {
+            put("partyId", partyId.toString())
+            if (amount != null) {
+                put("amount", amount)
+                put("currency", requireNotNull(currency))
+            }
+        }
+        val resp = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts/$accountId/delegation/payment-authorization",
+            query,
+            partyId.toString(),
+        )
         if (resp.status != 200) return null
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull()
             ?: return null
@@ -2779,10 +2824,12 @@ class CustomerEdgeResource(
         idempotencyKey: String?,
     ): SpendReservationOutcome {
         val grantId = debit.delegationId ?: return SpendReservationOutcome.NotDelegated
+        // Kept: the bound create must present the reservation's OWN key, which the rail compares.
+        val reservationKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString()
         val body = objectMapper.createObjectNode().apply {
             put("amount", amount)
             put("currency", currency)
-            put("idempotencyKey", idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString())
+            put("idempotencyKey", reservationKey)
             put("operationType", "DOMESTIC_PAYMENT")
         }
         val resp = runCatching {
@@ -2823,25 +2870,39 @@ class CustomerEdgeResource(
                     .build(),
             )
         }
-        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId))
+        // delegation-service answers 201 for a replay too and says so in this header. Absent means
+        // "cannot tell", which must be read as a replay: the bound path never releases one.
+        val replayed = resp?.getHeaderString("X-Idempotency-Replayed")?.trim()?.lowercase() != "false"
+        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId, reservationKey, replayed))
     }
 
     /**
-     * Settle a held reservation: [confirmed] keeps the headroom consumed, otherwise it comes back.
+     * The ONE place the edge settles a held reservation. [disposition] says how: CONFIRM keeps the
+     * headroom consumed, RELEASE gives it back, LEAVE_TO_OUTCOME does nothing here because the
+     * payment's terminal outcome settles it in delegation-service (#16000).
      *
-     * Every failure branch after a successful reserve must reach this with `confirmed = false`. A
-     * leaked reservation silently shrinks the delegate's ceiling until it expires, which is a
+     * Every failure branch after a successful reserve where the rail created nothing must reach
+     * this with RELEASE. A leaked reservation silently shrinks the delegate's ceiling, which is a
      * defect the customer experiences as their limit quietly shrinking for no stated reason.
      *
-     * "Confirmed" here means the instruction was ACCEPTED by the rail, not that it settled in
-     * clearing. Tracking true settlement would need an async outcome this synchronous route does
-     * not have; a payment that is accepted and later fails in clearing therefore leaves the
-     * headroom consumed. That over-counts rather than under-counts, which is the safe direction
-     * for a ceiling, and it is stated here rather than implied.
+     * LEGACY PATH ONLY (`openbank.edge.delegated-payment-bound-create.enabled=false`): CONFIRM
+     * means the instruction was ACCEPTED by the rail, not that it settled in clearing, so a payment
+     * that is accepted and later REJECTED/CANCELLED leaves the headroom consumed — an over-count,
+     * the safe direction for a ceiling. On the bound path this no longer holds: the edge never
+     * confirms, and the outcome releases a rejected payment's headroom. The legacy branch and this
+     * paragraph go together when a later cleanup PR removes the switch.
      */
-    private fun settleDelegatedSpend(reservation: SpendReservation?, customer: CustomerIdentity, confirmed: Boolean) {
+    private fun settleDelegatedSpend(
+        reservation: SpendReservation?,
+        customer: CustomerIdentity,
+        disposition: ReservationDisposition,
+    ) {
         if (reservation == null) return
-        val verb = if (confirmed) "confirm" else "release"
+        val verb = when (disposition) {
+            ReservationDisposition.CONFIRM -> "confirm"
+            ReservationDisposition.RELEASE -> "release"
+            ReservationDisposition.LEAVE_TO_OUTCOME -> return
+        }
         runCatching {
             upstream.post(
                 "$delegationServiceUrl/api/v1/delegations/${reservation.delegationId}" +
@@ -2874,15 +2935,26 @@ class CustomerEdgeResource(
     @Blocking
     fun listStatements(@PathParam("accountId") accountId: UUID): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadStatements(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
         return upstream.get("$statementServiceUrl/api/v1/statements/$accountId", customer.partyId.toString())
     }
 
     /**
+     * ADR-0375 D7. Owner, or a delegate holding `ACCOUNT_DOWNLOAD_STATEMENTS`. Both statement routes
+     * go through this one helper on purpose: the list and the render are the same authority, and two
+     * copies of an ownership-or-grant test are two things that drift. Before this, both asked
+     * `ownsAccount` alone — so the capability was grantable, three presets handed it out, and a
+     * delegate who had been given it was refused every time they used it.
+     */
+    private fun mayReadStatements(accountId: UUID, partyId: UUID): Boolean = ownsAccount(accountId, partyId) ||
+        hasGrant(partyId, "ACCOUNT", accountId, CAP_ACCOUNT_DOWNLOAD_STATEMENTS)
+
+    /**
      * Render a single closed statement on demand as a document (camt.053 XML / MT940 / PDF text) for
-     * one of the caller's OWN accounts. statement-service holds only the period-close record and
+     * one of the caller's own accounts, or one shared with them by a grant carrying
+     * `ACCOUNT_DOWNLOAD_STATEMENTS`. statement-service holds only the period-close record and
      * renders the document deterministically on demand (ADR-0035) — nothing is stored. Ownership is
      * enforced HERE (same IDOR guard as the list). The currency and format are validated against
      * fixed allow-lists before building the upstream URL (deny-by-default; no arbitrary passthrough),
@@ -2900,7 +2972,7 @@ class CustomerEdgeResource(
         @QueryParam("format") format: String?,
     ): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadStatements(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
         val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
@@ -3021,6 +3093,11 @@ class CustomerEdgeResource(
             debtorName,
             creditorAcctNo,
             creditorBank,
+            customerSubmissionScope = if (debit.onBehalfOf == null || debit.delegationId != null) {
+                domesticSubmissionScope(customer, debtor, debit.delegationId)
+            } else {
+                null // A legacy bank mandate has no stable grant identity to bind.
+            },
         ) ?: return badRequest("Malformed or incomplete payment body")
         if (customer.actingFor != null) {
             holdForApproval(
@@ -3053,20 +3130,42 @@ class CustomerEdgeResource(
         // holder — a delegate authenticates as themselves; the grant is what makes it their debit
         // to make. So `customer` here stays the delegate on the delegated path, deliberately.
         scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let {
-            settleDelegatedSpend(reservation, customer, confirmed = false)
+            settleDelegatedSpend(reservation, customer, ReservationDisposition.RELEASE)
             return it
         }
-        val resp = upstream.post(
-            "$domesticPaymentServiceUrl/api/v1/domestic-payments",
-            customer.partyId.toString(),
-            enriched,
-            idempotencyKey,
-        )
-        settleDelegatedSpend(
-            reservation,
-            customer,
-            confirmed = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL,
-        )
+        val created = if (reservation != null && delegatedPaymentBoundCreateEnabled) {
+            DelegatedBoundCreate.create(
+                upstream,
+                objectMapper,
+                domesticPaymentServiceUrl,
+                enriched,
+                reservation,
+                customer.partyId.toString(),
+                boundCreateSleeper,
+            )
+        } else {
+            val legacy = upstream.post(
+                "$domesticPaymentServiceUrl/api/v1/domestic-payments",
+                customer.partyId.toString(),
+                enriched,
+                idempotencyKey,
+            )
+            val accepted = legacy.statusInfo.family == Response.Status.Family.SUCCESSFUL
+            DelegatedCreate(legacy, if (accepted) ReservationDisposition.CONFIRM else ReservationDisposition.RELEASE)
+        }
+        settleDelegatedSpend(reservation, customer, created.disposition)
+        created.railRefusalCode?.let { code ->
+            // The customer got a neutral answer; the rail's own reason stays in the audit trail.
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = "payments.domestic",
+                result = "DENIED",
+                resourceId = debit.delegationId,
+                details = mapOf("reason" to "DELEGATED_BOUND_CREATE_REFUSED", "railCode" to code),
+            )
+        }
+        val resp = created.response
         // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
         // the money settled. Bind the created payment id to the session so the receiver's status poll
         // can reconcile true settlement, and only flip to PAID now if the create already reached the
@@ -3078,6 +3177,61 @@ class CustomerEdgeResource(
         }
         auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId, debit)
         return resp
+    }
+
+    /**
+     * Recover the original instruction after an ambiguous HTTP response. This path consumes no
+     * SCA challenge, creates no instruction, and makes no inference from a missing receipt.
+     */
+    @POST
+    @Path("/domestic-payments/submissions/lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun lookupDomesticPaymentSubmission(
+        body: DomesticSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val key = idempotencyKey?.takeIf {
+            it.isNotBlank() && it.length <= DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH && it.all { c -> c in ' '..'~' }
+        } ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+        val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
+        val customer = customer()
+        val scope = if (ownsAccount(debtor, customer.partyId)) {
+            domesticSubmissionScope(customer, debtor, null)
+        } else {
+            // Reuse the account service's grant selection. When several grants overlap, the
+            // original amount lets it select the same grant as it did at submission.
+            val grant = fetchDelegatedPaymentDecision(debtor, customer.partyId, body.amount, "CZK")
+                ?.takeIf { it.authorized && it.grantorPartyId != null }?.delegationId
+                ?: return domesticSubmissionResult()
+            domesticSubmissionScope(customer, debtor, grant)
+        }
+        val input = objectMapper.createObjectNode()
+            .put("debtorAccountId", debtor.toString())
+            .put("customerSubmissionScope", scope)
+        val upstreamResult = upstream.post(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/submissions/lookup",
+            customer.partyId.toString(),
+            input.toString(),
+            key,
+        )
+        if (upstreamResult.status != 200) return domesticSubmissionResult()
+        val result = runCatching { objectMapper.readTree(upstreamResult.entity?.toString()) }.getOrNull()
+        if (result?.path("outcome")?.asText() != "FOUND") return domesticSubmissionResult()
+        val paymentId = runCatching { UUID.fromString(result.path("paymentId").asText()) }.getOrNull()
+            ?: return domesticSubmissionResult()
+        val status = result.path("status").asText().takeIf(DOMESTIC_PAYMENT_STATUSES::contains)
+            ?: return domesticSubmissionResult()
+        return domesticSubmissionResult(paymentId, status)
+    }
+
+    private fun domesticSubmissionResult(paymentId: UUID? = null, status: String? = null): Response {
+        val body = if (paymentId == null) {
+            mapOf("outcome" to "UNKNOWN")
+        } else {
+            mapOf("outcome" to "FOUND", "paymentId" to paymentId.toString(), "status" to checkNotNull(status))
+        }
+        return Response.ok(body).header("Cache-Control", "no-store").build()
     }
 
     /**
@@ -3102,6 +3256,12 @@ class CustomerEdgeResource(
         val id = runCatching { UUID.fromString(paymentId) }.getOrNull()
             ?: return notFound("Payment not found")
         val resp = upstream.get("$domesticPaymentServiceUrl/api/v1/domestic-payments/$id", customer.partyId.toString())
+        if (resp.status in Response.Status.BAD_GATEWAY.statusCode..Response.Status.GATEWAY_TIMEOUT.statusCode) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(mapOf("error" to "Payment status temporarily unavailable"))
+                .build()
+        }
         if (resp.status != 200) return notFound("Payment not found")
         val payJson = (resp.entity as? String).orEmpty()
         val debtorAccountId = extractTextField(objectMapper, payJson, "debtorAccountId")
@@ -3546,6 +3706,86 @@ class CustomerEdgeResource(
             ),
         )
         return resp
+    }
+
+    @GET
+    @Path("/synthetic/transfers")
+    @Authorize(action = "customer.transfers.initiate")
+    fun syntheticTransferBankDate(): Response {
+        requireSyntheticTransferFixture()
+        return Response.ok(mapOf("runDate" to syntheticTransferCalendar.today().toString()))
+            .header("Cache-Control", "no-store")
+            .build()
+    }
+
+    @POST
+    @Path("/synthetic/transfers")
+    @Authorize(action = "customer.transfers.initiate")
+    @Blocking
+    fun createSyntheticTransfer(request: SyntheticTransferRun?): Response {
+        val fixture = requireSyntheticTransferFixture()
+        requireNotNull(request) { "Synthetic transfer run is required" }
+        require(request.runDate == syntheticTransferCalendar.today()) { "Synthetic transfer run date must be today" }
+        if (!isSyntheticTransferParty(fixture.partyId) ||
+            !isSyntheticTransferAccount(fixture.sourceAccountId, fixture.partyId) ||
+            !isSyntheticTransferAccount(fixture.targetAccountId, fixture.partyId)
+        ) {
+            throw ForbiddenException("Synthetic transfer fixture ownership could not be verified")
+        }
+
+        val party = fixture.partyId.toString()
+        val body = objectMapper.createObjectNode().apply {
+            put("partyId", party)
+            put("sourceAccountId", fixture.sourceAccountId.toString())
+            put("targetAccountId", fixture.targetAccountId.toString())
+            put("runDate", request.runDate.toString())
+            put("direction", request.direction.name)
+        }
+        return upstream.postToService(
+            transactionServiceUrl,
+            "/api/v1/transactions/synthetic-transfer",
+            party,
+            objectMapper.writeValueAsString(body),
+            idempotencyKey = request.direction.idempotencyKey(fixture.partyId, request.runDate),
+        )
+    }
+
+    private fun requireSyntheticTransferFixture(): SyntheticTransferAccounts {
+        val fixture = syntheticTransferFixture.accounts()
+        if (fixture == null || !isSyntheticTransferCaller(fixture.partyId)) {
+            throw ForbiddenException("Synthetic transfer requires its verified fixture identity")
+        }
+        return fixture
+    }
+
+    private fun isSyntheticTransferCaller(partyId: UUID): Boolean {
+        val client = ServiceAccountIdentity.verifiedClientId(jwt)
+        if (!syntheticTransferTaint.tainted || client != "openbank-synthetic-transfer") {
+            return false
+        }
+        return jwt.getClaim<String>("party_id") == partyId.toString() &&
+            requestHeaders.getHeaderString(ACTING_FOR_HEADER) == null
+    }
+
+    private fun isSyntheticTransferAccount(accountId: UUID, partyId: UUID): Boolean {
+        val body = fetchAccount(accountId, partyId) ?: return false
+        return runCatching {
+            val account = objectMapper.readTree(body)
+            val owned = account.path("id").asText() == accountId.toString() &&
+                account.path("partyId").asText() == partyId.toString()
+            owned && account.path("status").asText() == "ACTIVE" && account.path("currencyCode").asText() == "CZK"
+        }.getOrDefault(false)
+    }
+
+    private fun isSyntheticTransferParty(partyId: UUID): Boolean {
+        val response = upstream.get("$partyServiceUrl/api/v1/parties/$partyId", partyId.toString())
+        if (response.status != 200) return false
+        return runCatching {
+            val party = objectMapper.readTree(response.entity.toString())
+            party.path("id").asText() == partyId.toString() &&
+                party.path("classification").asText() == "SYNTHETIC" &&
+                party.path("status").asText() == "ACTIVE"
+        }.getOrDefault(false)
     }
 
     // --- Standing orders (recurring payments / trvalý příkaz) ---
@@ -4386,8 +4626,10 @@ class CustomerEdgeResource(
     /**
      * Freeze (temporarily suspend) a card the caller controls — the reversible self-service lock.
      *
-     * Open to a delegate holding `CARD_MANAGE_LIMITS` (ADR-0249 D2): freezing is one of the controls
-     * a real disponent expects, it is reversible, and it can only ever REDUCE what the card may do.
+     * Open to a delegate holding `CARD_MANAGE_STATUS` (ADR-0249 D2, corrected by ADR-0375 D7):
+     * freezing is one of the controls a real disponent expects, it is reversible, and it can only
+     * ever REDUCE what the card may do. It used to be gated on `CARD_MANAGE_LIMITS`, which is a
+     * different authority — the status capability existed and nothing read it.
      */
     @POST
     @Path("/cards/{id}/freeze")
@@ -4430,7 +4672,7 @@ class CustomerEdgeResource(
     // is the audit subject. Ownership is enforced here (the card must belong to the JWT party).
     private fun cardAction(id: UUID, action: String): Response {
         val customer = customer()
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_STATUS)) {
             return forbidden("Card does not belong to caller")
         }
         return upstream.post(
@@ -4624,7 +4866,7 @@ class CustomerEdgeResource(
                 "contactlessEnabled, onlineEnabled, atmEnabled and abroadEnabled (booleans) are all required",
                 "CARD_CONTROLS_INVALID",
             )
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_CHANNELS)) {
             return forbidden("Card does not belong to caller")
         }
         val resp = upstream.put(
@@ -5879,6 +6121,16 @@ class CustomerEdgeResource(
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
+        private const val DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH = 128
+        private val DOMESTIC_PAYMENT_STATUSES = setOf(
+            "RECEIVED",
+            "VALIDATED",
+            "SENT_TO_CLEARING",
+            "SETTLED",
+            "REJECTED",
+            "RETURNED",
+            "CANCELLED",
+        )
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
@@ -5942,6 +6194,22 @@ class CustomerEdgeResource(
          */
         internal const val CAP_CARD_VIEW = "CARD_VIEW"
         internal const val CAP_CARD_MANAGE_LIMITS = "CARD_MANAGE_LIMITS"
+
+        // ADR-0375 D7. These two were grantable and read by nothing: freeze/unfreeze/block and the
+        // channel toggles were all gated on CAP_CARD_MANAGE_LIMITS, so a vocabulary that
+        // distinguishes limits from status from channels was collapsed to one capability at the
+        // only place that checks it. Both card role presets grant all five card capabilities, so
+        // correcting the gating takes nothing away from a preset-based delegate; what it does take
+        // away is freeze and channel control from a hand-built grant carrying limits ALONE, which
+        // is the point — a limit is not a status and not a channel.
+        internal const val CAP_CARD_MANAGE_STATUS = "CARD_MANAGE_STATUS"
+        internal const val CAP_CARD_MANAGE_CHANNELS = "CARD_MANAGE_CHANNELS"
+
+        // ADR-0375 D7, account side. Same shape as the card correction: the account DETAIL read
+        // asked for the BALANCES capability, and the statement reads asked for ownership alone, so
+        // two more capabilities the vocabulary offers were grantable and read by nothing.
+        internal const val CAP_ACCOUNT_VIEW_DETAILS = "ACCOUNT_VIEW_DETAILS"
+        internal const val CAP_ACCOUNT_DOWNLOAD_STATEMENTS = "ACCOUNT_DOWNLOAD_STATEMENTS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this
@@ -6101,6 +6369,21 @@ class CustomerEdgeResource(
             return account to bank
         }
 
+        private fun domesticSubmissionScope(customer: CustomerIdentity, account: UUID, grant: String?): String {
+            val scope = listOf(
+                "openbank-domestic-submission-v1",
+                customer.human,
+                customer.partyId,
+                account,
+                grant.orEmpty(),
+            ).joinToString("|")
+            val digest = MessageDigest.getInstance("SHA-256").digest(scope.toByteArray(StandardCharsets.UTF_8))
+            return HexFormat.of().formatHex(digest)
+        }
+
+        private fun normalizeDomesticPriority(priority: String?): String =
+            priority?.uppercase()?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
+
         /**
          * Build the full CreateDomesticPaymentRequest the upstream needs from the app's lightweight body
          * plus the edge-resolved debtor/creditor parts. Amount is emitted as a JSON number; the optional
@@ -6119,6 +6402,7 @@ class CustomerEdgeResource(
             debtorName: String,
             creditorAccountNumber: String,
             creditorBankCode: String,
+            customerSubmissionScope: String? = null,
         ): String? = runCatching {
             val app = mapper.readTree(appBody) as? ObjectNode ?: return null
             fun txt(f: String) = app.get(f)?.takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
@@ -6133,16 +6417,17 @@ class CustomerEdgeResource(
             out.put("debtorName", debtorName)
             out.put("creditorAccountNumber", creditorAccountNumber)
             out.put("creditorBankCode", creditorBankCode)
+            customerSubmissionScope?.let { out.put("customerSubmissionScope", it) }
             out.put("creditorName", creditorName)
             out.put("amount", amount)
             out.put("currency", currency)
-            txt("variableSymbol")?.let { out.put("variableSymbol", it) }
-            txt("specificSymbol")?.let { out.put("specificSymbol", it) }
-            txt("constantSymbol")?.let { out.put("constantSymbol", it) }
+            // VS/SS 1-10 digits, KS 1-4 (libs-domain CzechPaymentSymbol). A malformed one throws
+            // inside runCatching, so the body reads as malformed (400) instead of being forwarded.
+            for (kind in CzechPaymentSymbol.entries) {
+                kind.normalise(txt(kind.fieldName))?.let { out.put(kind.fieldName, it) }
+            }
             txt("reference")?.let { out.put("messageForPayee", it) }
-            val priority = txt("priority")?.uppercase()
-                ?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
-            out.put("priority", priority)
+            out.put("priority", normalizeDomesticPriority(txt("priority")))
             mapper.writeValueAsString(out)
         }.getOrNull()
 
@@ -6644,7 +6929,14 @@ internal data class DebitAuthority(
 )
 
 /** Cumulative headroom held against a grant while one delegated payment is in flight (ADR-0249 D3). */
-internal data class SpendReservation(val delegationId: String, val reservationId: String)
+internal data class SpendReservation(
+    val delegationId: String,
+    val reservationId: String,
+    /** The key the reservation was taken under; the bound create must present it (#16000). */
+    val idempotencyKey: String,
+    /** True unless delegation-service said this reserve CREATED it; the bound path never releases a replay. */
+    val replayed: Boolean = true,
+)
 
 /**
  * The three ways asking for headroom can end. [NotDelegated] is not a failure — it is an owner
@@ -6676,3 +6968,6 @@ internal data class DelegatedPaymentDecision(
     val delegationId: String?,
     val grantorPartyId: UUID?,
 )
+
+/** Original debit account, with an optional amount to disambiguate overlapping delegated grants. */
+data class DomesticSubmissionLookup(val debtorAccountId: UUID?, val amount: String? = null)

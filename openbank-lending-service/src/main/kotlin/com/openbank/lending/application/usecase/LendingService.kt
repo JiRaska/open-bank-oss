@@ -78,6 +78,7 @@ import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -363,6 +364,8 @@ class LendingService @Inject constructor(
         reason: String,
     ): LendingOutboxMessage {
         val id = application.id.value
+        val signedAt = application.signatureRecordedAt?.takeIf { to == OriginationState.SIGNED }
+        val occurredAt = signedAt?.toInstant() ?: clock.instant()
         val payload = buildString {
             append("""{"eventType":"credit.application.transition",""")
             append(""""aggregateType":"LOAN_APPLICATION",""")
@@ -375,7 +378,7 @@ class LendingService @Inject constructor(
             append(""""actorKind":"${actorKind.name}",""")
             append(""""reason":"${reason.replace("\"", "'")}",""")
             append(""""packVersion":${application.packVersion ?: "null"},""")
-            append(""""occurredAt":"${clock.instant()}",""")
+            append(""""occurredAt":"$occurredAt",""")
             append(""""correlationId":"$id",""")
             append(""""sourceService":"lending"}""")
         }
@@ -751,35 +754,40 @@ class LendingService @Inject constructor(
                 ) {
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
-                    // The artefact hash rides the SAME conditional statement as the transition —
-                    // see LoanApplicationRepository.compareAndSetSignature for why a second write
-                    // would re-open the split-write window #3850 closed.
                     is OriginationTransitionResult.Applied ->
-                        applications.compareAndSetSignature(
-                            existing.copy(status = result.newState, signatureArtefactHash = request.artefactHash),
-                            existing.status,
-                        ).flatMap { claimed ->
-                            if (claimed == 0) {
-                                Uni.createFrom().failure(
-                                    IllegalStateException(
-                                        "Concurrent modification: application ${existing.id} is no longer " +
-                                            "in ${existing.status}",
-                                    ),
-                                )
-                            } else {
-                                Uni.createFrom().item(existing.copy(status = result.newState))
-                            }
-                        }
-                            .signalWorkflow()
-                            .emitEvidence(
-                                existing.status.name,
-                                signedBy,
-                                OriginationActorKind.HUMAN,
-                                "customer signature received (artefact ${request.artefactHash})",
-                            )
+                        recordSignature(existing, result.newState, request, signedBy)
                 }
             }
         }
+
+    private fun recordSignature(
+        existing: LoanApplication,
+        state: OriginationState,
+        request: SignApplicationRequest,
+        signedBy: String,
+    ): Uni<LoanApplication> = applications.withLocked(existing.id) { locked ->
+        val current = locked ?: throw signatureClaimLost(existing)
+        if (current.status != existing.status) throw signatureClaimLost(existing)
+        if (lacksDecision(current)) throw decisionMissing(current)
+        val signed = current.copy(
+            status = state,
+            signatureArtefactHash = request.artefactHash,
+            signatureRecordedAt = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MICROS),
+        )
+        applications.compareAndSetSignature(signed, existing.status).map { claimed ->
+            if (claimed == 0) throw signatureClaimLost(existing)
+            signed
+        }.emitEvidence(
+            existing.status.name,
+            signedBy,
+            OriginationActorKind.HUMAN,
+            "customer signature received (artefact ${request.artefactHash})",
+        )
+    }.signalWorkflow()
+
+    private fun signatureClaimLost(existing: LoanApplication) = IllegalStateException(
+        "Concurrent modification: application ${existing.id} is no longer in ${existing.status}",
+    )
 
     override fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String): Uni<Boolean> =
         applications.findById(id).flatMap { existing ->
@@ -1016,37 +1024,36 @@ class LendingService @Inject constructor(
                         }
                     }
                     .flatMap {
-                        events.emit(
-                            LendingOutboxMessage(
-                                aggregateId = saved.id.value,
-                                eventType = "loan.disbursed",
-                                // #3914: occurredAt is the loan's own `disbursedAt` — the instant the disbursement
-                                // happened on the aggregate — not the serialisation instant.
-                                // Issue #3994/#5256: sourceService is the strongest (EVENT-sourced) attribution
-                                // AuditConsumer.resolveSourceService reads. EventAttribution.TopicAttribution
-                                // already maps openbank.lending.events -> lending-service correctly (TOPIC-sourced),
-                                // and audit-service subscribes to this topic today (openbank-audit-service's
-                                // application.yaml consumed-topics list), so this is a live attribution upgrade.
-                                // Value matches the "lending" literal already used by the 3 previously-fixed
-                                // event types in this file/OriginationDecisionService/TerminationService — not
-                                // "lending-service" as the topic-fallback table would say (a pre-existing,
-                                // self-consistent naming choice this PR preserves rather than introduces).
-                                payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
-                                    """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
-                                    // #11107: optional, additive — the human contract number.
-                                    (saved.contractNumber?.let { """"contractNumber":"$it",""" } ?: "") +
-                                    """"principal":"${saved.principal}",""" +
-                                    // ADR-0314 D5: the rate terms, so the risk engine can tell a
-                                    // fixed loan from a floating one without asking lending.
-                                    saved.rateTerms.jsonFields() +
-                                    """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
-                                    """"sourceService":"lending"}""",
-                            ),
-                        )
+                        val cashConfirmedAt = clock.instant()
+                        applications.withLocked(application.id) {
+                            events.emit(disbursementEvent(saved)).call { _ ->
+                                events.emitExposureFact(
+                                    saved,
+                                    LoanExposureChange.Disbursed(cashConfirmedAt),
+                                    saved.disbursedAt.toInstant(),
+                                )
+                            }
+                        }
                     }
                     .map { saved }
             }
     }
+
+    private fun disbursementEvent(loan: Loan) = LendingOutboxMessage(
+        aggregateId = loan.id.value,
+        eventType = "loan.disbursed",
+        // #3914: occurredAt is the disbursement instant recorded by the aggregate.
+        // #3994/#5256: sourceService provides event-sourced audit attribution.
+        payload = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+            """"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+            // #11107: optional human contract number.
+            (loan.contractNumber?.let { """"contractNumber":"$it",""" } ?: "") +
+            """"principal":"${loan.principal}",""" +
+            // ADR-0314 D5: the rate terms distinguish fixed and floating loans.
+            loan.rateTerms.jsonFields() +
+            """"occurredAt":"${loan.disbursedAt.toInstant()}",""" +
+            """"sourceService":"lending"}""",
+    )
 
     // --- Servicing ----------------------------------------------------------------------------------
 
@@ -1082,14 +1089,26 @@ class LendingService @Inject constructor(
                     )
                 loan.status in CLOSED_EXPOSURE_STATES ->
                     Uni.createFrom().failure(IllegalStateException("Loan has no recognized exposure"))
-                else -> recordRepaymentAgainst(loan, installmentId).call { _ ->
+                else -> recordRepaymentAgainst(loan, installmentId).call { paid ->
                     installments.findByLoan(loanId).flatMap { rows ->
-                        if (rows.isNotEmpty() && rows.all { it.paid }) {
+                        // The UPDATE can leave the just-paid entity cached on this reactive session.
+                        // Use the successful write result for that installment and the rows for the rest.
+                        val unpaid = rows.filterNot { it.paid || it.id == paid.id }
+                        val updated = if (rows.isNotEmpty() && rows.all { it.paid }) {
                             provisioning.releaseAllowance(loan, events, LocalDate.now(clock))
                                 .flatMap { loans.update(loan.copy(status = LoanStatus.CLOSED)) }
-                                .replaceWith(Unit)
                         } else {
-                            Uni.createFrom().item(Unit)
+                            Uni.createFrom().item(loan)
+                        }
+                        updated.flatMap { current ->
+                            val principal = unpaid.fold(Money.zero(loan.principal.currency.code)) { total, row ->
+                                total + row.principal
+                            }
+                            events.emitExposureFact(
+                                current,
+                                LoanExposureChange.Repaid(paid, principal),
+                                requireNotNull(paid.paidAt).toInstant(),
+                            )
                         }
                     }
                 }
@@ -1116,7 +1135,8 @@ class LendingService @Inject constructor(
                     // and the four-eyes cash reconstruction for historic repayments uses the same key.
                     debitBorrower(loan, target)
                         .flatMap { installments.markPaid(installmentId, paidAt) }
-                        .flatMap {
+                        .flatMap { written ->
+                            check(written == 1) { "Repayment did not mark its installment paid" }
                             // Split posting: principal repayment + the interest leg. If the scheduled pass already
                             // accrued this installment's interest income, the cash only *settles* the receivable
                             // (INTEREST_SETTLEMENT); otherwise it is repaid early and we recognize income directly
@@ -1285,7 +1305,9 @@ class LendingService @Inject constructor(
                                     eventType = "loan.written_off",
                                     payload = wPayload,
                                 ),
-                            ).map { written }
+                            ).call { _ ->
+                                events.emitExposureFact(written, LoanExposureChange.Ended, writtenOffAt)
+                            }.map { written }
                         }
                 }
             }
@@ -1521,6 +1543,7 @@ class LendingService @Inject constructor(
             // Persist the bumped version — the durable half of the idempotency key computed above.
             .flatMap { loans.update(loan.copy(version = generation)) }
             .flatMap { updated ->
+                val rescheduledAt = clock.instant()
                 events.emit(
                     LendingOutboxMessage(
                         aggregateId = updated.id.value,
@@ -1534,10 +1557,12 @@ class LendingService @Inject constructor(
                             """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
                             """"newTermPeriods":${request.newTermPeriods},""" +
                             """"principalForgiveness":"${request.principalForgiveness}",""" +
-                            """"occurredAt":"${clock.instant()}",""" +
+                            """"occurredAt":"$rescheduledAt",""" +
                             """"sourceService":"lending"}""",
                     ),
-                ).map { updated }
+                ).call { _ ->
+                    events.emitExposureFact(updated, LoanExposureChange.Rescheduled(newPrincipal), rescheduledAt)
+                }.map { updated }
             }
     }
 

@@ -15,6 +15,7 @@ import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
+import com.openbank.tax.domain.returns.DeadlineBasis
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
@@ -185,6 +186,91 @@ class StatutoryReturnServiceTest {
             "M-FUND/fund-b/2026-07/NOT_ASSEMBLED",
             "Q-CO/company/2026-Q2/NOT_ASSEMBLED",
         )
+    }
+
+    @Test
+    fun `an on-demand return is never expected, so no un-named day is NOT_ASSEMBLED`(): Unit = runBlocking {
+        val onDemand = ReturnDefinition(
+            code = "D-EVENT",
+            name = "on demand",
+            scope = ReturnScope.COMPANY,
+            periodicity = Periodicity.DAY,
+            deadlineDaysAfterPeriodEnd = 3,
+            datapoints = listOf("units"),
+            rules = emptyList(),
+            legalBasis = "test",
+            deadlineBasis = DeadlineBasis.WORKING_DAYS,
+            onDemand = true,
+        )
+        val svc = StatutoryReturnService(
+            catalogues = object : ReturnCatalogueSource {
+                override fun catalogues() = listOf(ReturnCatalogue("ev", 1, "XX", false, listOf(onDemand)))
+            },
+            data = data,
+            repository = repo,
+            entities = ReportingEntities("company", emptyList(), LocalDate.of(2026, 6, 30)),
+            accountingClock = AccountingClock.bank(clock),
+            clock = clock,
+        )
+        assertThat(svc.breaches()).isEmpty()
+        // A stored revision of a named day still breaches once its working-day deadline passes.
+        svc.assemble("ev", "D-EVENT", "company", "2026-08-14", "maker")
+        assertThat(svc.breaches().map { "${it.period}/${it.dueDate}/${it.kind}" })
+            .containsExactly("2026-08-14/2026-08-19/NOT_SUBMITTED")
+    }
+
+    @Test
+    fun `the onStored hook runs only after the return validated and was stored`(): Unit = runBlocking {
+        val seen = mutableListOf<UUID>()
+        val hooked = object : ReturnDataPort {
+            var units = BigDecimal("-1")
+            override val available = true
+            override suspend fun fetch(
+                catalogue: ReturnCatalogue,
+                definition: ReturnDefinition,
+                entityId: String,
+                period: ReportingPeriod,
+            ) = ReturnAssemblyData(mapOf("units" to units), onStored = {
+                assertThat(repo.rows).containsKey(it.id)
+                seen += it.id
+            })
+        }
+        val svc = service(d = hooked)
+        assertThatThrownBy { runBlocking { svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker") } }
+            .isInstanceOf(com.openbank.tax.domain.returns.ReturnValidationException::class.java)
+        assertThat(seen).isEmpty()
+        hooked.units = BigDecimal("5")
+        val stored = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")
+        assertThat(seen).containsExactly(stored.id)
+    }
+
+    @Test
+    fun `a return with no filing obligation is never a breach, stored and overdue or not`(): Unit = runBlocking {
+        val dryRun = ReturnDefinition(
+            code = "D-TEST",
+            name = "dry run",
+            scope = ReturnScope.COMPANY,
+            periodicity = Periodicity.DAY,
+            deadlineDaysAfterPeriodEnd = 3,
+            datapoints = listOf("units"),
+            rules = emptyList(),
+            legalBasis = "test",
+            deadlineBasis = DeadlineBasis.WORKING_DAYS,
+            onDemand = true,
+            filingObligation = false,
+        )
+        val svc = StatutoryReturnService(
+            catalogues = object : ReturnCatalogueSource {
+                override fun catalogues() = listOf(ReturnCatalogue("ev", 1, "XX", false, listOf(dryRun)))
+            },
+            data = data,
+            repository = repo,
+            entities = ReportingEntities("company", emptyList(), LocalDate.of(2026, 6, 30)),
+            accountingClock = AccountingClock.bank(clock),
+            clock = clock,
+        )
+        svc.assemble("ev", "D-TEST", "company", "2026-08-14", "maker")
+        assertThat(svc.breaches()).isEmpty()
     }
 
     @Test

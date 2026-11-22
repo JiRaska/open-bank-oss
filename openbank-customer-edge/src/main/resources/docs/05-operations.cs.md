@@ -96,6 +96,10 @@ Symptom: každé proxované volání vrací `{"error":"upstream unavailable"}`.
 
 Toto je IDOR ochrana fungující dle návrhu: `accountId` se neresolvoval na party z JWT. Ověř, že účet patří volající party v account-service; vrací se 403 (ne 404) záměrně, aby se předešlo existenčnímu oraclu.
 
+## Tracing
+
+Edge používá `quarkus-opentelemetry`, takže každý příchozí požadavek otevře serverový span a Redis klient i odchozí REST volání se připojí do stejného trace. OTLP endpoint a argument sampleru dodává nasazený manifest. `CustomerEdgeTraceContractIT` fixuje trace kontrakt: požadavek na WebAuthn challenge a jeho Redis `SET` sdílejí jeden trace a nemají chybový span.
+
 ## Pojmenování metrik
 
 Každý vlastní čítač Micrometeru se registruje s předponou `openbank.` (CI brána `metric-name-prefix` odmítne nové jméno bez předpony). Prometheus převádí tečky na podtržítka a k čítačům přidává `_total`: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` a `openbank_feedback_emit_failures_total`. Dřívější názvy bez předpony (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) se po nasazení této verze už nevydávají, takže dashboardy a alerty musí používat názvy s předponou; PrometheusRules v repozitáři to již dělají.
@@ -124,3 +128,13 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Souhrnný časový limit schránky notifikací
 
 Sjednocená schránka notifikací volá notifikační službu pro každou stranu v rámci jednoho souhrnného časového limitu. Limit se měří monotónními hodinami a každé čekání (získání povolení, čekání na dokončení, časový limit HTTP volání) se zkracuje o zbývající rozpočet. Po vyčerpání rozpočtu endpoint odpoví `NOTIFICATIONS_UNAVAILABLE`, místo aby čekal na sekvenční časové limity. Konfigurace ani kontrakt se nezměnily.
+
+## Testovací převod mezi vlastními účty (#7284)
+
+Vyhrazená zákaznická trasa ověřuje syntetický požadavek a token servisního účtu
+`openbank-synthetic-transfer`. Nastavte `openbank.synthetic-transfer.party-id`,
+`openbank.synthetic-transfer.source-account-id` a `openbank.synthetic-transfer.target-account-id`
+pro izolovanou sandboxovou sadu. Subjekt musí být ve službě Party aktivní s klasifikací SYNTHETIC
+a vlastnit oba účty. `GET /customer/v1/synthetic/transfers` vrací ověřené sadě aktuální datum
+účtování v zóně Europe/Prague. POST na stejné cestě přijímá toto datum a směr převodu. Vyhrazená
+trasa Transaction vyžaduje ověřený Edge a stejný syntetický původ.

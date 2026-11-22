@@ -97,7 +97,11 @@ HTTPS, verify Certificate readiness, the service DNS SAN, a trusted TLS handshak
 and caller network-policy access to 8443. Keep HTTP during mixed-version operation;
 removing it requires a separate caller inventory and rollout. If the new listener
 fails, retain the existing caller URL and revert the additive server configuration.
-This stage provides server authentication; it does not establish mutual TLS.
+The production 8443 listener requires a trusted client certificate; API requests also
+require an independently authenticated bearer token. Tax-reporting uses its own
+client certificate and the private-CA trust store. `ListenerAuthParityIT` verifies
+certificate enforcement and bearer authentication on both listeners locally; it
+does not prove deployed certificate readiness or caller compatibility.
 
 `ServerTlsIT` proves PEM loading, TLS 1.3 negotiation, rejection of an untrusted
 certificate, and continued HTTP service with ephemeral test keys. Deployment
@@ -179,3 +183,7 @@ The `%dev` profile has no messaging override. `smallrye-in-memory` is a test-onl
 The fund client now calls pension-fund-service `/api/v2` for holdings, orders, priced transactions and strategy reads. Its client-credentials identity, TLS bucket and idempotency-key forwarding are unchanged. This is an outbound contract migration; this service's public `/api/v2/pension` contract is unchanged. Consumer Pact and mutual-TLS fixtures use the new provider paths.
 
 Before a separately approved client rollout, verify every active fund backend serves v2. The provider retains deprecated v1 aliases for these unchanged operations, so older client images can coexist; that is not proof the target environment already runs the new provider. Roll back callers before selecting a v1-only provider. No deployment or live order execution is authorized by the source migration.
+
+## Mutation testing
+
+The build applies the pitest plugin to the domain package of this money-path service. It runs only from the weekly and manual `pitest.yml` workflow, as an advisory score (ADR-0063), and is not part of `check` or any per-PR gate. Runtime behaviour, the API and the resolved runtime classpath are unchanged.

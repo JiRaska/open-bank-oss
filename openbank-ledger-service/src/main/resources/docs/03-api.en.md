@@ -31,6 +31,8 @@ The role matrix is locked by `LedgerSecurityContractTest`.
 
 Query params: `fromDate` (default `2020-01-01`), `toDate` (default today), `limit` (default 20), `cursor`.
 Returns a `CursorPage<JournalEntryResponse>`: `{ data: [...], pagination: { nextCursor, hasMore } }`.
+Journals are ordered by entry date, creation timestamp, and journal ID, all descending. Use the returned cursor with
+the same date range. PostgreSQL limits each page before the service loads its journal lines.
 
 ### `GET /api/v1/journals/{journalId}` — get one entry
 
@@ -88,6 +90,18 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapping is centralized in `ExceptionMappers` and deferred to `openbank-libs` for the generic fallback (ADR-0049 D4 — the service does not register a catch-all `Exception` mapper). Typical statuses: `400` (unbalanced / invalid posting), `401`/`403` (auth), `404` (unknown journal), `409` (idempotency-key conflict).
 
+## Posting refusals that carry a machine code
+
+A posting or reversal dated into a locked period answers `409`. Three locks exist and the body of each carries a stable `code` next to the unchanged `error` text, so a caller can tell them apart from any other 409 (an idempotency conflict, a mismatched replay) without parsing prose:
+
+| Lock | `code` | Remedy |
+|---|---|---|
+| Accounting day no longer OPEN (ADR-0207 D3) | `ACCOUNTING_DAY_CLOSED` | Re-date into the current open day. |
+| Statutory period FROZEN (ADR-0096 D1; refused only when `openbank.ledger.period-lock.mode=enforce`) | `ACCOUNTING_PERIOD_FROZEN` | Book the correction into the current open period. |
+| Fiscal year ATTESTED (#869) | `ACCOUNTING_YEAR_CLOSED` | Book an adjustment in the current open period. |
+
+The `code` field is additive; the `error` field is unchanged. These refusals are deterministic for the same entry date, so a caller must not retry the same payload unchanged. The two period-level codes are not yet handled specially by any caller; they are treated as a plain 409 today.
+
 ## Day-close participants (ADR-0342)
 
 `GET /api/v1/ledger/accounting-days/{date}/participants` returns the day's completeness. A declared participant (for example `interest`) reports `RAN`, `SKIPPED` or `REFUSED` with `PUT .../participants/{participant}`; only the service-account declared for it may report. A participant that never reported is listed in `missing`; one whose latest report is `REFUSED` is listed in `refused` - its work (for example interest capitalization) was not posted. Either holds the day in `CUTOFF` (`complete=false`) until the participant reports `RAN` or an operator waives it.
@@ -113,3 +127,10 @@ The call requires an `Idempotency-Key` header (1–128 characters of `[A-Za-z0-9
 The binding stores request/scope digests, result kind and an opaque source reference, not an independent financial response in Redis. An empty result retains only its original identifier, observation instant and database-view metadata. Expired bindings are removed on access and by minute maintenance; physical cleanup can lag while the service is stopped. Hashes and opaque identifiers are not asserted to be anonymous. These controls do not extend source-data retention or override legal holds.
 
 Coverage is **attached ledger journals only**, never proof of account lifetime, classified economic history or the absence of cash/card/transfer events. Direct balance mutations, detached source partitions, legacy missing origins and unverified origin assertions remain explicit limitations. Optional journal `origin` is an authenticated writer's raw assertion; its submitter is assigned by the ledger, not a request field. No EventKind or new posting authority is accepted.
+
+## Year-end result allocation (ADR-0096 D3)
+
+`GET /api/v1/ledger/close/{fiscalYear}/result-allocation` previews the closing legs that zero the year's income and expense accounts into retained earnings (6020); it is read-only and `posted` is always false. `POST` on the same path posts that closing journal dated the last day of the fiscal year through the ordinary posting path, so the day, period and fiscal-year locks apply. It is operator-only (`ledger.close.draft`), the maker step of the year close; the checker reviews it through the attestation, whose fresh-hash re-verification covers the closing journal.
+
+The POST takes no `Idempotency-Key`: it is carry-relative. A re-run over an unchanged ledger posts nothing (`posted=false`), and a later posting into the year leaves a residual that a re-run allocates. The journal's own idempotency key uses a reserved `year-end-result:` prefix that the generic posting API refuses. It is refused with 409 for a year that has not ended, an ATTESTED year close, or a non-CZK income or expense balance; no rate is invented. A DRAFT year close computed before the allocation must be refreshed before attestation.
+

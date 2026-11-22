@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -244,6 +244,37 @@ components:
           type: string
           format: uuid
           nullable: true
+          description: >-
+            Legacy internal payee id. Used as the payee-history key only when
+            `counterparty` is absent or cannot be keyed.
+        counterparty:
+          type: object
+          nullable: true
+          required: [scheme, value]
+          description: >-
+            ADR-0377 D3 payee account. Personal data — sent only over the authenticated
+            service-to-service hop, never logged or persisted by fraud-service: it is keyed
+            on arrival (HMAC-SHA-256 with a service-held secret) and only that pseudonym is
+            stored in payee history. Preferred over `counterpartyId` for the new-payee signal.
+          properties:
+            scheme:
+              type: string
+              enum: [IBAN, DOMESTIC_ACCOUNT]
+            value:
+              type: string
+              maxLength: 64
+              description: IBAN, or `<bankCode>/<accountNumber>` for DOMESTIC_ACCOUNT; spaces and case are normalised.
+              example: "DE89370400440532013000"
+        initiationMode:
+          type: string
+          nullable: true
+          enum: [CUSTOMER_PRESENT, STANDING_INSTRUCTION, MANDATE, THIRD_PARTY_PROVIDER, DELEGATE, SYSTEM_RETRY]
+          description: ADR-0377 D3 — who or what started the operation.
+        channel:
+          type: string
+          nullable: true
+          enum: [MOBILE_APP, WEB, API, BRANCH, BACK_OFFICE, SCHEDULER]
+          description: ADR-0377 D3 — the surface the instruction arrived through (optional evidence).
 
     ScoreFraudResponse:
       type: object

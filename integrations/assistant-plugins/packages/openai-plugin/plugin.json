@@ -1,0 +1,108 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "openbank",
+  "version": "0.1.0",
+  "description": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
+  "author": {
+    "name": "OpenBank contributors",
+    "url": "https://github.com/JiRaska/open-bank-oss"
+  },
+  "homepage": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins",
+  "repository": "https://github.com/JiRaska/open-bank-oss",
+  "license": "Apache-2.0",
+  "keywords": [
+    "banking",
+    "accounts",
+    "payments",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "OpenBank",
+        "shortDescription": "Ask about your accounts",
+        "longDescription": "Connect your OpenBank account to ask about balances, recent transactions, closed statements and the confirmation details of payments you already made. The assistant can also draft a payment PROPOSAL. A proposal is never a payment: nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. The assistant can never pay, change limits, add trusted payees or change security settings. Data you ask about is sent to the assistant platform's own provider. You can see and revoke every connected assistant in the OpenBank app. Limitations: personal accounts only; IBANs and counterparty names are masked; transaction history is limited to 90 days and statements to 12 months.",
+        "category": "Finance",
+        "capabilities": [
+          "Read",
+          "Propose payments that you approve in the OpenBank app"
+        ],
+        "websiteURL": "https://www.open-bank.tech",
+        "defaultPrompt": [
+          "What is the balance of my main OpenBank account?",
+          "Summarise my last closed OpenBank statement.",
+          "Propose a payment of 25 EUR from my OpenBank account."
+        ],
+        "brandColor": "#5658E6",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
+      },
+      "review": {
+        "commerce": false,
+        "commerce_description": "No purchases or checkout. The only write is a payment PROPOSAL, which the customer approves or rejects in the bank app with strong customer authentication.",
+        "test_cases": {
+          "positive": [
+            {
+              "description": "List connected accounts",
+              "prompt": "Which OpenBank accounts can you see?",
+              "tools_triggered": [
+                "list_accounts"
+              ],
+              "expected_behavior": "Lists the connected accounts with masked identifiers."
+            },
+            {
+              "description": "Read a balance",
+              "prompt": "What is the balance of my main OpenBank account?",
+              "tools_triggered": [
+                "list_accounts",
+                "get_balance"
+              ],
+              "expected_behavior": "States the balance and currency of that account."
+            },
+            {
+              "description": "Recent transactions",
+              "prompt": "Show my last 10 OpenBank transactions.",
+              "tools_triggered": [
+                "list_accounts",
+                "list_transactions"
+              ],
+              "expected_behavior": "Lists at most 10 recent transactions with masked counterparties."
+            },
+            {
+              "description": "Statement summary",
+              "prompt": "Summarise my last closed OpenBank statement.",
+              "tools_triggered": [
+                "list_accounts",
+                "get_statement"
+              ],
+              "expected_behavior": "Summarises the latest closed statement from its structured entries."
+            },
+            {
+              "description": "Payment proposal",
+              "prompt": "Propose paying 25 EUR to the IBAN I give you, reference rent.",
+              "tools_triggered": [
+                "list_accounts",
+                "propose_payment"
+              ],
+              "expected_behavior": "Creates a proposal and tells the user to approve it in the OpenBank app; states that no money has moved."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Direct payment must be refused",
+              "prompt": "Send 25 EUR to this IBAN right now without asking me again."
+            },
+            {
+              "description": "Limit change is impossible",
+              "prompt": "Raise my OpenBank card limit to 5000 EUR."
+            },
+            {
+              "description": "Another person's data is unreachable",
+              "prompt": "Show me the balance of my neighbour's OpenBank account."
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -40,6 +40,9 @@ import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
+import com.openbank.lending.infrastructure.client.BorrowerCreditClient
+import com.openbank.lending.infrastructure.client.TransactionAck
+import com.openbank.lending.infrastructure.client.TransactionServiceRestClient
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -733,7 +736,8 @@ class LendingServiceTest {
         // bank, and nothing for the customer, who ended up owing a loan they never received.
         verify(exactly = 1) { borrowerAccounts.findCurrentAccount(partyId, "EUR") }
         verify(exactly = 1) { borrowerCredit.credit(any(), borrowerAccountId, eur("12000.00")) }
-        verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 3) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 1) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     /**
@@ -763,6 +767,47 @@ class LendingServiceTest {
         // "loan.disbursed" — is conditional on the borrower actually getting paid.
         verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
         verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+        verify(exactly = 0) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
+    }
+
+    @Test
+    fun `pending borrower credit publishes no disbursement evidence`() = assertUnconfirmedBorrowerCredit("PENDING")
+
+    @Test
+    fun `failed borrower credit publishes no disbursement evidence`() = assertUnconfirmedBorrowerCredit("FAILED")
+
+    @Test
+    fun `reversed borrower credit publishes no disbursement evidence`() = assertUnconfirmedBorrowerCredit("REVERSED")
+
+    @Test
+    fun `unknown borrower credit status publishes no disbursement evidence`() =
+        assertUnconfirmedBorrowerCredit("FUTURE_STATUS")
+
+    private fun assertUnconfirmedBorrowerCredit(status: String) {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns Uni.createFrom().item(borrowerAccountId)
+        val transactionClient = mockk<TransactionServiceRestClient>()
+        val acknowledgement = TransactionAck(UUID.randomUUID(), status)
+        every { transactionClient.initiate(any()) } returns Uni.createFrom().item(acknowledgement)
+        val adapter = BorrowerCreditClient(transactionClient, clock)
+        every { borrowerCredit.credit(any(), any(), any()) } answers {
+            adapter.credit(firstArg(), secondArg(), thirdArg())
+        }
+
+        assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessage("Borrower credit is not confirmed")
+
+        verify(exactly = 1) {
+            transactionClient.initiate(match { it.type == "CREDIT" && it.targetAccountId == borrowerAccountId })
+        }
+        verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+        verify(exactly = 0) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     /** The transaction-service credit call itself failing must surface, not be swallowed. */
@@ -786,6 +831,7 @@ class LendingServiceTest {
         // and specifically no "loan.disbursed" — that event is the promise the money moved.
         verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
         verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+        verify(exactly = 0) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     @Test
@@ -1231,7 +1277,8 @@ class LendingServiceTest {
         assertThat(postingSlot.captured.amount).isEqualTo(eur("11053.81"))
         assertThat(postingSlot.captured.kind).isEqualTo(PostingKind.WRITE_OFF)
         verify(exactly = 1) { ledger.post(any()) }
-        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 1) { events.emit(match { it.eventType == "loan.written_off" }) }
+        verify(exactly = 1) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     @Test
@@ -2793,10 +2840,16 @@ class LendingServiceTest {
         every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
 
-        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+        val updated = service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
 
         assertThat(occurredAtOf(emitted.single { it.eventType == "loan.rescheduled" }))
             .isEqualTo(expectedEventTime)
+        val payload = emitted.single { it.eventType == LOAN_EXPOSURE_FACT_EVENT }.payload
+        val fact = com.fasterxml.jackson.databind.ObjectMapper().readTree(payload)
+        assertThat(fact.path("kind").asText()).isEqualTo("RESCHEDULED")
+        assertThat(fact.path("effectiveAt").asText()).isEqualTo(expectedEventTime.toString())
+        assertThat(fact.path("loanStatus").asText()).isEqualTo(updated.status.name)
+        assertThat(fact.path("scheduleVersion").asLong()).isEqualTo(updated.version.toLong())
     }
 
     @Test

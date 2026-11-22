@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-pension-service openbank-pension-fund-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -48,8 +48,10 @@ jobs:
           - openbank-ledger-service
           - openbank-balance-service
           # Fleet rollout (#1266): money-path services with substantive domain math.
-          # Thin-domain services (clearing / swift / lending — 1 domain file each) are
-          # skipped on purpose — mutation testing there is noise, not signal (ADR-0063).
+          # Thin-domain services (clearing / swift — 1 domain file each) are skipped on
+          # purpose — mutation testing there is noise, not signal (ADR-0063). lending is NOT
+          # thin (28 branch sites over 7 files); it is a recorded exclusion pending its own
+          # measurement (check-pitest-money-path-coverage.py: EXCLUDED / OVER_THIN_BASELINE).
           - openbank-account-service
           - openbank-transaction-service
           - openbank-fx-service
@@ -57,7 +59,7 @@ jobs:
           # decision logic (3 domain files each — routing, screening, validation); a surviving
           # mutant there is a real miss. Remaining money-path services stay excluded by the
           # same ADR-0063 thin-domain criterion (sca/consent/billing/clearing 1-2 files,
-          # swift/lending 1 file).
+          # swift 1 file; lending is a recorded exclusion, see above).
           - openbank-sepa-payment
           - openbank-sepa-instant
           - openbank-domestic-payment
@@ -106,11 +108,29 @@ jobs:
           #     NO_COVERAGE, mostly the Nostro* reconciliation classes, which no unit test reaches.
           - openbank-card-issuance-service
           - openbank-treasury-service
+          # 2026-11-10 (ADR-0063): pension (392 branch sites over 31 domain files) and pension-fund
+          # (98 over 8) were money-path and never measured. Local baselines (2026-11-10,
+          # `./gradlew :<svc>:pitest`, domain.* targets, domain+application tests):
+          #   pension-fund  523 mutations, 369 killed = 71%
+          #   pension      2331 mutations, 646 killed = 28%; 1530 are NO_COVERAGE (the domain is
+          #     exercised by funding/ and integration tests that targetTests does not select), ~19 min
+          # check-pitest-money-path-coverage.py keeps this list reconciled with rules.yaml
+          # money_path_services.
+          - openbank-pension-service
+          - openbank-pension-fund-service
+          # 2026-11-18 (ADR-0063): the three OVER_THIN_BASELINE debts pay down — the modules the
+          # thin-domain exclusion no longer covers (swift / lending / card-processing, see
+          # check-pitest-money-path-coverage.py) enter the matrix with the rest of the money path.
+          # Measured baselines 2026-11-18: swift 232 mutations/77% killed, lending 336/68%,
+          # card-processing 86/64% (event payloads excluded per the ADR-0063 noise criterion).
+          - openbank-swift-service
+          - openbank-lending-service
+          - openbank-card-processing-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           java-version: "25"
           distribution: temurin
@@ -203,7 +223,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           java-version: "25"
           distribution: temurin
@@ -294,7 +314,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           java-version: "25"
           distribution: temurin

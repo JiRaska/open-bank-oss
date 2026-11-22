@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.7.0...product-catalog-v1.8.0) (2026-11-21)
+
+
+### Features
+
+* **product-catalog:** serialize account permit consumption with passport revocation ([#16351](https://github.com/JiRaska/open-bank-oss/issues/16351)) ([50632ab](https://github.com/JiRaska/open-bank-oss/commit/50632ab2b59f15823ae7f5d7ac47d231cca56f57))
+
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.6.0...product-catalog-v1.7.0) (2026-11-12)
+
+
+### Features
+
+* **product-catalog:** bind fincrime replay reviews to stable actors ([#15696](https://github.com/JiRaska/open-bank-oss/issues/15696)) ([f821367](https://github.com/JiRaska/open-bank-oss/commit/f82136778ac2c84e32d1b25bfbc703b941edaa55))
+
 ## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.3...product-catalog-v1.6.0) (2026-11-08)
 
 

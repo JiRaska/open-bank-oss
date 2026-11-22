@@ -106,6 +106,11 @@ dependencies {
     //
     // Keep Quarkus API coordinates aligned with the service platform catalog.
     compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.3")
+    // ADR-0320 P2 (#16590): Jose4jDpopProofParser compiles against jose4j, which services get
+    // transitively from quarkus-oidc (67 of 68 modules). compileOnly, so libs-runtime ships no JOSE
+    // runtime dependency; the parser is a plain class a service constructs only when it opts in.
+    // Version = what the current Quarkus BOM resolves (already in verification-metadata.xml).
+    compileOnly("org.bitbucket.b_c:jose4j:0.9.6")
     compileOnly("io.quarkus:quarkus-jackson:${libs.versions.quarkus.asProvider().get()}")
 
     // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
@@ -116,6 +121,11 @@ dependencies {
     // ever selects the s3 backend. A service that sets openbank.objectstore.backend=s3
     // must add libs.aws.sdk.s3 (or an equivalent) to its OWN build.gradle.kts.
     compileOnly(libs.aws.sdk.s3)
+    // Synthetic response tests need SDK types, not a network transport or a consumer runtime dependency.
+    testImplementation(libs.aws.sdk.s3) {
+        exclude(group = "software.amazon.awssdk", module = "apache-client")
+        exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
+    }
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -124,6 +134,7 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:${libs.versions.quarkus.asProvider().get()}")
+    testImplementation("org.bitbucket.b_c:jose4j:0.9.6")
     testImplementation("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
     // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
     // class is absent at runtime is silently dropped, so the test needs arc itself.

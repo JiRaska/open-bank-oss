@@ -55,6 +55,7 @@ const groups = Object.fromEntries([...new Set(gates.map(gate => gate.group))].so
   .map(group => [group, gates.filter(gate => gate.group === group).length]))
 const catalog = {
   source: '.github/gates/gates.yaml', ref,
+  generatedAt: new Date().toISOString(),
   totals: {
     all: gates.length,
     enforced: gates.filter(gate => gate.mode === 'enforced').length,

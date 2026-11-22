@@ -8,7 +8,10 @@ import hashlib
 import gzip
 import importlib.util
 from pathlib import Path
+import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, Mock
 
@@ -21,6 +24,31 @@ old = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(old)
 SOURCE = "EXCLUDED_BRANCH_PREFIXES = ('codex/',)\nOWNER_APPROVAL_CONTEXT = 'merge-train/owner-approval'\n" + policy._SUPPORTED_CHECK
 PARENT, ROOT, DIRECTORY, SCRIPTS = ('c' * 40, 'd' * 40, 'e' * 40, 'f' * 40)
+
+
+def git(repo, *args):
+    # Hermetic: no inherited GIT_* (a runner or hook may point them at the real repo), no global or
+    # system config (signing, hooks, templates), so a fixture repo behaves the same everywhere.
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+    env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+    done = subprocess.run(['git', '-C', str(repo), '-c', 'user.email=t@example.invalid', '-c', 'user.name=t',
+                           '-c', 'commit.gpgsign=false', '-c', f'core.hooksPath={os.devnull}', *args],
+                          capture_output=True, text=True, env=env)
+    if done.returncode:
+        raise AssertionError(f'git {args} failed: {done.stderr.strip()}')
+    return done.stdout
+
+
+def commit_policy(repo, text):
+    if not Path(repo, '.git').exists():
+        git(repo, 'init', '-q', '-b', 'main')
+    target = Path(repo, policy.POLICY_PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    git(repo, 'add', policy.POLICY_PATH)
+    git(repo, 'commit', '-q', '-m', 'policy')
+    return git(repo, 'rev-parse', f'HEAD:{policy.POLICY_PATH}').strip()
+
 
 
 class PolicyGitHub(old.FakeGitHub):
@@ -239,6 +267,109 @@ class PolicyEvidenceTests(unittest.TestCase):
             proof.app_authorization(copy.deepcopy(github.pull), old.REPO, github)
         self.assertFalse(any('/git/' in path for path in github.calls))
 
+    def test_reviewed_bdc11a54_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('bdc11a54da45ff594f12d72eb7b2b3bf35139a0f')
+
+    def test_reviewed_9337dc5b_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('9337dc5bf351dd3c9310b1ac9dafeea6ee1f2976')
+
+    def test_reviewed_b03f72aa_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('b03f72aa290b53f9826007b8a745fb77ea15b9ec')
+
+    def test_reviewed_19f3b8c0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('19f3b8c002b9f09439ca152b581121eba0e83274')
+
+    def test_reviewed_231ad0e8_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('231ad0e824f57749b3cfa482ba10593557cbec2f')
+
+    def test_reviewed_1a4024d2_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('1a4024d26828985dd9a620c49b7deac393bc70ed')
+
+    def test_reviewed_eef9500b_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('eef9500b378c7630aff90490b68686b4f0f02cf8')
+
+    def test_reviewed_0706fa38_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('0706fa384166e6be506fa7dc5393a3d69906b6ea')
+
+    def test_reviewed_5e1458d0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('5e1458d0abd19d575cd667e4fae834a5f5aebe00')
+
+    def test_reviewed_3e8b1a85_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('3e8b1a854530ad67b8b2c15e6b68b32788519ef2')
+
+    def test_reviewed_4ff3f289_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('4ff3f289c41f697c1f498435a0ac7bcf4fa6b507')
+
+    def test_reviewed_bffe20f4_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('bffe20f4c51c3b6fe3a7d961617d4f484276478e')
+
+    def test_reviewed_82f517cd_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('82f517cde74e25753d7c498401c4cc9d861074b5')
+
+    def test_current_policy_source_is_within_bounds(self):
+        # #16187: the controller outgrew the size bound and nothing noticed until merge records
+        # were already missing. The size bound stays a PR-time check on the working tree.
+        raw = Path(__file__).with_name('merge-train.py').read_bytes()
+        self.assertLessEqual(len(raw), policy.MAX_POLICY_BLOB_BYTES)
+
+    def test_policy_change_carries_its_own_attestation(self):
+        # Replaces the tripwire that asserted main's CURRENT blob on every PR (#16187): only a PR
+        # whose diff changes merge-train.py must list its resulting blob, so its review covers it.
+        repo = Path(__file__).resolve().parents[2]
+        base = os.environ.get('PR_DIFF_BASE') or 'refs/remotes/origin/main'
+        try:
+            blob = policy.unattested_policy_change(repo, base)
+        except ValueError as error:
+            if os.environ.get('GITHUB_ACTIONS') or os.environ.get('PR_DIFF_BASE'):
+                raise  # in CI an unanswerable comparison must not read as a pass
+            self.skipTest(f'local run without a main to diff against: {error}')
+        self.assertIsNone(blob, f'this change edits merge-train.py; add its blob {blob} to '
+                                f'REVIEWED_POLICY_BLOBS with a fixture and chain test, so reviewing this '
+                                f'PR reviews the policy')
+
+    def test_unrelated_pr_stays_green_after_main_policy_moves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            git(tmp, 'branch', 'unrelated')
+            moved = commit_policy(tmp, SOURCE + '\n# landed on main after the PR was cut\n')
+            git(tmp, 'checkout', '-q', 'unrelated')
+            Path(tmp, 'other.txt').write_text('x')
+            git(tmp, 'add', 'other.txt')
+            git(tmp, 'commit', '-q', '-m', 'unrelated')
+            git(tmp, 'merge', '-q', '-m', 'merge main', 'main')  # even after merging main in
+            self.assertNotIn(moved, policy.REVIEWED_POLICY_BLOBS)
+            self.assertIsNone(policy.unattested_policy_change(Path(tmp), 'main'))
+
+    def test_policy_change_without_list_entry_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            git(tmp, 'checkout', '-q', '-b', 'touching')
+            changed = commit_policy(tmp, SOURCE + '\n# edited by this PR\n')
+            with patch.object(policy, 'REVIEWED_POLICY_BLOBS', frozenset()):
+                self.assertEqual(changed, policy.unattested_policy_change(Path(tmp), 'main'))
+            Path(tmp, policy.POLICY_PATH).write_text(SOURCE + '\n# uncommitted edit\n')
+            with patch.object(policy, 'REVIEWED_POLICY_BLOBS', frozenset({changed})):
+                self.assertIsNotNone(policy.unattested_policy_change(Path(tmp), 'main'))
+
+    def test_policy_change_with_list_entry_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            git(tmp, 'checkout', '-q', '-b', 'touching')
+            changed = commit_policy(tmp, SOURCE + '\n# edited by this PR\n')
+            with patch.object(policy, 'REVIEWED_POLICY_BLOBS', frozenset({changed})):
+                self.assertIsNone(policy.unattested_policy_change(Path(tmp), 'main'))
+
+    def test_unanswerable_comparison_fails_instead_of_passing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit_policy(tmp, SOURCE)
+            with self.assertRaises(ValueError):
+                policy.unattested_policy_change(Path(tmp), 'no-such-ref')
+
+    def test_base64_bound_admits_the_largest_allowed_blob(self):
+        raw = b'x' * policy.MAX_POLICY_BLOB_BYTES
+        encoded = base64.encodebytes(raw).decode()  # GitHub's API wraps base64 like this
+        self.assertLessEqual(len(encoded), policy.MAX_POLICY_BLOB_BASE64)
+
     def test_reviewed_14bd8b1e_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('14bd8b1e81b94eb0a297f645007c44d1245732cc')
 
@@ -274,6 +405,33 @@ class PolicyEvidenceTests(unittest.TestCase):
 
     def test_reviewed_8e5b4dfe_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('8e5b4dfe28d6bf527fa8e677f21e902b35ca3949')
+
+    def test_reviewed_7887f105_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('7887f1058488cea4f26939b5ab39e7d9d909e538')
+
+    def test_reviewed_d4c5ccda_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('d4c5ccdabee1e86687f096075120deb0b6df17a3')
+
+    def test_reviewed_67641bd6_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('67641bd6ce24a54b632c50d16d229ce1bd579843')
+
+    def test_reviewed_25f1786d_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('25f1786d171b1ab122685d39314fd850fc019b85')
+
+    def test_reviewed_82746dd0_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('82746dd0548f1f2e352fefbe97cb2aa9a801df5b')
+
+    def test_reviewed_15c3e151_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('15c3e1510c102bdd91e8006e1a04207b1abb83ef')
+
+    def test_reviewed_0c35ce96_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('0c35ce9601da83a44dd580d42b451e95a6bd1f6a')
+
+    def test_reviewed_1e5e9f5b_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('1e5e9f5b334f640d8102054b8155a9526d035e79')
+
+    def test_reviewed_e2b6a5df_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a')
 
     def test_branch_spoofing_rejected(self):
         github = PolicyGitHub()
@@ -377,7 +535,7 @@ class PolicyEvidenceTests(unittest.TestCase):
 
     def test_blob_digest_encoding_and_bounds_rejected(self):
         for change in ({'content': '!!!!'}, {'content': base64.b64encode(b'wrong').decode()},
-                       {'size': True}, {'size': 500001}, {'encoding': 'utf8'}, {'sha': old.HEAD}):
+                       {'size': True}, {'size': policy.MAX_POLICY_BLOB_BYTES + 1}, {'encoding': 'utf8'}, {'sha': old.HEAD}):
             github = PolicyGitHub()
             github.responses[f'/git/blobs/{github.blob_sha}'].update(change)
             with self.subTest(change=change), self.assertRaises(ValueError):
