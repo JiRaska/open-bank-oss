@@ -340,6 +340,36 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   directly, and the HITL + SCA guarantee must be enforced at the write boundary, not asserted in
   YAML.
 
+### Customer channel — route exposure (ADR-0383 / ADR-0385, #16590, #16847)
+
+The public route is `openbank-infra/gitops/components/mcp-customer-route/` and is **off by
+construction**: no ArgoCD Application applies it, its `kustomization.yaml` lists only the
+certificate grant, and its Gateway parent reference names a listener (`https-mcp`) the Gateway does not
+declare. Every row below must read LIVE before
+[`docs/runbooks/mcp-customer-channel-go-live.md`](../runbooks/mcp-customer-channel-go-live.md)
+step 1 starts. "Open PR" means not on `main`; the PR number is the only claim made about it.
+
+| ID | STRIDE | Threat | Control (what enforces it) | State |
+|----|--------|--------|----------------------------|-------|
+| C-S1 | Spoofing | A stolen access token is replayed from another device | DPoP: `CustomerChannelAdmission` requires `cnf.jkt` and the `DPoP` scheme, and `DpopProofVerifier` checks signature, `htm`, `htu` against the allowlist's published resource, `iat`, `ath`, proof key = `cnf.jkt` | LIVE (channel off by default) |
+| C-S2 | Spoofing | A captured proof is replayed within its `iat` window | `jti` replay claim; today `InMemoryDpopReplayStore`, bounded and per pod, accepted only while `mcp-service` is single-replica (ADR-0383 P4) | PARTIAL — shared fail-closed store is open PR #16791; **blocks go-live** together with the HA row C-D3 |
+| C-S3 | Spoofing | An unlisted or disabled MCP client obtains a customer token | `azp` must be declared AND enabled in `McpClientAllowlist`; tier is read from the allowlist, never the token; `CustomerChannel` refuses to boot on a missing or malformed list | LIVE; realm-side admission tiers are open PRs #16664, #16672 |
+| C-S4 | Spoofing | A client forges `X-Forwarded-Host`/`-Proto` to satisfy `htu`, or a client address to choose its audit key | Service: no `quarkus.http.proxy.*` forwarding at all (`ProxyForwardingGuard` refuses it); `htu` is checked by quarkus-oidc against the request's absolute URI on the `:8443` listener with the external Host passed through. The edge client-address header is honoured only from a verified client certificate whose DNS SAN equals `MCP_EDGE_GATEWAY_IDENTITY`. Edge: the route removes `X-Forwarded-For`, `Forwarded`, `X-Forwarded-Proto/-Host/-Port/-Prefix/-Server`, `X-Real-IP`; `ClientTrafficPolicy` `mcp-edge` trusts zero XFF hops; `BackendTLSPolicy` `mcp-customer-backend` validates the server certificate | Edge: in this route (off). Service mTLS identity pin: open PR #17004. Who may mint the pinned SAN (`openbank-ca` has no approver policy): **OPEN, blocks go-live** |
+| C-T1 | Tampering | An MCP client turns a proposal into an executed payment | Propose-only: `ProposedOnly` whitelists `PROPOSED` on every `status`; `UnwiredProposalPort` refuses while no store exists; gate `mcp-customer-channel-propose-only` (enforced) forbids any non-GET REST client in `openbank-mcp-service/src/main` unless allow-listed | LIVE |
+| C-T2 | Tampering | The proposal is approved with a token the MCP client holds | PDP veto: `rest.rego` `customer_app_session` — every `customer.mcp-proposals.*` action is prohibited unless `token_azp` is the bank app and the token is not exchanged (#16915) | LIVE |
+| C-T3 | Tampering | The customer approves something other than what was proposed | Full SCA with dynamic linking over the proposal hash in the app, no exemptions, expiry, no bulk approval | Open PRs #16853 (store), #16845 (app approval), #16864 (MCP write path); **blocks go-live** |
+| C-R1 | Repudiation | A tokenless flood spends every other caller's audit window | Subject-less audit key per client address, IPv6 /64, IPv4 /32 | Open PR #16919 (#16847); **blocks go-live** |
+| C-R2 | Repudiation | A proposal decision leaves no audit trail | Audit subscription to proposal events | Open PR #16849 |
+| C-I1 | Information disclosure | Tool results leak raw account identifiers that a model chains across parties | Caller-scoped opaque account handle | Open PR #16863; **blocks go-live** |
+| C-I2 | Information disclosure | A customer reads another party's accounts | Reads only under an active `MCP_CLIENT` grant for (party, client, key) | Open PR #16800; **blocks go-live** |
+| C-I3 | Information disclosure | Hostile free text in tool results steers the client's model | Sanitisation of free text in results | Open PR #16637 |
+| C-D1 | Denial of service | Volume before any token is parsed | Edge per-IP local rate limit 10/s, request buffer 64Ki, 30 s timeout (`BackendTrafficPolicy` `mcp-customer`), listener connection limit 500; service `quarkus.http.limits.max-body-size` 64K | Edge: in this route (off). Service cap: LIVE |
+| C-D2 | Denial of service | One subject or client exhausts the service | `McpRateLimiter` (per caller, anonymous shared bucket, in-flight cap) and the per-proof-key / per-client / per-(subject, client) buckets in `CustomerChannelAdmission` | LIVE, per pod; shared budgets are open PR #16791 |
+| C-D3 | Denial of service | One pod rotation is a customer-visible outage | >= 2 replicas, PDB, hostname spread (`public-workload-ha`) | **OPEN — blocks go-live**: single replica by constraint; the three findings are baselined only because the route is off |
+| C-E1 | Elevation of privilege | A customers-realm token reaches a staff charter's tools | `CallerContextResolver` returns null for a customer token before the agent or OBO path; a staff-realm token is never admitted as a customer | LIVE |
+| C-E2 | Elevation of privilege | The edge reaches management or other ports | NetworkPolicy `mcp-service-ingress-allow-list` (generated): `envoy-gateway-system` admitted on `:8443` (mTLS, client auth required) only; route matches only `/customer/mcp` and its two RFC 9728 metadata paths | Policy: in this PR; route off |
+| C-E3 | Elevation of privilege | Abuse is invisible, so none of the above is noticed in time | ADR-0384: three alerts on main (`prometheus-rules-mcp-customer.yaml`), `McpMetricsAdapter` series, admin health page; the rest of #16605 (lifecycle events, proposal funnel, SLOs, kill switch, warehouse, fraud signals) is missing | **OPEN — blocks go-live** |
+
 ## 5. Documented-but-unenforced controls (summary)
 
 > **2026-07-31 — ADR-0224 D2 (agent sessions) landed.** The service is stateful now: the
@@ -392,7 +422,9 @@ container hardening.
    present.
 2. **No ingress today.** Still correct, and still should stay that way — authentication now exists,
    but nothing here has been evaluated against a hostile internet-facing client, only in-cluster
-   ones.
+   ones. The customer route is now declared in gitops (`components/mcp-customer-route/`) but is
+   applied by nothing and names a listener the Gateway does not have; the go-live runbook is the
+   only way it opens, and the "Customer channel — route exposure" rows are its entry criteria.
 3. **Real customer data now passes through this service.** The sandbox posture (no production
    customers) is what currently bounds the blast radius of T-I3, not any code-level control.
 4. **`propose_payment` is money-adjacent by design and is unimplemented — and now says so.** The
@@ -463,6 +495,16 @@ a stub (T-T2/T-D2).
     customers-realm key on `/mcp`). With the refusal removed the first two went red (200, served
     anonymous); the third stays green either way, because the OIDC layer already refuses it (the
     customers tenant is path-bound to `/customer/mcp`, and the staff tenant rejects its `iss`).
+
+- **2026-11-21 (ADR-0383 S6, #16590, #16847)** — Customer route declared, off by construction.
+  Adds the "Customer channel — route exposure" STRIDE rows (C-*) with the real state of every
+  control: LIVE on `main`, open PR, or open and blocking. Adds the edge controls the route carries
+  (client forwarded headers removed, zero trusted XFF hops, per-IP rate, body cap, timeout, exact
+  paths `/customer/mcp` and its RFC 9728 metadata) and the go-live runbook. Rebased on the mTLS
+  edge-hop design (#17004): the route targets the `:8443` mTLS listener under a `BackendTLSPolicy`
+  (server cert validated against `openbank-ca`, hostname `mcp-service.platform.svc`), and the
+  NetworkPolicy admits `envoy-gateway-system` on `:8443` only; no route attaches, so nothing is
+  reachable from it yet. No trusted-proxy literal is needed any more.
 
 - **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
   IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
