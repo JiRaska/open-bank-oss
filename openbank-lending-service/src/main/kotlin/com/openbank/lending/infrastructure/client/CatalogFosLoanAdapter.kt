@@ -10,6 +10,7 @@ import com.openbank.lending.application.port.out.FosOperation
 import com.openbank.lending.application.port.out.FosRoute
 import com.openbank.lending.application.port.out.FosRoutePin
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
+import com.openbank.libs.market.PassportMode
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
@@ -42,8 +43,13 @@ interface CatalogFosLoanClient {
 
 @ApplicationScoped
 class CatalogFosLoanAdapter(@RestClient private val client: CatalogFosLoanClient) : CatalogFosLoanPort {
-    override fun resolve(grantId: UUID, partyId: UUID, revision: CatalogLoanSnapshot): Uni<FosRoute> =
-        client.route(subject(grantId, partyId, revision)).onFailure(::conflict).transform { FosCommitmentRefused() }
+    override fun resolve(
+        grantId: UUID,
+        partyId: UUID,
+        revision: CatalogLoanSnapshot,
+        mode: PassportMode,
+    ): Uni<FosRoute> = client.route(subject(grantId, partyId, revision) + ("mode" to mode.name))
+        .onFailure(::conflict).transform { FosCommitmentRefused() }
 
     override fun admit(
         operation: FosOperation,
@@ -56,6 +62,7 @@ class CatalogFosLoanAdapter(@RestClient private val client: CatalogFosLoanClient
             "operationId" to operation.id.toString(),
             "binding" to operation.binding(partyId, revision),
             "hostCountry" to pin.route.hostCountry,
+            "mode" to pin.route.mode.name,
             "bankId" to pin.route.bankId.toString(),
             "establishmentId" to pin.route.establishmentId.toString(),
             "channel" to pin.route.channel,

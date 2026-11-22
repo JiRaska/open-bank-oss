@@ -348,3 +348,22 @@ test_renamed_machine_may_not_resolve_mcp_client_grants if {
 test_mcp_name_without_service_account_marker_may_not_resolve if {
 	not allow with input as object.union(resolve, {"principal": {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}})
 }
+
+# --- proposal-create grant pinned to the service-account marker (defence in depth) ---
+
+markerless_mcp := {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+test_genuine_mcp_service_account_may_create_proposal_pinned if {
+	allow with input as {"principal": mcp_m2m, "action": "delegation.proposal.create"}
+}
+
+test_mcp_name_without_marker_may_not_create_proposal if {
+	not allow with input as {"principal": markerless_mcp, "action": "delegation.proposal.create"}
+	prohibited with input as {"principal": markerless_mcp, "action": "delegation.proposal.create"}
+}
+
+test_human_named_mcp_with_service_account_false_may_not_create_proposal if {
+	p := object.union(mcp_m2m, {"service_account": false})
+	not allow with input as {"principal": p, "action": "delegation.proposal.create"}
+	prohibited with input as {"principal": p, "action": "delegation.proposal.create"}
+}

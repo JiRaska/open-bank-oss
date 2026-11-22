@@ -82,7 +82,9 @@ import com.openbank.libs.lending.origination.OriginationStateMachine
 import com.openbank.libs.lending.origination.OriginationTransition
 import com.openbank.libs.lending.origination.OriginationTransitionResult
 import com.openbank.libs.market.MarketCountry
+import com.openbank.libs.market.PassportMode
 import com.openbank.libs.messaging.SyntheticTaintKafkaRail
+import io.quarkus.runtime.LaunchMode
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -415,8 +417,9 @@ class LendingService @Inject constructor(
     // --- Origination --------------------------------------------------------------------------------
 
     override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+        require(request.passportMode == null || request.passportGrantId != null) { "Passport mode requires a grant" }
         require(request.passportGrantId == null || request.catalogOfferingId != null) {
-            "FOS origination requires a published catalogue offering"
+            "Passport origination requires a published catalogue offering"
         }
         return request.catalogOfferingId?.let { offeringId ->
             catalogLoanProfiles.resolvePublished(offeringId).flatMap { profile ->
@@ -433,19 +436,22 @@ class LendingService @Inject constructor(
         val priced = priceCatalogRequest(request, profile)
         val grant = request.passportGrantId
         if (grant != null) {
-            return fosCatalogue.resolve(grant, request.partyId, profile.snapshot).flatMap { route ->
+            val mode = request.passportMode ?: PassportMode.FOS
+            requireCommitmentMode(mode)
+            return fosCatalogue.resolve(grant, request.partyId, profile.snapshot, mode).flatMap { route ->
+                check(route.mode == mode) { "Catalogue returned a different passport mode" }
                 val host = MarketCountry(route.hostCountry)
                 require(host != DOMESTIC_MARKET && profile.markets?.includes(host) == true) {
-                    "Catalogue offering does not include the FOS host market"
+                    "Catalogue offering does not include the passport host market"
                 }
                 require(request.jurisdiction == null || request.jurisdiction == host.code) {
-                    "Requested jurisdiction does not match the approved FOS route"
+                    "Requested jurisdiction does not match the approved passport route"
                 }
                 require(profile.productType == "INSTALLMENT_LOAN" && route.customerSegment == "RETAIL") {
-                    "The FOS route requires a retail installment product"
+                    "The passport route requires a retail installment product"
                 }
                 require(request.productType == null || request.productType == "CONSUMER_CREDIT") {
-                    "Requested credit type does not match the FOS offering"
+                    "Requested credit type does not match the passport offering"
                 }
                 val routed = priced.copy(jurisdiction = host.code, productType = "CONSUMER_CREDIT")
                 applyLegacy(routed, proposedBy, profile.snapshot, FosRoutePin(grant, route))
@@ -549,9 +555,16 @@ class LendingService @Inject constructor(
         }
     }
 
+    private fun requireCommitmentMode(mode: PassportMode) {
+        // Until B2 supplies branch books, exercise this path only in the isolated integration runtime.
+        require(mode != PassportMode.BRANCH || LaunchMode.current() == LaunchMode.TEST) {
+            "Branch lending requires branch-aware booking"
+        }
+    }
+
     private fun requireFosOriginationAllowed(route: FosRoutePin?, hasHostPack: Boolean) {
         require(route == null || (hasHostPack && !originationConfig.autoApprove)) {
-            "FOS requires an active host pack and human approval"
+            "Passport lending requires an active host pack and human approval"
         }
     }
 
@@ -1253,7 +1266,7 @@ class LendingService @Inject constructor(
     }
 
     private fun validateFosActor(app: LoanApplication, action: FosAction, actor: String) {
-        require(actor.isNotBlank()) { "FOS commitment actor is required" }
+        require(actor.isNotBlank()) { "Passport commitment actor is required" }
         if (lacksDecision(app)) throw decisionMissing(app)
         if (action == FosAction.SIGN) {
             check(app.status == OriginationState.AWAITING_SIGNATURE) { "Application is not awaiting signature" }
@@ -1270,13 +1283,16 @@ class LendingService @Inject constructor(
 
     private fun stageFos(id: LoanApplicationId, action: FosAction, command: FosCommand): Uni<FosOperation> =
         applications.withLocked(id) { current ->
-            val app = checkNotNull(current) { "FOS application no longer exists" }
+            val app = checkNotNull(current) { "Passport application no longer exists" }
             fosOperations.route(id.value).flatMap { route ->
-                check(route?.route?.hostCountry == app.jurisdiction) { "Application has no verified FOS route" }
+                check(route != null && route.route.hostCountry == app.jurisdiction) {
+                    "Application has no verified passport route"
+                }
+                requireCommitmentMode(route.route.mode)
                 fosOperations.find(id.value, action).flatMap { existing ->
                     if (existing != null) {
                         check(existing.command == command && !existing.refused) {
-                            "FOS operation has a different command or was refused"
+                            "Passport operation has a different command or was refused"
                         }
                         Uni.createFrom().item(existing)
                     } else {
@@ -1294,19 +1310,25 @@ class LendingService @Inject constructor(
         Uni.createFrom().item(Unit)
     } else {
         fosOperations.find(operation.applicationId, FosAction.SIGN).invoke { signature ->
-            check(signature?.admitted == true) { "FOS disbursement requires a confirmed signature" }
+            check(signature?.admitted == true) { "Passport disbursement requires a confirmed signature" }
         }.replaceWith(Unit)
     }
 
     private fun admitFos(operation: FosOperation): Uni<Unit> {
-        if (operation.admitted) return Uni.createFrom().item(Unit)
         val applicationId = LoanApplicationId(operation.applicationId)
         return applications.findById(applicationId).flatMap { app ->
-            val current = checkNotNull(app) { "FOS application no longer exists" }
-            val revision = checkNotNull(current.catalogSnapshot) { "FOS application has no pinned catalogue revision" }
+            val current = checkNotNull(app) { "Passport application no longer exists" }
+            val revision = checkNotNull(current.catalogSnapshot) { "Missing pinned catalogue revision" }
             fosOperations.route(operation.applicationId).flatMap { pin ->
-                check(pin != null && pin.route.hostCountry == current.jurisdiction) { "Verified FOS route changed" }
-                fosCatalogue.admit(operation, pin, current.partyId, revision)
+                check(pin != null && pin.route.hostCountry == current.jurisdiction) {
+                    "Verified passport route changed"
+                }
+                requireCommitmentMode(pin.route.mode)
+                if (operation.admitted) {
+                    Uni.createFrom().item(Unit)
+                } else {
+                    fosCatalogue.admit(operation, pin, current.partyId, revision)
+                }
             }
         }.onFailure(FosCommitmentRefused::class.java).call { _ ->
             applications.withLocked(applicationId) { fosOperations.refuse(operation.id) }
@@ -1345,7 +1367,7 @@ class LendingService @Inject constructor(
             val app = checkNotNull(row)
             val loanId = LoanId(operation.id)
             if (app.status == OriginationState.DISBURSED) {
-                loans.findById(loanId).map { loan -> checkNotNull(loan) { "FOS booked loan is missing" } }
+                loans.findById(loanId).map { loan -> checkNotNull(loan) { "Passport booked loan is missing" } }
             } else {
                 validateFosActor(app, FosAction.DISBURSE, operation.command.actor)
                 val loan = newLoan(app, loanId)

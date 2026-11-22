@@ -6,6 +6,7 @@ package com.openbank.lending.application.port.out
 
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.libs.audit.decision.InputDigest
+import com.openbank.libs.market.PassportMode
 import io.smallrye.mutiny.Uni
 import java.time.LocalDate
 import java.util.UUID
@@ -17,6 +18,7 @@ data class FosRoute(
     val channel: String,
     val customerSegment: String,
     val packSetDigest: String,
+    val mode: PassportMode = PassportMode.FOS,
 )
 
 data class FosRoutePin(val grantId: UUID, val route: FosRoute)
@@ -59,13 +61,13 @@ data class FosOperation(
 }
 
 interface CatalogFosLoanPort {
-    fun resolve(grantId: UUID, partyId: UUID, revision: CatalogLoanSnapshot): Uni<FosRoute>
+    fun resolve(grantId: UUID, partyId: UUID, revision: CatalogLoanSnapshot, mode: PassportMode): Uni<FosRoute>
 
     /** Retries of the same operation recover its receipt even after revocation. */
     fun admit(operation: FosOperation, pin: FosRoutePin, partyId: UUID, revision: CatalogLoanSnapshot): Uni<Unit>
 }
 
-class FosCommitmentRefused : IllegalStateException("Catalogue refused the FOS commitment")
+class FosCommitmentRefused : IllegalStateException("Catalogue refused the passport commitment")
 
 interface FosLoanOperations {
     fun pin(applicationId: UUID, route: FosRoutePin): Uni<Unit>
