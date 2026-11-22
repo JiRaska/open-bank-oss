@@ -18,7 +18,7 @@ duplicate openbank-control-liveness-sentinel FindingStatus  # #13441
 duplicate openbank-control-liveness-sentinel RunTrigger  # #13441
 duplicate openbank-copilot-service ChatRole  # #13441
 duplicate openbank-copilot-service StopReason  # #13441
-duplicate openbank-delegation-service PaymentProposalStatus  # #13441
+duplicate openbank-delegation-service PaymentProposalStatus  # #16590
 duplicate openbank-devops-agent FindingStatus  # #13441
 duplicate openbank-devops-agent RunTrigger  # #13441
 duplicate openbank-docs-truth-agent FindingStatus  # #13441
@@ -35,7 +35,7 @@ duplicate openbank-kyb-service CeremonyStatus  # #13441
 duplicate openbank-kyc-service KycCaseStatus  # #13441
 duplicate openbank-ledger-service AccountingRole  # #13441
 duplicate openbank-lending-service LoanRateIndex  # #13434
-duplicate openbank-libs-domain ApprovalStatus  # #13441
+duplicate openbank-libs-domain ApprovalStatus  # #16590
 duplicate openbank-libs-domain ProposalState  # #13441
 duplicate openbank-libs-domain WaiveOperator  # #13441
 duplicate openbank-libs-lending CreditProductKind  # #13441

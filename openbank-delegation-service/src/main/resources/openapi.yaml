@@ -13,7 +13,8 @@ info:
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
-  # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes.
+  # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes,
+  # on top of main's 1.33.0 (#16793, mcp-client resolve).
   version: 1.34.0
 servers:
   - url: http://localhost:8126

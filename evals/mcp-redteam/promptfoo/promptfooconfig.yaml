@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Live mode of the MCP red-team pack. Run via evals/mcp-redteam/live.sh, never in CI.
+# The provider (model) is supplied on the command line by live.sh, so no model or key is committed.
+description: "MCP prompt-injection red team (ADR-0383 D7, #16617 layer 4)"
+prompts:
+  - file://prompt.js
+defaultTest:
+  options:
+    provider:
+      config:
+        temperature: 0
+        tools: file://tools.json
+        tool_choice: auto
+tests: file://tests.json
