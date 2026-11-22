@@ -154,6 +154,41 @@ Trust boundaries:
 
 ## 6. Change log
 
+- **2026-11-19** — **Customer approval surface for MCP payment proposals (ADR-0383 D6, #16590).**
+  New routes `GET /mcp-proposals`, `GET /mcp-proposals/{id}`, `POST /mcp-proposals/{id}/reject`,
+  `POST /mcp-proposals/{id}/approve`, backed by delegation-service's proposal store. The app screen
+  lives in the separate app repository (ADR-0064); this slice is API only.
+  - **Elevation of privilege (an MCP client approves).** Every route requires the customer's OWN app
+    session: `azp == openbank-app`, no `act` claim, no acting-for context. An MCP client token, an
+    exchanged token or a business context answers 403 before any upstream call.
+  - **Tampering / TOCTOU.** Approval re-reads the proposal from the store, RECOMPUTES its canonical
+    SHA-256 from the returned instruction (vector shared with delegation-service) and requires it to
+    equal both the stored hash and the hash the app sent, before SCA is touched. The payment body
+    is built only from the stored instruction.
+  - **SCA bypass.** Execution goes through the ordinary domestic/SEPA initiation path and its
+    settlement gate; the proposal adds `approvalRequestId = mcp-proposal:<id>` and `payloadSha256` to
+    the dynamic linking (additive only: the amount/currency/payee keys can never be overridden), so
+    only an APPROVAL challenge signed for this exact proposal is consumed. No SCA exemption applies.
+  - **Replay / double execution.** The store records APPROVED only after the gate reports the
+    challenge spent (`ProposalScaBinding.consumed`), by hash CAS. An APPROVED proposal not yet
+    executed may be approved again (the retry path, fresh SCA each time); only an EXECUTED one is
+    refused. What keeps concurrent or repeated approvals to one payment is the payment idempotency
+    key `mcp-proposal-<id>`, so a retry is safe only while the payment service retains that key.
+  - **App session = `azp openbank-app` + audience `openbank-edge` + no `act`.** The audience mapper
+    exists only on the `openbank-app` client, so an MCP client's token (audienced to mcp-service)
+    fails even if it named the app's azp. Residual: `openbank-app` is a public client that also
+    admits `http://localhost:*` redirects, so a local attacker program can complete the app's own
+    login flow; tracked with the PDP gap under #16612 / #16848.
+  - **Retry body stability.** The retry replays under the same key (`mcp-proposal-<id>`) whatever
+    SCA challenge id is presented — the challenge is a header the payment service never sees. The
+    payee, amount, currency and reference come from the immutable stored instruction; the edge
+    re-derives only the debtor's account number and legal name. If those changed between attempts
+    the payment service sees a different body under the same key and refuses it as key reuse —
+    a failed retry, never a second payment.
+  - Residuals: the store trusts the edge's report of SCA (as every edge-gated route does); the VoP
+    display and push coalescing of D6 are app/notification work not in this slice.
+  Tests: `McpProposalApprovalTest`, `CustomerMcpProposalTest`.
+
 - **2026-11-14** — **A delegated payment's reservation is settled by its outcome, behind a switch
   (#16000 part 4, ADR-0249 D3 amendment).** New `openbank.edge.delegated-payment-bound-create.enabled`
   (default `false`: the legacy create and confirm-on-2xx, unchanged). On: `POST /customer/v1/domestic-payments`
