@@ -1845,9 +1845,13 @@ def hotfix_audit(gh, grants: dict | None, shadow: bool) -> str | None:
         if recs is None:
             return f"#{n} comments unreadable — fail closed"
         if not recs:
-            continue   # labelled today but merged without a hotfix grant: not this lane's merge
-        head, judged, _eid = recs[-1]
-        problem = hotfix_merge_problem(pr, head, judged, gh.commit_parents(pr.get("merge_commit_sha") or ""))
+            merged_head = (pr.get("head") or {}).get("sha") or ""
+            if (gh.app_statuses(merged_head).get(HOTFIX_GRANT_CONTEXT) or ("",))[0] != "success":
+                continue   # labelled but merged without any hotfix grant: not this lane's merge
+            problem = f"merged head {merged_head[:12]} carries the hotfix grant marker but no grant record"
+        else:
+            head, judged, _eid = recs[-1]
+            problem = hotfix_merge_problem(pr, head, judged, gh.commit_parents(pr.get("merge_commit_sha") or ""))
         if problem:
             if not shadow and not any(HOTFIX_INCIDENT_MARK in (c.get("body") or "") and
                                       (c.get("user") or {}).get("login") == BOT_LOGIN for c in comments or []):
@@ -1951,7 +1955,8 @@ def hotfix_withdraw(gh, p: dict, why: str, shadow: bool, summary: dict) -> None:
         gh.post_status(sha, "pending", f"hotfix lane: grant withdrawn — {why}")
 
 
-def hotfix_revoke_sweep(gh, repo: str, granted: dict[int, str], shadow: bool, summary: dict) -> None:
+def hotfix_revoke_sweep(gh, repo: str, granted: dict[int, str], shadow: bool, summary: dict,
+                        marked: dict | None = None) -> None:
     """Revocation never depends on how far eligibility got. For EVERY open PR — draft, disarmed, unfetchable
     or past any candidate limit alike — every head the App ever recorded a hotfix grant for keeps its grant
     only if it is that PR's current head AND was granted again this very tick (`granted`: PR -> head).
@@ -1973,6 +1978,12 @@ def hotfix_revoke_sweep(gh, repo: str, granted: dict[int, str], shadow: bool, su
                    else f"head is {p['head']['sha'][:12]}, not the granted {sha[:12]}" if p["head"]["sha"] != sha
                    else "not granted on this tick")
             hotfix_withdraw(gh, {"number": n, "head": {"sha": sha}}, why, shadow, summary)
+        # A head carrying the grant marker with NO matching record (a record that failed to store, or a
+        # marker from anywhere else) is never a grant: the records are what everything else trusts.
+        mh = ((marked or {}).get(n) or (None,))[0]
+        if mh and granted.get(n) != mh and mh not in {h for h, _m, _e in recs}:
+            hotfix_withdraw(gh, {"number": n, "head": {"sha": mh}}, "grant marker without a grant record",
+                            shadow, summary)
 
 
 def hotfix_lane(gh, git, repo: str, base: str, main_red: dict, strict_busy: str | None, cap: int,
@@ -1982,7 +1993,7 @@ def hotfix_lane(gh, git, repo: str, base: str, main_red: dict, strict_busy: str 
     runs whatever the cap — 0 turns granting off and revokes everything still standing."""
     out = hotfix_grant_tick(gh, git, repo, base, main_red, strict_busy, cap, shadow, summary, now, probe,
                             admissible, marked)
-    hotfix_revoke_sweep(gh, repo, summary.get("_hotfix_heads", {}), shadow, summary)
+    hotfix_revoke_sweep(gh, repo, summary.get("_hotfix_heads", {}), shadow, summary, marked)
     summary.pop("_hotfix_heads", None)
     return out
 
@@ -2031,12 +2042,22 @@ def hotfix_grant_tick(gh, git, repo: str, base: str, main_red: dict, strict_busy
         if shadow:
             continue
         app = gh.app_statuses(head)
+        # The audit record FIRST, and only a stored one (201) lets any status follow: the sweep and the
+        # post-merge audit are driven by these records, so a grant without one would be invisible to both.
+        if p.get("_hotfix_bound") != head:
+            stored = gh.comment(n, f"{HOTFIX_GRANT_MARK}\nhotfix lane: granted head {head} over main {base} "
+                                   f"(label event {record['label_event']} by {record['actor']}). Native auto-merge "
+                                   "merges it; the next tick verifies the merge.")
+            if stored is not True:
+                log(f"::warning::#{n:>6} hotfix    grant record not stored — no grant this tick (fail closed)")
+                out.discard(n)
+                summary["_hotfix_heads"].pop(n, None)
+                summary["hotfix"].remove(record)
+                hotfix_withdraw(gh, p, "grant record could not be stored", shadow, summary)
+                continue
         if (app.get(HOTFIX_GRANT_CONTEXT) or ("",))[0] != "success":
             gh.post_status(head, "success", f"hotfix: label event {record['label_event']} over main {base[:12]}",
                            context=HOTFIX_GRANT_CONTEXT)
-            gh.comment(n, f"{HOTFIX_GRANT_MARK}\nhotfix lane: granted head {head} over main {base} "
-                          f"(label event {record['label_event']} by {record['actor']}). Native auto-merge merges "
-                          "it; the next tick verifies the merge.")
         if (app.get(STATUS_CONTEXT) or ("",))[0] != "success":
             gh.post_status(head, "success", f"hotfix lane: owner-granted over main {base[:12]}", source_number=n)
     return out
@@ -3515,8 +3536,11 @@ class GitHub:
         if code != 201:
             raise SystemExit(f"::error::POST status on {sha} -> {code}: {data}")
 
-    def comment(self, n: int, text: str) -> None:
-        api("POST", f"/repos/{self.repo}/issues/{int(n)}/comments", {"body": f"{COMMENT_MARK}\n{text}\n\n{self.run_url}"})
+    def comment(self, n: int, text: str) -> bool:
+        """True only when GitHub stored the comment (201). Most callers ignore it; the hotfix lane may not."""
+        code, _data = api("POST", f"/repos/{self.repo}/issues/{int(n)}/comments",
+                          {"body": f"{COMMENT_MARK}\n{text}\n\n{self.run_url}"})
+        return code == 201
 
     def merge(self, n: int, head: str) -> str | None:
         """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
@@ -8848,7 +8872,7 @@ class FakeGitHub:
         self.__dict__["_n"] = self.__dict__.get("_n", 0) + 1
         seq[sha] = seq.get(sha, [])[:len(self.statuses[sha]) - 1] + [self._n]
 
-    def comment(self, n, text): self.comments.append((n, text))
+    def comment(self, n, text): self.comments.append((n, text)); return True
 
     def merge(self, n, head):
         if self.prs[n]["head"]["sha"] != head or n in self.refuse_merge:
@@ -9878,7 +9902,7 @@ def hotfix_lane_self_test(check) -> None:
         def unverified(self, sha, guard): self.guards.append(guard); return self.why
         def app_statuses(self, sha): return self.__dict__.get("app_by", {}).get(sha, self.app)
         def post_status(self, sha, state, desc, context=STATUS_CONTEXT, **kw): self.posted.append((sha, state, context))
-        def comment(self, n, text): self.commented.append((n, text))
+        def comment(self, n, text): self.commented.append((n, text)); return True
         def head_refspec(self, n): return f"refs/pull/{n}/head"
 
     def run(gh, probe=None, main_red=None, busy=None, cap=2, shadow=False, admissible=None):
@@ -10018,6 +10042,25 @@ def hotfix_lane_self_test(check) -> None:
     got, _ = run(stay)
     check("hotfix: the sweep never withdraws the head granted in this tick", got == {7}
           and not [x for x in stay.posted if x[1] in ("failure", "pending")], repr(stay.posted))
+    # Record first (re-review of e911830f, MEDIUM).
+    nostore = type("NS", (GH,), {"comment": lambda s, n, t: (s.commented.append((n, t)), False)[1]})()
+    got, summary = run(nostore)
+    check("hotfix must-FAIL: the grant record POST fails -> no grant statuses at all",
+          got == set() and not [x for x in nostore.posted if x[1] == "success"] and not summary.get("hotfix"),
+          f"{nostore.posted} {summary}")
+    orphan = GH(prs=[{**GH().open_prs()[0]}], comments={7: []}, app=granted_app)
+    run(orphan, cap=0)
+    hotfix_lane(orphan, None, repo, base, {}, None, 0, False, {}, now=now, probe=Probe(), admissible={},
+                marked={7: (head, [HOTFIX_LABEL])})
+    check("hotfix must-FAIL: a head carrying the grant marker with no grant record -> withdrawn",
+          (head, "failure", HOTFIX_GRANT_CONTEXT) in orphan.posted and (head, "pending", STATUS_CONTEXT) in orphan.posted,
+          repr(orphan.posted))
+    norec = GH(merged={7: {"number": 7, "merged_at": "2026-11-21T11:00:00Z", "head": {"sha": head},
+                           "merge_commit_sha": "a" * 40}}, comments={7: []}, parents=[base], app=granted_app, prs=[])
+    _got, summary = run(norec)
+    check("hotfix audit must-FAIL: merged head with the grant marker but no grant record -> incident + disabled",
+          "no grant record" in summary.get("hotfix_disabled", "")
+          and any(HOTFIX_INCIDENT_MARK in t for _n, t in norec.commented), repr(summary))
     got, _ = run(GH(), probe=Probe(paths=(".github/workflows/x.yml",)))
     check("hotfix: a .github PR with no strict carrier/urgent in flight is granted", got == {7})
     got, _ = run(GH(title="security(auth): x"), main_red={"all-green": "x"})

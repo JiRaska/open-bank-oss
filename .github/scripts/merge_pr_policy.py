@@ -122,7 +122,7 @@ REVIEWED_POLICY_BLOBS = frozenset({
     # merge-train.py of the aging real-tree fix (auto_squash_enabled counts as armed), reviewed with that PR.
     'd628b9a9c116f2274fb76e4e8cbdf5c4f80ed22e',
     # merge-train.py of the owner hotfix lane (#17025) over #17048, reviewed with that PR.
-    '948e81d73f39584e2c9672f56f5c621b50955c1c',
+    'aeccc5f23e736946d8147221db4e86bd4bfa9357',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
