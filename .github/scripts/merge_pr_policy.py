@@ -123,8 +123,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'd628b9a9c116f2274fb76e4e8cbdf5c4f80ed22e',
     # merge-train.py of the owner hotfix lane (#17025) over #17048, reviewed with that PR.
     'aeccc5f23e736946d8147221db4e86bd4bfa9357',
-    # merge-train.py of the strict yield-once-per-reservation fix (#17072) over #17025, reviewed with that PR.
-    '0d0797d2de1bb8f051ba111adf18874808874a2c',
+    # merge-train.py of the strict yield-once-per-reservation fix (#17072, update merges must come from main) over #17025, reviewed with that PR.
+    '647b424f6b90e79712a2f994a2ca238748a48984',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
