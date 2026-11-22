@@ -91,9 +91,10 @@ marker_commit() {
 # Resolve an abbreviated off-main pin against GRAPH_DIR (main + fetched refs/pull/*).
 # Prints the full sha and exits 0 only if the prefix names exactly one commit AND that commit is
 # contained in a PR head whose head repository is ${REPO} (fork heads are attacker-controlled).
-# Exit 1: unknown; 2: the PR-repo lookup could not answer; 3: ambiguous prefix; 4: fork-only.
+# Exit 1: in no PR head; 2: the PR-repo lookup could not answer; 3: ambiguous prefix;
+# 4: fork-only; 5: contained in more PR heads than PDP_ROLLOUT_PR_LOOKUP_CAP (unbounded API spend).
 offmain_pin_commit() {
-  local cands n full prs pr repo asked=0
+  local cands n full prs pr repo asked=0 try
   cands="$(git --git-dir="$GRAPH_DIR" rev-parse --disambiguate="$1" 2>/dev/null \
     | while read -r c; do [ "$(git --git-dir="$GRAPH_DIR" cat-file -t "$c" 2>/dev/null)" = commit ] && echo "$c"; done)"
   n="$(printf '%s' "$cands" | grep -c . || true)"
@@ -102,11 +103,16 @@ offmain_pin_commit() {
   full="$cands"
   prs="$(git --git-dir="$GRAPH_DIR" for-each-ref --contains "$full" --format='%(refname:lstrip=2)' refs/pull)"
   [ -n "$prs" ] || return 1
+  [ "$(printf '%s\n' "$prs" | grep -c .)" -le "${PDP_ROLLOUT_PR_LOOKUP_CAP:-20}" ] || return 5
   for pr in $prs; do
-    if repo="$(gh api "repos/${REPO}/pulls/${pr}" --jq '.head.repo.full_name // ""' 2>/dev/null)"; then
-      asked=1
-      if [ "$repo" = "$REPO" ]; then printf '%s\n' "$full"; return 0; fi
-    fi
+    for try in 1 2; do
+      if repo="$(gh api "repos/${REPO}/pulls/${pr}" --jq '.head.repo.full_name // ""' 2>/dev/null)"; then
+        asked=1
+        if [ "$repo" = "$REPO" ]; then printf '%s\n' "$full"; return 0; fi
+        break
+      fi
+      [ "$try" = 2 ] || sleep "${PDP_ROLLOUT_RETRY_SLEEP:-3}"
+    done
   done
   [ "$asked" = 1 ] && return 4
   return 2
@@ -138,11 +144,10 @@ is_ancestor() {
     # the short sha must resolve to exactly ONE commit (else LAGGING: a planted collision), and
     # that commit must be contained in a PR head whose head repository is this repository
     # (else LAGGING). Only "could not ask which repo" falls through to the compare API.
-    if [ "$grc" = 128 ] && [ "${PULL_HEADS_FETCHED:-0}" = 0 ] && [ "${PDP_ROLLOUT_PULL_HEADS:-1}" = 1 ]; then
-      PULL_HEADS_FETCHED=1
-      GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" fetch -q --filter=blob:none --no-tags origin \
-        '+refs/pull/*/head:refs/pull/*' 2>/dev/null \
-        || echo "::warning::could not fetch PR heads; off-main pins fall back to the compare API" >&2
+    if [ "$grc" = 128 ] && [ "${PULL_HEADS_TRIED:-0}" = 0 ] && [ "${PDP_ROLLOUT_PULL_HEADS:-1}" = 1 ]; then
+      PULL_HEADS_TRIED=1
+      if GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" fetch -q --filter=blob:none --no-tags origin \
+        '+refs/pull/*/head:refs/pull/*' 2>/dev/null; then PULL_HEADS_FETCHED=1; else echo "::warning::could not fetch PR heads; off-main pins fall back to the compare API" >&2; fi
     fi
     if [ "$grc" = 128 ] && [ "${PULL_HEADS_FETCHED:-0}" = 1 ]; then
       local full prc=0
@@ -154,8 +159,19 @@ is_ancestor() {
            return 1 ;;
         4) echo "::warning::pin ${2} is reachable only from fork PR heads; counting as LAGGING" >&2
            return 1 ;;
+        2) echo "::warning::pin ${2}: could not establish its PR head repository; counting as LAGGING" >&2
+           return 1 ;;
+        5) echo "::warning::pin ${2} is in more than ${PDP_ROLLOUT_PR_LOOKUP_CAP:-20} PR heads; counting as LAGGING" >&2
+           return 1 ;;
       esac
-      # 1: not in any PR head either; 2: could not ask which repository. Both: compare API.
+      # 1: in no PR head. The compare API resolves fork-network commits too, so it is asked only
+      # for a commit proven to be in THIS repository: the head of one of its branches.
+      local heads
+      if ! heads="$(gh api "repos/${REPO}/commits/${2}/branches-where-head" --jq '.[].name' 2>/dev/null)" \
+          || [ -z "$heads" ]; then
+        echo "::warning::pin ${2} is on no PR head and no branch of ${REPO}; counting as LAGGING" >&2
+        return 1
+      fi
     fi
   fi
   local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
@@ -465,6 +481,23 @@ selftest() {
     [ -n "$amb" ] || { echo "selftest FAIL: could not build an ambiguous prefix" >&2; f=1; }
     if [ -n "$amb" ] && PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "$amb" 2>/dev/null; then
       echo "selftest FAIL: an ambiguous short sha was accepted" >&2; f=1; fi
+    # (a) the PR-repo lookup never answers: LAGGING, never handed to the (always-"ahead") compare.
+    gh() { case "$*" in *pulls/*) return 1 ;; *compare/*) echo ahead ;; *) echo main ;; esac; }
+    if PDP_ROLLOUT_RETRY_SLEEP=0 PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${own:0:8}" 2>/dev/null; then
+      echo "selftest FAIL: an unanswered PR-repo lookup fell through to compare" >&2; f=1; fi
+    # (b) in no PR head: compare only for the head of a branch of this repo, else LAGGING.
+    lone="$(mk lone)"
+    gh() { case "$*" in *branches-where-head*) return 0 ;; *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    if PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${lone:0:8}" 2>/dev/null; then
+      echo "selftest FAIL: a commit on no PR head and no branch reached compare" >&2; f=1; fi
+    gh() { case "$*" in *branches-where-head*) echo feature ;; *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${lone:0:8}" 2>/dev/null \
+      || { echo "selftest FAIL: a branch-head commit was not handed to compare" >&2; f=1; }
+    # (c) more containing PR heads than the cap: LAGGING without spending the lookups.
+    gh() { case "$*" in *pulls/*) echo "$REPO" ;; *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    git update-ref refs/pull/5 "$own"; git update-ref refs/pull/6 "$own"
+    if PDP_ROLLOUT_PR_LOOKUP_CAP=2 PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${own:0:8}" 2>/dev/null; then
+      echo "selftest FAIL: a pin over the PR-lookup cap was accepted" >&2; f=1; fi
     git for-each-ref --format='delete %(refname)' refs/pull | git update-ref --stdin
     unset PULL_HEADS_FETCHED; unset -f mk
     GRAPH_DIR=""
