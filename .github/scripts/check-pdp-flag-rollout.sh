@@ -164,14 +164,17 @@ is_ancestor() {
         5) echo "::warning::pin ${2} is in more than ${PDP_ROLLOUT_PR_LOOKUP_CAP:-20} PR heads; counting as LAGGING" >&2
            return 1 ;;
       esac
-      # 1: in no PR head. The compare API resolves fork-network commits too, so it is asked only
-      # for a commit proven to be in THIS repository: the head of one of its branches.
-      local heads
-      if ! heads="$(gh api "repos/${REPO}/commits/${2}/branches-where-head" --jq '.[].name' 2>/dev/null)" \
-          || [ -z "$heads" ]; then
-        echo "::warning::pin ${2} is on no PR head and no branch of ${REPO}; counting as LAGGING" >&2
-        return 1
-      fi
+      # 1: in no PR head; falls to the branch guard below.
+    fi
+    # Every compare fallback for an off-main pin (PR heads fetched or not): the compare API resolves
+    # fork-network commits too, so it is asked only for a commit proven to be in THIS repository.
+    # branches-where-head matches branch TIPS only, so a pin whose branch moved on is LAGGING
+    # (fail-closed).
+    local heads
+    if ! heads="$(gh api "repos/${REPO}/commits/${2}/branches-where-head" --jq '.[].name' 2>/dev/null)" \
+        || [ -z "$heads" ]; then
+      echo "::warning::pin ${2} is on no PR head and no branch of ${REPO}; counting as LAGGING" >&2
+      return 1
     fi
   fi
   local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
@@ -442,7 +445,7 @@ selftest() {
     # commit outside it still asks the API. Without the GRAPH_DIR branch in is_ancestor the
     # first two cases make 2 calls instead of 0, so they fail.
     calls="$tmp/graph-calls"; : > "$calls"
-    gh() { echo x >> "$calls"; case "$*" in *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    gh() { case "$*" in *branches-where-head*) echo feature ;; *compare/*) echo x >> "$calls"; echo ahead ;; *) echo x >> "$calls"; return 1 ;; esac; }
     GRAPH_DIR="$GIT_DIR"
     is_ancestor "$before_phase1" "$shipped" || { echo "selftest FAIL: graph ancestor not current" >&2; f=1; }
     if is_ancestor "$shipped" "$before_phase1"; then echo "selftest FAIL: graph read a descendant as an ancestor" >&2; f=1; fi
@@ -457,6 +460,13 @@ selftest() {
     marker="$(marker_commit)" || { echo "selftest FAIL: graph marker lookup failed" >&2; f=1; }
     [ "$marker" = "$shipped" ] || { echo "selftest FAIL: graph marker '$marker' != squash commit" >&2; f=1; }
     [ "$(wc -l < "$calls" | tr -d '[:space:]')" = 0 ] || { echo "selftest FAIL: graph marker lookup asked the API" >&2; f=1; }
+    # PR-head fetch failed (PULL_HEADS_FETCHED=0): an off-main pin on no branch of this repo is
+    # LAGGING even though compare would answer "ahead" (#17129 review).
+    PULL_HEADS_TRIED=1 PULL_HEADS_FETCHED=0
+    gh() { case "$*" in *branches-where-head*) return 0 ;; *compare/*) echo ahead ;; *) return 1 ;; esac; }
+    if PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" cafebabecafebabecafebabecafebabecafebabe 2>/dev/null; then
+      echo "selftest FAIL: unfetched off-main pin on no branch reached compare" >&2; f=1; fi
+    unset PULL_HEADS_TRIED
     # Off-main pins resolved from refs/pull/* (#17128). Fork heads are attacker-controlled: a
     # commit reachable only from a fork head, or a short sha naming two commits, must be LAGGING.
     # Drop the head-repo check or the disambiguation in offmain_pin_commit and these fail.
@@ -487,9 +497,11 @@ selftest() {
       echo "selftest FAIL: an unanswered PR-repo lookup fell through to compare" >&2; f=1; fi
     # (b) in no PR head: compare only for the head of a branch of this repo, else LAGGING.
     lone="$(mk lone)"
+    # shellcheck disable=SC2329 # invoked indirectly by is_ancestor
     gh() { case "$*" in *branches-where-head*) return 0 ;; *compare/*) echo ahead ;; *) return 1 ;; esac; }
     if PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${lone:0:8}" 2>/dev/null; then
       echo "selftest FAIL: a commit on no PR head and no branch reached compare" >&2; f=1; fi
+    # shellcheck disable=SC2329 # invoked indirectly by is_ancestor
     gh() { case "$*" in *branches-where-head*) echo feature ;; *compare/*) echo ahead ;; *) return 1 ;; esac; }
     PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${lone:0:8}" 2>/dev/null \
       || { echo "selftest FAIL: a branch-head commit was not handed to compare" >&2; f=1; }
