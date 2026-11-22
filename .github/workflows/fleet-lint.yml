@@ -89,7 +89,10 @@ jobs:
     # limit must exceed the cold duration or the gate cannot recover on its own. This value is
     # the backstop for setup and post steps; the Gradle step carries its own, lower limit below,
     # because a STEP that times out fails the job whereas a JOB that times out is `cancelled`.
-    timeout-minutes: 75
+    # ADR-0389 SAFE knob: repo var FLEET_LINT_TIMEOUT_MINUTES overrides (positive integer minutes); unset = today's
+    # value. A non-numeric value makes fromJSON fail the job LOUDLY at start, never silently.
+    # Must exceed FLEET_LINT_STEP_TIMEOUT_MINUTES by >= 5; the first step enforces it.
+    timeout-minutes: ${{ fromJSON(vars.FLEET_LINT_TIMEOUT_MINUTES || '75') }}
     permissions:
       contents: read
       issues: write
@@ -128,6 +131,19 @@ jobs:
       # pin the Kotlin daemon separately rather than letting the raise multiply.
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
     steps:
+      # ADR-0389: expressions have no max()/arithmetic, so the step < job invariant cannot be
+      # derived in-expression. Validate it FIRST and fail with a clear message instead of letting
+      # a mis-set pair make the job limit land before the step's (a `cancelled`, not a verdict).
+      - name: Validate timeout knobs
+        env:
+          JOB_TMO: ${{ vars.FLEET_LINT_TIMEOUT_MINUTES || '75' }}
+          STEP_TMO: ${{ vars.FLEET_LINT_STEP_TIMEOUT_MINUTES || '70' }}
+        run: |
+          case "$JOB_TMO$STEP_TMO" in *[!0-9]*) echo "::error::FLEET_LINT_TIMEOUT_MINUTES=$JOB_TMO / FLEET_LINT_STEP_TIMEOUT_MINUTES=$STEP_TMO must be positive integers"; exit 1;; esac
+          if [ "$STEP_TMO" -le 0 ] || [ $((STEP_TMO + 5)) -gt "$JOB_TMO" ]; then
+            echo "::error::FLEET_LINT_STEP_TIMEOUT_MINUTES ($STEP_TMO) must be at least 5 below FLEET_LINT_TIMEOUT_MINUTES ($JOB_TMO)"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Install both so
@@ -228,7 +244,8 @@ jobs:
       # the run concludes `failure`, the alert fires and the watch reads it as red.
       - name: Fleet compile + detekt + ktlint
         id: lint
-        timeout-minutes: 70
+        # ADR-0389 knob FLEET_LINT_STEP_TIMEOUT_MINUTES; must stay below the job's limit.
+        timeout-minutes: ${{ fromJSON(vars.FLEET_LINT_STEP_TIMEOUT_MINUTES || '70') }}
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/fleet-lint.log"
