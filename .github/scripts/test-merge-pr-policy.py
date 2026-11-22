@@ -318,11 +318,20 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_b30cbdc9_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('b30cbdc9d1993063ec72162e98892165a84323e4')
 
+    def test_reviewed_113d12f7_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('113d12f7961e632c68f188e62b2b9e4290d73b5b')
+
     def test_reviewed_c1283f95_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('c1283f95612aa4d81f5ffe2e88b628963a682849')
 
+    def test_reviewed_a2dcce5d_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('a2dcce5daa332417152fddf57a13d5764d5f041f')
+
     def test_reviewed_dedc258e_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('dedc258eebfb37b502915e468a7f1cd144bfeda2')
+
+    def test_reviewed_fe8935b2_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('fe8935b2c51667dbc4da58a843e5928cba25f1fd')
 
     def test_current_policy_source_is_within_bounds(self):
         # #16187: the controller outgrew the size bound and nothing noticed until merge records
