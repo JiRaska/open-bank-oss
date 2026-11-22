@@ -170,8 +170,10 @@ Trust boundaries:
     the dynamic linking (additive only: the amount/currency/payee keys can never be overridden), so
     only an APPROVAL challenge signed for this exact proposal is consumed. No SCA exemption applies.
   - **Replay / double execution.** The store records APPROVED only after the gate reports the
-    challenge spent (`ProposalScaBinding.consumed`), by hash CAS, so a second approval is refused;
-    the payment idempotency key is the proposal id, so a race cannot create two payments.
+    challenge spent (`ProposalScaBinding.consumed`), by hash CAS. An APPROVED proposal not yet
+    executed may be approved again (the retry path, fresh SCA each time); only an EXECUTED one is
+    refused. What keeps concurrent or repeated approvals to one payment is the payment idempotency
+    key `mcp-proposal-<id>`, so a retry is safe only while the payment service retains that key.
   - **App session = `azp openbank-app` + audience `openbank-edge` + no `act`.** The audience mapper
     exists only on the `openbank-app` client, so an MCP client's token (audienced to mcp-service)
     fails even if it named the app's azp. Residual: `openbank-app` is a public client that also
