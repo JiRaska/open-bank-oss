@@ -28,6 +28,7 @@ spec:
             team: treasury
           annotations:
             summary: "A treasury contra account is negative"
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-treasury.md#treasuryfundingexceeded
             description: >-
               The {{ $labels.currency }} nostro / settlement account (GL {{ $labels.gl }}) ended a
               monitor pass below zero: treasury booked or settled against money the account did not
