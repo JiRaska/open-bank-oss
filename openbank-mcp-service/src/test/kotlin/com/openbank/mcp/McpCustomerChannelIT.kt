@@ -36,7 +36,9 @@ class McpCustomerChannelIT {
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
             // Every test below spends this window; the throttle test uses its own subject.
             "openbank.mcp.rate-limit.calls-per-minute" to "8",
-        )
+        ) + GatewayTls.listener()
+
+        override fun testResources() = GatewayTls.resources
 
         override fun getEnabledAlternatives(): Set<Class<*>> = setOf(CustomerTokenSource::class.java)
     }
@@ -65,19 +67,35 @@ class McpCustomerChannelIT {
     ) + extra
 
     private fun post(body: String, proof: String? = DpopTestProofs.proof(key), scheme: String? = "DPoP") =
-        given().contentType(ContentType.JSON)
+        GatewayTls.spec().contentType(ContentType.JSON)
+            .header("Host", "mcp.test.example")
             .apply { scheme?.let { header("Authorization", "$it ${DpopTestProofs.ACCESS_TOKEN}") } }
             .apply { proof?.let { header("DPoP", it) } }
-            .body(body).post("/mcp").then()
+            .body(body).post("/customer/mcp").then()
 
     @Test
     fun `protected-resource metadata is published at both RFC 9728 locations`() {
-        listOf("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp").forEach { path ->
-            given().get(path).then().statusCode(200)
+        listOf(
+            "/.well-known/oauth-protected-resource",
+            "/.well-known/oauth-protected-resource/customer/mcp",
+            "/.well-known/oauth-protected-resource/mcp",
+        ).forEach { path ->
+            GatewayTls.spec().get(path).then().statusCode(200)
                 .body("resource", equalTo(DpopTestProofs.RESOURCE))
                 .body("authorization_servers[0]", equalTo(DpopTestProofs.ISSUER))
                 .body("dpop_bound_access_tokens_required", equalTo(true))
         }
+    }
+
+    @Test
+    fun `the customer root and its metadata are not served on the plain-HTTP listener`() {
+        CustomerTokenSource.claims = customerClaims()
+        given().contentType(ContentType.JSON)
+            .header("Authorization", "DPoP ${DpopTestProofs.ACCESS_TOKEN}")
+            .header("DPoP", DpopTestProofs.proof(key))
+            .body(LIST).post("/customer/mcp").then().statusCode(404)
+        listOf("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/customer/mcp")
+            .forEach { given().get(it).then().statusCode(404) }
     }
 
     @Test
@@ -88,7 +106,7 @@ class McpCustomerChannelIT {
             .header(
                 "WWW-Authenticate",
                 containsString(
-                    "resource_metadata=\"https://mcp.test.example/.well-known/oauth-protected-resource/mcp\"",
+                    "resource_metadata=\"https://mcp.test.example/.well-known/oauth-protected-resource/customer/mcp\"",
                 ),
             )
     }
@@ -117,16 +135,40 @@ class McpCustomerChannelIT {
             "aud" to "openbank-mcp-service",
             "consent_id" to CONSENT,
         )
-        val tools = post(LIST, proof = null, scheme = "Bearer").statusCode(200)
+        // The staff root, plain HTTP: the customer root is a separate path the staff path never shares.
+        val tools = given().contentType(ContentType.JSON)
+            .header("Authorization", "Bearer ${DpopTestProofs.ACCESS_TOKEN}")
+            .body(LIST).post("/mcp").then().statusCode(200)
             .extract().jsonPath().getList<String>("result.tools.name")
         assertThat(tools).isNotEmpty
     }
 
     @Test
+    fun `a staff agent token on the customer root is refused, never dispatched to the staff tools`() {
+        CustomerTokenSource.claims = mapOf(
+            "iss" to DpopTestProofs.STAFF_ISSUER,
+            "sub" to "agent:test-agent",
+            "aud" to "openbank-mcp-service",
+            "consent_id" to CONSENT,
+        )
+        post(LIST, proof = null, scheme = "Bearer").statusCode(401)
+            .header("WWW-Authenticate", containsString("resource_metadata="))
+    }
+
+    @Test
+    fun `a customer token on the staff root never reaches the staff tools`() {
+        CustomerTokenSource.claims = customerClaims(sub = "agent:test-agent", extra = mapOf("consent_id" to CONSENT))
+        given().contentType(ContentType.JSON)
+            .header("Authorization", "DPoP ${DpopTestProofs.ACCESS_TOKEN}")
+            .header("DPoP", DpopTestProofs.proof(key))
+            .body(LIST).post("/mcp").then().statusCode(200).body("result.tools.size()", equalTo(0))
+    }
+
+    @Test
     fun `a staff-realm token with customer-shaped claims and a valid proof is not admitted as a customer`() {
         CustomerTokenSource.claims = customerClaims() + ("iss" to DpopTestProofs.STAFF_ISSUER)
-        post(CALL).statusCode(200).body("result.content[0].text", equalTo("Authorization unavailable"))
-        assertThat(recorder.events.last().actorId).isEqualTo("unknown")
+        // On the customer root a non-customers-realm token is refused outright (#16847).
+        post(CALL).statusCode(401)
     }
 
     @Test
