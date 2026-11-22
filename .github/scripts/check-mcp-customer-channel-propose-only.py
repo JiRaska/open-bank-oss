@@ -68,6 +68,11 @@ ALLOWLIST: dict[tuple[str, str, str], str] = {
         "ADR-0195 consent validation: a POST that READS (consent-service answers whether a consent "
         "covers an action, and changes no state). It predates this gate. ADR-0383 D3 replaces it "
         "with a server-side grant lookup on the customer channel.",
+    ("com.openbank.mcp.infrastructure.customer.PaymentProposalStoreClient", "create", "POST"):
+        "ADR-0383 D6: creating a PENDING payment proposal IS the propose-only capability; it moves "
+        "no money, and the customer authorises it in the bank app with their own SCA. "
+        "delegation_rest_ext.rego grants service-account-openbank-mcp only "
+        "delegation.proposal.create (no read, approve, reject or execution).",
 }
 
 # Non-GET operations a client INHERITS from a generated openbank-client-* API.
