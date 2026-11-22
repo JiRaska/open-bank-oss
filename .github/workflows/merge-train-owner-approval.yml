@@ -57,6 +57,10 @@ jobs:
   decide:
     # Check BOTH actors before minting credentials; reruns never re-apply old decisions.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && github.run_attempt == 1
+    # Least-privilege: the App credential is read from the protected `merge-train` environment
+    # (deployment branches: main only). An environment secret overrides a repository secret
+    # of the same name, so this works before and after the repo-level copy is removed.
+    environment: merge-train
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
