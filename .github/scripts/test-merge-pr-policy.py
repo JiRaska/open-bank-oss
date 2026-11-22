@@ -327,6 +327,12 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_a2dcce5d_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('a2dcce5daa332417152fddf57a13d5764d5f041f')
 
+    def test_reviewed_dedc258e_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('dedc258eebfb37b502915e468a7f1cd144bfeda2')
+
+    def test_reviewed_fe8935b2_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('fe8935b2c51667dbc4da58a843e5928cba25f1fd')
+
     def test_current_policy_source_is_within_bounds(self):
         # #16187: the controller outgrew the size bound and nothing noticed until merge records
         # were already missing. The size bound stays a PR-time check on the working tree.
@@ -453,6 +459,9 @@ class PolicyEvidenceTests(unittest.TestCase):
 
     def test_reviewed_e2b6a5df_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a')
+
+    def test_reviewed_811903a6_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('811903a6b2a9c794928ff84122babd0c32fb19eb')
 
     def test_branch_spoofing_rejected(self):
         github = PolicyGitHub()

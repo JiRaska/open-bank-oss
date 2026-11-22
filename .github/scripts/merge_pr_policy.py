@@ -143,6 +143,12 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'c1283f95612aa4d81f5ffe2e88b628963a682849',
     # merge-train.py of #17115's failed-only retry planner merged with #17108's bot-move hold (#17112), reviewed with #17115.
     'a2dcce5daa332417152fddf57a13d5764d5f041f',
+    # merge-train.py of #17123 (real-tree receiver case expects `ui-e2e` in validate's needs, a one-line change over main's pinned source), reviewed with that PR.
+    '811903a6b2a9c794928ff84122babd0c32fb19eb',
+    # merge-train.py of #17123 (real-tree receiver case expects `ui-e2e` in validate's needs) merged over main's #17108 bot-move hold (#17112), reviewed with #17123.
+    'dedc258eebfb37b502915e468a7f1cd144bfeda2',
+    # merge-train.py of #17115's failed-only retry planner merged with #17123's `ui-e2e` receiver needs (validate keeps both), reviewed with #17115.
+    'fe8935b2c51667dbc4da58a843e5928cba25f1fd',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
