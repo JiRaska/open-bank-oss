@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+# A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
+#
+# THE MCP CLIENT ALLOWLIST — ADR-0385 D1 ("one declaration drives both mcp-service and Keycloak").
+#
+# This file is the single source for:
+#   1. the customers-realm client config of every MCP client
+#      (openbank-infra/gitops/components/keycloak/customers-realm-template.json — the `clients[]`
+#      entries carrying `openbank.mcp.tier`, and the `openbank-mcp-fresh-passkey` browser flow they
+#      are bound to). Those entries are DERIVED: never hand-edit them, run
+#        python3 .github/scripts/gen-mcp-realm-clients.py
+#   2. mcp-service's tier admission (the tier is read from HERE, keyed by `azp`, never from a
+#      token claim or client-supplied metadata — ADR-0385 D1).
+#
+# Enforced by the `mcp-client-realm-parity` gate (.github/scripts/check-mcp-client-realm-parity.py):
+# a realm client that does not match its declared tier, an undeclared realm client carrying the
+# MCP marker, or a client-secret exception past its expiry date fails CI.
+#
+# The tier is assigned by REGISTRATION BEHAVIOUR (redirect type, whether it authenticates, whether
+# it sends DPoP), never by product name. Client ids here are bank-assigned and name no vendor.
+#
+#   H  hosted confidential client: fixed HTTPS redirect, client authentication at the token AND
+#      refresh endpoints. `auth.method: private_key_jwt` (default) pins the JWKS by content: the
+#      key set is committed under mcp-clients/ and its sha256 is declared below, so a changed key
+#      set is a reviewed diff, not a remote fetch. `client_secret` is admitted ONLY with a
+#      `secret_exception` (owner risk acceptance, <= 6 months); after `expires` the gate fails and
+#      the client must be disabled or re-accepted.
+#   L  local public client: loopback redirect `http://127.0.0.1` / `http://[::1]` (RFC 8252,
+#      variable port, never `localhost`), DPoP-bound tokens required.
+#
+# Every client is declared `enabled: false` until ADR-0383's exposure order holds (no route to
+# mcp-service exists before every delivery check passes). The two `*-reference` clients are the
+# shape templates the gate and the live-Keycloak verification run against; neither is a real
+# platform registration and the reference key set's private half was never stored.
+
+schema_version: 1
+
+# RFC 8707 resource / RFC 9728 protected resource. Access tokens carry aud = `audience`.
+resource: https://api.open-bank.tech/mcp
+audience: openbank-mcp-service
+
+# The dedicated browser-flow override every MCP client is bound to (ADR-0385 D2.2): a fresh
+# passwordless WebAuthn assertion, NO auth-cookie alternative.
+flow:
+  alias: openbank-mcp-fresh-passkey
+  id: 6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001
+
+clients:
+  - client_id: mcp-hosted-reference
+    tier: H
+    enabled: false
+    display_name: "Reference hosted assistant (template, not a registration)"
+    redirect_uris:
+      - https://mcp-client.example/oauth/callback
+    auth:
+      method: private_key_jwt
+      signing_alg: ES256
+      jwks_file: mcp-clients/mcp-hosted-reference.jwks.json
+      jwks_sha256: f55634da1e50148546228de3c0acff83e16332e710ee17d662d513db9356b1ff
+
+  - client_id: mcp-local-reference
+    tier: L
+    enabled: false
+    display_name: "Reference local assistant (template, not a registration)"
+    redirect_uris:
+      - http://127.0.0.1/callback
+      - http://[::1]/callback
