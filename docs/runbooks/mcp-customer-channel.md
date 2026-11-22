@@ -36,3 +36,35 @@ Warning. One client's policy and downstream refusals are over three times the ch
    a client asking for tools its grants do not allow.
 2. `downstream_error` concentrated on one client points at the arguments it sends; check the
    downstream service's error logs for the same window.
+
+## McpCustomerChannelNoTraffic
+
+Warning. The same hour yesterday carried at least 50 real customer-channel requests and the last
+hour carried none at all: no completed tool calls and no refusals. Synthetic canary traffic is not
+counted, so a running canary does not hide it. Requests are not reaching mcp-service, which also
+silences every ratio alert above.
+
+1. Check the customer route and the gateway in front of it: listener status, certificate expiry,
+   recent changes to the route.
+2. Fetch the protected-resource metadata document from outside the cluster. Clients that cannot
+   read it never send a request.
+3. Only then check mcp-service itself (`up`, restarts). A pod roll alone does not fire this alert:
+   the old pod's samples stay inside the one-hour window.
+4. A quiet hour that is genuinely quiet (a public holiday) clears on its own when traffic returns.
+
+## SLO burn alerts (openbank-mcp-customer-availability / -latency)
+
+Pyrra burn-rate alerts from `pyrra-slo-mcp-customer.yaml`. Availability counts SERVER-SIDE failures
+(`openbank_mcp_tool_call_failures_total{kind="error"}`: a tool or downstream fault, or a PDP outage)
+against completed customer tool calls that policy did not refuse (real traffic only). A client's
+invalid params (`kind="invalid_params"`) and a tool that is not wired yet (`kind="unavailable"`) are
+not failures here.
+Latency is the share of those calls that finish within the 1.073741824 s histogram bucket.
+
+1. Availability burn: split `openbank_mcp_tool_call_failures_total{channel="customer",kind="error"}`
+   by `tool`. One tool points at its downstream service; all tools at once points at the PDP or the
+   delegation lookup.
+2. Latency burn: compare `openbank_mcp_tool_call_duration_seconds` by `tool`; the PDP round trip is
+   included in every call.
+3. Requests refused before a tool ran (replay store, throttles) are not in this SLI; the
+   McpCustomerReplayStoreUnavailable alert covers the store outage.

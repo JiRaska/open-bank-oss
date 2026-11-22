@@ -1,0 +1,74 @@
+# Customer MCP channel SLOs (ADR-0383/ADR-0384, issue #16605). One availability + one latency
+# ServiceLevelObjective for the customer channel of openbank-mcp-service. mcp-service is not a
+# rules.yaml money_path_services entry, so these are NOT in pyrra-slo-money-path.yaml (whose
+# registry gate, check-slo-registry.py, derives its scope from that list); the targets below are
+# the same reference defaults as rules.yaml: slo (99.9 / 99 / 30d), not calibrated on real traffic.
+#
+# Indicators are the app's own Micrometer series (McpMetricsAdapter), not Tempo span-metrics: only
+# the app knows which calls came in on the customer channel and which were synthetic. Real traffic
+# only (synthetic="false"), so the ADR-0252 canary and its deliberate negative twin spend no budget.
+#
+# Availability: SERVER-SIDE failures only. Errors are openbank_mcp_tool_call_failures_total{kind="error"}
+# (a tool or downstream fault, or a PDP outage); a client's invalid params (kind="invalid_params")
+# and a tool not wired yet (kind="unavailable", today propose_payment) spend no budget. The tool-call
+# counter alone cannot make that cut: result="FAILURE" carries no reason. The total is every call that
+# was not refused by policy (decision ALLOW, or UNAVAILABLE for a PDP outage); a DENY is a policy or
+# throttle outcome, not unavailability, and would only dilute the ratio. Requests refused before a
+# tool ran (DPoP, grant, replay store) are outside this SLI by construction; the replay-store outage
+# is paged by McpCustomerReplayStoreUnavailable in prometheus-rules-mcp-customer.yaml.
+#
+# Latency: openbank_mcp_tool_call_duration is published with publishPercentileHistogram
+# (libs-runtime standardPercentiles), whose Micrometer bucket grid has no 1s boundary; the nearest
+# is le="1.073741824" (4^15 ns). "Within ~1.07s" is the objective, stated as the bucket it reads.
+#
+# COLD POD / t=0: every series here is registered on first increment, so until the customer channel
+# carries real traffic the SLI is empty, which Pyrra treats as no burn. `alerting.absent: false` for
+# the same reason as the money-path file (issue #3333): an absent counter means "nobody called",
+# never "the service is gone"; McpCustomerChannelNoTraffic is the rule that answers "nobody called
+# although they did yesterday".
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-mcp-customer-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  description: "Customer MCP channel availability: real customer tool calls that did not fail server-side; client errors are not failures (ADR-0384, #16605)."
+  indicator:
+    ratio:
+      errors:
+        metric: openbank_mcp_tool_call_failures_total{channel="customer",synthetic="false",kind="error"}
+      total:
+        metric: openbank_mcp_tool_calls_total{channel="customer",synthetic="false",decision=~"ALLOW|UNAVAILABLE"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-mcp-customer-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  description: "Customer MCP channel latency: share of real customer tool calls completed within the 1.073741824s bucket (ADR-0384, #16605)."
+  indicator:
+    latency:
+      success:
+        metric: openbank_mcp_tool_call_duration_seconds_bucket{channel="customer",synthetic="false",le="1.073741824"}
+      total:
+        metric: openbank_mcp_tool_call_duration_seconds_count{channel="customer",synthetic="false"}
