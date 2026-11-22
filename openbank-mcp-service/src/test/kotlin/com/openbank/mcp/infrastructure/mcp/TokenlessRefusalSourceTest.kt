@@ -8,8 +8,8 @@ import org.junit.jupiter.api.Test
 import java.util.Optional
 
 /**
- * The tokenless `ip:` refusal source of the customer channel (channel-off refusals in [McpEndpoint],
- * subject-less refusals in [McpCustomerBranch]) is [ClientAddressKey] over the address
+ * The tokenless `ip:` refusal source of the CUSTOMER root (subject-less refusals in
+ * [McpCustomerBranch]; staff-root refusals use the shared anonymous bucket since #17086) is [ClientAddressKey] over the address
  * [ClientAddressResolver] picks — never a hash of the raw peer string (#16919 adoption, #16800).
  */
 class TokenlessRefusalSourceTest {

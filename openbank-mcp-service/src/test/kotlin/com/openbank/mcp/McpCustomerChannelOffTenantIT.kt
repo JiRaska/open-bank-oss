@@ -29,9 +29,9 @@ import java.security.PrivateKey
  *   key fails its issuer check. Both answer 401 without reaching the endpoint (no audit row).
  * - **McpEndpoint, for a `DPoP` credential.** The staff tenant reads only `Bearer`, so a
  *   `Authorization: DPoP <token>` request reaches the endpoint with NO identity. The endpoint's
- *   channel-off refusal answers it 401 `invalid_token`; before it existed this was served 200 as
- *   anonymous. The same refusal also backstops a staff tenant misconfigured to accept a
- *   customers-realm token (`McpCustomerChannelOffIT`, substituted verifier).
+ *   staff-root customer-credential refusal (#17086, `respondCustomerOnStaffRoot`) answers it 401
+ *   `invalid_token`; before it existed this was served 200 as anonymous. Channel-state-independent
+ *   coverage of that refusal is `McpStaffRootCustomerCredentialIT`.
  */
 @QuarkusTest
 @TestProfile(McpCustomerChannelOffTenantIT.StaffTenantOnly::class)
@@ -80,9 +80,9 @@ class McpCustomerChannelOffTenantIT {
     fun `a real customers-realm Bearer token is refused 401 by the staff tenant before the endpoint`() {
         recorder.clear()
         val token = sign(OidcItKeys.pair("customers").private, CUSTOMERS, "c0ffee00-0000-0000-0000-0000000000f3")
-        // The endpoint's challenge is absent: this 401 is Quarkus OIDC's, not the channel-off refusal.
+        // The endpoint's challenge is absent: this 401 is Quarkus OIDC's, not the staff-root refusal.
         val challenge = call(token).statusCode(401).extract().header("WWW-Authenticate").orEmpty()
-        assertThat(challenge).doesNotContain("customer channel is not enabled")
+        assertThat(challenge).doesNotContain("customer credentials are accepted only at")
         // No audit row: the request never reached McpEndpoint.
         assertThat(recorder.events).isEmpty()
     }
@@ -91,9 +91,9 @@ class McpCustomerChannelOffTenantIT {
     fun `a DPoP-scheme customers token reaches the endpoint unread and is refused, not served anonymously`() {
         val token = sign(OidcItKeys.pair("customers").private, CUSTOMERS, "c0ffee00-0000-0000-0000-0000000000f5")
         // Measured: the staff tenant only reads `Bearer`, so this request reaches McpEndpoint with NO
-        // identity. Without the endpoint's channel-off refusal it was answered 200 on the anonymous path.
+        // identity. Without the endpoint's staff-root refusal it was answered 200 on the anonymous path.
         call(token, scheme = "DPoP").statusCode(401)
-            .header("WWW-Authenticate", org.hamcrest.Matchers.containsString("customer channel is not enabled"))
+            .header("WWW-Authenticate", org.hamcrest.Matchers.containsString("customer credentials are accepted only at"))
     }
 
     @Test

@@ -17,54 +17,71 @@ import org.jboss.logging.Logger
 internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, private val metrics: McpMetricsPort) {
     private val log = Logger.getLogger(McpAudienceRefusal::class.java)
 
-    /**
-     * [source] keys the channel-off audit window: the caller's subject when the token carried one,
-     * else a hash of the client address. One flood therefore cannot suppress another source's row.
-     */
-    fun respond(
-        method: String,
-        params: JsonNode,
-        reason: Reason = Reason.FOREIGN_AUDIENCE,
-        source: String? = null,
-    ): Response {
+    fun respond(method: String, params: JsonNode): Response {
         // The method is caller-supplied and this runs before the NUL guard: bounded and control-free.
-        log.warnf("rejected %s: %s", McpInputBounds.logSafe(method), reason.description)
+        log.warnf("rejected %s: bearer token audience does not include this server", McpInputBounds.logSafe(method))
         metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
         // Bounded like every other audit write (#16628); a NUL-carrying request is not audited at all.
-        // Channel-off refusals are audited at most once per source per minute window, so a flood
-        // cannot become an audit-write amplifier; a suppressed row is still counted. Only a
-        // tools/call is audited, so only a tools/call may spend that window.
-        val call = method == "tools/call" && !McpInputBounds.containsNul(params)
-        val windowed = reason == Reason.CUSTOMER_CHANNEL_OFF
-        val auditable = call && (!windowed || throttle.shouldAuditRefusal(CHANNEL_OFF_AUDIT_KEY + (source ?: UNKNOWN)))
-        if (call &&
-            windowed &&
-            !auditable
-        ) {
-            metrics.auditSuppressed(McpMetricsPort.AuditSuppression.CUSTOMER_CHANNEL_OFF)
-        }
-        if (auditable) {
+        if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
             throttle.auditAnonymousCall(
                 McpInputBounds.echo(params.path("name").asText("")),
                 McpInputBounds.auditKeys(params.path("arguments")),
-                reason.auditReason,
+                "token audience mismatch",
             )
         }
         return Response.status(Response.Status.UNAUTHORIZED)
-            .header("WWW-Authenticate", "Bearer error=\"invalid_token\", error_description=\"${reason.description}\"")
+            .header("WWW-Authenticate", CHALLENGE)
+            .build()
+    }
+
+    /**
+     * #16590: the 401 for a customer credential on the STAFF root — refused whatever the channel
+     * state, so no staff dispatch path ever runs for it. Counted on the customer-rejected series
+     * (`layer="token"`) and, for `tools/call`, audited as DENIED like the audience refusal.
+     */
+    fun respondCustomerOnStaffRoot(
+        method: String,
+        params: JsonNode,
+        reason: McpMetricsPort.CustomerRejectReason,
+        client: String?,
+    ): Response {
+        log.warnf(
+            "rejected %s on the staff root: customer credential (%s)",
+            McpInputBounds.logSafe(method),
+            reason.name.lowercase(),
+        )
+        metrics.customerRejected(reason, client, synthetic = false)
+        // The credential is unverified here (a junk `DPoP x` reaches this line), so the audit write is
+        // bounded by the shared anonymous bucket FIRST: beyond it, only the throttle's once-per-window
+        // row is written, never one per request (review of #17086).
+        if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
+            val tool = McpInputBounds.echo(params.path("name").asText(""))
+            val keys = McpInputBounds.auditKeys(params.path("arguments"))
+            if (throttle.anonymousCallRefusal(tool, keys) == null) {
+                throttle.auditAnonymousCall(tool, keys, "customer credential on the staff root")
+            }
+        }
+        return Response.status(Response.Status.UNAUTHORIZED)
+            .header("WWW-Authenticate", CUSTOMER_CHALLENGE)
+            .build()
+    }
+
+    /** More than one `Authorization` header: which credential the OIDC layer validated is ambiguous. */
+    fun respondAmbiguousCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: more than one Authorization header", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", AMBIGUOUS_CHALLENGE)
             .build()
     }
 
     private companion object {
-        const val CHANNEL_OFF_AUDIT_KEY = "customer-channel-off:"
-        const val UNKNOWN = "unknown"
-    }
-
-    /** Why a presented token is refused before any method runs. Descriptions are constants, never input. */
-    enum class Reason(val description: String, val auditReason: String) {
-        FOREIGN_AUDIENCE("token audience does not include this server", "token audience mismatch"),
-
-        /** ADR-0383 D1: a customers-realm token while the customer channel is off. */
-        CUSTOMER_CHANNEL_OFF("customer channel is not enabled", "customer channel not enabled"),
+        const val AMBIGUOUS_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"exactly one Authorization header is allowed\""
+        const val CUSTOMER_CHALLENGE =
+            "Bearer error=\"invalid_token\", error_description=\"customer credentials are accepted only at " +
+                McpEndpoint.CUSTOMER_ROOT + "\""
+        const val CHALLENGE =
+            "Bearer error=\"invalid_token\", error_description=\"token audience does not include this server\""
     }
 }

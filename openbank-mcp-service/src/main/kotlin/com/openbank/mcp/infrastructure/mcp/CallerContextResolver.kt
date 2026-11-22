@@ -100,6 +100,12 @@ class CallerContextResolver @Inject constructor(
      * passthrough. No token at all (anonymous) is NOT foreign — that case keeps its existing
      * deny-without-401 behaviour.
      */
+    /**
+     * True when the presented token was issued by the customers realm (ADR-0383 D1). The staff root
+     * refuses such a token outright (#16590); [resolveOrNull] independently never resolves it.
+     */
+    fun presentsCustomerRealmToken(): Boolean = isCustomerRealmToken()
+
     fun presentsForeignAudience(): Boolean = jwt.subject != null && MCP_AUDIENCE !in audience()
 
     /**
