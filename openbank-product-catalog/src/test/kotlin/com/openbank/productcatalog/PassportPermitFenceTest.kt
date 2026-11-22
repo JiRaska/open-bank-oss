@@ -595,7 +595,6 @@ class PassportPermitFenceTest {
 
     private data class PermitRequest(
         val operation: String,
-        val mode: String = "FOS",
         val grant: UUID = UUID.randomUUID(),
         val permit: UUID = UUID.randomUUID(),
         val operationId: UUID = UUID.randomUUID(),
