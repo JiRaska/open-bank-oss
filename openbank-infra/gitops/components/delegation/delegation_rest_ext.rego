@@ -206,7 +206,9 @@ prohibited if {
 # bound to the proposal's payload hash, and initiates the payment through the ordinary path.
 allowed_reasons contains "mcp-service-payment-proposal-create" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-mcp")
+	# Pinned via mcp_service_principal: machine_named's legacy branch would admit a principal
+	# with NO service_account marker by name alone.
+	mcp_service_principal
 	input.action == "delegation.proposal.create"
 }
 
@@ -226,7 +228,7 @@ allowed_reasons contains "edge-service-payment-proposal" if {
 # allow reason can widen either half.
 prohibited if {
 	input.action == "delegation.proposal.create"
-	not machine_named("service-account-openbank-mcp")
+	not mcp_service_principal
 }
 
 prohibited if {
