@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.18.2...copilot-service-v0.18.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **copilot:** validate proposed IBANs and currencies with the libs-domain types ([#16764](https://github.com/JiRaska/open-bank-oss/issues/16764)) ([0275c0c](https://github.com/JiRaska/open-bank-oss/commit/0275c0c8b7156551798e246951e05461944d615d))
+
 ## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.18.1...copilot-service-v0.18.2) (2026-11-16)
 
 

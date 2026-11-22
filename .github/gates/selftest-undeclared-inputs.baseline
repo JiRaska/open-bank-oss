@@ -19,6 +19,7 @@ audit-money-path-subscription openbank-infra/
 audit-money-path-subscription openbank-libs/
 claude-md-identifiers-exist build-logic/
 claude-md-identifiers-exist build.gradle.kts
+claude-md-identifiers-exist e2e/mcp-harness/
 claude-md-identifiers-exist fuzz/
 claude-md-identifiers-exist openbank-*/
 claude-md-identifiers-exist openbank-admin-ui/
@@ -39,7 +40,6 @@ edge-decoy-rule-parity openbank-infra/
 event-consumer-liveness build-logic/
 event-consumer-liveness openbank-*/
 event-contract-code-agreement build-logic/
-event-contract-code-agreement openbank-*/
 event-contract-coverage-ratchet build-logic/
 event-contract-coverage-ratchet openbank-*/
 event-handler-swallows fuzz/
@@ -87,11 +87,13 @@ gate-script-registration ci/
 gate-script-registration codecov.yml
 gate-script-registration config/
 gate-script-registration docs/
+gate-script-registration e2e/mcp-harness/
 gate-script-registration evals/
 gate-script-registration fuzz/
 gate-script-registration gradle.properties
 gate-script-registration gradle/
 gate-script-registration gradlew
+gate-script-registration integrations/
 gate-script-registration openbank-*/
 gate-script-registration openbank-admin-ui/
 gate-script-registration openbank-infra/
@@ -120,7 +122,9 @@ license-header-consistency build.gradle.kts
 license-header-consistency codecov.yml
 license-header-consistency config/
 license-header-consistency docs/
+license-header-consistency e2e/mcp-harness/
 license-header-consistency fuzz/
+license-header-consistency integrations/
 license-header-consistency openbank-*/
 license-header-consistency openbank-admin-ui/
 license-header-consistency openbank-infra/

@@ -75,10 +75,39 @@ github:
         []
   unprovisioned:
     - kind: secret
+      names: [BREAK_GLASS_APP_ID, BREAK_GLASS_APP_PRIVATE_KEY]
+      reason: "environment-scoped merge-train break-glass credential awaits owner setup; the workflow fails closed until then"
+      issue: 17006
+      review_by: 2026-12-21
+    - kind: variable
+      names: [AUTO_DEPLOY_MAX_PARALLEL, MERGE_TRAIN_API_RETRY_ATTEMPTS, MERGE_TRAIN_BATCH_SIZE, MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP, MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_EXPEDITE_LANE, MERGE_TRAIN_PREFETCH_BATCH, MERGE_TRAIN_RESERVATION_CEILING_S, MERGE_TRAIN_SPECULATIVE_STACK, MERGE_TRAIN_STALE_RED_CAP, MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S, MERGE_TRAIN_STRICT_AGING_S, MERGE_TRAIN_STRICT_BATCH_CAP, MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
+      reason: "optional owner-tunable merge-train and auto-deploy knobs; unset means the reviewed workflow default applies, and merge-train.py range-validates any value"
+      issue: 16932
+      review_by: 2027-02-21
+    - kind: variable
+      names:
+        - TF_ARC_MIN_RUNNERS
+        - TF_ARC_MAX_RUNNERS
+        - TF_ARC_DEPLOY_MAX_RUNNERS
+        - TF_ARC_BATCH_MAX_RUNNERS
+        - TF_ARC_DR_MAX_RUNNERS
+      reason: "optional ADR-0389 runner-pool overrides for platform-tofu; unset by design means the variables.tf default applies, ranges enforced by tofu validation"
+      issue: 17006
+      review_by: 2027-02-21
+    - kind: variable
+      names: [PR_RUNNER_POOL]
+      reason: "opt-in PR build pool trial; unset is the kill switch (every PR build hosted) and only allowlisted labels are honoured"
+      issue: 16006
+      review_by: 2026-12-03
+    - kind: secret
+      names: [SECURITY_KPI_DEPENDABOT_READ_TOKEN]
+      reason: "repository-scoped Dependabot alerts read access awaits owner provisioning; only CVE Remediation degrades until then"
+      issue: 16492
+      review_by: 2026-12-16
+    - kind: secret
       names:
         - GLITCHTIP_AUTH_TOKEN
         - AGENT_REVIEW_ANTHROPIC_API_KEY
-        - METADATA_REFRESH_PAT
       reason: "optional; each consumer degrades by design without it (see the issue, one line per name)"
       issue: 16206
       review_by: 2027-02-15
@@ -96,6 +125,12 @@ github:
       reason: "ADR-0382 reader role for the in-cluster digest envelopes; the S3 step is skipped until the owner applies alert-digest.tf and sets it"
       issue: 6432
       review_by: 2027-01-15
+    - kind: variable
+      names:
+        - DEPLOY_DROPPED_PIN_HOURS
+      reason: "tuning knob for the dropped-pin watch; the workflow falls back to 6 hours, so unset is the intended default"
+      issue: 16701
+      review_by: 2027-02-15
     - kind: variable
       names:
         - CODEQL_JAVA_ON_PR
@@ -132,6 +167,16 @@ github:
       reason: "least-privilege read identity for the perf baseline; created with the perf targets"
       issue: 7311
       review_by: 2027-01-31
+    - kind: variable
+      names:
+        - GATE_BUDGET_MULTIPLIER
+        - FLEET_LINT_TIMEOUT_MINUTES
+        - FLEET_LINT_STEP_TIMEOUT_MINUTES
+        - LIBS_BENCH_TIMEOUT_MINUTES
+        - SERVICE_CI_CONTRACT_TIMEOUT_MINUTES
+      reason: "ADR-0389 runtime tuning knobs; every consumer falls back to today's value, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-02-15
     - kind: variable
       names:
         - APICURIO_REGISTRY_URL

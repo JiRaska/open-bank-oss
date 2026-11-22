@@ -88,6 +88,24 @@ dependencies {
     // (ZDPS §18) — rather than a re-model of any of them. The domain packages are framework-free
     // (ADR-0002), so only the domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-pension-service"))
+    // Test Intelligence simulation gap: the harness drives the REAL treasury-service nostro
+    // domain — `NostroBreak` (two-sided identity rules, BusinessDays aging, the BreakAlertPolicy)
+    // and its four-eyes manual resolution (propose/approve/reject with the approver never the
+    // proposer) — rather than a re-model of any of them. The domain package is framework-free
+    // (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-treasury-service"))
+    // Test Intelligence simulation gap: the harness drives the REAL card-issuance-service
+    // lifecycle — the `Card` status machine (activate/suspend/resume/block/cancel/consume/
+    // expireUnused), limit and channel-control rules, and the `DelegatedCardGrant` authority link
+    // (ADR-0249 D2) — rather than a re-model of any of them. The domain package is framework-free
+    // (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-card-issuance-service"))
+    // Test Intelligence simulation gap (money path): the harness drives the REAL
+    // pension-fund-service unit register — `NavCalculator`/`NavRecord` (NAV computation under the
+    // four-eyes publish rule) and `ForwardPricer` (forward pricing, switch legs, fee cancellation,
+    // NAV corrections) — rather than a re-model of any of them. The domain package is
+    // framework-free (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-pension-fund-service"))
     // REAL `SctInstPayment` aggregate (sepa-instant) and the REAL scheme rule that guards it
     // (`SctInstSchemeRules.requireSchemeCurrency` — SCT Inst is euro-only, EPC rulebook), rather
     // than a re-model of either. The domain package is framework-free (ADR-0002 — no

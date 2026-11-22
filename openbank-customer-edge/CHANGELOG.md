@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.2...customer-edge-v1.13.0) (2026-11-20)
+
+
+### Features
+
+* **customer-edge:** enable OpenTelemetry tracing + WebAuthn challenge trace contract ([#16751](https://github.com/JiRaska/open-bank-oss/issues/16751)) ([abaa92c](https://github.com/JiRaska/open-bank-oss/commit/abaa92c7a779beda55ead57bd14106a741b0f132))
+
+
+### Bug Fixes
+
+* **customer-edge:** refuse malformed VS/SS/KS on domestic payments ([#16780](https://github.com/JiRaska/open-bank-oss/issues/16780)) ([6e8da93](https://github.com/JiRaska/open-bank-oss/commit/6e8da936b2a7347879437fd8c1f567188135f6b6))
+
+## [1.12.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.1...customer-edge-v1.12.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **customer-edge:** isolate Redis quotas and preserve payment outages ([#16692](https://github.com/JiRaska/open-bank-oss/issues/16692)) ([6de680f](https://github.com/JiRaska/open-bank-oss/commit/6de680f182174776e68292bc3a0707da8d2454b7))
+
 ## [1.12.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.0...customer-edge-v1.12.1) (2026-11-17)
 
 

@@ -4,6 +4,7 @@
 
 package com.openbank.aml.domain.monitoring
 
+import com.openbank.libs.domain.money.CurrencyCode
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -33,11 +34,10 @@ data class BookedMovement(
 ) {
     init {
         require(amount.signum() > 0) { "a booked movement has a positive amount" }
-        require(currency.matches(CURRENCY)) { "currency is three upper-case letters" }
+        require(CurrencyCode.isCanonical(currency)) { "currency is an active ISO 4217 code" }
     }
 
     companion object {
-        private val CURRENCY = Regex("[A-Z]{3}")
 
         /** Credit-positive delta, as the ledger publishes it: positive is money in. */
         fun fromSignedDelta(

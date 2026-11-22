@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.9.0...domestic-payment-v1.9.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **domestic-payment:** reject Czech accounts failing mod-11 and keep the prefix in scheme IBANs ([#16772](https://github.com/JiRaska/open-bank-oss/issues/16772)) ([fea73e6](https://github.com/JiRaska/open-bank-oss/commit/fea73e6cf347468c9e4c9df0f083f38fc13b678d))
+
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.2...domestic-payment-v1.9.0) (2026-11-18)
+
+
+### Features
+
+* **domestic-payment:** adopt claim-fenced outbox v2 ([#15665](https://github.com/JiRaska/open-bank-oss/issues/15665)) ([b636fe3](https://github.com/JiRaska/open-bank-oss/commit/b636fe368ac0c9a7a76d414109237e1601ab3c56))
+
 ## [1.8.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.8.1...domestic-payment-v1.8.2) (2026-11-17)
 
 

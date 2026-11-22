@@ -75,3 +75,73 @@ If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with 
 - **Request body cap:** `quarkus.http.limits.max-body-size` (`MCP_MAX_BODY_SIZE`, default 64K) rejects oversize bodies with HTTP 413 before parsing. It is service-wide.
 - **Config keys** (env override in parentheses): `openbank.mcp.rate-limit.enabled` (`MCP_RATE_LIMIT_ENABLED`), `calls-per-minute` (`MCP_RATE_LIMIT_PER_MINUTE`), `calls-per-day` (`MCP_RATE_LIMIT_PER_DAY`), `anonymous-calls-per-minute` (`MCP_RATE_LIMIT_ANON_PER_MINUTE`), `max-in-flight` (`MCP_RATE_LIMIT_MAX_IN_FLIGHT`).
 - **State is in-process** (replicas: 1), so the caps multiply by the replica count and reset on a pod roll until the shared-store slice lands.
+
+## MCP client allowlist (ADR-0385 D1)
+
+`src/main/resources/mcp-client-allowlist.yaml` is the one declaration of which third-party MCP clients may connect, and in which tier. The tier is assigned by how the client registers, never by product name, and never from a token claim or client-supplied metadata.
+
+- **Tier H (hosted):** a confidential client with a fixed HTTPS redirect and client authentication at the token and refresh endpoints. The default is `private_key_jwt`, whose key set is committed under `mcp-clients/` and pinned by its sha256 in the declaration. Keycloak receives it inline, so it never fetches keys. A client secret is allowed only under a recorded `secret_exception` of at most six months, and it fails CI after its `expires` date.
+- **Tier L (local):** a public client with loopback redirects (`http://127.0.0.1/…`, `http://[::1]/…`, any port; `localhost` is not accepted). Its tokens must be DPoP-bound.
+
+The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow. The `mcp-client-realm-parity` gate fails CI on any mismatch between the declaration and the realm.
+
+While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order.
+
+## Customer channel admission (ADR-0385)
+
+The customer MCP channel is admitted only when `openbank.mcp.customer.enabled` is on and an
+allowlisted client presents a customer-realm token bound to a DPoP proof. Discovery follows
+RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
+`/.well-known/oauth-protected-resource/mcp` answer the resource metadata (issuer,
+`authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
+issuer only, never from request headers. While the channel is off both endpoints answer 404 —
+nothing advertises a channel that does not admit anyone.
+
+## Forwarded headers behind the edge (#16847)
+
+Behind the edge the customers OIDC tenant needs the external URL: with
+`quarkus.oidc.customers.token.authorization-scheme=DPoP`, quarkus-oidc's
+`BearerAuthenticationMechanism` compares the proof's `htu` with `HttpServerRequest.absoluteURI()`
+before the request reaches this service (whose own admission checks `htu` against the static
+published resource). Measured with forwarding not applied: `DPoP proof HTTP request uri claim
+https://mcp.test.example/mcp does not match the request HTTP uri http://localhost:…/mcp`, answered
+401 with a bare `DPoP` challenge. Quarkus applies `X-Forwarded-Proto`/`-Host`/`-For` when `MCP_PROXY_FORWARDING=true`
+(default `false`), and ONLY from peers listed in `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES`.
+
+- **Boot gate.** `ProxyForwardingGuard` is `@Startup`: any Quarkus 3.40 forwarding switch
+  (`proxy-address-forwarding`, `allow-forwarded`, `allow-x-forwarded`, `enable-forwarded-host`,
+  `enable-forwarded-prefix`, `enable-trusted-proxy-header`, `use-proxy-protocol`) or the edge
+  client-address header, with a trusted-proxy list that is empty, contains a hostname, or has a
+  prefix shorter than /8 (IPv4) or /16 (IPv6), stops the service. An unset list would make Quarkus
+  trust forwarded headers from any peer.
+- **Untrusted peers.** Their forwarded headers are ignored: the request keeps its direct URL, so a
+  proof bound to the published resource fails the tenant's `htu` check with 401.
+- **Audit key.** `ClientAddressResolver` never uses Quarkus' forwarded address: Quarkus takes the
+  LEFTMOST `X-Forwarded-For` entry, which a client controls whenever the edge appends. The key is
+  the raw TCP peer, or the ONE edge-set header named by `MCP_EDGE_CLIENT_ADDRESS_HEADER` (e.g.
+  `X-Envoy-External-Address`) when the peer is in the trusted list and the value is a single IP.
+  `ClientAddressKey` is an HMAC-SHA256 (per-boot random key) of IPv4 /32 or the IPv6 /64 prefix,
+  parsed by a strict literal grammar (`IpLiteral`, no DNS); anything else keys as `ip:unknown`. The
+  header must occur exactly once. Distinct subject-less keys are capped at 4096 per minute; past the
+  cap new keys share `ip:overflow`, so memory stays bounded. The cap is tiered, because one party
+  cheaply holds many networks: one allocation (IPv6 /48, IPv4 /24) may hold 64 distinct keys per
+  minute, after which its further networks share one `net:` allocation key; one region (IPv6 /32)
+  may hold 256 keys, allocation keys included, after which they share one `region:` key. So filling
+  the 4096 budget, which would push other callers into `ip:overflow` and suppress their audit rows,
+  needs at least 16 distinct /32s or a spread of IPv4 /24s. The first overflow of each minute logs
+  one WARN, so that state is never silent.
+- **Deployed state: forwarding OFF.** No route to mcp-service exists. The route PR must, together:
+  narrow `QUARKUS_HTTP_PROXY_TRUSTED_PROXIES` to the gateway's source (never the pod CIDR); make the
+  edge authoritative (Envoy `ClientTrafficPolicy` client IP detection, client-supplied
+  `X-Forwarded-*` overwritten); set `MCP_EDGE_CLIENT_ADDRESS_HEADER`; and admit only the gateway and
+  known callers to `:8150` in the NetworkPolicy.
+- **Symptom of a wrong list:** every real customer call refused 401 `invalid_dpop_proof` at the
+  tenant (forwarding not applied), or every tokenless caller sharing one audit key (the gateway's).
+
+## Customer channel metrics and alerts (ADR-0384 slice 1)
+
+`McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
+(per allowlisted client, per tool, with the DPoP/replay-refusal reason where one applies)
+through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
+reads the same series through the delegations MCP-channel view. Alert thresholds for the
+channel live with the fleet alerting rules, not in this service.
