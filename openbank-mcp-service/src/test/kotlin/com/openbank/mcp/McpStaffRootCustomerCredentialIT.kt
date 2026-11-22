@@ -121,6 +121,20 @@ class McpStaffRootCustomerCredentialIT {
         assertThat(tools).isNotEmpty
     }
 
+    @Test
+    fun `over real HTTP a tab-separated DPoP credential is refused 401, never served anonymous`() {
+        // #17099 review: the injected request carries the raw header; RestAssured sends the tab as-is.
+        post("DPoP\tx").statusCode(401)
+            .header("WWW-Authenticate", containsString("customer credentials are accepted only at"))
+    }
+
+    @Test
+    fun `over real HTTP a comma-joined Bearer and DPoP value is refused 400 invalid_request`() {
+        CustomerTokenSource.claims = staffClaims
+        post("Bearer a, DPoP b").statusCode(400)
+            .header("WWW-Authenticate", containsString("invalid_request"))
+    }
+
     private val staffClaims = mapOf(
         "iss" to "https://kc.test.example/realms/openbank",
         "sub" to "agent:test-agent",

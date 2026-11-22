@@ -87,6 +87,7 @@ class McpThrottleTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(meters)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(registry, pdp, 0)
