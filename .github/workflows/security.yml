@@ -26,7 +26,10 @@ concurrency:
   # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
   # stops the job being created at all (#3082).
   group: security-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # Only a superseded PR head is cancelled (keyed per PR: github.ref is refs/pull/<n>/merge).
+  # push-to-main, schedule and workflow_dispatch runs are never cancelled. Merge-train carriers
+  # are pull_request runs on a fresh train/<run>-<attempt> PR each, so no carrier supersedes another.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------------------
