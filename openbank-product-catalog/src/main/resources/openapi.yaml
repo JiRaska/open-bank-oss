@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.16.0
+  version: 2.17.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -947,7 +947,12 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Admission refused }
+        '409':
+          description: Admission refused
+          headers:
+            X-FOS-Decision:
+              description: Present with value refused when the exact refusal has been retained.
+              schema: { type: string, enum: [refused] }
   /api/v2/internal/passport-commitments/receipt:
     post:
       tags: [Passport Grants]

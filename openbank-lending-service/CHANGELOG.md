@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.51.0...lending-service-v0.52.0) (2026-11-22)
+
+
+### Features
+
+* **lending,product-catalog:** recover FOS signing and disbursement ([#16539](https://github.com/JiRaska/open-bank-oss/issues/16539)) ([491fd26](https://github.com/JiRaska/open-bank-oss/commit/491fd26e456954b41a0959306b8bd031f35626d5))
+
+## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.50.0...lending-service-v0.51.0) (2026-11-22)
+
+
+### Features
+
+* **lending:** recover durable catalogue-backed signatures ([#16490](https://github.com/JiRaska/open-bank-oss/issues/16490)) ([a1b662e](https://github.com/JiRaska/open-bank-oss/commit/a1b662e07712b216c3145acd0a77e62f93b6c83a))
+
 ## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.49.2...lending-service-v0.50.0) (2026-11-22)
 
 
