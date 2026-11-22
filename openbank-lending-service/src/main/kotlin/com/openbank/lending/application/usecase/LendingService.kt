@@ -69,6 +69,7 @@ import com.openbank.libs.lending.origination.OriginationState
 import com.openbank.libs.lending.origination.OriginationStateMachine
 import com.openbank.libs.lending.origination.OriginationTransition
 import com.openbank.libs.lending.origination.OriginationTransitionResult
+import com.openbank.libs.market.MarketCountry
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -403,6 +404,13 @@ class LendingService @Inject constructor(
         proposedBy: String,
         profile: CatalogLoanProfile,
     ): Uni<LoanApplication> {
+        val markets = profile.markets
+        if (markets != null) {
+            require(markets.includes(DOMESTIC_MARKET)) { "Catalog offering is outside the Czech domestic route" }
+            require(request.jurisdiction == null || request.jurisdiction == DOMESTIC_MARKET.code) {
+                "Catalog offering requires the Czech domestic jurisdiction"
+            }
+        }
         require(request.requestedAmount.currency.code == profile.currency) {
             "Requested currency does not match catalog"
         }
@@ -417,7 +425,11 @@ class LendingService @Inject constructor(
         }
         // A catalog profile publishes a single rate and no index terms, so a catalog loan is FIXED.
         require(request.rateTerms.rateType == LoanRateType.FIXED) { "Catalog loans carry a FIXED rate" }
-        return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
+        val priced = request.copy(
+            nominalAnnualRate = profile.nominalAnnualRate,
+            jurisdiction = if (markets == null) request.jurisdiction else DOMESTIC_MARKET.code,
+        )
+        return applyLegacy(priced, proposedBy, profile.snapshot)
     }
 
     private fun applyLegacy(
@@ -1887,6 +1899,7 @@ class LendingService @Inject constructor(
     }
 
     private companion object {
+        val DOMESTIC_MARKET = MarketCountry("CZ")
         const val REFUSED_EVENT_TYPE = "credit.application.transition.refused"
         const val FOUR_EYES_ESCALATION_EVENT_TYPE = "credit.application.four_eyes_sla_escalation"
         val REFUSAL_JSON: com.fasterxml.jackson.databind.ObjectMapper = com.fasterxml.jackson.databind.ObjectMapper()
