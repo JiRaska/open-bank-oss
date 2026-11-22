@@ -72,8 +72,12 @@ class PaymentProposalResource(
      * already replay-safe (dedupe on create, revision CAS on every transition); the key adds an
      * exact replay of the first answer, and a key reused for a DIFFERENT request is refused (409).
      * The key is scoped by operation and proposal, so it can never replay another proposal's answer.
+     *
+     * Only a DEFINITIVE answer is stored. A 5xx is released, never saved: the edge sends a FIXED key
+     * per proposal for reject (`mcp-proposal-reject-<id>`), so a stored transient failure would be
+     * replayed to every retry for the record's whole TTL and the customer could never reject it.
      */
-    private suspend fun idempotent(
+    internal suspend fun idempotent(
         operation: String,
         scope: String,
         key: String?,
@@ -106,6 +110,10 @@ class PaymentProposalResource(
         ) {
             idempotencyStore.release(storeKey, hash)
             throw e
+        }
+        if (response.status >= SERVER_ERROR_MIN) {
+            idempotencyStore.release(storeKey, hash)
+            return response
         }
         idempotencyStore.save(storeKey, hash, response.status, objectMapper.writeValueAsString(response.entity))
         return response
@@ -258,7 +266,9 @@ class PaymentProposalResource(
 
     companion object {
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        const val IDEMPOTENCY_HEADER = "Idempotency-Key"
         private const val IDEMPOTENCY_KEY_MAX = 255
+        private const val SERVER_ERROR_MIN = 500
         const val MCP_PRINCIPAL = "service-account-openbank-mcp"
         const val EDGE_PRINCIPAL = "service-account-openbank-edge"
         private const val CLIENT_ID_MAX = 255
