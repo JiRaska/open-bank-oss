@@ -41,6 +41,8 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             reversalOf = transaction.reversalOf,
             occurredAt = Instant.now(clock),
             sourceService = SOURCE_SERVICE,
+            sourceBookingContext = transaction.sourceBookingContext,
+            targetBookingContext = transaction.targetBookingContext,
         ),
     )
 
@@ -51,6 +53,8 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             referenceNumber = transaction.referenceNumber,
             occurredAt = Instant.now(clock),
             sourceService = SOURCE_SERVICE,
+            sourceBookingContext = transaction.sourceBookingContext,
+            targetBookingContext = transaction.targetBookingContext,
         ),
     )
 
@@ -62,6 +66,8 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             reason = reason,
             occurredAt = Instant.now(clock),
             sourceService = SOURCE_SERVICE,
+            sourceBookingContext = transaction.sourceBookingContext,
+            targetBookingContext = transaction.targetBookingContext,
         ),
     )
 
@@ -73,6 +79,8 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             reason = reason,
             occurredAt = Instant.now(clock),
             sourceService = SOURCE_SERVICE,
+            sourceBookingContext = transaction.sourceBookingContext,
+            targetBookingContext = transaction.targetBookingContext,
         ),
     )
 
@@ -89,6 +97,8 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
                 settledAt = now,
                 occurredAt = now,
                 sourceService = SOURCE_SERVICE,
+                sourceBookingContext = transaction.sourceBookingContext,
+                targetBookingContext = transaction.targetBookingContext,
             ),
         )
     }

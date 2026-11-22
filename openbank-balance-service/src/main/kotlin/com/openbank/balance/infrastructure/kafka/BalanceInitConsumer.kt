@@ -33,6 +33,16 @@ import java.util.UUID
 class BalanceInitConsumer(private val balanceUseCase: BalanceUseCase, private val objectMapper: ObjectMapper) {
     private val log = Logger.getLogger(BalanceInitConsumer::class.java)
 
+    @org.eclipse.microprofile.faulttolerance.Retry(
+        maxRetries = -1,
+        delay = 1000,
+        abortOn = [
+            IllegalStateException::class,
+            IllegalArgumentException::class, NullPointerException::class,
+            com.fasterxml.jackson.core.JsonProcessingException::class, java.time.DateTimeException::class,
+            com.openbank.libs.domain.money.InvalidMoneyException::class,
+        ],
+    )
     @Incoming("balance-init-in")
     suspend fun consume(payload: String) {
         val node: JsonNode = try {
@@ -53,6 +63,13 @@ class BalanceInitConsumer(private val balanceUseCase: BalanceUseCase, private va
         // (dead-letter-queue -> openbank.dlq.balance.balance-init-in) parks the record for replay
         // and no balance row is created. Before, any string became a balance pocket. `eur` is EUR.
         val code = CurrencyCode.of(currency.trim())
+        val context = node["bookingContext"]?.takeUnless { it.isNull }?.let {
+            objectMapper.treeToValue(
+                it,
+                com.openbank.balance.infrastructure.persistence.repository.AccountBookContext::class.java,
+            )
+        }
+        com.openbank.balance.infrastructure.persistence.repository.AccountBookContexts.record(accountId, context)
         balanceUseCase.initializeBalance(InitializeBalanceCommand.zero(accountId, code))
         log.infof("Initialized zero balance for account %s (%s)", accountId, code.code)
     }

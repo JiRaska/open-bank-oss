@@ -10,6 +10,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.config.HttpClientConfig.httpClientConfig
 import io.restassured.config.RestAssuredConfig.config
@@ -85,6 +87,96 @@ class LedgerDatabaseOutageIT {
         }
     }
 
+    @Test
+    @Timeout(value = 90, unit = TimeUnit.SECONDS)
+    @TestSecurity(user = "service-account-openbank-lending", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-lending"),
+            Claim(key = "preferred_username", value = "service-account-openbank-lending"),
+        ],
+    )
+    fun `a committed branch posting keeps one journal when its acknowledgement is lost`() {
+        val transactionId = UUID.randomUUID()
+        val reference = "loan:$transactionId:disbursement"
+        val request = Posting(key = reference, transactionId = transactionId)
+        val book = UUID.randomUUID()
+        val otherBook = UUID.randomUUID()
+        val payload = request.payload(book)
+        val proxyAdmin = URI.create(proxyAdminUrl)
+        val proxy = ToxiproxyClient(proxyAdmin.host, proxyAdmin.port).getProxy("ledger-postgres")
+        DriverManager.getConnection(directJdbcUrl, databaseUser, databasePassword).use { observer ->
+            assertThat(post(payload).statusCode).isEqualTo(409)
+            val bank = registerBranchBooks(observer, book, otherBook)
+
+            // The first caller loses its receipt. Only the database is used to identify the commit.
+            post(payload)
+            val journalId = rows(
+                observer,
+                "SELECT journal_id::text FROM ledger_idempotency WHERE idempotency_key = ?",
+                reference,
+            ).single()
+            try {
+                proxy.disable()
+                assertThat(post(payload).statusCode).isBetween(500, 599)
+            } finally {
+                proxy.enable()
+            }
+
+            val receipt = recover(payload)
+            assertThat(receipt.header("Idempotent-Replayed")).isEqualTo("true")
+            assertThat(receipt.jsonPath().getString("id")).isEqualTo(journalId)
+            assertThat(receipt.jsonPath().getString("branchBookId")).isEqualTo(book.toString())
+            assertThat(post(request.payload(otherBook)).statusCode).isEqualTo(409)
+            assertThat(post(payload.replace("25.00", "26.00")).statusCode).isEqualTo(409)
+            assertThat(post(request.payload()).statusCode).isEqualTo(409)
+            assertAtomicPosting(observer, request, UUID.fromString(journalId))
+            val statement = """
+                SELECT line.side || ':' || line.base_amount::text FROM journal_lines line
+                    JOIN journal_entries entry ON entry.id = line.journal_id
+                WHERE entry.branch_book_id = ? ORDER BY line.side
+            """.trimIndent()
+            val lines = rows(observer, statement, book)
+            assertThat(lines.map { it.substringBefore(':') }).containsExactly("C", "D")
+            assertThat(lines.map { it.substringAfter(':').toBigDecimal().stripTrailingZeros() })
+                .containsExactly("25".toBigDecimal(), "25".toBigDecimal())
+            assertThat(rows(observer, statement, otherBook)).isEmpty()
+            assertBookSnapshot(observer, request, bank, book)
+        }
+    }
+
+    private fun assertBookSnapshot(observer: Connection, request: Posting, bank: UUID, book: UUID) {
+        val snapshot = given().queryParam("bankId", bank).queryParam("asOf", LocalDate.now().toString())
+            .get("/api/v1/journals/branch-books").then().statusCode(200).extract().jsonPath()
+        assertThat(snapshot.getString("bankId")).isEqualTo(bank.toString())
+        val bookRows = snapshot.getList<Map<String, Any?>>("lines").filter { it["branchBookId"] == book.toString() }
+        assertThat(bookRows).hasSize(1)
+        assertThat(bookRows.single()["deposits"].toString().toBigDecimal()).isEqualByComparingTo("25")
+        assertThat(
+            rows(
+                observer,
+                "SELECT payload::jsonb->>'branchBookId' FROM ledger_outbox " +
+                    "WHERE aggregate_id=? AND event_type='AccountBookedChanged'",
+                request.subAccountId,
+            ),
+        )
+            .containsExactly(book.toString())
+        given().queryParam("bankId", bank).get("/api/v1/journals/branch-books").then().statusCode(400)
+    }
+
+    private fun registerBranchBooks(observer: Connection, vararg books: UUID): UUID {
+        val sql = "INSERT INTO ledger_branch_books (establishment_id, bank_id, host_country) VALUES (?, ?, 'AT')"
+        val bank = UUID.randomUUID()
+        observer.prepareStatement(sql).use { statement ->
+            books.forEach { book ->
+                statement.setObject(1, book)
+                statement.setObject(2, bank)
+                statement.executeUpdate()
+            }
+        }
+        return bank
+    }
+
     private fun post(payload: String): Response = given().config(
         config().httpClient(
             httpClientConfig().setParam("http.connection.timeout", 5000).setParam("http.socket.timeout", 5000),
@@ -151,9 +243,10 @@ class LedgerDatabaseOutageIT {
         val transactionId: UUID = UUID.randomUUID(),
         val subAccountId: UUID = UUID.randomUUID(),
     ) {
-        fun payload(): String = """
+        fun payload(branchBookId: UUID? = null): String = """
             {
               "idempotencyKey": "$key",
+              "branchBookId": ${branchBookId?.let { "\"$it\"" } ?: "null"},
               "transactionId": "$transactionId",
               "entryDate": "${LocalDate.now()}",
               "valueDate": "${LocalDate.now()}",

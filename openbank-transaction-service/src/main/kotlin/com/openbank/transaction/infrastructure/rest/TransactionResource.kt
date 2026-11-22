@@ -440,6 +440,10 @@ data class TransactionResponse(
     // old bytes stay the old bytes when there is nothing to add.
     @field:JsonInclude(JsonInclude.Include.NON_NULL)
     val merchant: MerchantResponse? = null,
+    @field:JsonInclude(JsonInclude.Include.NON_NULL)
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    @field:JsonInclude(JsonInclude.Include.NON_NULL)
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 )
 
 /**
@@ -576,6 +580,8 @@ private fun Transaction.toResponse(
             merchantCategory != null -> "MCC"
             else -> "CATALOGUE"
         },
+        sourceBookingContext = sourceBookingContext,
+        targetBookingContext = targetBookingContext,
         merchant = catalogue?.toResponse(
             location = parsed?.cityToken?.let { locations["${parsed.key}|$it"] },
         ),

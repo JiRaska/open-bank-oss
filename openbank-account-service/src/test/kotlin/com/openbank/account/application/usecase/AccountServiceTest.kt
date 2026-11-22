@@ -14,6 +14,7 @@ import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.CatalogProduct
 import com.openbank.account.application.port.out.CurrencyPocketRepository
 import com.openbank.account.application.port.out.NotificationRequestPort
+import com.openbank.account.application.port.out.PassportCommitment
 import com.openbank.account.application.port.out.PinOutcome
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
@@ -93,6 +94,11 @@ class AccountServiceTest {
                 metrics,
                 Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC),
                 notificationRequestPort,
+                mockk<PassportCommitment>().also { passport ->
+                    coEvery { passport.find(any()) } returns null
+                    coEvery { passport.openingFor(any()) } returns null
+                },
+                mockk(),
             )
     }
 

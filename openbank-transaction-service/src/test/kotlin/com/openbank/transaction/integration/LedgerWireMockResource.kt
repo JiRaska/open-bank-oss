@@ -37,10 +37,18 @@ class LedgerWireMockResource : QuarkusTestResourceLifecycleManager {
         )
         stubLedgerSuccess()
         stubBalanceCoverSuccess()
+        server.stubFor(
+            com.github.tomakehurst.wiremock.client.WireMock.get(urlPathMatching("/api/v1/accounts/[^/]+"))
+                .willReturn(
+                    okJson("""{"id":"{{request.pathSegments.[3]}}","bookingContext":null}""")
+                        .withTransformers("response-template"),
+                ),
+        )
 
         val base = server.baseUrl()
         return mapOf(
             "quarkus.rest-client.ledger-service.url" to base,
+            "quarkus.rest-client.account-service.url" to base,
             "quarkus.rest-client.balance-service.url" to base,
             "quarkus.oidc-client.auth-server-url" to base,
             "quarkus.oidc-client.discovery-enabled" to "false",

@@ -7,6 +7,8 @@ package com.openbank.transaction.application.port.out
 import java.math.BigDecimal
 import java.util.UUID
 
+class InsufficientPaymentCover : RuntimeException("Insufficient funds for payment cover")
+
 /**
  * Cover (krytí) operations on the source currency pocket in balance-service.
  *
@@ -24,7 +26,7 @@ interface BalanceCoverPort {
         currency: String,
         reason: String,
         referenceId: String,
-        ttlSeconds: Long,
+        ttlSeconds: Long?,
     ): UUID
 
     /** Release a previously placed reservation. Idempotent enough for compensation best-effort. */

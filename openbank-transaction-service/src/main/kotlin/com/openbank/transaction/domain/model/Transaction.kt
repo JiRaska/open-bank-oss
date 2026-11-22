@@ -59,6 +59,8 @@ data class Transaction(
     val counterpartyName: String? = null,
     /** Authenticated synthetic origin, retained across worker and reversal boundaries. */
     val synthetic: Boolean = false,
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 ) {
     fun complete(clock: Clock): Transaction {
         check(status == TransactionStatus.PENDING || status == TransactionStatus.PROCESSING) {

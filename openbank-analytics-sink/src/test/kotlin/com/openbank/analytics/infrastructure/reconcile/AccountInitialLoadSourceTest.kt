@@ -29,8 +29,10 @@ class AccountInitialLoadSourceTest {
     @Vetoed
     private class FakeRegistry(private val pages: List<AccountRegistryPage>) : AccountRegistryClient {
         var calls: Int = 0
+        val requests = mutableListOf<Pair<Int, String?>>()
 
         override fun listActive(limit: Int, cursor: String?): Uni<AccountRegistryPage> {
+            requests += limit to cursor
             val page = pages[calls]
             calls++
             return Uni.createFrom().item(page)
@@ -145,6 +147,7 @@ class AccountInitialLoadSourceTest {
             )
         assertEquals(2, runBlocking { source(registry).read(window, request()) }.size)
         assertEquals(2, registry.calls)
+        assertEquals(listOf(200 to null, 200 to "next"), registry.requests)
     }
 
     /** An account opened outside the requested window is not this run's business. */

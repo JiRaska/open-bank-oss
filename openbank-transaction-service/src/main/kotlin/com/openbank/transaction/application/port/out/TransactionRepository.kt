@@ -27,6 +27,14 @@ interface TransactionRepository {
     /** Persist a new transaction together with its domain-event outbox message, atomically. */
     suspend fun save(transaction: Transaction, outboxMessage: OutboxMessage): Transaction
 
+    /** Commit the branch reversal intent, original transition and both events as one unit. */
+    suspend fun saveBranchReversal(
+        original: Transaction,
+        reversal: Transaction,
+        originalEvent: OutboxMessage,
+        reversalEvent: OutboxMessage,
+    ): Transaction
+
     /** Update a transaction's mutable lifecycle state (status/timestamps/version). */
     suspend fun update(transaction: Transaction): Transaction
 

@@ -801,8 +801,6 @@ change_requirements:
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — GET /customer/v1/statements/{accountId}."
       - edge: "openbank-copilot-service->openbank-transaction-service:api"
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — listTransactions()."
-      - edge: "openbank-transaction-service->openbank-account-service:api"
-        reason: "Validation is implemented via BalanceCoverClient (configKey=balance-service) placing/releasing holds, a sibling of account-service — never a direct account-service call."
       - edge: "openbank-customer-edge->openbank-account-service:api"
         reason: "customer-edge is a BFF with ZERO @RegisterRestClient interfaces — every hop is a Vert.x WebClient built from openbank.edge.account-service-url (CustomerEdgeResource); the Deployment env's ACCOUNT_SERVICE_URL is the independent witness."
       - edge: "openbank-customer-edge->openbank-party-service:api"
@@ -4772,6 +4770,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/client/AccountBookingClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/BalanceCoverClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/FxRateClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/LedgerRestClient.kt"
@@ -4888,6 +4887,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/account/application/usecase/SavingsProposalService.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/BalanceServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/PartyDirectoryClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ProductCatalogClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/SanctionsServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ScaChallengeClient.kt"
@@ -4898,9 +4898,11 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
     cardholder: []
   openbank-balance-service:
     auth_crypto_payment:
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/LedgerBranchBooksClient.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
@@ -5069,6 +5071,8 @@ security_sensitive_paths:
     cardholder: []
   openbank-ledger-service:
     auth_crypto_payment:
+      - "src/main/kotlin/**/BranchPaymentPlan.kt"
+      - "src/main/kotlin/**/BranchPaymentResource.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       # ADR-0365: own-book posting, payload identity, startup binding and four-eyes controls.
       - "src/main/kotlin/**/Pension*.kt"
@@ -5139,6 +5143,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/CatalogFosLoanAdapter.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
