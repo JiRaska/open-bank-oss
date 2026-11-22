@@ -60,6 +60,39 @@ class LedgerOutboxClaimIT {
     }
 
     @Test
+    fun `mapped claim token remains usable after an additive table change`() {
+        clearOutbox()
+        changeTestSchema("ADD COLUMN future_claim_token UUID")
+        try {
+            val message = seedPending(1).single()
+            val claim = onEventLoop { repository.claimWithTokens(1) }.single()
+            assertThat(claim.entry.eventId).isEqualTo(message.eventId)
+            assertThat(claim.entry.payload).isEqualTo(message.payload)
+            assertThat(claim.entry.status).isEqualTo(OutboxStatus.DISPATCHING)
+            val wrongOwner = claim.copy(token = Ids.newId())
+            assertThat(onEventLoop { repository.markClaimsSent(listOf(wrongOwner)) }).isEmpty()
+            assertThat(onEventLoop { repository.markClaimsSent(listOf(claim)) }).containsExactly(message.eventId)
+            assertThat(onEventLoop { repository.markClaimsSent(listOf(claim)) }).isEmpty()
+        } finally {
+            try {
+                clearOutbox()
+            } finally {
+                changeTestSchema("DROP COLUMN future_claim_token")
+            }
+        }
+    }
+
+    private fun changeTestSchema(clauses: String) {
+        onEventLoop {
+            Panache.withTransaction {
+                Panache.getSession().chain { session ->
+                    session.createNativeQuery<Int>("ALTER TABLE ledger_outbox $clauses").executeUpdate()
+                }
+            }.awaitSuspending()
+        }
+    }
+
+    @Test
     fun `two concurrent claims never return the same row`() {
         clearOutbox()
         val seeded = seedPending(50)

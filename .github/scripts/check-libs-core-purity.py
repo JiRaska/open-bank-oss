@@ -46,6 +46,7 @@ CONTEXT_PACKAGES: dict[str, tuple[str, ...]] = {
     "openbank-libs-iso20022": ("com.openbank.libs.iso20022", "com.openbank.libs.domain.payment"),
     "openbank-libs-finance": ("com.openbank.libs.finance",),
     "openbank-libs-fincrime": ("com.openbank.libs.fincrime",),
+    "openbank-libs-market": ("com.openbank.libs.market",),
 }
 
 PACKAGE_RE = re.compile(r"^\s*package\s+([A-Za-z0-9_.]+)", re.M)

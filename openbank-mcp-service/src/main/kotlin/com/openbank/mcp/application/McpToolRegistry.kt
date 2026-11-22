@@ -225,9 +225,13 @@ class McpToolRegistry(
         //             narrows WHAT can leave the bank.
         //   wrap    — instruction/data separation (ADR-0195 T-I3): narrows what the data that DOES
         //             leave can make the calling client's model do. See McpUntrustedData.
+        //   sanitise — ADR-0383 D7: free text is NFKC-normalised, stripped of control/format chars
+        //             and link/image markup, embedded IBAN/phone masked, marker look-alikes
+        //             neutralised, length-capped. Runs AFTER the masker (which keys on field names
+        //             and whole values) and BEFORE wrap. See McpToolResultSanitiser.
         // Order matters only in that wrapping must come last: it must enclose the final bytes, or
         // a later step could re-introduce text outside the markers.
-        val masked = mapper.writeValueAsString(masker.mask(result))
+        val masked = mapper.writeValueAsString(McpToolResultSanitiser.sanitise(masker.mask(result)))
         return ToolCallResult(listOf(ToolContent(text = McpUntrustedData.wrap(masked))))
     }
 

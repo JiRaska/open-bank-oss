@@ -711,8 +711,6 @@ change_requirements:
         reason: "#9073 stage 1 of 2, consumer-first: audit-service and analytics-sink subscribe, with the topic and ACLs, before account-service publishes there. Today AccountEventPublisher ignores the topic its callers name and emits status changes on account-events-out (account.created); the producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
       - topic: "openbank.accounts.savings-withdrawal.approved"
         reason: "#9073 stage 1 of 2, consumer-first: same sequencing as account.status-changed above; the account-service producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
-      - topic: "openbank.delegation.payment-proposal-events"
-        reason: "ADR-0383 D6 consumer-first: audit-service subscribes, with the topic and Read ACL, before delegation-service's proposal store publishes there; the producer PR MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-19, #16590): #16590."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -826,6 +824,19 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-proposed-staleness.py"
     target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the 4-findings seed tail (0141, 0142, 0155, 0170) is decided, re-affirmed, or baselined
     blocked_on: "first live run flags 4 genuinely open proposals from 2026-06/07; enforcement is safe once that tail is triaged — the gate is sweep-proof by construction (creation-age + deliberate last-reviewed), so no mechanical commit can silently reset it"
+  mcp_redteam_model_verdict:
+    # ADR-0383 D7 / #16617 layer 4. The model-in-the-loop half of the MCP prompt-injection red team:
+    # a recorded model run must not call propose_payment unrequested, fetch beyond the question, or
+    # emit an attacker URL/IBAN when a tool result is poisoned. Advisory only because nothing is
+    # recorded yet (CI holds no model keys) — the gate prints "model verdict: NOT MEASURED".
+    detect: ["evals/mcp-redteam/scenarios.json scenarios vs evals/mcp-redteam/recordings/recording.json"]
+    require:
+      - "a committed recording covers every scenario (partial => fail), none is stale, every assertion holds"
+    gate: mcp-redteam-model-verdict
+    enforced: advisory
+    ci_producer: ".github/scripts/run-mcp-redteam-evals.py"
+    target_enforce_date: "2026-12-15"   # ADR-0144
+    blocked_on: "first owner live recording committed via evals/mcp-redteam/live.sh"
   adr_delivery_scripts:
     # An ADR's `## Delivery check` is the falsifier of its own `delivery-status`, and as prose
     # nobody runs it: ADR-0344 read `planned` while code for its decisions landed, found only by a
@@ -4810,6 +4821,8 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/domain/model/PaymentProposal.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/rest/PaymentProposalResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -5139,6 +5152,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/CatalogFosLoanAdapter.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"

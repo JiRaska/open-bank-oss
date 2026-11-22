@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA CLIENT certificate the edge Envoy presents to TLS backends
+# (EnvoyProxy/edge spec.backendTLS.clientCertificateRef, gateway.yaml). Owner decision 2026-11-21
+# (#16847): the customer MCP channel trusts the gateway hop by this IDENTITY, never by source IP, so
+# mcp-service pins the DNS SAN below (MCP_EDGE_GATEWAY_IDENTITY) and honours the edge client-address
+# header only from it. Gateway-wide on purpose (option A): presenting a client certificate to another
+# TLS backend discloses no key, whereas a per-backend `Backend` would mean enabling Envoy Gateway's
+# Backend API, which widens the edge to non-Service targets. The SAN is a name no Service resolves to,
+# so it can never be confused with a server identity.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: edge-backend-client-tls
+  namespace: envoy-gateway-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: edge-backend-client-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - client auth
+  commonName: edge-gateway.envoy-gateway-system.client.open-bank.tech
+  dnsNames:
+    - edge-gateway.envoy-gateway-system.client.open-bank.tech
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

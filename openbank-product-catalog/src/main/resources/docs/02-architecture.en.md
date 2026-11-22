@@ -162,3 +162,7 @@ Lending can resolve a proposed route from the catalogue using its exact grant, v
 and pinned product revision. The response contains the route's scope and pack-set digest.
 It excludes subject evidence details. Resolving the route performs no permit write. The
 commitment call rechecks eligibility under the revocation lock.
+
+A refusal for an exact valid commitment command is retained under the grant lock. Retrying the
+command returns the same refusal even if eligibility changes later. This lets Lending clear its
+local pending state after a definitive refusal while delayed duplicate requests are still arriving.
