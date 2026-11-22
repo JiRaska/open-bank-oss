@@ -3235,6 +3235,30 @@ gates:
     run: |
       python3 .github/scripts/check-agent-bounded-write-surface.py
 
+  # ADR-0387 (issue #16754): agents read the public web only through the fetch broker's
+  # `web.fetch` tool (resource read.public_web). The network layer cannot carry the host
+  # allowlist (aws-network-policy-agent matches CIDRs, not hostnames), so the charter is the
+  # control: explicit HTTPS hostnames, no write/execute next to web access, and the renderer
+  # credential mounted by the broker alone.
+  #
+  # ENFORCED. Pure python, one file read plus a gitops scan, <1 s. Falsified by effect on
+  # 2026-11-18: granting read.public_web to regulatory-obligations-watcher without a host list
+  # made it exit 1; the self-test covers wildcard, IP literal, scheme, upper case, write/execute
+  # tier, dead allowlist and a second secret mount.
+  - id: public-web-fetch
+    min_subjects: 15   # agent charters examined; 23 today (2026-11-18)
+    name: "public-web fetch bounded per charter (ADR-0387, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 30
+    rationale: "Fetched web content is untrusted and the host allowlist exists only in the application layer, so a wildcard host, a write tier beside web access or a second renderer-credential mount would each widen agent egress with nothing else to notice."
+    review_after: "2027-05-18"
+    selftest: python3 .github/scripts/check-public-web-fetch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-public-web-fetch.py"]
+    run: |
+      python3 .github/scripts/check-public-web-fetch.py
+
   - id: agent-model-parity
     name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
     group: registry
