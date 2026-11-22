@@ -772,12 +772,16 @@ jobs:
       actions: read       # readiness R8 verifies the exact api-fuzz run artifact
       contents: read
       pull-requests: read
-    needs: [agent-admission, ruleset-evidence]
-    # Missing evidence must produce NOT_EVALUATED in the gate report while the
-    # independent governance checks still run. Admission refusal still blocks all.
-    if: always() && needs.agent-admission.outputs.proceed == 'true'
+    # Shards start beside `ruleset-evidence`, not after it (#11442): only one gate
+    # (ruleset-bypass-actors, lint shard) reads the snapshot, and that shard receives it
+    # itself just before `Run gates`. Admission stays a hard dependency: a refused or
+    # failed admission skips every shard, and `validate` turns that skip into a red.
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The lint shard may now wait on the trusted producer inside the job (the receiver's own
+    # deadline is 30 min, the step below caps it at 32), so it gets that wait on top of 15.
+    timeout-minutes: ${{ matrix.slug == 'lint-supplychain-security' && 47 || 15 }}
     strategy:
       # Never fail-fast: one red shard must not hide the state of the other seven, or a PR
       # gets a one-gate-at-a-time debugging loop instead of the whole picture in one run.
@@ -826,7 +830,6 @@ jobs:
       # Dependabot cannot read Actions secrets; the reviewed public id remains available.
       # Missing or incorrect ids still fail the guard; retain the legacy secret fallback.
       GITOPS_APP_ID: ${{ vars.GITOPS_APP_ID || secrets.GITOPS_APP_ID }}
-      RULESET_BYPASS_SNAPSHOT: ${{ needs.ruleset-evidence.outputs.snapshot }}
       # run-gates.py traces every self-test it runs and fails one that reads a repo file its
       # `selftest_inputs` does not declare (selftest_input_trace.py). `require`: an untraceable
       # runner fails loudly instead of silently checking nothing.
@@ -837,14 +840,6 @@ jobs:
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
-
-      # A failed-job rerun preserves successful dependency outputs. Its snapshot
-      # belongs to the previous attempt and must never be relabelled or accepted.
-      # Only the consuming shard receives the new attempt's trusted artifact;
-      # the other shards and the privileged collector remain unchanged.
-      - uses: ./.github/actions/receive-ruleset-evidence
-        id: current-evidence
-        if: github.run_attempt > 1 && matrix.slug == 'lint-supplychain-security'
 
       - name: Install strace (self-test input tracing)
         run: |
@@ -1011,9 +1006,20 @@ jobs:
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
         run: bash .github/scripts/install-promtool.sh
 
+      # Only the consuming shard receives the trusted artifact, bound to THIS run attempt (a
+      # rerun gets the new attempt's evidence, never a relabelled earlier one). It runs last
+      # before the gates so the setup above overlaps the producer. Missing evidence must yield
+      # NOT_EVALUATED for ruleset-bypass-actors while the independent gates still run, hence
+      # the `Run gates` condition; `validate` separately requires `ruleset-evidence` success.
+      - uses: ./.github/actions/receive-ruleset-evidence
+        id: current-evidence
+        if: matrix.slug == 'lint-supplychain-security'
+        timeout-minutes: 32
+
       - name: Run gates
+        if: ${{ !cancelled() && (success() || steps.current-evidence.outcome == 'failure') }}
         env:
-          RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}
+          RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot }}
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
           # ADR-0389: scales SAFE gates' budget/timeout; run-gates.py validates it (1.0..4.0, else 1.0).
           GATE_BUDGET_MULTIPLIER: ${{ vars.GATE_BUDGET_MULTIPLIER }}
