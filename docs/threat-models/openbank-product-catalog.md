@@ -48,6 +48,18 @@ the same permit ledger to loan signing (`SIGN`) and disbursement (`DISBURSE`).
 | T7 | A refused loan commitment is later admitted for the same command, for example after new subject evidence arrives, so the lending side's terminal decision and the catalogue disagree | V20 retains each exact refusal in `passport_commitment_refusals` under the grant lock. `admit_passport_commitment` refuses any later attempt with the same operation, operation ID, grant, party, revision and binding. The response carries `X-FOS-Decision: refused` only for a retained refusal, so lending can tell a definitive refusal from a transient one. A route mismatch is not retained and stays retryable. | `PassportPermitFenceTest` (`an exact refusal does not become an admission when evidence arrives later`) |
 | T8 | A FOS receipt or permit authorizes a BRANCH commitment, or the reverse | V21 passes the requested mode into `admit_passport_scoped_operation` and `admit_passport_commitment`, and refuses unless it equals the locked grant's `mode`. Establishment and route are matched under the same lock, so a FOS receipt cannot be replayed as a BRANCH one. | `PassportPermitFenceTest` (`revocation that owns the grant prevents a new loan admission`, `loan admission that owns the grant preserves only its exact receipt`, `only exact consumed loan operations return receipts`; each runs for FOS and BRANCH) |
 
+## Account booking context on the admission receipt (ADR-0380 B2)
+
+V22 makes the consumed account admission receipt the only source of the booking context that
+account-service freezes (`/api/v2/internal/passport-account-admissions/context`).
+
+| # | Threat | Mitigation | Evidence |
+|---|---|---|---|
+| T9 | A caller chooses or alters the bank, establishment, host country or mode an account is booked under | The context is read only from the exact consumed permit, matched on grant, operation, operation ID, party, revision and binding, under the named account-service identity. A request with any other binding, or before consumption, answers 404. Callers supply only the grant reference. | `PassportPermitFenceTest` (`receipt lookup cannot consume an issued permit and remains readable after revocation`; runs for FOS and BRANCH) |
+| T10 | A grant's booking scope is edited after a receipt was issued, so a later read reports a different context | `trg_preserve_passport_booking_scope` rejects any update to bank, establishment, host country, mode, offering, channel, segment or pack-set digest on `passport_grants` (SQLSTATE 23514). | `PassportPermitFenceTest` (same test: the `UPDATE passport_grants SET bank_id` is refused) |
+| T11 | An account is admitted in a host country the offering is not marketed in | The redefined `admit_passport_account` also requires the grant's host country in the offering's `market.countries` before it issues or consumes a permit. | Fixture seeding in `PassportPermitFenceTest` (admissions succeed only with a matching market country) |
+| R2 | A receipt context disappears after revocation, leaving recovery unable to prove its booking | The context read, like the receipt read, stays available for an already-consumed permit after revocation and never consumes one. | `PassportPermitFenceTest` (same test, read after `revoke`) |
+
 ## Residual risk / follow-ups
 - **No subject-evidence writer exists yet.** `admit_passport_account` requires an unexpired row
   in `passport_grant_subject_evidence`, and nothing in this change writes one. In production,
@@ -60,6 +72,8 @@ the same permit ledger to loan signing (`SIGN`) and disbursement (`DISBURSE`).
   It still admits nothing without a subject-evidence row, which nothing writes yet.
 - **BRANCH loan commitments are admitted by the catalogue but not executed.** Lending refuses branch
   origination and commitment execution at normal runtime until B2 provides branch-aware booking.
+- **No negative test for the V22 market-country denial yet.** The check is exercised only on its
+  passing path; a dedicated mismatch case is a follow-up.
 - Consumers of the V18 grant lifecycle stream are not enabled yet. Until one is, the outbox rows
   wait unconsumed. They are not on the admission path, so they admit nothing.
 
