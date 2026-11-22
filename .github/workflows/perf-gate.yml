@@ -82,6 +82,7 @@ jobs:
               "openbank-card-processing-service",
               "openbank-card-issuance-service",
               "openbank-treasury-service",
+              "openbank-clearing-service",
               "openbank-swift-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()

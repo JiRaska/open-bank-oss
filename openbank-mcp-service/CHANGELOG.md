@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.1...mcp-service-v0.18.2) (2026-11-22)
+
+
+### Security
+
+* **mcp:** sanitise free text in tool results (ADR-0383 D7) ([#16637](https://github.com/JiRaska/open-bank-oss/issues/16637)) ([5afbbc4](https://github.com/JiRaska/open-bank-oss/commit/5afbbc4268b7554a615d5bcef9689a5759f997e1))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.0...mcp-service-v0.18.1) (2026-11-22)
+
+
+### Security
+
+* **mcp-service:** cap subject-less audit keys per network allocation ([#17022](https://github.com/JiRaska/open-bank-oss/issues/17022)) ([54d3b13](https://github.com/JiRaska/open-bank-oss/commit/54d3b13485c5c80dde182664809845958749f99d))
+* **mcp:** admit MCP clients by allowlist tier in the customers realm ([#16664](https://github.com/JiRaska/open-bank-oss/issues/16664)) ([5fb6813](https://github.com/JiRaska/open-bank-oss/commit/5fb681320dc1bd4c411e9a4493c287c256c1d8d4))
+* **mcp:** edge trusted by mTLS identity; customer channel on its own DPoP-only root ([#17004](https://github.com/JiRaska/open-bank-oss/issues/17004)) ([2606221](https://github.com/JiRaska/open-bank-oss/commit/2606221c33b356b4e9d946d6b5af94916e794998))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.11...mcp-service-v0.18.0) (2026-11-21)
 
 

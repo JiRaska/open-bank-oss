@@ -422,6 +422,7 @@ class PerformanceStageTests(unittest.TestCase):
             "openbank-consent-service-consent-read-baseline",
             "openbank-domestic-payment-domestic-payment-read-baseline",
             "openbank-fx-service-fx-read-baseline",
+            "openbank-clearing-service-clearing-read-baseline",
             "openbank-sca-service-sca-read-baseline",
             "openbank-sepa-instant-sepa-instant-read-baseline",
             "openbank-sepa-payment-sepa-payment-read-baseline",

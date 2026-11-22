@@ -87,6 +87,23 @@ complete merely because a domain renderer passes tests: `GsftSnapshotAdapter`'s 
 and `requireComplete()` are part of the acceptance path. C7 must use reviewed national/treaty
 rules; this plan deliberately supplies no tax rates as defaults for another country.
 
+### C0 entry points and first delivery slice
+
+| Entry point | Commitment boundary | First-slice coverage |
+|---|---|---|
+| Operator account API, party-created consumer, business onboarding and catch-up | `AccountService.openAccount` before `saveNewAccount` | Checks the published offering's declared countries on the server's existing Czech domestic route. A foreign-only offering is refused before writing the account. Operator or agent presentation does not set the route. |
+| Party-standing consumer and business-account catch-up | `AccountService.activateAccount` before the repository update and status publication | Rechecks the current published offering for a pending account with a revision pin. An already active account returns its previous state. Historic pending accounts without a pin retain the domestic compatibility path. |
+| Customer and operator lending intake, offer acceptance, material changes and disbursement | Lending origination/decision and disbursement use cases | Further C3 work. The shared contract must be enforced in lending before a cross-border route can be enabled. |
+| Legal inbox and application (#16324) | Legal-effect state transition | Synthetic identity contract tests cover instrument/subject binding, evidence freshness, version change, revocation and merge. PID/Party authoritative checks and a write fence are C4 work. |
+
+Country metadata from the older catalogue response and legacy products without country restrictions
+retain their current domestic meaning. Deploy the catalogue publisher before relying on the check.
+This slice enforces **offering distribution scope**. The durable grant registry, approval, permit
+consumption and revocation ordering still belong to C2/C3. Keep FOS and BRANCH disabled until those
+controls and the required identity sources are in place. Test no write after refusal, including an
+account stuck in pending activation. In C4, reconcile original and surviving party IDs before retrying
+a legal action that was pending during a merge.
+
 ## 4. FOS-specific backlog (reusable across hosts)
 
 | ID / owner | Deliverable | Dependencies | Acceptance |
