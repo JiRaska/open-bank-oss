@@ -100,6 +100,15 @@ class RestLedgerPostingAdapter(
             .map { Unit }
     }
 
+    override fun postConfirmedDisbursement(posting: LedgerPosting): Uni<Unit> {
+        val request = buildRequest(posting)
+        return guard.postJournal(request).map { receipt ->
+            check(receipt.status == "POSTED" && receipt.transactionId == request.transactionId) {
+                "Ledger did not confirm the FOS disbursement"
+            }
+        }
+    }
+
     override fun postReportingReplay(posting: LedgerPosting): Uni<LedgerPostResult> =
         guard.postJournalWithHeaders(buildRequest(posting)).map { response ->
             when (response.getHeaderString(IDEMPOTENT_REPLAYED_HEADER)?.lowercase()) {

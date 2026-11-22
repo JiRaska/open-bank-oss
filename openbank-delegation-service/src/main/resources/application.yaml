@@ -215,6 +215,15 @@ mp:
         connector: smallrye-kafka
         client.id: delegation-service-approval-${quarkus.uuid}
         topic: openbank.delegation.approval-events
+      # ADR-0383 D6 proposal lifecycle (Created/Approved/Rejected/Expired/Executed/ExecutionFailed),
+      # keyed by proposal id. Its own topic, so no existing delegation consumer sees these types.
+      payment-proposal-events-out:
+        connector: smallrye-kafka
+        topic: openbank.delegation.payment-proposal-events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       # One canonical value per immutable roster revision. The `groupId:revision` key preserves
       # every historical revision under compaction and allows new product services to bootstrap.
       approval-group-revisions-out:
@@ -335,6 +344,12 @@ openbank:
       # ADR-0312: flips PENDING / unclaimed-APPROVED approval requests past expiresAt to EXPIRED.
       # A config expression so BusinessApprovalExpirySweepIT can drive the REAL scheduler.
       expiry-cron: "0 */5 * * * ?"
+    # ADR-0383 D6: proposals a customer MCP client may create. 24 h and 10 open / 20 per day are
+    # the ADR's ceilings; PaymentProposalService refuses a ttl above 24 h whatever is configured.
+    payment-proposals:
+      ttl: PT24H
+      max-open-per-party: 10
+      max-created-per-party-per-day: 20
     recertification:
       # A reminder-only sweep. Due tasks are idempotent and the grant remains ACTIVE after dueAt.
       cron: "0 15 * * * ?"

@@ -20,6 +20,7 @@ data class CatalogLoanProfile(
     val minPrincipal: BigDecimal?,
     val maxPrincipal: BigDecimal?,
     val markets: OfferingMarkets? = null,
+    val productType: String? = null,
 )
 
 /**

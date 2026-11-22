@@ -139,6 +139,29 @@ channels:
       ApprovalGroupDeactivated:
         $ref: '#/components/messages/ApprovalGroupDeactivated'
 
+  paymentProposalEvents:
+    address: openbank.delegation.payment-proposal-events
+    title: Customer MCP payment-proposal lifecycle (ADR-0383 D6)
+    description: |
+      One event per proposal state change, keyed by `aggregateId` (the proposal id). Its own
+      topic so the delegation projections never see these types. Data-minimised: no payee IBAN,
+      payee name or reference; `payloadSha256` identifies the exact instruction, whose record of
+      truth is delegation-service's `delegation_payment_proposals` table. No consumer yet besides
+      the audit trail (notifications are a later slice).
+    messages:
+      PaymentProposalCreated:
+        $ref: '#/components/messages/PaymentProposalCreated'
+      PaymentProposalApproved:
+        $ref: '#/components/messages/PaymentProposalApproved'
+      PaymentProposalRejected:
+        $ref: '#/components/messages/PaymentProposalRejected'
+      PaymentProposalExpired:
+        $ref: '#/components/messages/PaymentProposalExpired'
+      PaymentProposalExecuted:
+        $ref: '#/components/messages/PaymentProposalExecuted'
+      PaymentProposalExecutionFailed:
+        $ref: '#/components/messages/PaymentProposalExecutionFailed'
+
 operations:
   publishDelegationEvents:
     action: send
@@ -210,6 +233,23 @@ operations:
       - $ref: '#/channels/approvalGroupRevisions/messages/ApprovalGroupRevised'
       - $ref: '#/channels/approvalGroupRevisions/messages/ApprovalGroupDeactivated'
 
+  publishPaymentProposalEvents:
+    action: send
+    title: Publish customer MCP payment-proposal transitions
+    channel:
+      $ref: '#/channels/paymentProposalEvents'
+    description: |
+      **Producer: `openbank-delegation-service`**, `mp.messaging.outgoing.payment-proposal-events-out`.
+      Written to the outbox in the same transaction as the proposal's state change. Schema v1;
+      additions are optional fields only.
+    messages:
+      - $ref: '#/channels/paymentProposalEvents/messages/PaymentProposalCreated'
+      - $ref: '#/channels/paymentProposalEvents/messages/PaymentProposalApproved'
+      - $ref: '#/channels/paymentProposalEvents/messages/PaymentProposalRejected'
+      - $ref: '#/channels/paymentProposalEvents/messages/PaymentProposalExpired'
+      - $ref: '#/channels/paymentProposalEvents/messages/PaymentProposalExecuted'
+      - $ref: '#/channels/paymentProposalEvents/messages/PaymentProposalExecutionFailed'
+
 components:
   messageTraits:
     outboxHeaders:
@@ -233,6 +273,27 @@ components:
               assume each event arrives once.
 
   schemas:
+    paymentProposalEvent:
+      type: object
+      required: [aggregateId, partyId, grantId, mcpClientId, status, revision, operationType, amount, currency, payloadSha256, expiresAt, occurredAt, eventType, aggregateType, version, eventId]
+      properties:
+        eventId: { type: string, format: uuid }
+        eventType: { type: string }
+        aggregateType: { type: string, const: PaymentProposal }
+        version: { type: integer, const: 1 }
+        aggregateId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        grantId: { type: string, format: uuid }
+        mcpClientId: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXPIRED, EXECUTED, EXECUTION_FAILED] }
+        revision: { type: integer, minimum: 0 }
+        operationType: { type: string, enum: [DOMESTIC_PAYMENT, SEPA_PAYMENT] }
+        amount: { type: string }
+        currency: { type: string }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        expiresAt: { type: string, format: date-time }
+        executedPaymentId: { type: [string, 'null'], format: uuid }
+        occurredAt: { type: string, format: date-time }
     # ADR-0312. Every approval event type carries this ONE shape (schema version 1), mirroring
     # the data classes in ApprovalEvents.kt; check-event-contract-code-agreement.py compares both
     # directions. A breaking change ships as version 2, never an in-place edit.
@@ -673,6 +734,60 @@ components:
         scaSessionId: { type: string, format: uuid, nullable: true }
 
   messages:
+    PaymentProposalCreated:
+      name: PaymentProposalCreated
+      title: Payment proposal transitioned (PaymentProposalCreated)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/paymentProposalEvent'
+
+    PaymentProposalApproved:
+      name: PaymentProposalApproved
+      title: Payment proposal transitioned (PaymentProposalApproved)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/paymentProposalEvent'
+
+    PaymentProposalRejected:
+      name: PaymentProposalRejected
+      title: Payment proposal transitioned (PaymentProposalRejected)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/paymentProposalEvent'
+
+    PaymentProposalExpired:
+      name: PaymentProposalExpired
+      title: Payment proposal transitioned (PaymentProposalExpired)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/paymentProposalEvent'
+
+    PaymentProposalExecuted:
+      name: PaymentProposalExecuted
+      title: Payment proposal transitioned (PaymentProposalExecuted)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/paymentProposalEvent'
+
+    PaymentProposalExecutionFailed:
+      name: PaymentProposalExecutionFailed
+      title: Payment proposal transitioned (PaymentProposalExecutionFailed)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/paymentProposalEvent'
+
     APPROVAL_REQUESTED:
       name: APPROVAL_REQUESTED
       title: A request needs signatures — tell every eligible signer who has not signed yet
