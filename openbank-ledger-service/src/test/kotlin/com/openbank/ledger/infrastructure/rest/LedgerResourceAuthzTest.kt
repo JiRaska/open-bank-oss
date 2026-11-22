@@ -8,11 +8,18 @@ import com.openbank.ledger.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured.given
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.LocalDate
 import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * Regression coverage for wiring a real [com.openbank.libs.authz.PolicyDecisionPoint] bean
@@ -29,6 +36,87 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(PostgresRedpandaTestResource::class)
 class LedgerResourceAuthzTest {
+    @Inject
+    lateinit var dataSource: DataSource
+
+    @Test
+    @TestSecurity(user = "another-workload", roles = ["ROLE_API"])
+    fun `a generic API workload cannot supply booking attribution`() {
+        Given {
+            contentType("application/json")
+            body("null")
+        } When {
+            post("/api/v1/journals/booked")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-transaction", roles = ["ROLE_API"])
+    @OidcSecurity(claims = [Claim(key = "azp", value = "openbank-transaction")])
+    fun `transaction workload posts and replays an attributed branch journal`() {
+        val tx = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val context = UUID.randomUUID()
+        val branch = UUID.randomUUID()
+        val date = LocalDate.now()
+        val body = """
+            {
+              "journal": {
+                "idempotencyKey":"workflow-$tx-ledger", "transactionId":"$tx",
+                "entryDate":"$date", "valueDate":"$date", "createdBy":"$tx",
+                "lines":[
+                  {"glAccountId":"a0000000-0000-0000-0000-000000000001","side":"DEBIT",
+                   "amount":1,"currencyCode":"CZK","baseAmount":1,"baseCurrencyCode":"CZK"},
+                  {"glAccountId":"a0000000-0000-0000-0000-000000000002","side":"CREDIT",
+                   "amount":1,"currencyCode":"CZK","baseAmount":1,"baseCurrencyCode":"CZK"}
+                ]
+              },
+              "booking":{"contextVersionId":"$context","legalEntityId":"$company",
+                         "operatingMode":"BRANCH","establishmentId":"$branch"},
+              "synthetic":false
+            }
+        """.trimIndent()
+        fun post(payload: String) = given().contentType("application/json")
+            .header("Idempotency-Key", "workflow-$tx-ledger")
+            .body(payload).post("/api/v1/journals/booked")
+
+        assertThat(
+            given().contentType("application/json").body(body)
+                .post("/api/v1/journals/booked").statusCode,
+        ).isEqualTo(400)
+        assertThat(
+            given().contentType("application/json").header("Idempotency-Key", "different")
+                .body(body).post("/api/v1/journals/booked").statusCode,
+        ).isEqualTo(400)
+
+        val created = post(body)
+        assertThat(created.statusCode).describedAs(created.body.asString()).isEqualTo(201)
+        val journalId = UUID.fromString(created.jsonPath().getString("id"))
+        val replay = post(body)
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.jsonPath().getString("id")).isEqualTo(journalId.toString())
+        assertThat(post(body.replace(branch.toString(), UUID.randomUUID().toString())).statusCode).isEqualTo(409)
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                SELECT booking_company_id, booking_context_version_id, booking_mode, booking_branch_id
+                FROM journal_entries WHERE id = ?
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, journalId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject(1)).isEqualTo(company)
+                    assertThat(rows.getObject(2)).isEqualTo(context)
+                    assertThat(rows.getString(3)).isEqualTo("BRANCH")
+                    assertThat(rows.getObject(4)).isEqualTo(branch)
+                }
+            }
+        }
+    }
 
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])

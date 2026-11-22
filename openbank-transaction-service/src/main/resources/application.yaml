@@ -99,6 +99,23 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      account-booking-in:
+        enabled: ${ACCOUNT_BOOKING_PROJECTION_ENABLED:false}
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        group:
+          id: transaction-account-booking
+        auto:
+          offset:
+            reset: earliest
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.transaction-service.account-booking-in
     outgoing:
       transaction-events-out:
         connector: smallrye-kafka

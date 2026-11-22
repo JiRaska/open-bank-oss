@@ -709,3 +709,21 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## Account booking projection rollout — #16356
+
+A forged, replayed or conflicting AccountCreated context can attribute a payment to
+the wrong company, FOS perimeter or branch. The projection accepts the versioned
+booking-context shape and retains its evidence. Conflicting evidence for an existing
+account is rejected. The Kafka producer identity and its topic write ACL remain a
+trust boundary; payload validation alone does not authenticate the source.
+
+The initial rollout keeps account booking projection and attributed posting disabled.
+Before enabling them, verify the trusted admission producer, account/catalog receipt
+flow, projection reconciliation and historical backfill. Legacy accounts with unknown
+attribution must remain explicit in the source controls.
+
+A stopped consumer must remain observable and recoverable. The changed input channel
+declares retry/dead-letter handling with its service topic and write ACL. Recovery
+tests cover the Kafka projection; the reporting worker separately verifies the frozen
+source digest and replays without querying customer services.

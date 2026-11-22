@@ -148,3 +148,19 @@ python openbank-finrep-service/tools/reconcile_finrep_facts.py --report finrep-s
 
 `SUPPORTED_FACTS_RECONCILED` covers those coordinates. COREP requires an independently reconciled
 prudential capital source. A filing also requires coverage of the other applicable EBA tables.
+
+## Offline scoped F01.01 comparison
+
+The `renderFrozenFinrep` Gradle task reads a staged JSON trial balance and an
+independently approved SHA-256 digest. Its arguments are the input path, digest,
+approved context identifier, reporting date and a new output path. It verifies
+the exact scope, date, input shape and balance verdict before mapping F01.01.
+The input is bounded to eight MiB and 50,000 trial-balance lines; the output
+path must not already exist.
+
+The input scope identifies its company, domestic/FOS/branch mode, establishment
+when applicable and accounting perimeter version. Produce and reconcile that
+scope from immutable attributed ledger data. A date-only balance cannot establish
+company or branch attribution. This command produces an offline comparison
+artifact; activation of a filing flow requires its source, lifecycle and approval
+controls. See issue #16356 for the isolated-worker rollout and measured limitations.

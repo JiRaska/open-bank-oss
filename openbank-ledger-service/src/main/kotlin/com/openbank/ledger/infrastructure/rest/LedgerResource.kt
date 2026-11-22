@@ -19,6 +19,8 @@ import com.openbank.ledger.application.port.`in`.ReplayBookedChangesUseCase
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
 import com.openbank.ledger.application.usecase.AccountingClassService
 import com.openbank.ledger.domain.model.AccountCurrencyBalance
+import com.openbank.ledger.domain.model.JournalBookingAttribution
+import com.openbank.ledger.domain.model.JournalBookingMode
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
@@ -36,6 +38,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -45,6 +48,7 @@ import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
@@ -219,11 +223,46 @@ class LedgerResource(
         return bookJournal(request, synthetic = true)
     }
 
+    @POST
+    @Path("/booked")
+    @RolesAllowed(Roles.API)
+    @Authorize(action = "ledger.create", resource = "")
+    @Operation(summary = "Post an attributed journal from the transaction workload")
+    suspend fun postBookedJournal(
+        request: BookedJournalRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @Context requestContext: ContainerRequestContext,
+    ): Response {
+        requireTransactionWorkload()
+        requireNotNull(request) { "a booked journal body is required" }
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        require(idempotencyKey.isNotBlank() && idempotencyKey == request.journal.idempotencyKey) {
+            "Idempotency-Key must match the journal idempotency key"
+        }
+        val synthetic = isSynthetic(requestContext)
+        val suppliedOrigin = requireNotNull(request.synthetic) { "synthetic is required" }
+        if (suppliedOrigin != synthetic) throw ForbiddenException("Journal origin does not match the trusted origin")
+        return bookJournal(request.journal, synthetic, request.booking.toDomain())
+    }
+
+    private fun requireTransactionWorkload() {
+        val token = callerIdentity.principal as? JsonWebToken ?: throw ForbiddenException()
+        val trusted = token.getClaim<String>("azp") == "openbank-transaction" &&
+            token.getClaim<String>("preferred_username") == "service-account-openbank-transaction"
+        if (!trusted) {
+            throw ForbiddenException()
+        }
+    }
+
     // Both values carry the filter's authenticated trust decision. Either true value wins.
     private fun isSynthetic(requestContext: ContainerRequestContext): Boolean =
         taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true
 
-    private suspend fun bookJournal(request: PostJournalRequest?, synthetic: Boolean): Response {
+    private suspend fun bookJournal(
+        request: PostJournalRequest?,
+        synthetic: Boolean,
+        bookingAttribution: JournalBookingAttribution? = null,
+    ): Response {
         requireNotNull(request) { "a request body is required" }
         // ADR-0096 D3: this prefix is reserved for the year-end closing journal, whose attribution
         // is written only by the allocation's own transaction. A generic post under it would be an
@@ -240,6 +279,7 @@ class LedgerResource(
             lines = request.requireLines().map { it.toCommand(accountingClasses) },
             postedBy = request.createdBy,
             synthetic = synthetic,
+            bookingAttribution = bookingAttribution,
             origin = request.origin?.let { origin ->
                 check(!callerIdentity.isAnonymous) { "authenticated journal submitter is required" }
                 origin.toDomain(callerIdentity.principal.name)
@@ -332,6 +372,21 @@ data class PostJournalLineRequest(
         }
         return classes.resolve(accountingClass, accountingRole, currencyCode).glAccountId
     }
+}
+
+data class BookedJournalRequest(
+    val journal: PostJournalRequest,
+    val booking: JournalBookingInput,
+    val synthetic: Boolean?,
+)
+
+data class JournalBookingInput(
+    val contextVersionId: UUID,
+    val legalEntityId: UUID,
+    val operatingMode: JournalBookingMode,
+    val establishmentId: UUID? = null,
+) {
+    fun toDomain() = JournalBookingAttribution(legalEntityId, contextVersionId, operatingMode, establishmentId)
 }
 
 data class PostJournalRequest(

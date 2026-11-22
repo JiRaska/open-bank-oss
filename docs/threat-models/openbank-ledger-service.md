@@ -963,3 +963,22 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## Reporting attribution rollout — #16356
+
+A forged or incorrect company, approved context version, operating mode or branch on a
+journal can produce a balanced report for the wrong accounting perimeter. The new
+attribution shape is all-or-none, requires a branch identifier exactly for BRANCH,
+and is retained on reversal and through journal persistence. V46 expands existing
+rows with unknown attribution and preserves the posted-row immutability guard.
+
+The initial rollout keeps attributed posting disabled. Source authorization and the
+trusted admission producer must be verified before enabling it. A structurally valid
+context alone does not establish approval or ownership of that context.
+
+A reporting replay can also exhaust operational CPU, storage or connection budgets.
+The pilot consumes a staged immutable export on an isolated worker with independent
+storage. The source producer checks the approved manifest digest, scope controls,
+sequence completeness and double-entry totals before publishing snapshots. The
+three-million-customer drills remain diagnostic evidence because customer failures
+persisted, including in a control without a reporting worker.

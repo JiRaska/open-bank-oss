@@ -68,6 +68,18 @@ class JournalEntryEntity : PanacheEntityBase {
     @Column(name = "synthetic", nullable = false)
     var synthetic: Boolean = false
 
+    @Column(name = "booking_company_id")
+    var bookingCompanyId: UUID? = null
+
+    @Column(name = "booking_context_version_id")
+    var bookingContextVersionId: UUID? = null
+
+    @Column(name = "booking_mode")
+    var bookingMode: String? = null
+
+    @Column(name = "booking_branch_id")
+    var bookingBranchId: UUID? = null
+
     @Column(name = "origin_kind")
     var originKind: String? = null
 

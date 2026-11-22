@@ -20,6 +20,8 @@ import com.openbank.ledger.application.port.out.YearCloseRepository
 import com.openbank.ledger.domain.model.DayLockDecision
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
+import com.openbank.ledger.domain.model.JournalBookingAttribution
+import com.openbank.ledger.domain.model.JournalBookingMode
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
@@ -233,6 +235,23 @@ class LedgerServiceTest {
             assertThat(result).isEqualTo(existing)
             coVerify(exactly = 0) { journalRepository.save(any(), any(), any()) }
             coVerify(exactly = 0) { journalRepository.nextEntryNumber() }
+        }
+
+        @Test
+        fun `a retry cannot restate booking attribution on an existing journal`(): Unit = runBlocking {
+            val attribution = JournalBookingAttribution(UUID.randomUUID(), UUID.randomUUID(), JournalBookingMode.FOS)
+            val command = postCommand().copy(bookingAttribution = attribution)
+            val existing = postedEntry(command.transactionId).copy(bookingAttribution = attribution)
+            coEvery { journalRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+
+            assertThat(service.postJournal(command)).isEqualTo(existing)
+            val changed = attribution.copy(contextVersionId = UUID.randomUUID())
+            val failure = runCatching {
+                service.postJournal(command.copy(bookingAttribution = changed))
+            }.exceptionOrNull()
+
+            assertThat(failure).isInstanceOf(LedgerConflictException::class.java)
+            coVerify(exactly = 0) { journalRepository.save(any(), any(), any()) }
         }
 
         @ParameterizedTest

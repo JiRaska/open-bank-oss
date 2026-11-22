@@ -62,3 +62,12 @@ The Hibernate Reactive warm-up (`HibernateReactiveWarmup`) skips entities whose 
 Resource-type warm-up expands each endpoint type into its nested types (container content, map keys and generic bindings, recursively) before building serializers, so a DTO reached only through a type variable such as `Page<List<Dto>>` is warm before readiness rather than on the first request (#12042). Opaque leaves such as `String` and primitives are skipped.
 
 The raw-socket `SafeHttpClient` also enforces its whole-call deadline while sending a request body. One shared daemon closes expired sockets; successful and failed calls immediately remove their pending deadline tasks. Forced expiry disables `SO_LINGER` waiting so it cannot delay other calls’ deadline tasks. Normal completion preserves the socket configuration.
+
+### OPA exchange phase diagnostics
+
+Opt-in policy-exchange diagnostics correlate request construction, response arrival,
+body parsing and completion using elapsed microseconds from a monotonic clock.
+Failed response parsing records a failure phase and propagates the original error;
+policy decisions, the configured exchange deadline and fail-closed behavior are unchanged.
+Treat phase timings as diagnostic evidence: a timeout alone does not identify OPA
+execution as its cause, and these measurements do not certify workload capacity.

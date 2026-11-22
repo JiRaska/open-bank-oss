@@ -371,6 +371,10 @@ class PanacheJournalRepository(
         it.version = version
         it.reversalOf = reversalOf
         it.synthetic = synthetic
+        it.bookingCompanyId = bookingAttribution?.companyId
+        it.bookingContextVersionId = bookingAttribution?.contextVersionId
+        it.bookingMode = bookingAttribution?.mode?.name
+        it.bookingBranchId = bookingAttribution?.branchId
         it.originKind = origin?.kind?.name
         it.originRecordId = origin?.sourceRecordId
         it.originSubmitter = origin?.authenticatedSubmitter
@@ -407,6 +411,14 @@ class PanacheJournalRepository(
         version = version,
         reversalOf = reversalOf,
         synthetic = synthetic,
+        bookingAttribution = bookingContextVersionId?.let { contextVersionId ->
+            com.openbank.ledger.domain.model.JournalBookingAttribution(
+                checkNotNull(bookingCompanyId),
+                contextVersionId,
+                com.openbank.ledger.domain.model.JournalBookingMode.valueOf(checkNotNull(bookingMode)),
+                bookingBranchId,
+            )
+        },
         origin = originKind?.let { kind ->
             com.openbank.ledger.domain.model.JournalOrigin(
                 com.openbank.ledger.domain.model.JournalOriginKind.valueOf(kind),

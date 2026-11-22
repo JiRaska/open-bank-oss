@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: regulatory-perf-16356
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: reporting-budget
+  namespace: regulatory-perf-16356
+spec:
+  hard:
+    requests.cpu: "2"
+    limits.cpu: "2"
+    requests.memory: 1Gi
+    limits.memory: 1Gi
+    requests.storage: 2Gi
+    persistentvolumeclaims: "1"
+    pods: "1"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolated-worker
+  namespace: regulatory-perf-16356
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: reporting-data
+  namespace: regulatory-perf-16356
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: reporting-worker
+  namespace: regulatory-perf-16356
+  labels:
+    app: isolated-reporting-benchmark
+spec:
+  automountServiceAccountToken: false
+  terminationGracePeriodSeconds: 5
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: worker
+      image: python:3.12-alpine@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89
+      command: ["sleep", "infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: "2"
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 1Gi
+      volumeMounts:
+        - name: data
+          mountPath: /fixture
+        - name: scripts
+          mountPath: /source
+          readOnly: true
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: reporting-data
+    - name: scripts
+      configMap:
+        name: reporting-scripts
