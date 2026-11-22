@@ -253,6 +253,18 @@ negative audience, identity and signature cases. Apply the reviewed attributes t
 the live realm separately; persist the verified template using runbook 0009 so a
 fresh realm has the same behavior. No custom provider or image rebuild is needed.
 
+### `clients[openbank-app].redirectUris` / `webOrigins`
+
+Exactly two callbacks, both matched literally: the claimed HTTPS link
+`https://open-bank.tech/app/oauth/callback` (App Links / AASA) and the private-scheme floor
+`tech.openbank.app://oauth/callback`. Those are the only two the app sends (its
+`RedirectUriNegotiator` picks one of them). There is no loopback entry: a `http://localhost:*`
+pattern let any local process start an authorize request, ride the browser SSO session and mint
+a token with `azp=openbank-app`, which defeats the app-session checks downstream (#16612).
+A local or desktop flow that needs loopback gets its own dev-only client, never this one.
+`webOrigins` is empty because the app is a native client and makes no CORS requests; `+` would
+have widened CORS to every redirect origin.
+
 ### `clients[openbank-app].protocolMappers[sub]`
 
 This realm import defines explicit (non-default) client scopes, so Keycloak does NOT

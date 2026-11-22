@@ -119,3 +119,26 @@ The published loan revision read (`ProductCatalogLoanClient`, `GET /api/v2/produ
 shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
 denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
 client selection.
+
+### Catalogue distribution on the Czech application route
+
+Before writing a catalogue-backed application, lending reads the current distribution countries
+with the effective catalogue revision. A scoped offering must include CZ. Lending assigns CZ
+jurisdiction for that route and refuses a contradictory caller-supplied jurisdiction. Historical
+offerings with no declared distribution scope follow the existing application path.
+
+For a Czech application with a pinned catalogue revision, Lending first commits the signature
+intent, including the revision identity and content hash. The request and the recovery scheduler
+use the same operation. Recovery claims due intents across replicas. The application transition,
+signature evidence and intent completion commit in one transaction. A later retry must match the
+recorded artefact and signer. The intent also records synthetic taint for asynchronous recovery.
+
+### FOS retail installment commitments
+
+On a FOS application the catalogue resolves the grant for the applicant and published product pin.
+Lending persists the resolved route in the same transaction as the application. The host
+jurisdiction and consumer credit pack are selected from the route and product classification.
+Signing and disbursement each stage an immutable operation and use its UUID at the catalogue.
+The application row lock and database guard prevent a conflicting transition during a commitment.
+A disbursement keeps the loan ID, destination and value date across retries. The scheduler
+resumes work and records the cash and exposure events after both cash services confirm.

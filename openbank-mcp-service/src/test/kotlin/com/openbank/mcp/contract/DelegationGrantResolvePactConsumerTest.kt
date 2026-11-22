@@ -39,11 +39,14 @@ import java.util.UUID
  * delegation-service's `DelegationMcpClientGrantPactFolderProviderVerificationTest` (`@PactFolder`).
  *
  * The expected path is a LITERAL and only the outgoing request is reflected off the client's `@Path`
- * (CLAUDE.md "Contract tests"). Interactions: both branches of the fail-closed lookup: an active
- * grant for the exact triple, and no grant — an EMPTY list with 200, which is the refusal the cache
- * must never store. Plus ADR-0383 D6's proposal store `POST /api/v1/payment-proposals` (201 PENDING,
- * 403 no grant). One class per consumer/provider pair: `pact.writer.overwrite` makes each class
- * rewrite the whole file, so a second class would silently drop the other's interactions.
+ * (CLAUDE.md "Contract tests"). Interactions: both branches of the fail-closed lookup — an active
+ * grant for the exact triple, and no grant (an EMPTY list with 200, which is the refusal the cache
+ * must never store) — plus the adversarial case (ADR-0279 #3): a caller presenting no bearer token
+ * is refused 401, so the contract goes red the day the provider stops enforcing authn on a lookup
+ * that answers which accounts a party has shared. Plus ADR-0383 D6's proposal store
+ * `POST /api/v1/payment-proposals` (201 PENDING, 403 no grant). One class per consumer/provider
+ * pair: `pact.writer.overwrite` makes each class rewrite the whole file, so a second class would
+ * silently drop the other's interactions.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-delegation-service", pactVersion = PactSpecVersion.V3)
@@ -90,6 +93,18 @@ class DelegationGrantResolvePactConsumerTest {
         .body(newJsonBody { o -> o.array("grants") { } }.build())
         .toPact()
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun unauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(STATE_ACTIVE)
+        .uponReceiving("POST resolve without a bearer token is refused 401")
+        .path(EXPECTED_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(mapper.writeValueAsString(REQUEST))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "activeGrantPact")
     fun `an active grant names the account and its capabilities`(mockServer: MockServer) {
@@ -106,7 +121,13 @@ class DelegationGrantResolvePactConsumerTest {
         assertThat(mapper.readValue<ResolveMcpClientGrantResponse>(post(mockServer)).grants).isEmpty()
     }
 
-    private fun post(mockServer: MockServer): String {
+    @Test
+    @PactTestFor(pactMethod = "unauthenticatedPact")
+    fun `a tokenless lookup is refused 401, never answered`(mockServer: MockServer) {
+        post(mockServer, expectedStatus = 401)
+    }
+
+    private fun post(mockServer: MockServer, expectedStatus: Int = 200): String {
         assertThat(
             clientDerivedPath(),
         ).describedAs("DelegationGrantClient's @Path drifted from the pact").isEqualTo(EXPECTED_PATH)
@@ -114,7 +135,7 @@ class DelegationGrantResolvePactConsumerTest {
             .contentType("application/json")
             .body(mapper.writeValueAsString(REQUEST))
             .post(clientDerivedPath())
-            .then().statusCode(200).extract().asString()
+            .then().statusCode(expectedStatus).extract().asString()
     }
 
     private fun proposalRequest(builder: PactDslWithProvider, state: String, description: String) = builder

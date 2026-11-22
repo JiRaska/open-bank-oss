@@ -5,7 +5,7 @@ steps. Each step is separately mergeable, separately verifiable and separately r
 merge two steps in one PR and do not start a step before the previous one's verification passed.**
 The order exists so that no step makes anything unwritable: the minimum in-sync value is raised last.
 
-Ledger-class clusters (label `openbank.io/durability-class: ledger-class`): the bank's ledger
+Ledger-class clusters (label `open-bank.tech/durability-class: ledger-class`): the bank's ledger
 database and every separate-entity ledger deployment (ADR-0337). All other clusters keep ADR-0159.
 
 All verification commands are read-only. Apply and rollback commands are Git changes that ArgoCD
@@ -31,7 +31,7 @@ Verify (read-only):
 
 ```bash
 # every ledger-class cluster has 3 ready instances and a streaming standby set
-kubectl get clusters.postgresql.cnpg.io -A -l openbank.io/durability-class=ledger-class \
+kubectl get clusters.postgresql.cnpg.io -A -l open-bank.tech/durability-class=ledger-class \
   -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,WANT:.spec.instances,READY:.status.readyInstances
 # replication state: three rows per cluster, two in streaming state, lag small and not growing
 kubectl -n ledger exec ledger-db-1 -c postgres -- psql -U postgres -Atc \
