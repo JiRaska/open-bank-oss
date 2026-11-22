@@ -227,7 +227,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: |
@@ -509,7 +509,9 @@ jobs:
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: openbank-build
-    timeout-minutes: 45
+    # ADR-0389 SAFE knob: repo var SERVICE_CI_CONTRACT_TIMEOUT_MINUTES overrides (positive integer minutes); unset = today's
+    # value. A non-numeric value makes fromJSON fail the job LOUDLY at start, never silently.
+    timeout-minutes: ${{ fromJSON(vars.SERVICE_CI_CONTRACT_TIMEOUT_MINUTES || '45') }}
     # Only this post-merge, trusted runner receives an OIDC token for its ECR cache access.
     permissions:
       contents: read
@@ -662,7 +664,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: |

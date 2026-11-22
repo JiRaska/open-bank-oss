@@ -71,3 +71,22 @@ spec:
   config:
     cleanup.policy: compact
     retention.ms: -1
+---
+# ADR-0383 D6 — customer MCP payment-proposal lifecycle (PaymentProposalCreated / Approved /
+# Rejected / Expired / Executed / ExecutionFailed), produced by delegation-service through its
+# transactional outbox, keyed by proposal id. Declared by the consumer's PR (audit-service) so the
+# subscription never names a topic that does not exist (#2598); the producer's PR owns the
+# KafkaUser Write grant and the event contract. Data-minimised (no payee IBAN/name/reference).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.delegation.payment-proposal-events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

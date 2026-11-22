@@ -28,6 +28,8 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.SignatureIntent
+import com.openbank.lending.application.port.out.SignatureIntents
 import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
@@ -54,6 +56,7 @@ import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.CollateralId
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -69,6 +72,8 @@ import com.openbank.libs.lending.origination.OriginationState
 import com.openbank.libs.lending.origination.OriginationStateMachine
 import com.openbank.libs.lending.origination.OriginationTransition
 import com.openbank.libs.lending.origination.OriginationTransitionResult
+import com.openbank.libs.market.MarketCountry
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -134,6 +139,9 @@ class LendingService @Inject constructor(
 
     @Inject
     lateinit var accrualProgress: com.openbank.lending.application.port.out.AccrualProgressPort
+
+    @Inject
+    lateinit var signatureIntents: SignatureIntents
 
     private val log = Logger.getLogger(LendingService::class.java)
 
@@ -403,6 +411,13 @@ class LendingService @Inject constructor(
         proposedBy: String,
         profile: CatalogLoanProfile,
     ): Uni<LoanApplication> {
+        val markets = profile.markets
+        if (markets != null) {
+            require(markets.includes(DOMESTIC_MARKET)) { "Catalog offering is outside the Czech domestic route" }
+            require(request.jurisdiction == null || request.jurisdiction == DOMESTIC_MARKET.code) {
+                "Catalog offering requires the Czech domestic jurisdiction"
+            }
+        }
         require(request.requestedAmount.currency.code == profile.currency) {
             "Requested currency does not match catalog"
         }
@@ -417,7 +432,11 @@ class LendingService @Inject constructor(
         }
         // A catalog profile publishes a single rate and no index terms, so a catalog loan is FIXED.
         require(request.rateTerms.rateType == LoanRateType.FIXED) { "Catalog loans carry a FIXED rate" }
-        return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
+        val priced = request.copy(
+            nominalAnnualRate = profile.nominalAnnualRate,
+            jurisdiction = if (markets == null) request.jurisdiction else DOMESTIC_MARKET.code,
+        )
+        return applyLegacy(priced, proposedBy, profile.snapshot)
     }
 
     private fun applyLegacy(
@@ -736,6 +755,8 @@ class LendingService @Inject constructor(
             when {
                 existing == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.signatureRecordedAt != null && existing.supportsDurableSignature() ->
+                    replaySignature(existing, request, signedBy)
                 existing.status != OriginationState.AWAITING_SIGNATURE ->
                     Uni.createFrom().failure(
                         IllegalStateException("Application is not awaiting signature: ${existing.status}"),
@@ -755,10 +776,97 @@ class LendingService @Inject constructor(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
                     is OriginationTransitionResult.Applied ->
-                        recordSignature(existing, result.newState, request, signedBy)
+                        if (existing.supportsDurableSignature()) {
+                            stageSignature(existing, request, signedBy)
+                        } else {
+                            recordSignature(existing, result.newState, request, signedBy)
+                        }
                 }
             }
         }
+
+    private fun LoanApplication.supportsDurableSignature(): Boolean =
+        jurisdiction == DOMESTIC_MARKET.code && catalogSnapshot != null
+
+    private fun LoanApplication.signatureIntent(request: SignApplicationRequest, actor: String): SignatureIntent {
+        val pin = checkNotNull(catalogSnapshot)
+        return SignatureIntent(
+            Ids.newId(),
+            id,
+            pin.revisionId,
+            pin.contentHash,
+            request.artefactHash,
+            actor,
+            SyntheticTaintKafkaRail.currentlyTainted(),
+        )
+    }
+
+    private fun stageSignature(
+        existing: LoanApplication,
+        request: SignApplicationRequest,
+        actor: String,
+    ): Uni<LoanApplication> = applications.withLocked(existing.id) { locked ->
+        val current = locked ?: throw signatureClaimLost(existing)
+        if (current.status != existing.status && current.signatureRecordedAt == null) {
+            throw signatureClaimLost(existing)
+        }
+        if (lacksDecision(current)) throw decisionMissing(current)
+        val candidate = current.signatureIntent(request, actor)
+        val stored = if (current.signatureRecordedAt == null) {
+            signatureIntents.stage(candidate).map<SignatureIntent?> { it }
+        } else {
+            signatureIntents.find(current.id)
+        }
+        stored.map { intent ->
+            check(intent != null && intent.matches(candidate)) { "A different signature request is already recorded" }
+            intent
+        }
+    }.flatMap(::finishSignatureIntent)
+
+    private fun replaySignature(
+        application: LoanApplication,
+        request: SignApplicationRequest,
+        actor: String,
+    ): Uni<LoanApplication> = signatureIntents.find(application.id).map { stored ->
+        check(
+            stored != null &&
+                application.signatureArtefactHash == stored.artefactHash &&
+                stored.matches(application.signatureIntent(request, actor)),
+        ) {
+            "The signature request does not match the recorded operation"
+        }
+        application
+    }
+
+    fun finishSignatureIntent(intent: SignatureIntent): Uni<LoanApplication> =
+        applications.withLocked(intent.applicationId) { current ->
+            checkNotNull(current) { "Signature application no longer exists" }
+            val pin = current.catalogSnapshot
+            check(
+                current.supportsDurableSignature() &&
+                    pin != null &&
+                    pin.revisionId == intent.revisionId &&
+                    pin.contentHash == intent.revisionContentHash,
+            ) { "Signature product revision changed" }
+            if (current.signatureRecordedAt != null) {
+                check(current.signatureArtefactHash == intent.artefactHash) { "Signature artefact changed" }
+                Uni.createFrom().item(current to false)
+            } else {
+                check(current.status == OriginationState.AWAITING_SIGNATURE) {
+                    "Application is no longer awaiting signature"
+                }
+                if (lacksDecision(current)) throw decisionMissing(current)
+                commitSignature(current, OriginationState.SIGNED, intent.artefactHash, intent.actor)
+                    .call { _ -> signatureIntents.complete(intent.id) }
+                    .map { it to true }
+            }
+        }.call { (application, changed) ->
+            if (changed) {
+                armTimers(application.id, application.status, reflectionDaysFor(application))
+            } else {
+                Uni.createFrom().nullItem<TimerArmingOutcome>()
+            }
+        }.map { it.first }
 
     private fun recordSignature(
         existing: LoanApplication,
@@ -769,21 +877,30 @@ class LendingService @Inject constructor(
         val current = locked ?: throw signatureClaimLost(existing)
         if (current.status != existing.status) throw signatureClaimLost(existing)
         if (lacksDecision(current)) throw decisionMissing(current)
+        commitSignature(current, state, request.artefactHash, signedBy)
+    }.signalWorkflow()
+
+    private fun commitSignature(
+        current: LoanApplication,
+        state: OriginationState,
+        artefactHash: String,
+        signedBy: String,
+    ): Uni<LoanApplication> {
         val signed = current.copy(
             status = state,
-            signatureArtefactHash = request.artefactHash,
+            signatureArtefactHash = artefactHash,
             signatureRecordedAt = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MICROS),
         )
-        applications.compareAndSetSignature(signed, existing.status).map { claimed ->
-            if (claimed == 0) throw signatureClaimLost(existing)
+        return applications.compareAndSetSignature(signed, current.status).map { claimed ->
+            if (claimed == 0) throw signatureClaimLost(current)
             signed
         }.emitEvidence(
-            existing.status.name,
+            current.status.name,
             signedBy,
             OriginationActorKind.HUMAN,
-            "customer signature received (artefact ${request.artefactHash})",
+            "customer signature received (artefact $artefactHash)",
         )
-    }.signalWorkflow()
+    }
 
     private fun signatureClaimLost(existing: LoanApplication) = IllegalStateException(
         "Concurrent modification: application ${existing.id} is no longer in ${existing.status}",
@@ -1887,6 +2004,7 @@ class LendingService @Inject constructor(
     }
 
     private companion object {
+        val DOMESTIC_MARKET = MarketCountry("CZ")
         const val REFUSED_EVENT_TYPE = "credit.application.transition.refused"
         const val FOUR_EYES_ESCALATION_EVENT_TYPE = "credit.application.four_eyes_sla_escalation"
         val REFUSAL_JSON: com.fasterxml.jackson.databind.ObjectMapper = com.fasterxml.jackson.databind.ObjectMapper()

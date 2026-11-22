@@ -183,6 +183,14 @@ labels:
     color: "5319e7"
     description: "Owner-applied only, capped per day: takes the strict reservation next tick. Agents never apply it."
 
+  - name: "merge-priority:hotfix"
+    color: "b60205"
+    description: "Owner-applied, daily cap, bound to one head: merges by native auto-merge when green. Never agents."
+
+  - name: "merge-priority:deploy-fix"
+    color: "5319e7"
+    description: "Owner-only, 1/day: lets a can-i-deploy-green gitops PR fix a main-red contract."
+
   - name: "merge-priority:repair"
     color: "d93f0b"
     description: "Defer new deploy auto-merges while this repair PR is open; remove to release."

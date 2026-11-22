@@ -81,6 +81,77 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
+# Operational knobs (#16932). Each is read from a repository variable through the workflow
+# (`${{ vars.X || 'default' }}`) or from the process environment, so the owner can tune the train
+# without a PR. A variable is operator input, not reviewed code: a value that is not a plain int in
+# the knob's reviewed range falls back to the reviewed default with a `::warning::` naming the
+# variable — never a crash of the tick, never an unbounded value. Defaults equal the previous
+# hard-coded values, so an unset variable changes nothing — with ONE deliberate exception:
+# MERGE_TRAIN_STRICT_AGING_S defaults to 1800, which turns strict-lane aging ON (0 = off, the rollback;
+# 1..599 is refused like any out-of-range value). name -> (default, lo, hi).
+KNOBS: dict[str, tuple[int, int, int]] = {
+    "MERGE_TRAIN_EXPEDITE_DAILY_CAP": (6, 0, 20),
+    "MERGE_TRAIN_URGENT_DAILY_CAP": (5, 0, 20),
+    "MERGE_TRAIN_HOTFIX_DAILY_CAP": (2, 0, 20),
+    "MERGE_TRAIN_STRICT_AGING_S": (1800, 0, 14400),   # 0 = off; 1..599 refused (aging_knob)
+    "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S": (3600, 600, 14400),
+    "MERGE_TRAIN_STRICT_BATCH_CAP": (8, 1, 16),
+    "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP": (4, 1, 16),
+    "MERGE_TRAIN_BATCH_SIZE": (16, 1, 32),
+    "MERGE_TRAIN_STALE_RED_CAP": (2, 0, 10),
+    "MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP": (1, 0, 5),
+    "MERGE_TRAIN_RESERVATION_CEILING_S": (14400, 1800, 28800),
+    "MERGE_TRAIN_API_RETRY_ATTEMPTS": (5, 1, 10),
+    "MERGE_TRAIN_PREFETCH_BATCH": (8, 1, 16),
+}
+
+
+def _warn(msg: str) -> None:
+    print(f"::warning::{msg}", file=sys.stderr)
+
+
+def knob_text(text: str) -> str:
+    """An operator-supplied value made safe to echo in a log line: no CR/LF, no workflow-command `::`, bounded."""
+    clean = re.sub(r"[\r\n\x00-\x1f]", " ", text).replace("::", ": :")
+    return clean[:40] + ("…" if len(clean) > 40 else "")
+
+
+def knob(raw: str | None, name: str, log=None, default: int | None = None) -> int:
+    """KNOBS[name] validated: int in [lo, hi], else the default with one logged warning."""
+    d, lo, hi = KNOBS[name]
+    d = d if default is None else default
+    text = (raw or "").strip()
+    if re.fullmatch(r"[0-9]{1,6}", text) and lo <= int(text) <= hi:
+        return int(text)
+    if text or (raw or ""):   # whitespace-only is a set-but-blank variable: say so, never silently default
+        (log or _warn)(f"merge-train: {name}={knob_text(text)!r} is not an integer in [{lo}, {hi}]; using default {d}")
+    return d
+
+
+def aging_knob(raw: str | None, log=None) -> int:
+    """MERGE_TRAIN_STRICT_AGING_S: 0 (off) or an int in [600, 14400]; anything else -> 1800 + one warning."""
+    v = knob(raw, "MERGE_TRAIN_STRICT_AGING_S", log)
+    if 0 < v < 600:
+        (log or _warn)(f"merge-train: MERGE_TRAIN_STRICT_AGING_S={v} is neither 0 (off) nor in [600, 14400]; "
+                       "using default 1800")
+        return 1800
+    return v
+
+
+def env_knob(name: str, env_name: str | None = None) -> int:
+    return knob(os.environ.get(env_name or name), name)
+
+
+def knob_bool(raw: str | None, name: str, default: bool, log=None) -> str:
+    """'true'/'false' knob; anything else falls back to the default with one logged warning."""
+    text = (raw or "").strip().lower()
+    if text in ("true", "false"):
+        return text
+    if text or (raw or ""):
+        (log or _warn)(f"merge-train: {name}={knob_text(text)!r} is not true/false; using default {str(default).lower()}")
+    return "true" if default else "false"
+
+
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 WORKFLOW = pathlib.Path(".github/workflows/merge-train.yml")
 REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
@@ -90,6 +161,9 @@ REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
 STATUS_CONTEXT = "merge-train"
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
 BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
+# The App merge-train.yml hands update-branch (UPDATE_BRANCH_TOKEN). Measured on #16719's branch
+# (68c7fffab4, c96091eef2): author openbank-branch-updater[bot], committer web-flow, verified (#16947).
+BRANCH_UPDATER_LOGIN = "openbank-branch-updater[bot]"
 BOT_ID = 305_862_397                             # its numeric user id (carrier #13817); merge_train_carrier pins it too
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
@@ -106,6 +180,10 @@ EXPEDITE_LABEL = "merge-priority:expedite"
 # `train/<run>-<attempt>` shape is hard-coded in merge_train_carrier.py, check-security-checklist.py and
 # security.yml, and an expedite carrier is judged by exactly the same rules as any other carrier.
 EXPEDITE_CONTEXT = "merge-train/expedite-carrier"
+# App marker on an expedited PR's head: settle opened the expedite window for it over main <sha>. Read
+# back by expedite_candidate: a head still carrying it for the SAME main was given the window and the
+# lane produced nothing (build deferred it, publish refused it), so it is passed over this tick (#16874).
+EXPEDITE_WINDOW_CONTEXT = "merge-train/expedite-window"
 EXPEDITE_CARRIER_TITLE = "merge-train expedite carrier"
 EXPEDITE_LANE_DEFAULT = False      # MERGE_TRAIN_EXPEDITE_LANE; "false" = the label only reorders, as before
 EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is a policy, not an identity
@@ -119,9 +197,95 @@ EXPEDITE_DAILY_CAP_DEFAULT = 6     # expedite carriers per UTC day; the label is
 # On a red main every fix still comes first; a non-fix urgent PR waits for green main like any other.
 URGENT_LABEL = "merge-priority:urgent"
 URGENT_PREEMPT_CONTEXT = "merge-train/urgent-preempted"   # App marker: this head yielded main to an urgent PR once
-URGENT_DAILY_CAP_DEFAULT = 2       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
+URGENT_DAILY_CAP_DEFAULT = 5       # MERGE_TRAIN_URGENT_DAILY_CAP: distinct PRs owner-labelled urgent per UTC day
 URGENT_CLOCK_CONTEXT = "merge-train/urgent-since"     # App marker: first tick this head outranked the other lanes
 URGENT_DROPPED_CONTEXT = "merge-train/urgent-dropped"  # App marker: this head's urgent priority was dropped
+# Lane caps come from repo variables (`vars.X || 'default'`) so the owner can tune them without a PR.
+# A variable is operator input, not reviewed code: anything but a plain int in [0, LANE_CAP_MAX] falls
+# back to the reviewed default and says so, rather than crashing the tick or opening an unbounded lane.
+LANE_CAP_MAX = 20
+
+
+def lane_cap(raw: str | None, default: int, name: str, log=None) -> int:
+    """KNOBS[name] (a daily lane cap) validated: int in that knob's range, else `default` with one logged line.
+    `name` must be a KNOBS entry; any other name is a programming error and raises."""
+    if name not in KNOBS:
+        raise ValueError(f"lane_cap: unknown knob {name!r} (programming error)")
+    return knob(raw, name, log, default)
+
+
+def knobs_self_test(check) -> None:
+    """Every knob: a valid value is taken, an out-of-range and a non-numeric one must fall back
+    to the default and log a warning naming the variable."""
+    for name, (d, lo, hi) in KNOBS.items():
+        mid = str((lo + hi) // 2)
+        logged: list[str] = []
+        check(f"knob {name}: valid {mid}", knob(mid, name, logged.append) == int(mid) and not logged, repr(logged))
+        check(f"knob {name}: unset -> default", knob(None, name, logged.append) == d and not logged, repr(logged))
+        for bad in (str(hi + 1), "-1" if lo == 0 else str(lo - 1), "abc", "4.5"):
+            logged.clear()
+            got = knob(bad, name, logged.append)
+            check(f"knob {name} must-FAIL: {bad!r} -> default {d}", got == d, f"got {got}")
+            check(f"knob {name} must-FAIL: {bad!r} warns naming the variable",
+                  len(logged) == 1 and name in logged[0] and f"using default {d}" in logged[0], repr(logged))
+    logged = []
+    check("knob bool: valid false", knob_bool("false", "MERGE_TRAIN_EXPEDITE_LANE", True, logged.append) == "false" and not logged)
+    check("knob bool must-FAIL: 'yes' -> default true",
+          knob_bool("yes", "MERGE_TRAIN_EXPEDITE_LANE", True, logged.append) == "true"
+          and len(logged) == 1 and "MERGE_TRAIN_EXPEDITE_LANE" in logged[0], repr(logged))
+    check("knob bool must-FAIL: '1' -> default true",
+          knob_bool("1", "MERGE_TRAIN_EXPEDITE_LANE", True, lambda m: None) == "true")
+    check("knob: module defaults equal the reviewed previous values",
+          (STALE_RED_CAP, DEPLOY_FIX_DAILY_CAP, RESERVATION_CEILING_S, API_RETRY_ATTEMPTS, PREFETCH_BATCH)
+          == (2, 1, 14400, 5, 8) or any(k in os.environ for k in KNOBS), "env overrides present")
+
+
+def lane_cap_self_test(check) -> None:
+    logged: list[str] = []
+    for raw, want in (("5", 5), ("0", 0), ("20", 20), (" 7 ", 7), (None, 6), ("", 6)):
+        check(f"lane cap: {raw!r} -> {want}", lane_cap(raw, 6, "MERGE_TRAIN_EXPEDITE_DAILY_CAP", logged.append) == want, repr(raw))
+    check("lane cap: valid values log nothing", logged == [], repr(logged))
+    for raw in ("21", "-1", "abc", "5.0", "1e3", "999", "0x5", "６"):
+        logged.clear()
+        got = lane_cap(raw, 6, "MERGE_TRAIN_EXPEDITE_DAILY_CAP", logged.append)
+        check(f"lane cap must-FAIL: {raw!r} falls back to default", got == 6, f"got {got}")
+        check(f"lane cap must-FAIL: {raw!r} is logged", len(logged) == 1 and "using default 6" in logged[0], repr(logged))
+    try:
+        lane_cap("3", 6, "MERGE_TRAIN_NO_SUCH_CAP")
+        raised = False
+    except ValueError:
+        raised = True
+    check("lane cap must-FAIL: an unknown knob name raises (programming error), never a silent fallback", raised)
+    logged.clear()
+    knob("5\r\n::error::pwn" + "x" * 80, "MERGE_TRAIN_EXPEDITE_DAILY_CAP", logged.append)
+    check("knob warning must-FAIL: CR/LF and workflow commands are stripped, length bounded",
+          len(logged) == 1 and "\n" not in logged[0] and "\r" not in logged[0] and "::error::" not in logged[0]
+          and len(logged[0]) < 200, repr(logged))
+
+
+# Deploy fix claim (#16943). A main red on a provider CONTRACT job can be fixed only by deploying the
+# consumer pair whose pact it verifies: the auto-deploy gitops PR changes image pins under
+# openbank-infra/gitops/, so path-scoped CI never re-runs the contract job on its head and
+# fix_job_evidence reads it `(absent)` forever — the train deadlocks (2026-11-20, #16940). Such a PR may
+# claim the fix slot only when ALL hold, each read from git or the Actions API, never from the PR body:
+# authored by the App; its head branch is auto-deploy's `chore/gitops-auto-deploy-<sha>-run<id>`; every
+# changed line is an image pin under gitops/components whose new tag is built from that <sha>; the run
+# <id> is auto-deploy.yml over main at <sha>, an ancestor of main, and its `can-i-deploy` job (red if
+# ANY service is blocked) succeeded; every job red on main for the context, besides the aggregate
+# itself, is a `(contract)` job; and the OWNER applied DEPLOY_FIX_LABEL today, within a daily cap.
+# The label is the human step, not decoration: a provider job names the provider, not the consumers it
+# verifies, so "these pins fix that job" is not derivable from names, and a push to the bot branch that
+# swaps a digest under the same tag is not visible to these checks. Everything unknown refuses.
+DEPLOY_FIX_LABEL = "merge-priority:deploy-fix"
+DEPLOY_FIX_DAILY_CAP = env_knob("MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP")   # default 1
+AUTO_DEPLOY_WORKFLOW = ".github/workflows/auto-deploy.yml"
+DEPLOY_BRANCH_RE = re.compile(r"chore/gitops-auto-deploy-([0-9a-f]{40})-run([1-9][0-9]{0,19})")
+GITOPS_PIN_PREFIX = "openbank-infra/gitops/components/"
+CONTRACT_JOB_RE = re.compile(r".*\(contract\)")
+# One image pin, sign stripped: (indent, registry/repository, service, tag).
+PIN_LINE_RE = re.compile(r"([ \t]*)image:[ \t]*([A-Za-z0-9.:_-]+/openbank-([a-z0-9-]+)):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}[ \t]*")
+ISO_Z_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+DEPLOY_REQUIRED_JOBS = ("can-i-deploy", "Gitops PR")
 # A picked urgent PR leaves that state within one or two ticks (update-branch, or merge). 60 min is two
 # TRAIN_TURN_S (each two */10 ticks at the measured p90 gap) and covers one carrier in flight finishing; past
 # it the PR is not progressing, and it must not hold the train's and the fast lane's turns any longer.
@@ -156,7 +320,7 @@ BUNDLE_REF = "refs/heads/merge-train-bundle"
 # Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
-STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
+STALE_RED_CAP = env_knob("MERGE_TRAIN_STALE_RED_CAP")      # default 2; stale-red refreshes per settle tick (ADR-0343)
 STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # A strict-lane reservation (ADR-0343) holds main for one PR's CI and is released when that CI STALLS,
 # not when it is merely slow (#13400). A fixed 64 min bound (2 x the ci.yml p95) livelocked #13204: its
@@ -167,7 +331,7 @@ STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # measured 2026-10-22 from /actions/runs/{id}/attempts/1/jobs). The ceiling bounds a CI that keeps
 # trickling forever; it is measured from the head's committer time, which update-branch sets.
 RESERVATION_STALL_S = 15 * 60
-RESERVATION_CEILING_S = 4 * 3600
+RESERVATION_CEILING_S = env_knob("MERGE_TRAIN_RESERVATION_CEILING_S")   # default 4 * 3600
 # Queued CI is CI (#14302): required contexts produced by nested reusable-workflow jobs (`gates (*)`,
 # `Validate manifests`) register no check run until their caller job starts, so a head whose CI only
 # waits for runners has no check-run stamp to show. A workflow run for the head in one of these states
@@ -291,7 +455,26 @@ STACK_CONTEXT = "merge-train/stacked-carrier"   # App marker: a carrier was stac
 STACK_DESC_RE = re.compile(r"^stacked carrier (train/[0-9]+-[0-9]+) over #([0-9]+)$")   # on the holder head
 STACK_TIP_RE = re.compile(r"^stacked over ([0-9a-f]{40}) of #([0-9]+)$")                  # on the carrier head
 SPECULATIVE_STACK_DEFAULT = True
+# GUARDED knob (ADR-0389): the repo variable may say only 'true' or 'false'; anything else is 'false'
+# (today's rolled-back value, #15772) with a ::warning::. 'true' made the money-path checklist gate fail
+# closed when it was last on, so settle logs a prominent notice on every tick it is effective.
+SPECULATIVE_STACK_ON_NOTICE = ("::notice::MERGE_TRAIN_SPECULATIVE_STACK=true is EFFECTIVE: speculative stacking is ON "
+                               "(rolled back 2026-11-12, #15772, when it made the money-path checklist gate fail closed)")
+
+
+def speculative_stack_setting(raw: str | None, log=None) -> str:
+    """GUARDED: 'true'/'false' only; unset or anything else -> 'false' (+ ::warning:: when set)."""
+    return knob_bool(raw, "MERGE_TRAIN_SPECULATIVE_STACK", False, log)
 STALE_CULPRIT_CONTEXT = "merge-train/stale-culprit-refresh"   # App marker: this culprit head was update-branched once
+# Stale-base refresh: an armed PR red on a required context that was NOT red on main at its base but is
+# green on main now (the red came from an old base whose defect main has since fixed — 2026-11-20/21,
+# ~20 armed PRs stuck on "its own defect" until main was merged in by hand). It gets ONE update-branch
+# per lineage (marker on the head; the update-branch head inherits it through its first parent), at
+# most STALE_BASE_REFRESH_CAP per tick, never when conflicting, draft or unarmed. A bulk update is a CI
+# denial of service, hence the cap and the per-head memo.
+STALE_BASE_CONTEXT = "merge-train/stale-base-refresh"
+STALE_BASE_REFRESH_CAP = 2
+_STALE_BASE_MEMO: set[str] = set()   # heads update-branched by this process (survives a lost status write)
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -363,6 +546,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
     ".github/scripts/check-test-script-reachability.py",    # names merge-train in its text; a lenient copy must not ride a train
+    ".github/scripts/check-schedule-pause-switch.py",       # names merge-train.yml in its text; a lenient copy must not ride a train
     ".github/scripts/test-merge-train-carrier-lock.py",     # exercises the carrier library
     ".github/scripts/test-merge-train-main-red-freshness.py",  # exercises settle / the strict lane
     ".github/scripts/test-merge-train-owner-approval.py",   # exercises the owner-approval writer
@@ -833,6 +1017,55 @@ def live_source_intent(gh, number: int, head: str) -> bool:
         return owner_approval_valid(number, ref, app)
 
 
+def already_merged_member(gh, git, number: int, head: str, expected: str) -> str | None:
+    """#16932: the merge commit when GitHub's native auto-merge already merged this carrier member at
+    exactly the verified head, directly over the main the train expected (first parent == `expected`)
+    and that commit is on live main. None otherwise, so the caller stops (fail closed).
+
+    A member stays armed while it rides a carrier, so auto-merge can race the train's own merge call
+    (runs 44711788330 / #16776 and 44800662763 / #16915). The squash is then the one the train would
+    have made: same head, same base. A different head, a merge over another main, a merge commit not on
+    main, or closed-unmerged is never treated as success.
+
+    Governance trade-off, deliberately NOT decided here: disabling native auto-merge for train-eligible
+    PRs would let the train own every member merge and remove this race; but arming (auto_merge set) is
+    today the author's intent signal live_source_intent reads, and native auto-merge is the fallback
+    that still merges a green PR when the train is paused or broken. Keeping it costs this tolerance.
+    """
+    pr = gh.pr(number)
+    if not isinstance(pr, dict) or pr.get("number") != number or pr.get("merged") is not True:
+        return None
+    source, merge = pr.get("head"), pr.get("merge_commit_sha")
+    if (not isinstance(source, dict) or source.get("sha") != head
+            or not isinstance(merge, str) or not re.fullmatch(r"[0-9a-f]{40}", merge)):
+        return None
+    if git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/native-main", check=False).returncode != 0:
+        return None
+    if git("merge-base", "--is-ancestor", merge, "refs/merge-train/native-main", check=False).returncode != 0:
+        return None
+    parent = git("rev-parse", "--verify", "-q", f"{merge}^1", check=False)
+    if parent.returncode != 0 or parent.stdout.strip() != expected:
+        return None
+    return merge
+
+
+def path_refusal(pr: dict, untrainable) -> str | None:
+    """The part of qualifies() decided by the verified diff alone (files, gates_append, special_paths):
+    no check, status or approval read can turn it into a pass. live_candidates uses it to skip those
+    reads for a PR it already knows is not a candidate, where nothing but `ok` is consumed (#16955)."""
+    for f in pr.get("files") or []:
+        if unsafe_path(f):
+            return "a path contains a control character — manual lane, never a train"
+        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
+            return f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
+    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
+                                       for f in pr.get("files") or []):
+        # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
+        # whole carrier for it. Gate code next to one never rides (review of #13750).
+        return "gate code next to a symlink or gitlink — never a train"
+    return None
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               app: dict[str, tuple[str, str]] | None = None, untrainable=None,
               extra: list[str] | None = None) -> tuple[bool, str]:
@@ -853,16 +1086,9 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     ref = pr.get("head_ref") or ""
     if not owner_approval_valid(pr.get("number"), ref, app):
         return False, "codex PR needs owner approval on this exact head"
-    for f in pr.get("files") or []:
-        if unsafe_path(f):
-            return False, "a path contains a control character — manual lane, never a train"
-        if untrainable(f) and not (f == GATES_YAML and pr.get("gates_append") is True):
-            return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if pr.get("special_paths") and any(gate_code(f) or (f == GATES_YAML and pr.get("gates_append") is True)
-                                       for f in pr.get("files") or []):
-        # The strict lane refuses a symlink/gitlink outright; on the train publish would halve the
-        # whole carrier for it. Gate code next to one never rides (review of #13750).
-        return False, "gate code next to a symlink or gitlink — never a train"
+    why = path_refusal(pr, untrainable)
+    if why:
+        return False, why
     app_state, app_desc = (app or {}).get(STATUS_CONTEXT, ("", ""))
     if app_state == "failure" and not app_desc.startswith((LEGACY_CULPRIT_PREFIX, *NOTICE_PREFIXES)):
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
@@ -1017,23 +1243,73 @@ def parse_selftest_inputs(text: str) -> dict[str, list[str]]:
 
 GATE_CMD_KEYS_RE = re.compile(r"^\s+(run|selftest):\s*(.*)$")   # NOT selftest_inputs: those are the gate's SUBJECTS
 PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./@-]*/[A-Za-z0-9_./@-]*$")   # after normpath: repo-relative, has a `/`
+# A single-segment directory token (`docs/`, `build-logic/`) loses its `/` under normpath and would fail
+# PATH_TOKEN_RE; it is a directory only when the raw token ended in `/` (#16843).
+DIR_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.@-]*$")
+# A file token with one of these extensions is EXECUTED code when a gate names it (`python3 dir/x.py`,
+# `bash dir/x.sh`, `node x.mjs`); the directory holding one is where the judge's code lives.
+EXEC_SCRIPT_EXT_RE = re.compile(r"\.(py|sh|bash|js|mjs|cjs|ts|pl|rb)$")
+# Code ROOTS handed to an interpreter: each `:`-element of these assignments, and the `-s` start
+# directory of `python3 -m unittest discover`. Code under them runs, so the directory is judge.
+CODE_ROOT_ENV_RE = re.compile(r"(?:^|[\s;&|(])(?:PYTHONPATH|NODE_PATH|PERL5LIB|RUBYLIB)=([^\s\"';|&)]+)")
+# A directory argument after one of these runs code FROM that directory (`cd dir && ./x`, `make -C dir`,
+# `./gradlew -p build-logic test`, `npm --prefix dir`, `--project-dir dir`): judge, a bare single segment
+# included (review of #16885).
+DIR_EXEC_FLAGS = frozenset({"cd", "-C", "-p", "--prefix", "--project-dir"})
+# A token after one of these is the program that runs; without an extension (`bash tools/gate/run`) it is
+# still an executed FILE, never a directory.
+EXEC_PROGRAMS = frozenset({"bash", "sh", "zsh", "python", "python3", "node", "exec", "source", ".", "perl", "ruby"})
+# `bash -c`, `sh -c` or `eval` in a gate builds its command from a string this tokeniser cannot read:
+# every directory that gate names is then judge (fail closed, review of #16885).
+OPAQUE_SHELL_RE = re.compile(r"(?:^|[\s;&|(`])(?:(?:ba|z)?sh\s+-c|eval)(?=[\s\"'])")
 
 
-def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]:
-    """(files, directories) every repo path the gates.yaml entries of `gate_ids` name in `run` and
-    `selftest` — the code that JUDGES — by simple tokenisation of those strings (security review of #16832:
-    gates run scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py, which no
-    prefix covers). NOT `selftest_inputs`: those are the SUBJECTS a gate checks (eight services' src/main
-    for event-contract-code-agreement); a subject edit cannot make a red gate pass vacuously, at worst it
-    breaks it, and refusing it would send exactly the legitimate main-red fixes (#16599's class) to a
-    human — the inverse of #16675. A token with `/` and an extension is a file; a `/`-token without one,
-    or ending in `/`, a directory. Tokens split on whitespace, shell punctuation AND `:` (PYTHONPATH-style
-    lists), normalised with posixpath.normpath (`./x`, `a/./b`); `..`-relative and absolute tokens, globs,
-    `$VAR`s, flags and URLs are dropped — never a blanket refusal for an odd slash token: over-refusal is
-    what bit before. No import parsing, no spawn."""
+def gate_named_paths(text: str, gate_ids: set[str], is_dir=None) -> tuple[set[str], set[str]]:
+    """(files, directories) the repo paths the gates.yaml entries of `gate_ids` name in `run` and
+    `selftest` that are the code that JUDGES, by simple tokenisation of those strings (security review of
+    #16832: gates run scripts outside .github/ too, e.g. openbank-infra/scripts/check-db-migration.py,
+    which no prefix covers). NOT `selftest_inputs`: those are the SUBJECTS a gate checks (eight services'
+    src/main for event-contract-code-agreement); a subject edit cannot make a red gate pass vacuously, at
+    worst it breaks it, and refusing it would send exactly the legitimate main-red fixes (#16599's class)
+    to a human — the inverse of #16675. Every named FILE counts (a token with `/` and an extension). A
+    named DIRECTORY (a `/`-token without an extension, or ending in `/` — a single segment like `docs/`
+    included, #16843) counts only when the gate EXECUTES code under it: it holds a named script token
+    (EXEC_SCRIPT_EXT_RE), or it is a code root (`PYTHONPATH=dir`, `unittest discover -s dir`). A directory
+    a gate merely scans, diffs or generates into is its SUBJECT, not its judge (review of #16832:
+    gen-network-policies-drift-gate diffs openbank-infra/gitops/components/, shellcheck lints
+    openbank-infra/scripts/ — the legitimate fixes for those reds edit exactly those trees). Tokens split
+    on whitespace, shell punctuation AND `:` (PYTHONPATH-style lists), normalised with posixpath.normpath
+    (`./x`, `a/./b`); `..`-relative and absolute tokens, globs, `$VAR`s, flags and URLs are dropped —
+    never a blanket refusal for an odd slash token: over-refusal is what bit before. No import parsing,
+    no spawn. `.github/` prefixes and FIX_JUDGE_FILES stay refused by fix_evidence regardless.
+    Also judge (review of #16885, which found the subject rule fail-open): a directory after `cd`, `-C`,
+    `-p`, `--prefix` or `--project-dir` (a bare single segment too: `./gradlew -p build-logic`), the
+    directory `node dir/` runs, the root a `find dir ... -exec` walks, a directory on an `xargs` line, and
+    each package prefix of `-m a.b.c` that `is_dir` (default os.path.isdir, the checkout) says exists. A
+    program token without an extension (`bash tools/gate/run`, a line's first word) is an executed file.
+    A gate whose run/selftest contains `bash -c`, `sh -c` or `eval` makes every directory it names judge."""
+    is_dir = is_dir or os.path.isdir
     files: set[str] = set()
     dirs: set[str] = set()
+    # Per GATE: a directory one gate scans is not made judge by a script another red gate executes under it.
+    named_dirs: dict[str, set[str]] = {}
+    exec_files: dict[str, set[str]] = {}
+    roots: dict[str, set[str]] = {}
+    opaque: set[str] = set()
     gid, key = None, None
+
+    def path_token(tok: str) -> tuple[str, bool] | None:
+        """(normalised repo path, is_dir) for a token that names one, else None."""
+        if not tok or tok.startswith(("$", "-", "#", "/")) or "*" in tok or "{" in tok or "/" not in tok:
+            return None
+        as_dir = tok.endswith("/")
+        p = posixpath.normpath(tok)
+        if p.startswith("..") or p == ".":
+            return None
+        if not PATH_TOKEN_RE.match(p) and not (as_dir and DIR_SEGMENT_RE.match(p)):
+            return None
+        return p, as_dir or not re.search(r"\.[A-Za-z0-9]+$", p.rsplit("/", 1)[-1])
+
     for ln in text.splitlines():
         m = GATE_ID_RE.match(ln)
         if m:
@@ -1049,17 +1325,53 @@ def gate_named_paths(text: str, gate_ids: set[str]) -> tuple[set[str], set[str]]
         else:
             key = None
             continue
-        for tok in re.split(r"[\s\"'|;&()<>=,:\[\]`]+", rest):
-            if not tok or tok.startswith(("$", "-", "#", "/")) or "*" in tok or "{" in tok or "/" not in tok:
+        for assignment in CODE_ROOT_ENV_RE.findall(rest):
+            for entry in assignment.split(":"):
+                pt = path_token(entry)
+                if pt and pt[1]:
+                    roots.setdefault(gid, set()).add(pt[0] + "/")
+        if OPAQUE_SHELL_RE.search(rest):
+            opaque.add(gid)
+        toks = re.split(r"[\s\"'|;&()<>=,:\[\]`]+", rest)
+        discover = "discover" in toks
+        find_exec = "find" in toks and ("-exec" in toks or "-execdir" in toks)
+        xargs = "xargs" in toks
+        first = next((j for j, t in enumerate(toks) if t), None)
+        for i, tok in enumerate(toks):
+            prev = toks[i - 1] if i > 0 else ""
+            if prev == "-m" and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", tok):
+                parts = tok.split(".")
+                for k in range(1, len(parts) + 1):
+                    d = "/".join(parts[:k]) + "/"
+                    if is_dir(d):
+                        roots.setdefault(gid, set()).add(d)
                 continue
-            as_dir = tok.endswith("/")
-            p = posixpath.normpath(tok)
-            if p.startswith("..") or p == "." or not PATH_TOKEN_RE.match(p):
+            if (prev in DIR_EXEC_FLAGS and "/" not in tok and DIR_SEGMENT_RE.match(tok)
+                    and not re.search(r"\.[A-Za-z0-9]+$", tok)):
+                named_dirs.setdefault(gid, set()).add(tok + "/")
+                roots.setdefault(gid, set()).add(tok + "/")
                 continue
-            if as_dir or not re.search(r"\.[A-Za-z0-9]+$", p.rsplit("/", 1)[-1]):
-                dirs.add(p + "/")
+            pt = path_token(tok)
+            if pt is None:
+                continue
+            p, is_d = pt
+            if is_d and not tok.endswith("/") and (prev in EXEC_PROGRAMS or i == first):
+                is_d = False                       # an extensionless program: `bash tools/gate/run`
+                exec_files.setdefault(gid, set()).add(p)
+            if is_d:
+                named_dirs.setdefault(gid, set()).add(p + "/")
+                if ((discover and prev == "-s") or prev in DIR_EXEC_FLAGS or (prev == "node" and tok.endswith("/"))
+                        or (find_exec and prev == "find") or xargs):
+                    roots.setdefault(gid, set()).add(p + "/")
             else:
                 files.add(p)
+                if EXEC_SCRIPT_EXT_RE.search(p):
+                    exec_files.setdefault(gid, set()).add(p)
+    for g, named in named_dirs.items():
+        dirs |= {d for d in named if g in opaque or d in roots.get(g, ())
+                 or any(f.startswith(d) for f in exec_files.get(g, ()))}
+    for rs in roots.values():   # `-m a.b.c` package roots are named only through the dotted path
+        dirs |= rs
     return files, dirs
 
 
@@ -1299,7 +1611,7 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     return out
 
 
-def urgent_grant(events, owner: str) -> tuple[str | None, str]:
+def urgent_grant(events, owner: str, label: str = URGENT_LABEL) -> tuple[str | None, str]:
     """(labelled_at, why). The LATEST `labeled` event for URGENT_LABEL decides: only the repo owner may have
     applied it (anyone else re-applying it after the owner takes the grant away). Fail closed: unreadable
     events, no such event, or an event without a timestamp grant nothing."""
@@ -1307,20 +1619,20 @@ def urgent_grant(events, owner: str) -> tuple[str | None, str]:
         return None, "label events unreadable"
     last = None
     for e in events:
-        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL:
+        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label:
             last = e
     if last is None:
-        return None, f"no readable {URGENT_LABEL} label event"
+        return None, f"no readable {label} label event"
     actor = (last.get("actor") or {}).get("login") or ""
     if actor != owner:
-        return None, f"{URGENT_LABEL} applied by {actor or 'unknown'}, not the repo owner {owner}"
+        return None, f"{label} applied by {actor or 'unknown'}, not the repo owner {owner}"
     at = last.get("created_at") or ""
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T.*", at):
         return None, "label event carries no timestamp"
     return at, ""
 
 
-def urgent_grants(events, owner: str, day: str) -> dict[int, str]:
+def urgent_grants(events, owner: str, day: str, label: str = URGENT_LABEL) -> dict[int, str]:
     """{PR: its FIRST owner `labeled merge-priority:urgent` event on UTC `day`} from repository issue events.
     An event is never deleted, so removing the label afterwards does not uncount a grant, and re-applying it
     to the same PR counts once."""
@@ -1328,29 +1640,30 @@ def urgent_grants(events, owner: str, day: str) -> dict[int, str]:
     for e in events or []:
         at = e.get("created_at") or ""
         n = (e.get("issue") or {}).get("number")
-        if (e.get("event") == "labeled" and (e.get("label") or {}).get("name") == URGENT_LABEL
+        if (e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label
                 and (e.get("actor") or {}).get("login") == owner and at[:10] == day and isinstance(n, int)):
             out[n] = min(out.get(n, at), at)
     return out
 
 
-def urgent_refusal(n: int, events, owner: str, grants: dict | None, cap: int, day: str) -> str | None:
+def urgent_refusal(n: int, events, owner: str, grants: dict | None, cap: int, day: str,
+                   label: str = URGENT_LABEL) -> str | None:
     """Why #n's urgent label grants nothing; None = admitted. The latest label event must be the owner's
     (urgent_grant) and fall on UTC `day`: a grant lasts the day it was made, so yesterday's grants never
     carry over uncounted. `grants` = every PR the owner granted on `day` (urgent_grants over a COMPLETE
     enumeration; None = incomplete -> refused); #n must be among its first `cap` by grant time."""
-    at, why = urgent_grant(events, owner)
+    at, why = urgent_grant(events, owner, label)
     if at is None:
         return why
     if at[:10] != day:
         return f"granted on {at[:10]}, not today ({day}): a grant lasts its UTC day — re-apply to use today's cap"
     if grants is None:
-        return "today's urgent grants could not be enumerated completely"
+        return f"today's {label} grants could not be enumerated completely"
     if n not in grants:
         return "today's grant enumeration does not contain this PR's own grant (incomplete)"
     rank = sorted(grants, key=lambda k: (grants[k], k)).index(n)
     if rank >= cap:
-        return f"daily cap reached ({rank + 1} urgent PRs granted on {day}, cap {cap})"
+        return f"daily cap reached ({rank + 1} PRs granted {label} on {day}, cap {cap})"
     return None
 
 
@@ -1376,6 +1689,377 @@ def urgent_prs(gh, repo: str, strict: list, cap: int, now: float | None = None) 
             log(f"#{n:>6} urgent    not admitted: {why}")
         else:
             out.add(n)
+    return out
+
+
+# Owner hotfix lane (ADR-0343 amendment 2026-11-21, #17006). An owner-blessed PR merges through GitHub's
+# native auto-merge as soon as the ruleset's required checks are green on a head containing exact live
+# main: settle posts `merge-train` success on that head itself, so no carrier is built and nothing else is
+# batched with it. The ruleset is unchanged (the train posts the same required context it always posts)
+# and nothing uses an override. Eligibility is re-derived every tick and fails closed on any unreadable input.
+HOTFIX_LABEL = "merge-priority:hotfix"
+HOTFIX_GRANT_CONTEXT = "merge-train/hotfix-granted"   # App marker: this head was granted by the hotfix lane
+HOTFIX_GRANT_MARK = "<!-- merge-train:hotfix-grant -->"       # PR comment: the audit record of one grant
+HOTFIX_INCIDENT_MARK = "<!-- merge-train:hotfix-incident -->"  # PR comment: post-merge verification failed
+HOTFIX_DAILY_CAP_DEFAULT = 2      # MERGE_TRAIN_HOTFIX_DAILY_CAP: distinct PRs owner-labelled hotfix per UTC day
+HOTFIX_FIX_TITLE_RE = re.compile(r"^(fix|security)(\([^)]*\))?!?: ")   # the only types eligible on a red main
+HOTFIX_GRANT_RE = re.compile(r"hotfix lane: granted head ([0-9a-f]{40}) over main ([0-9a-f]{40}) \(label event (\d+) by ")
+HOTFIX_MARKED_KEY = "hotfix_marked"   # settle_view cache: {PR: (head, labels)} of heads carrying the grant marker
+HOTFIX_SCOPE_PREFIX = ".github/"   # the strict lane's scope: never moved under a strict carrier or urgent reservation
+
+
+def has_label(p: dict, name: str) -> bool:
+    return any((lb.get("name") if isinstance(lb, dict) else lb) == name for lb in p.get("labels") or [])
+
+
+def suite_arrival(data: dict, sha: str, branch: str, repo: str) -> float | None:
+    """Earliest check-suite created_at for `sha` on `branch` OF THIS REPOSITORY (a fork's branch of the
+    same name is ignored), or None. A suite read with no total, or more suites than one page, is unknowable."""
+    suites = data.get("check_suites")
+    if not isinstance(suites, list) or not isinstance(data.get("total_count"), int) or data["total_count"] > len(suites):
+        return None
+    times = [iso_epoch(cs.get("created_at")) for cs in suites
+             if cs.get("head_branch") == branch and cs.get("head_sha") == sha
+             and ((cs.get("head_repository") or {}).get("full_name") == repo)]
+    times = [t for t in times if t is not None]
+    return min(times) if times else None
+
+
+def hotfix_granted(view: dict, app: dict | None) -> bool:
+    """live_candidates: a head the hotfix lane granted is never batched, fast-laned or reserved by another lane."""
+    return has_label(view, HOTFIX_LABEL) and ((app or {}).get(HOTFIX_GRANT_CONTEXT) or ("",))[0] == "success"
+
+
+def hotfix_label_event(timeline) -> tuple[int, dict] | None:
+    """(position, event) of the LATEST `labeled merge-priority:hotfix` item of a PR timeline."""
+    last = None
+    for i, e in enumerate(timeline or []):
+        if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == HOTFIX_LABEL:
+            last = (i, e)
+    return last
+
+
+HOTFIX_UPDATER_AUTHORS = (BRANCH_UPDATER_LOGIN, BOT_LOGIN)   # the train's own update-branch credentials
+HOTFIX_UPDATE_DEPTH = 5   # update-branch merges after the label the lane will walk back through
+
+
+def hotfix_updater_commit(meta: dict | None) -> bool:
+    """REST commit metadata of the train's own update-branch merge: two parents, author resolved BY GITHUB
+    to the branch-updater (or GitOps) App login, committed by web-flow, signature verified. A shape only:
+    the content is proven separately (update_merge_ok)."""
+    return (isinstance(meta, dict) and len(meta.get("parents") or []) == 2
+            and meta.get("author_login") in HOTFIX_UPDATER_AUTHORS and meta.get("committer_login") == "web-flow"
+            and meta.get("verified") is True)
+
+
+def hotfix_head_refusal(gh, probe, timeline, label_pos: int, label_at: str, head: str, branch: str, base: str,
+                        bound: str | None) -> str | None:
+    """Per head. Binding: once the lane granted this label event, the grant belongs to THAT head (`bound`,
+    from the App's grant record); later the current head must be it, or reachable from it only through the
+    train's own verified update-branch merges. Before the first grant, the label must postdate the head's
+    server-side arrival on this repository's branch (suite_arrival). Either way, any force-push or restore
+    after the label refuses (a push back to an earlier, once-eligible sha included), and every commit the
+    timeline shows after the label must be such an update merge. Unknowable = ineligible."""
+    labelled = iso_epoch(label_at)
+    if labelled is None:
+        return "label event carries no timestamp — fail closed"
+    for e in timeline[label_pos + 1:]:
+        kind = e.get("event")
+        if kind in ("head_ref_force_pushed", "head_ref_restored"):
+            return f"{kind} after the owner's label — re-apply the label on this head"
+        if kind == "committed" and not hotfix_updater_commit(gh.commit_meta(e.get("sha") or "")):
+            return "a commit pushed after the owner's label is not the train's update merge — re-apply the label"
+    cur = head
+    for _ in range(HOTFIX_UPDATE_DEPTH + 1):
+        if bound is not None:
+            if cur == bound:
+                return None
+        else:
+            arrived = gh.head_arrived_at(cur, branch)
+            if arrived is None:
+                return f"arrival of {cur[:12]} on {branch} is not determinable server-side — fail closed"
+            if labelled > arrived:
+                return None
+        meta = gh.commit_meta(cur)
+        if not hotfix_updater_commit(meta):
+            return ("head moved off the granted head " + bound[:12] if bound else "head arrived after the owner's label") + \
+                " — re-apply the label on this head"
+        parent = meta["parents"][0]
+        if not probe.update_merge_ok(parent, cur, base):
+            return (f"update merge {cur[:12]} after the label is not exactly the old head merged with live main "
+                    "— re-apply the label on this head")
+        cur = parent
+    return f"more than {HOTFIX_UPDATE_DEPTH} update merges after the label — re-apply the label"
+
+
+def hotfix_merge_problem(pr: dict, head: str, judged_main: str, parents: list[str] | None) -> str | None:
+    """Post-merge verification of one granted PR: merged, at the marked head, onto the judged main."""
+    if not pr.get("merged_at"):
+        return None
+    merged_head = (pr.get("head") or {}).get("sha") or ""
+    if merged_head != head:
+        return f"merged head {merged_head[:12] or '?'} is not the marked head {head[:12]}"
+    if not parents:
+        return "merge commit unreadable — fail closed"
+    if parents[0] != judged_main:
+        return f"merge commit's first parent {parents[0][:12]} is not the judged main {judged_main[:12]}"
+    return None
+
+
+def hotfix_grant_records(comments) -> list[tuple[str, str, int]] | None:
+    """[(head, judged main, label event id)] from the App's own grant comments, oldest first; None = unreadable."""
+    if comments is None:
+        return None
+    out = []
+    for c in comments:
+        if (c.get("user") or {}).get("login") != BOT_LOGIN or HOTFIX_GRANT_MARK not in (c.get("body") or ""):
+            continue
+        m = HOTFIX_GRANT_RE.search(c.get("body") or "")
+        if m:
+            out.append((m.group(1), m.group(2), int(m.group(3))))
+    return out
+
+
+def hotfix_bound_head(comments, label_id) -> str | None:
+    """The head the lane bound THIS label event to (its latest App grant record for that event), or None
+    when this label has never been granted. A relabel is a new event and binds afresh."""
+    recs = hotfix_grant_records(comments) or []
+    heads = [h for h, _m, eid in recs if eid == label_id]
+    return heads[-1] if heads else None
+
+
+def hotfix_audit(gh, grants: dict | None, shadow: bool) -> str | None:
+    """Next-tick verification of every PR granted a hotfix label today. Returns why the lane is disabled
+    for the rest of the UTC day (None = enabled). A mismatch posts one incident comment on that PR; an
+    unreadable input disables the lane for this tick only (fail closed, no incident)."""
+    if grants is None:
+        return "today's hotfix grants could not be enumerated — fail closed"
+    for n in sorted(grants):
+        pr = gh.pr(n)
+        if not isinstance(pr, dict):
+            return f"#{n} unreadable — fail closed"
+        if not pr.get("merged_at"):
+            continue
+        comments = gh.issue_comments(n)
+        recs = hotfix_grant_records(comments)
+        if recs is None:
+            return f"#{n} comments unreadable — fail closed"
+        if not recs:
+            merged_head = (pr.get("head") or {}).get("sha") or ""
+            if (gh.app_statuses(merged_head).get(HOTFIX_GRANT_CONTEXT) or ("",))[0] != "success":
+                continue   # labelled but merged without any hotfix grant: not this lane's merge
+            problem = f"merged head {merged_head[:12]} carries the hotfix grant marker but no grant record"
+        else:
+            head, judged, _eid = recs[-1]
+            problem = hotfix_merge_problem(pr, head, judged, gh.commit_parents(pr.get("merge_commit_sha") or ""))
+        if problem:
+            if not shadow and not any(HOTFIX_INCIDENT_MARK in (c.get("body") or "") and
+                                      (c.get("user") or {}).get("login") == BOT_LOGIN for c in comments or []):
+                gh.comment(n, f"{HOTFIX_INCIDENT_MARK}\nMerge-train hotfix lane INCIDENT: {problem}. The hotfix "
+                              "lane is disabled for the rest of this UTC day; see ADR-0343 (amendment 2026-11-21).")
+            return f"post-merge verification of #{n} failed: {problem}"
+    return None
+
+
+class HotfixGit:
+    """The lane's git reads, separable for the self-test."""
+
+    def __init__(self, gh, git):
+        self.gh, self.git = gh, git
+
+    def head_ok(self, n: int, head: str) -> bool:
+        ref = f"refs/merge-train/hotfix-{int(n)}"
+        if self.git("fetch", "-q", "origin", f"+{self.gh.head_refspec(n)}:{ref}", check=False).returncode != 0:
+            return False
+        return self.git("rev-parse", "--verify", "--quiet", ref, check=False).stdout.strip() == head
+
+    def contains(self, base: str, head: str) -> bool:
+        return self.git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
+
+    def paths(self, base: str, head: str) -> list[str]:
+        return changed_paths(self.git, f"{base}...{head}")
+
+    def update_merge_ok(self, prev: str, sha: str, base: str) -> bool:
+        """`sha` is old head `prev` merged with a commit on live main, and its tree is exactly what
+        `git merge-tree` makes of those two parents (no extra content rode along)."""
+        if not all(SHA_RE.fullmatch(x or "") for x in (prev, sha, base)):
+            return False
+        parents = self.git("rev-list", "--parents", "-n", "1", sha, check=False).stdout.split()
+        if len(parents) != 3 or parents[1] != prev:
+            return False
+        if self.git("merge-base", "--is-ancestor", parents[2], base, check=False).returncode != 0:
+            return False
+        mt = self.git("merge-tree", "--write-tree", prev, parents[2], check=False)
+        tree = self.git("rev-parse", f"{sha}^{{tree}}", check=False).stdout.strip()
+        return mt.returncode == 0 and bool(tree) and mt.stdout.split("\n", 1)[0].strip() == tree
+
+
+def hotfix_refusal(gh, probe, p: dict, owner: str, grants: dict | None, cap: int, day: str, base: str,
+                   main_red: dict, strict_busy: str | None, admissible: dict) -> tuple[str | None, dict | None]:
+    """(why not, None) or (None, label event). The lane bypasses ONLY batching: `admissible` is settle's own
+    per-head verdict this tick (live_candidates: path_refusal, admission on the live body, qualifies with the
+    member contexts and extra gates, special paths; or the strict lane's green), and anything it did not admit
+    is refused here. Then the lane's own conditions, cheapest first."""
+    n, head = p["number"], (p.get("head") or {}).get("sha") or ""
+    if p.get("state") not in (None, "open") or p.get("draft") is not False:
+        return "draft or not open", None
+    if not p.get("auto_merge"):
+        return "native auto-merge not armed", None
+    if not SHA_RE.fullmatch(head) or not SHA_RE.fullmatch(base or ""):
+        return "no verified head/base sha — fail closed", None
+    if admissible.get(n) != head:
+        return "not admitted by the train's per-head gates on this head this tick (see its skip line)", None
+    timeline = gh.pr_timeline(n)
+    if timeline is None:
+        return "timeline unreadable — fail closed", None
+    why = urgent_refusal(n, timeline, owner, grants, cap, day, HOTFIX_LABEL)   # owner actor, day, daily cap
+    if why:
+        return why, None
+    pos, ev = hotfix_label_event(timeline)
+    if main_red and not HOTFIX_FIX_TITLE_RE.match(p.get("title") or ""):
+        return f"main is red on {', '.join(sorted(main_red))}: only fix/security hotfixes are eligible", None
+    if not probe.head_ok(n, head):
+        return "fetched head differs from the API head — fail closed", None
+    comments = gh.issue_comments(n)
+    if comments is None:
+        return "comments unreadable — fail closed", None
+    bound = hotfix_bound_head(comments, ev.get("id"))
+    p["_hotfix_bound"] = bound
+    why = hotfix_head_refusal(gh, probe, timeline, pos, ev.get("created_at") or "", head,
+                              (p.get("head") or {}).get("ref") or "", base, bound)
+    if why:
+        return why, None
+    if not probe.contains(base, head):
+        return f"head does not contain live main {base[:12]} — update the branch", None
+    if strict_busy and any(f.startswith(HOTFIX_SCOPE_PREFIX) for f in probe.paths(base, head)):
+        return f"touches {HOTFIX_SCOPE_PREFIX}** while {strict_busy} — waits", None
+    why = gh.unverified(head, guard=True)
+    if why:
+        return why, None
+    return None, ev
+
+
+def hotfix_withdraw(gh, p: dict, why: str, shadow: bool, summary: dict) -> None:
+    """A grant that no longer holds: take it back (marker failure, merge-train pending) on the current head
+    AND on the head it was bound to, so native auto-merge cannot act on a stale verdict if that sha returns."""
+    for sha in dict.fromkeys(x for x in (p["head"]["sha"], p.get("_hotfix_bound")) if x):
+        app = gh.app_statuses(sha)
+        if (app.get(HOTFIX_GRANT_CONTEXT) or ("",))[0] != "success":
+            continue
+        log(f"::warning::#{p['number']:>6} hotfix    grant WITHDRAWN on {sha[:12]}: {why}")
+        if p["number"] not in summary.setdefault("hotfix_withdrawn", []):
+            summary["hotfix_withdrawn"].append(p["number"])
+        if shadow:
+            continue
+        gh.post_status(sha, "failure", f"hotfix: grant withdrawn — {why}", context=HOTFIX_GRANT_CONTEXT)
+        gh.post_status(sha, "pending", f"hotfix lane: grant withdrawn — {why}")
+
+
+def hotfix_revoke_sweep(gh, repo: str, granted: dict[int, str], shadow: bool, summary: dict,
+                        marked: dict | None = None) -> None:
+    """Revocation never depends on how far eligibility got. For EVERY open PR — draft, disarmed, unfetchable
+    or past any candidate limit alike — every head the App ever recorded a hotfix grant for keeps its grant
+    only if it is that PR's current head AND was granted again this very tick (`granted`: PR -> head).
+    Every other recorded head that still carries the marker is withdrawn: marker failure, `merge-train`
+    pending. So a grant on X followed by a push of Y loses X in the same tick, and a later push back to X
+    finds no success to act on. An unreadable comment list cannot be revoked from: logged, never silent."""
+    for p in gh.open_prs():
+        if is_carrier(p, repo) or is_strict_carrier(p, repo):
+            continue
+        n = p["number"]
+        recs = hotfix_grant_records(gh.issue_comments(n))
+        if recs is None:
+            log(f"::warning::#{n:>6} hotfix    revocation sweep: comments unreadable — cannot verify old grants")
+            continue
+        for sha in dict.fromkeys(h for h, _m, _e in recs):
+            if granted.get(n) == sha:
+                continue
+            why = ("merge-priority:hotfix label removed" if not has_label(p, HOTFIX_LABEL)
+                   else f"head is {p['head']['sha'][:12]}, not the granted {sha[:12]}" if p["head"]["sha"] != sha
+                   else "not granted on this tick")
+            hotfix_withdraw(gh, {"number": n, "head": {"sha": sha}}, why, shadow, summary)
+        # A head carrying the grant marker with NO matching record (a record that failed to store, or a
+        # marker from anywhere else) is never a grant: the records are what everything else trusts.
+        mh = ((marked or {}).get(n) or (None,))[0]
+        if mh and granted.get(n) != mh and mh not in {h for h, _m, _e in recs}:
+            hotfix_withdraw(gh, {"number": n, "head": {"sha": mh}}, "grant marker without a grant record",
+                            shadow, summary)
+
+
+def hotfix_lane(gh, git, repo: str, base: str, main_red: dict, strict_busy: str | None, cap: int,
+                shadow: bool, summary: dict, now: float | None = None, probe=None,
+                admissible: dict | None = None, marked: dict | None = None) -> set[int]:
+    """One hotfix tick: grant (hotfix_grant_tick), then the revocation sweep over every open PR. The sweep
+    runs whatever the cap — 0 turns granting off and revokes everything still standing."""
+    out = hotfix_grant_tick(gh, git, repo, base, main_red, strict_busy, cap, shadow, summary, now, probe,
+                            admissible, marked)
+    hotfix_revoke_sweep(gh, repo, summary.get("_hotfix_heads", {}), shadow, summary, marked)
+    summary.pop("_hotfix_heads", None)
+    return out
+
+
+def hotfix_grant_tick(gh, git, repo: str, base: str, main_red: dict, strict_busy: str | None, cap: int,
+                      shadow: bool, summary: dict, now: float | None = None, probe=None,
+                      admissible: dict | None = None, marked: dict | None = None) -> set[int]:
+    """Grant the eligible hotfix PRs this tick: marker + audit comment once per head, then `merge-train`
+    success on the CURRENT head (post_status re-verifies required checks and live source intent). Native
+    auto-merge then merges. Returns the granted PR numbers: settle drops them from every other lane."""
+    if cap <= 0:
+        return set()
+    owner = repo.split("/", 1)[0]
+    day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if now is None else now))
+    labelled = [p for p in gh.open_prs()
+                if has_label(p, HOTFIX_LABEL) and not is_carrier(p, repo) and not is_strict_carrier(p, repo)]
+    grants = gh.urgent_grants_today(day, owner, HOTFIX_LABEL)
+    yday = time.strftime("%Y-%m-%d", time.gmtime((time.time() if now is None else now) - 86400))
+    prior = gh.urgent_grants_today(yday, owner, HOTFIX_LABEL)   # a merge just past midnight is audited too
+    disabled = hotfix_audit(gh, None if grants is None or prior is None else {**prior, **grants}, shadow)
+    # Unlabel revokes: a head still carrying the grant marker whose PR no longer has the label loses it.
+    for n, (h, labels) in sorted((marked or {}).items()):
+        if HOTFIX_LABEL not in (labels or []):
+            hotfix_withdraw(gh, {"number": n, "head": {"sha": h}}, "merge-priority:hotfix label removed", shadow, summary)
+    if disabled:
+        log(f"::warning::hotfix lane disabled: {disabled}")
+        summary["hotfix_disabled"] = disabled
+        for p in labelled:
+            hotfix_withdraw(gh, p, f"lane disabled: {disabled}", shadow, summary)
+        return set()
+    probe = probe or HotfixGit(gh, git)
+    out: set[int] = set()
+    for p in labelled:
+        n, head = p["number"], p["head"]["sha"]
+        why, ev = hotfix_refusal(gh, probe, p, owner, grants, cap, day, base, main_red, strict_busy, admissible or {})
+        if why:
+            log(f"#{n:>6} hotfix    not granted: {why}")
+            hotfix_withdraw(gh, p, why, shadow, summary)
+            continue
+        record = {"pr": n, "head": head, "actor": (ev.get("actor") or {}).get("login"), "label_event": ev.get("id")}
+        summary.setdefault("hotfix", []).append(record)
+        log(f"#{n:>6} hotfix    GRANTED head {head[:12]} over main {base[:12]} "
+            f"(label event {record['label_event']} by {record['actor']})")
+        out.add(n)
+        summary.setdefault("_hotfix_heads", {})[n] = head
+        if shadow:
+            continue
+        app = gh.app_statuses(head)
+        # The audit record FIRST, and only a stored one (201) lets any status follow: the sweep and the
+        # post-merge audit are driven by these records, so a grant without one would be invisible to both.
+        if p.get("_hotfix_bound") != head:
+            stored = gh.comment(n, f"{HOTFIX_GRANT_MARK}\nhotfix lane: granted head {head} over main {base} "
+                                   f"(label event {record['label_event']} by {record['actor']}). Native auto-merge "
+                                   "merges it; the next tick verifies the merge.")
+            if stored is not True:
+                log(f"::warning::#{n:>6} hotfix    grant record not stored — no grant this tick (fail closed)")
+                out.discard(n)
+                summary["_hotfix_heads"].pop(n, None)
+                summary["hotfix"].remove(record)
+                hotfix_withdraw(gh, p, "grant record could not be stored", shadow, summary)
+                continue
+        if (app.get(HOTFIX_GRANT_CONTEXT) or ("",))[0] != "success":
+            gh.post_status(head, "success", f"hotfix: label event {record['label_event']} over main {base[:12]}",
+                           context=HOTFIX_GRANT_CONTEXT)
+        if (app.get(STATUS_CONTEXT) or ("",))[0] != "success":
+            gh.post_status(head, "success", f"hotfix lane: owner-granted over main {base[:12]}", source_number=n)
     return out
 
 
@@ -2227,7 +2911,7 @@ def record_problem(record_desc: str | None, record_creator: str | None, sha_tree
 # (API_RETRY_ATTEMPTS, API_BACKOFF_CAP_S) and per process (API_RETRY_BUDGET_S, 5 min against the
 # 30-45 min step timeouts in merge-train.yml).
 TRANSIENT_HTTP = frozenset({500, 502, 503, 504})   # 500: run 41640891760, check-runs page 2
-API_RETRY_ATTEMPTS = 5
+API_RETRY_ATTEMPTS = env_knob("MERGE_TRAIN_API_RETRY_ATTEMPTS")   # default 5
 API_BACKOFF_BASE_S = 2.0
 API_BACKOFF_CAP_S = 60.0
 API_RETRY_BUDGET_S = 300.0
@@ -2389,7 +3073,7 @@ def get(path: str) -> object:
     return data
 
 
-PREFETCH_BATCH = 8        # 20 heads per query hit RESOURCE_LIMITS_EXCEEDED on 2026-11-14; 8 answered 24/24
+PREFETCH_BATCH = env_knob("MERGE_TRAIN_PREFETCH_BATCH")        # default 8; 20 heads per query hit RESOURCE_LIMITS_EXCEEDED on 2026-11-14; 8 answered 24/24
 PREFETCH_PAGE_ROUNDS = 5  # follow-up rounds for a check suite with more than 100 runs (Services CI's matrix)
 _RUN_FIELDS = "databaseId name status conclusion detailsUrl url startedAt completedAt"
 PREFETCH_FRAGMENT = """fragment H on Commit {
@@ -2852,8 +3536,11 @@ class GitHub:
         if code != 201:
             raise SystemExit(f"::error::POST status on {sha} -> {code}: {data}")
 
-    def comment(self, n: int, text: str) -> None:
-        api("POST", f"/repos/{self.repo}/issues/{int(n)}/comments", {"body": f"{COMMENT_MARK}\n{text}\n\n{self.run_url}"})
+    def comment(self, n: int, text: str) -> bool:
+        """True only when GitHub stored the comment (201). Most callers ignore it; the hotfix lane may not."""
+        code, _data = api("POST", f"/repos/{self.repo}/issues/{int(n)}/comments",
+                          {"body": f"{COMMENT_MARK}\n{text}\n\n{self.run_url}"})
+        return code == 201
 
     def merge(self, n: int, head: str) -> str | None:
         """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
@@ -2952,6 +3639,38 @@ class GitHub:
                 return None
             v = j.get("conclusion") if j.get("status") == "completed" else None
             out[name] = v if out.get(name, v) == v else None   # two jobs, one name, disagreeing: not green
+        return out or None
+
+    def workflow_run(self, run_id: int) -> dict | None:
+        """The Actions run object (path, head_sha, head_branch), or None when unreadable (callers fail closed)."""
+        code, data = api("GET", f"/repos/{self.repo}/actions/runs/{int(run_id)}")
+        return data if code == 200 and isinstance(data, dict) else None
+
+    def compare_commits(self, base: str, head: str) -> list[dict] | None:
+        """The commits of base...head as {sha, author, committer, verified, date, parents}; None when
+        unreadable or truncated (the compare API lists at most 250)."""
+        code, data = api("GET", f"/repos/{self.repo}/compare/{base}...{head}")
+        if code != 200 or not isinstance(data, dict) or not isinstance(data.get("commits"), list):
+            return None
+        cs = data["commits"]
+        if data.get("total_commits") != len(cs):
+            return None
+        return [{"sha": c.get("sha"), "author": (c.get("author") or {}).get("login"),
+                 "committer": (c.get("committer") or {}).get("login"),
+                 "verified": ((c.get("commit") or {}).get("verification") or {}).get("verified"),
+                 "date": ((c.get("commit") or {}).get("committer") or {}).get("date"),
+                 "parents": len(c.get("parents") or [])} for c in cs if isinstance(c, dict)]
+
+    def run_jobs(self, run_id: int) -> dict[str, str | None] | None:
+        """Latest-attempt job name -> conclusion (None while running) of run `run_id`; None when unreadable
+        or two jobs of one name disagree being indistinguishable is folded to None like ctx_jobs."""
+        out: dict[str, str | None] = {}
+        for j in paginate(f"/repos/{self.repo}/actions/runs/{int(run_id)}/jobs?filter=latest", "jobs"):
+            name = j.get("name") if isinstance(j, dict) else None
+            if not isinstance(name, str):
+                return None
+            v = j.get("conclusion") if j.get("status") == "completed" else None
+            out[name] = v if out.get(name, v) == v else None
         return out or None
 
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
@@ -3131,7 +3850,100 @@ class GitHub:
                 return out
         return None   # more than 1000 events: cannot be read whole, so it is not read at all
 
-    def urgent_grants_today(self, day: str, owner: str) -> dict[int, str] | None:
+    def green_since(self, sha: str) -> float | None:
+        """When the last required context (merge-train aside) went green on `sha`; None = unknowable. Advisory
+        only: ANY read failure (a non-200 SystemExit, an API outage) is None — no aging hold — never a tick
+        abort. A skipped/neutral required context is not "green" here: None too (aging fails open)."""
+        try:
+            return self._green_since(sha)
+        except (SystemExit, ApiAbort, KeyError, TypeError, ValueError) as exc:
+            log(f"::notice::aging: green time of {sha[:12]} unreadable ({type(exc).__name__}) — no aging hold")
+            return None
+
+    def _green_since(self, sha: str) -> float | None:
+        latest: dict[str, dict] = {}
+        for c in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if c["name"] not in latest or c["id"] > latest[c["name"]]["id"]:
+                latest[c["name"]] = c
+        statuses: dict[str, dict] = {}
+        for st in sorted(paginate(f"/repos/{self.repo}/commits/{sha}/statuses"), key=lambda x: x["id"], reverse=True):
+            statuses.setdefault(st["context"], st)
+        times = []
+        for ctx in self.required():
+            if ctx == STATUS_CONTEXT:
+                continue
+            c, st = latest.get(ctx), statuses.get(ctx)
+            if c and c.get("conclusion") == "success":
+                times.append(iso_epoch(c.get("completed_at")))
+            elif st and st.get("state") == "success":
+                times.append(iso_epoch(st.get("updated_at")))
+            else:
+                return None
+        return max(times) if times and None not in times else None
+
+    def head_arrived_at(self, sha: str, branch: str) -> float | None:
+        """Server-side time `sha` arrived on `branch`: the earliest check suite GitHub created for it there.
+        None = no such suite or unreadable (callers fail closed)."""
+        code, data = api("GET", f"/repos/{self.repo}/commits/{sha}/check-suites?per_page=100")
+        if code != 200 or not isinstance(data, dict):
+            return None
+        return suite_arrival(data, sha, branch, self.repo)
+
+    def commit_meta(self, sha: str) -> dict | None:
+        """GitHub-resolved commit identity (logins, not author-controlled names), parents, signature."""
+        code, data = api("GET", f"/repos/{self.repo}/commits/{sha}")
+        if code != 200 or not isinstance(data, dict):
+            return None
+        return {"parents": [c.get("sha") or "" for c in data.get("parents") or []],
+                "author_login": (data.get("author") or {}).get("login"),
+                "committer_login": (data.get("committer") or {}).get("login"),
+                "verified": ((data.get("commit") or {}).get("verification") or {}).get("verified")}
+
+    def armed_since(self, n: int) -> float | None:
+        """created_at of #n's latest auto-merge ENABLE timeline item; None = unknowable (any read failure).
+        GitHub names the item after the merge method — `auto_squash_enabled` for this repo's squash merges,
+        `auto_merge_enabled` / `auto_rebase_enabled` otherwise — so all three count (aging_armed_at)."""
+        try:
+            timeline = self.pr_timeline(n)
+        except (SystemExit, ApiAbort) as exc:
+            log(f"::notice::aging: armed time of #{n} unreadable ({type(exc).__name__}) — no aging hold")
+            return None
+        return aging_armed_at(timeline)
+
+    def pr_timeline(self, n: int) -> list | None:
+        """Every timeline item of #n in order (labels with actor and id, commits, force-pushes); None =
+        unreadable or longer than 1000 items — the hotfix lane then grants nothing (fail closed)."""
+        out: list = []
+        for page in range(1, 11):
+            code, data = api("GET", f"/repos/{self.repo}/issues/{int(n)}/timeline?per_page=100&page={page}")
+            if code != 200 or not isinstance(data, list):
+                log(f"::warning::#{n} timeline unreadable ({code}) — no hotfix grant")
+                return None
+            out += data
+            if len(data) < 100:
+                return out
+        return None
+
+    def issue_comments(self, n: int) -> list | None:
+        out: list = []
+        for page in range(1, 11):
+            code, data = api("GET", f"/repos/{self.repo}/issues/{int(n)}/comments?per_page=100&page={page}")
+            if code != 200 or not isinstance(data, list):
+                return None
+            out += data
+            if len(data) < 100:
+                return out
+        return None
+
+    def commit_parents(self, sha: str) -> list[str] | None:
+        if not SHA_RE.fullmatch(sha or ""):
+            return None
+        code, data = api("GET", f"/repos/{self.repo}/commits/{sha}")
+        if code != 200 or not isinstance(data, dict):
+            return None
+        return [c.get("sha") or "" for c in data.get("parents") or []]
+
+    def urgent_grants_today(self, day: str, owner: str, label: str = URGENT_LABEL) -> dict[int, str] | None:
         """urgent_grants over the repository's issue events for UTC `day`, newest first. Authoritative: an
         event exists the moment the label is applied (no search index), and a removed label leaves its
         `labeled` event in place. Complete once a page reaches before `day` or the stream ends; None when a
@@ -3144,7 +3956,7 @@ class GitHub:
                 return None
             seen += data
             if len(data) < 100 or any((e.get("created_at") or "9")[:10] < day for e in data):
-                return urgent_grants(seen, owner, day)
+                return urgent_grants(seen, owner, day, label)
         log(f"::warning::{URGENT_EVENT_PAGES} event pages do not reach back to {day} — no PR admitted as urgent")
         return None
 
@@ -3247,7 +4059,7 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
     return {"number": p["number"], "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
             "same_repo": (p["head"].get("repo") or {}).get("full_name") == repo, "head_ref": p["head"]["ref"],
             "head_sha": p["head"]["sha"], "created_at": p.get("created_at", ""), "title": p.get("title", ""),
-            "body": p.get("body") or "", "files": files,
+            "body": p.get("body") or "", "files": files, "author": (p.get("user") or {}).get("login"),
             "labels": [lb.get("name") if isinstance(lb, dict) else lb for lb in p.get("labels") or []]}
 
 
@@ -3289,6 +4101,9 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
     if not CHECKLIST_GATE.is_file():
         return f"admission gate missing at {CHECKLIST_GATE} — fail closed, this is a train wiring defect"
     return f"admission check exited {rc} — fail closed"
+
+
+PATH_SHORTCUT_OFF = [False]   # self-test switch: True = the pre-#16955 full read path
 
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
@@ -3364,12 +4179,28 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             view["gates_append"] = why_not is None
             if why_not:
                 log(f"#{p['number']:>6} gates.yaml not a pure append ({why_not}) — strict lane")
+        if strict is None and red is None and not PATH_SHORTCUT_OFF[0]:
+            # build/publish (#16955): only `ok` is consumed here, and qualifies() refuses on the diff
+            # alone whatever the API says, so the statuses, approval chain, admission subprocess and
+            # check-runs (~16 requests, ~7 s per PR live) cannot change this PR's verdict. settle
+            # passes strict/red — a manual-lane PR may still be a strict-lane or stale-red entry there.
+            pwhy = path_refusal(view, untrainable or FAIL_CLOSED_UNTRAINABLE)
+            if pwhy:
+                log(f"#{n:>6} skip      {pwhy}")
+                continue
         app = gh.app_statuses(fetched)
         if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
             chain = remember_approval_chain(gh, git, base, fetched)
             if len(chain) > 1:   # an exact-head decision is already in `app`: no extra read
                 app = with_owner_decision(gh, app, chain)
         view["app"] = app                    # strict_lane reads the notice from it, no second read
+        if cache is not None and (app.get(HOTFIX_GRANT_CONTEXT) or ("",))[0] == "success":
+            cache.setdefault(HOTFIX_MARKED_KEY, {})[n] = (fetched, list(view.get("labels") or []))
+        if strict is None and hotfix_granted(view, app):
+            # build/publish: a head the hotfix lane granted is never batched (native auto-merge merges it).
+            # settle (strict given) still judges it in full below: the lane re-checks every gate each tick.
+            log(f"#{n:>6} skip      hotfix lane granted this head")
+            continue
         refusal = admission_refusal(git, base, view)
         if refusal:
             # Before every lane AND the stale-red queue: no batch, no reservation, no update-branch.
@@ -3842,25 +4673,171 @@ def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: d
 
 
 
-def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int) -> int | None:
-    """The first expedited train candidate the lane may serve now, or None. Order is the train's own."""
+def expedite_window_held(gh, head: str, base: str) -> bool:
+    """`head` was given the expedite window over THIS main on an earlier tick (EXPEDITE_WINDOW_CONTEXT
+    names `base`) and no expedite carrier came of it — the caller has already established that none is
+    open. A moved main is a fresh attempt: the marker names the main it was opened over."""
+    state, desc = gh.app_statuses(head).get(EXPEDITE_WINDOW_CONTEXT, ("", ""))
+    return state == "success" and desc.endswith(f"over main {base}")
+
+
+def expedite_candidate(gh, git, repo: str, train_waiting: list, cap: int, base: str | None = None) -> int | None:
+    """The first expedited train candidate the lane may serve now, or None. Order is the train's own,
+    except (#16874) that a candidate whose head HELD the window over this very main and got nothing
+    from it (its one-member train was deferred by the build — gate code beside a regeneration commit,
+    #13400 — or refused by publish) is passed over for the next expedited candidate this tick, so one
+    perpetually deferred member cannot starve every other expedited PR (#16807 held the slot ~6 h while
+    #16852, the main-red fix, waited). When every expedited candidate has had its turn over this main,
+    the first is served again: a rotation bounded by the number of expedited candidates, never a
+    permanent exclusion. Still one expedited PR per tick: the chosen one, never a later one past it."""
     labels = {p["number"]: p for p in gh.open_prs()}
-    for m in train_waiting:
-        if not is_expedited(labels.get(m.number) or {}):
+    expedited = [m for m in train_waiting if is_expedited(labels.get(m.number) or {})]
+    if not expedited:
+        return None
+    held = [m for m in expedited if base and expedite_window_held(gh, m.head_sha, base)]
+    fresh = [m for m in expedited if m not in held]
+    m = (fresh or held)[0]
+    if held and fresh:
+        log(f"expedite lane: {[h.number for h in held]} held the window over main {base[:12]} and nothing was built — "
+            f"passed over for #{m.number} this tick (#16874)")
+    elif held:
+        log(f"expedite lane: every expedited candidate {[h.number for h in held]} has held the window over main "
+            f"{base[:12]} — rotation restarts at #{m.number}")
+    why = expedite_problem(gh, git, repo, m.number, cap)
+    if why is None:
+        return m.number
+    log(f"expedite lane: #{m.number} not served — {why}")
+    return None   # one expedited PR per tick: the chosen one, never a later one past it
+
+
+# Strict-lane aging (#17006 follow-up). Back-to-back fast carriers keep `in_flight` true, and the strict lane
+# yields to an in-flight carrier, so a green, armed strict PR can starve indefinitely (observed 2026-11-21:
+# two strict PRs waited 30+ min behind successive carriers). Once any strict candidate has been continuously
+# green and armed, unserved, for MERGE_TRAIN_STRICT_AGING_S, settle publishes no NEW fast or expedite carrier;
+# carriers already in flight are judged as usual (never cancelled), and the strict lane takes the reservation
+# on the tick after they settle. No persisted state: the wait is re-derived from the live API each tick, and an
+# unknowable time fails OPEN (no hold, logged) so aging can never wedge the train. Urgent and hotfix PRs pre-empt
+# on their own and are not aged. This is the opposite direction of #16736 (fast passing strict): it only stops
+# NEW carriers, it never lets a fast carrier jump a strict one.
+STRICT_AGING_S_DEFAULT = 1800
+
+
+def iso_epoch(text: str | None) -> float | None:
+    try:
+        return datetime.datetime.strptime(text or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+# Live tree, 2026-11-21 22:00Z: every one of 18 strict candidates logged "green/armed time unknowable", because
+# the reader looked for `auto_merge_enabled` and a squash-armed PR's timeline only ever says
+# `auto_squash_enabled` (merge_method squash). The event name follows the merge method.
+AUTO_MERGE_ENABLE_EVENTS = ("auto_merge_enabled", "auto_squash_enabled", "auto_rebase_enabled")
+
+
+def aging_armed_at(timeline) -> float | None:
+    """created_at of the LATEST auto-merge enable item (any merge method); a later `auto_merge_disabled` with
+    no re-enable after it means not armed now (None). None also for an unreadable timeline."""
+    at = None
+    for e in timeline or []:
+        if e.get("event") in AUTO_MERGE_ENABLE_EVENTS:
+            at = e.get("created_at")
+        elif e.get("event") == "auto_merge_disabled":
+            at = None
+    return iso_epoch(at) if at else None
+
+
+def strict_unserved_since(gh, view: dict) -> float | None:
+    """When this strict PR became continuously green AND armed: the later of its head's green time (last
+    required check completed) and its armed time (latest auto-merge enable, aging_armed_at). None = unknowable."""
+    green = gh.green_since(view["head_sha"])
+    armed = gh.armed_since(view["number"])
+    if green is None or armed is None:
+        return None
+    return max(green, armed)
+
+
+def strict_aging_candidate(gh, strict: list, exempt: set, now: float, threshold: int,
+                           max_hold: int = 3600, last_carrier_merge=None) -> tuple[int, int] | None:
+    """(PR, waited s) of the longest-waiting green strict PR at or past `threshold`; None = no hold. Per-head
+    budget: a head holds carriers for at most `max_hold` s past its threshold (stateless: unserved-since +
+    threshold + max_hold), after which it is released and logged, so one unservable head cannot stall the
+    fast lane for ever. Global budget: the hold, counted from the later of its earliest start and the last
+    train carrier merge (`last_carrier_merge()`, epoch or None, read only when a hold would apply), lasts at
+    most `max_hold` s in total, so a rotation of aged heads cannot starve the fast lane either."""
+    best, starts = None, []
+    for st, v in strict:
+        if st != "green" or v["number"] in exempt:
             continue
-        why = expedite_problem(gh, git, repo, m.number, cap)
-        if why is None:
-            return m.number
-        log(f"expedite lane: #{m.number} not served — {why}")
-        return None   # one expedited PR per tick: the first in order, never a later one past it
+        since = strict_unserved_since(gh, v)
+        if since is None:
+            log(f"#{v['number']:>6} strict    aging: green/armed time unknowable — no aging hold (fail open)")
+            continue
+        waited = int(now - since)
+        if waited >= threshold + max_hold:
+            starts.append(since + threshold)   # a released head still counts toward the global budget
+            log(f"#{v['number']:>6} strict    aging: held carriers for its {max_hold}s budget on this head — "
+                "released, the fast lane proceeds")
+            continue
+        if waited >= threshold:
+            starts.append(since + threshold)
+            if best is None or waited > best[1]:
+                best = (v["number"], waited)
+    if best is not None and last_carrier_merge is not None:
+        start = max(min(starts), last_carrier_merge() or 0)
+        if now - start > max_hold:
+            log(f"strict aging: carriers held {int(now - start)}s since the last carrier merge (budget {max_hold}s) — "
+                "released, the fast lane proceeds")
+            return None
+    return best
+
+
+AGING_YIELDABLE = ("train's turn after a strict-lane merge", "fast lane's turn after a reservation ended")
+
+
+def last_carrier_merge_at(gh, git, base: str, horizon_s: int, now: float) -> float | None:
+    """Committer time of the newest train-carrier merge on main's first-parent chain within `horizon_s`
+    (older ones cannot change the global budget), or None. Lazy: called only when a hold would apply."""
+    out = git("log", "--first-parent", f"--since={int(now - horizon_s)}", "--format=%H %ct", base, check=False)
+    for line in (out.stdout or "").splitlines():
+        sha, _, ct = line.partition(" ")
+        if merge_lane(gh, git, sha) == "train":
+            return float(ct)
     return None
+
+
+def apply_strict_aging(gh, summary: dict, strict: list, exempt: set, holder, strict_carrier_open: bool,
+                       now: float, threshold: int, max_hold: int = 3600, main_red: bool = False) -> None:
+    """Hold NEW fast/expedite carriers for an aged strict candidate while no strict carrier or reservation
+    exists. Only acts when this tick would otherwise publish one (in_flight false, or an expedite window).
+    Never while main is red: the red-main fix and deploy-fix lanes are what such a carrier serves."""
+    if holder is not None or strict_carrier_open or main_red:
+        return
+    if summary.get("in_flight") and not summary.get("expedite_window"):
+        return
+    aged = strict_aging_candidate(gh, strict, exempt, now, threshold, max_hold)
+    if aged is not None:
+        strict_aging_hold(summary, aged)
+
+
+def strict_aging_hold(summary: dict, aged: tuple[int, int]) -> None:
+    """Apply one aging hold: no new fast/expedite carrier this tick (in-flight ones are untouched)."""
+    if summary.get("in_flight") and not summary.get("expedite_window"):
+        return   # nothing would be published this tick anyway
+    n, waited = aged
+    log(f"strict-aging hold: #{n} waited {waited}s — no new fast or expedite carrier until the strict lane takes it")
+    summary["in_flight"] = True
+    for k in ("expedite_window", "stack_window", "deferral_window"):
+        summary.pop(k, None)
+    summary["strict_aging_hold"] = f"strict-aging hold: #{n} waited {waited}s"
 
 
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
                 strict_cap: int = STRICT_BATCH_CAP_DEFAULT, judge_cap: int = STRICT_JUDGE_BATCH_CAP_DEFAULT,
                 stack: bool = SPECULATIVE_STACK_DEFAULT,
                 expedite: bool = EXPEDITE_LANE_DEFAULT, expedite_cap: int = EXPEDITE_DAILY_CAP_DEFAULT,
-                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT) -> dict:
+                urgent_cap: int = URGENT_DAILY_CAP_DEFAULT, hotfix_cap: int | None = None, aging_s: int = 0,
+                aging_max_hold_s: int = 3600) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
@@ -4112,8 +5089,15 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             expected = live_main
             for i, (n, head) in enumerate(chain[1]):
                 if not live_source_intent(gh, n, head):
-                    log(f"#{n} source intent or head changed since the train was verified; stopping")
-                    break
+                    native = None if shadow else already_merged_member(gh, git, n, head, expected)
+                    if native is None or (stacked_steps and git.tree(native) != git.tree(stacked_steps[i])):
+                        log(f"#{n} source intent or head changed since the train was verified; stopping")
+                        break
+                    # #16932: native auto-merge won the race at the verified head over the expected main.
+                    log(f"#{n} already merged by native auto-merge at the verified head ({native[:12]}); continuing")
+                    expected = native
+                    summary.setdefault("native_merged", []).append(n)
+                    continue
                 if not shadow and gh.main_sha() != expected:
                     log("main advanced by a foreign merge; stopping, the next tick rebuilds")
                     break
@@ -4129,8 +5113,16 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     continue
                 merged = gh.merge(n, head)
                 if not merged:
-                    log(f"#{n} did not merge; stopping")
-                    break
+                    # #16932 / run 44872757590: our own success status above can release native auto-merge,
+                    # which then wins against GitHub.merge's last intent read. Same fail-closed proof as above.
+                    native = already_merged_member(gh, git, n, head, expected)
+                    if native is None or (stacked_steps and git.tree(native) != git.tree(stacked_steps[i])):
+                        log(f"#{n} did not merge; stopping")
+                        break
+                    log(f"#{n} already merged by native auto-merge at the verified head ({native[:12]}); continuing")
+                    expected = native
+                    summary.setdefault("native_merged", []).append(n)
+                    continue
                 expected = merged
                 summary["merged"].append(n)
                 if stacked_steps:
@@ -4210,6 +5202,19 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
                                                activity=gh.ci_activity, relevant=relevant,
                                                urgent=urgent, preempted=preempted, main_red=bool(main_red))
+    # Owner hotfix lane (ADR-0343 amendment 2026-11-21): off unless the cap is positive (main() passes the
+    # validated MERGE_TRAIN_HOTFIX_DAILY_CAP). A granted PR leaves every other lane this tick.
+    strict_busy = ("a strict carrier is in flight" if strict_carrier_open else
+                   f"urgent reservation #{holder} is in flight" if holder is not None and holder in urgent else None)
+    admissible = {m.number: m.head_sha for m in cands}
+    admissible.update({v["number"]: v["head_sha"] for st, v in strict if st == "green"})
+    # None = not wired (direct callers); main() always passes the validated int, and 0 still revokes.
+    hotfix = set() if hotfix_cap is None else hotfix_lane(
+        gh, git, repo, base, main_red, strict_busy, hotfix_cap, shadow, summary,
+        admissible=admissible, marked=main_cache.get(HOTFIX_MARKED_KEY)) - {holder}
+    if hotfix:
+        strict[:] = [sv for sv in strict if sv[1]["number"] not in hotfix]
+        cands = [m for m in cands if m.number not in hotfix]
     summary["main_red"] = sorted(main_red)
     if urgent:
         summary["urgent"] = sorted(urgent)
@@ -4237,6 +5242,20 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         yield_why = fast_turn(gh, git, base,
                               [m for m in fast if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success"],
                               bool(timed_out), shadow)
+    # Strict-lane aging (review of #17009): an aged green strict PR takes back a TURN owed to the train or the
+    # fast lane, so the strict lane serves it in THIS tick. Holding the carrier while the strict lane yields
+    # would leave both idle until the turn expired. An open carrier keeps its turn (nothing is cancelled).
+    now_t = time.time()
+    last_merge = (lambda: last_carrier_merge_at(gh, git, base, aging_max_hold_s + aging_s, now_t))
+    aged = None
+    if (aging_s > 0 and not shadow and holder is None and not strict_carrier_open and not main_red
+            and urgent_now is None and yield_why and yield_why.startswith(AGING_YIELDABLE)):
+        aged = strict_aging_candidate(gh, strict, set(urgent) | hotfix, now_t, aging_s, aging_max_hold_s, last_merge)
+        if aged is not None:
+            log(f"strict-aging: #{aged[0]} waited {aged[1]}s — the turn ({yield_why}) is taken back; "
+                "the strict lane serves it this tick")
+            summary["strict_aging_hold"] = f"strict-aging hold: #{aged[0]} waited {aged[1]}s"
+            yield_why = None
     if timed_out:
         summary["timed_out"] = timed_out
         # Released: never reserving again on that head (RELEASED_CONTEXT, read back by
@@ -4324,15 +5343,32 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             f"over the same main during its CI (bounded deferral)")
         summary["in_flight"] = False
         summary["deferral_window"] = n
-    if (expedite and not shadow and pending_carrier is not None and summary["in_flight"]
+    # Strict aging, decided BEFORE the expedite window so a held tick never opens (and records) a window it
+    # would then have to close: 0 (the default for direct callers) = off; main() passes the validated knob.
+    if aged is not None and (summary["updated"] or summary["strict"]):
+        aged = None   # the strict lane took the reservation (or merged) this tick: the hold has done its job
+    elif (aged is None and aging_s > 0 and not shadow and holder is None and not strict_carrier_open and not main_red
+            and not summary["updated"] and not summary["strict"]
+            and (not summary["in_flight"] or (expedite and pending_carrier is not None))):
+        # Only when this tick would otherwise publish a carrier or open an expedite window (cost, review).
+        aged = strict_aging_candidate(gh, strict, set(urgent) | hotfix, now_t, aging_s, aging_max_hold_s, last_merge)
+    if (expedite and not shadow and pending_carrier is not None and summary["in_flight"] and aged is None
             and holder is None and not strict_carrier_open and not main_red
             and not summary["updated"] and not summary["strict"] and not summary["merged"]
             and not summary.get("stack_window") and not summary.get("deferral_window")):
-        n = expedite_candidate(gh, git, repo, train_waiting, expedite_cap)
+        n = expedite_candidate(gh, git, repo, train_waiting, expedite_cap, base)
         if n is not None:
             log(f"expedite lane: #{n} may ride its own carrier over main {base[:12]} beside carrier #{pending_carrier}")
             summary["in_flight"] = False
             summary["expedite_window"] = n
+            # The window is recorded on the head it was opened for, naming this main (#16874): if the lane
+            # builds nothing from it (a deferred one-member train), the next tick passes this head over.
+            head = next((m.head_sha for m in train_waiting if m.number == n), None)
+            desc = f"expedite window over main {base}"
+            if head and gh.app_statuses(head).get(EXPEDITE_WINDOW_CONTEXT, ("", "")) != ("success", desc):
+                gh.post_status(head, "success", desc, context=EXPEDITE_WINDOW_CONTEXT)
+    if aged is not None:
+        strict_aging_hold(summary, aged)
     # Strict priority (#15827): a holder GREEN on a head that contains live main but not merged in this
     # tick's strict_lane (a train in flight, merge refused, source intent re-read, main moved under the
     # read) would be pushed behind main by the next carrier and restart its full CI. For ONE tick per
@@ -4490,6 +5526,173 @@ def carrier_holds_strict(p: dict, now: float | None = None) -> bool:
     unreadable age holds (today's behaviour); a carrier past the bound releases the strict lane."""
     age = carrier_age_s(p, now)
     return age is None or age <= CARRIER_PRIORITY_S
+
+
+def selftest_deploy_fix(check) -> None:
+    """#16943: an App-authored auto-deploy PR may claim a main-red CONTRACT context only on the full
+    evidence of deploy_fix_refusal. Built on the real #16940 shape (two image pins, run 44740185064, one
+    App commit committed by web-flow, main red on a libs-runtime contract job), then every must-FAIL
+    case, then the live path (claim_evidence -> deploy_fix_claim) over a stubbed GitHub and git."""
+    AG, CJ = "all-green", "build (openbank-libs-runtime) / openbank-libs-runtime (contract)"
+    src, run_id, day = "730965564a4ff9706b4817238ded37e367281c25", 44740185064, "2026-11-20"
+    reg = "registry.example"
+    pin = lambda sign, svc, tag, c, r=reg: f"{sign}          image: {r}/openbank-{svc}:{tag}@sha256:{c * 64}"
+    files = ["openbank-infra/gitops/components/customer-edge/customer-edge.yaml",
+             "openbank-infra/gitops/components/payments/payments-services.yaml"]
+    entries = [("M", "100644", "100644", f) for f in files]
+    def block(f, hunks):
+        out = [f"diff --git a/{f} b/{f}", "index 1111111..2222222 100644", f"--- a/{f}", f"+++ b/{f}"]
+        for h in hunks:
+            out += ["@@ -1 +1 @@"] + h
+        return out
+    ce = [pin("-", "customer-edge", "sandbox-abaa92c7", "3"), pin("+", "customer-edge", "sandbox-73096556", "0")]
+    dp = [pin("-", "domestic-payment", "sandbox-7e9d36e9", "7"), pin("+", "domestic-payment", "sandbox-73096556", "1")]
+    mk = lambda ce_h=ce, dp_h=dp, extra=(): "\n".join(block(files[0], [ce_h]) + block(files[1], [dp_h]) + list(extra))
+    diff = mk()
+    head = "5a25b16b195fa1f74c5720b597437e392ccd71f7"
+    view = {"number": 16940, "author": BOT_LOGIN, "head_sha": head,
+            "head_ref": f"chore/gitops-auto-deploy-{src}-run{run_id}", "labels": ["chore", "gitops", DEPLOY_FIX_LABEL]}
+    main_jobs = {CJ: "failure", AG: "failure", "build (openbank-x)": "success"}
+    run = {"id": run_id, "path": AUTO_DEPLOY_WORKFLOW, "head_sha": src, "head_branch": "main"}
+    run_jobs = {"Detect changed services": "success", "Build + push": "success", "can-i-deploy": "success",
+                "Gitops PR": "success", "Push failures": "skipped"}
+    bot_commit = {"sha": head, "author": BOT_LOGIN, "committer": "web-flow", "verified": True,
+                  "date": f"{day}T13:07:43Z", "parents": 1}
+    label_at = f"{day}T13:30:00Z"
+    base = dict(view=view, ctx=AG, main_jobs=main_jobs, entries=entries, diff=diff, run=run, run_jobs=run_jobs,
+                src_on_main=True, label_why=None, commits=[bot_commit], label_at=label_at)
+    got = deploy_fix_refusal(**base)
+    check("deploy fix: the real #16940 shape is admitted", got is None, str(got))
+    update_merge = {**bot_commit, "sha": "c" * 40, "date": f"{day}T14:00:00Z", "parents": 2}
+    got = deploy_fix_refusal(**{**base, "commits": [bot_commit, update_merge]})
+    check("deploy fix: the train's own update-branch merge after the label still admits", got is None, str(got))
+    human = {**bot_commit, "sha": "d" * 40, "author": "JiRaska", "committer": "JiRaska", "date": f"{day}T14:00:00Z"}
+    # The real shape of a train update-branch merge (#16719's 68c7fffab4, #16947).
+    updater_merge = {**update_merge, "author": BRANCH_UPDATER_LOGIN, "committer": "web-flow", "verified": True}
+    got = deploy_fix_refusal(**{**base, "commits": [bot_commit, updater_merge]})
+    check("deploy fix: the branch-updater App's real update-branch merge admits", got is None, str(got))
+    for label, change, want in [
+        ("a non-bot author", {"view": {**view, "author": "JiRaska"}}, "is not"),
+        ("an unknown author", {"view": {k: v for k, v in view.items() if k != "author"}}, "is not"),
+        ("a branch that is not auto-deploy's", {"view": {**view, "head_ref": "agent/pins"}}, "not an auto-deploy"),
+        ("an extra file outside gitops", {"entries": entries + [("M", "100644", "100644", ".github/scripts/merge-train.py")]},
+         "not a gitops image-pin file"),
+        ("an extra non-yaml gitops file", {"entries": entries + [("M", "100644", "100644", "openbank-infra/gitops/components/x/run.sh")]},
+         "not a gitops"),
+        ("a new file", {"entries": entries + [("A", "000000", "100644", "openbank-infra/gitops/components/x/new.yaml")]}, "plain modification"),
+        ("a deleted file", {"entries": [("D", "100644", "000000", files[0]), entries[1]]}, "plain modification"),
+        ("a renamed file", {"entries": [("R100", "100644", "100644", files[0]), entries[1]]}, "plain modification"),
+        ("a mode change", {"entries": [("M", "100644", "100755", files[0]), entries[1]]}, "plain modification"),
+        ("a new-file header in the diff", {"diff": mk(extra=block("openbank-infra/gitops/components/x/n.yaml", [])[:1]
+                                                        + ["new file mode 100644"])}, "plain modification"),
+        ("an extra non-pin line in a gitops file", {"diff": mk(ce_h=ce + ["+          replicas: 3"])}, "not an image pin"),
+        ("an added `++evil: true` line", {"diff": mk(ce_h=[ce[0], "+++evil: true", ce[1]])}, "not an image pin"),
+        ("a removed `---` YAML separator", {"diff": mk(ce_h=[ce[0], "----", ce[1]])}, "not an image pin"),
+        ("a pin moved to a foreign registry host",
+         {"diff": mk(ce_h=[ce[0], pin("+", "customer-edge", "sandbox-73096556", "0", "evil.example")])}, "registry or repository"),
+        ("an unreadable diff", {"diff": None}, "unreadable"),
+        ("unreadable files", {"entries": None}, "unreadable"),
+        ("a pin not built from the run's source (carried)",
+         {"diff": mk(dp_h=[dp[0], pin("+", "domestic-payment", "sandbox-deadbeef", "1")])}, "not built from"),
+        ("a pin added for a service it did not remove",
+         {"diff": mk(dp_h=[dp[0], pin("+", "ledger", "sandbox-73096556", "1")])}, "registry or repository"),
+        ("a human commit pushed after the label", {"commits": [bot_commit, human]}, "not the App's verified commit"),
+        ("an unverified App-authored commit", {"commits": [{**bot_commit, "verified": False}]}, "not the App's verified"),
+        ("an App-authored commit committed by a human", {"commits": [{**bot_commit, "committer": "JiRaska"}]}, "not the App's"),
+        ("a human-authored merge", {"commits": [bot_commit, {**updater_merge, "author": "JiRaska"}]}, "not the App's verified"),
+        ("an unverified branch-updater merge", {"commits": [bot_commit, {**updater_merge, "verified": False}]}, "not the App's verified"),
+        ("a merge by another App", {"commits": [bot_commit, {**updater_merge, "author": "dependabot[bot]"}]}, "not the App's verified"),
+        ("a non-merge commit by the branch-updater App",
+         {"commits": [bot_commit, {**updater_merge, "parents": 1}]}, "not the App's verified"),
+        ("unreadable commits", {"commits": None}, "unreadable"),
+        ("a label applied before the last push", {"label_at": f"{day}T13:00:00Z"}, "before the last commit"),
+        ("an unreadable label time", {"label_at": None}, "unreadable"),
+        ("a missing can-i-deploy job", {"run_jobs": {k: v for k, v in run_jobs.items() if k != "can-i-deploy"}}, "can-i-deploy"),
+        ("a failed can-i-deploy job", {"run_jobs": {**run_jobs, "can-i-deploy": "failure"}}, "can-i-deploy"),
+        ("a can-i-deploy still running", {"run_jobs": {**run_jobs, "can-i-deploy": None}}, "can-i-deploy"),
+        ("unreadable run jobs", {"run_jobs": None}, "can-i-deploy"),
+        ("an unreadable run", {"run": None}, "unreadable"),
+        ("a run of another workflow", {"run": {**run, "path": ".github/workflows/ci.yml"}}, "is not"),
+        ("a run over another commit", {"run": {**run, "head_sha": "f" * 40}}, "is not"),
+        ("a run over another branch", {"run": {**run, "head_branch": "agent/x"}}, "is not"),
+        ("a run id that does not match the branch", {"run": {**run, "id": run_id + 1}}, "is not"),
+        ("a source not on main", {"src_on_main": False}, "not on main"),
+        ("main red on an unrelated, non-contract job (unrelated service)",
+         {"main_jobs": {**main_jobs, "build (openbank-ledger-service)": "failure"}}, "not a contract job"),
+        ("main red only on the aggregate", {"main_jobs": {AG: "failure", CJ: "success"}}, "no failed job"),
+        ("no job record for main", {"main_jobs": None}, "no job record"),
+        ("a missing or refused owner label", {"label_why": f"no readable {DEPLOY_FIX_LABEL} label event"}, "label"),
+    ]:
+        got = deploy_fix_refusal(**{**base, **change})
+        check(f"deploy fix must FAIL: {label}", got is not None and want in got, str(got))
+
+    # Live path: claim_evidence over a stub GitHub/git. The job rule refuses (the contract job is absent
+    # on the head), the deploy path admits — and refuses again without the label or without its grant.
+    class G:
+        repo = "JiRaska/open-bank-oss"
+        def __init__(self, events, grants, cid="success", commits=(bot_commit,)):
+            self.events, self.grants, self.cid, self.commits = events, grants, cid, list(commits)
+        def ctx_jobs(self, sha, ctx):
+            return main_jobs if sha == "m" * 40 else {AG: "success"}
+        def workflow_run(self, rid):
+            return run if rid == run_id else None
+        def run_jobs(self, rid):
+            return {**run_jobs, "can-i-deploy": self.cid} if rid == run_id else None
+        def compare_commits(self, mb, h):
+            return self.commits if (mb, h) == (src, head) else None
+        def issue_events(self, n):
+            return self.events
+        def urgent_grants_today(self, d, owner, label=URGENT_LABEL):
+            return self.grants if label == DEPLOY_FIX_LABEL else {}
+
+    class R:
+        def __init__(self, out="", rc=0):
+            self.stdout, self.returncode = out, rc
+    raw = "".join(f":100644 100644 {'a' * 7} {'b' * 7} M\0{f}\0" for f in files)
+    def git(*args, check=True):
+        if args[0] == "diff" and "--raw" in args:
+            return R(raw)
+        if args[0] == "diff":
+            return R(diff)
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            return R("", 0 if args[2] == src else 1)
+        if args[0] == "merge-base":
+            return R(src + "\n")
+        return R("", 1)
+    owner_ev = [{"event": "labeled", "label": {"name": DEPLOY_FIX_LABEL}, "actor": {"login": "JiRaska"},
+                 "created_at": label_at}]
+    grant = {16940: label_at}
+    now = datetime.datetime(2026, 11, 20, 15, tzinfo=datetime.timezone.utc).timestamp()
+    def live(gh, v=view):
+        cache: dict = {}
+        why = fix_evidence(gh, git, "b" * 40, AG, "m" * 40, v["head_sha"], cache)
+        d = deploy_fix_claim(gh, git, "b" * 40, AG, "m" * 40, v, cache, now=now)
+        return why, d
+    why, d = live(G(owner_ev, grant))
+    check("deploy fix live: the job rule alone refuses #16940 (the deadlock)", why is not None and "absent" in why, str(why))
+    check("deploy fix live: the owner-labelled #16940 shape is admitted", d is None, str(d))
+    _w, d = live(G([{**owner_ev[0], "actor": {"login": "some-agent"}}], {}))
+    check("deploy fix live must FAIL: label applied by someone other than the owner", d is not None and "not the repo owner" in d, str(d))
+    _w, d = live(G(owner_ev, {1: f"{day}T09:00:00Z", **grant}))
+    check("deploy fix live must FAIL: over the daily cap", d is not None and "daily cap" in d, str(d))
+    _w, d = live(G(owner_ev, None))
+    check("deploy fix live must FAIL: grants not enumerable", d is not None and "enumerated" in d, str(d))
+    _w, d = live(G(owner_ev, grant, cid="failure"))
+    check("deploy fix live must FAIL: can-i-deploy failed in the run", d is not None and "can-i-deploy" in d, str(d))
+    _w, d = live(G(owner_ev, grant, commits=[bot_commit, human]))
+    check("deploy fix live must FAIL: a human commit pushed after the label", d is not None and "verified commit" in d, str(d))
+    _w, d = live(G(owner_ev, grant, commits=[{**bot_commit, "date": f"{day}T14:00:00Z"}]))
+    check("deploy fix live must FAIL: the label predates the last push", d is not None and "before the last commit" in d, str(d))
+    d = deploy_fix_claim(G(owner_ev, grant), git, "b" * 40, AG, "m" * 40, {**view, "labels": ["chore", "gitops"]}, {}, now=now)
+    check("deploy fix live must FAIL: no label", d is not None and DEPLOY_FIX_LABEL in d, str(d))
+    gh = G(owner_ev, grant)
+    cache: dict = {}
+    check("deploy fix live: claim_evidence admits and records a job-level strength",
+          claim_evidence(gh, git, "b" * 40, AG, "m" * 40, view, cache, now=now) is None
+          and cache.get((FIX_STRENGTH_KEY, view["head_sha"], AG), (0,))[0] == FIX_JOB_LEVEL)
+    w = claim_evidence(gh, git, "b" * 40, AG, "m" * 40, {**view, "author": "JiRaska"}, {}, now=now)
+    check("deploy fix live must FAIL: claim_evidence keeps the job-rule refusal for a non-bot author",
+          w is not None and "deploy fix" not in w, str(w))
 
 
 def selftest_skip_fix_self_test(check) -> None:
@@ -4797,22 +6000,123 @@ def gate_level_fix_self_test(check) -> None:
     check("refusal visibility: note_not_fix records the head the refusal is about",
           cache.get(NOT_FIX_HEAD_KEY, {}).get(20) == "g" * 40, str(cache.get(NOT_FIX_HEAD_KEY)))
     # Paths a RED gate's entry names outside .github/ (security review of #16832): tokenised, both revs.
-    gates_named = ("gates:\n  - id: adr-registry\n    run: |\n      python3 openbank-infra/scripts/check-db-migration.py --root docs/adr/ > /dev/null\n"
+    gates_named = ("gates:\n  - id: adr-registry\n    run: |\n      PYTHONPATH=build-logic/ python3 openbank-infra/scripts/check-db-migration.py --root docs/adr/ > /dev/null\n"
                    "    selftest_inputs: [\"openbank-infra/scripts/lib/db.py\"]\n"
                    "  - id: green-one\n    run: python3 openbank-infra/scripts/other.py\n")
     fs, ds = gate_named_paths(gates_named, {"adr-registry"})
-    check("named paths: a red gate's run/selftest yield its files and directories; its selftest_inputs (subjects) and a green gate's paths do not",
-          fs == {"openbank-infra/scripts/check-db-migration.py"} and "docs/adr/" in ds
+    check("named paths: a red gate's run/selftest yield its files and code-root directories; its selftest_inputs (subjects), a scanned "
+          "directory (`--root docs/adr/`) and a green gate's paths do not",
+          fs == {"openbank-infra/scripts/check-db-migration.py"} and ds == {"build-logic/"}
           and "openbank-infra/scripts/lib/db.py" not in fs and "openbank-infra/scripts/other.py" not in fs, f"{fs} {ds}")
     fs, ds = gate_named_paths("gates:\n  - id: n\n    run: |\n      PYTHONPATH=a:openbank-infra/scripts python3 ./openbank-infra/scripts/x.py openbank-infra/./scripts/y.py ../up.py /dev/null --root=docs/adr/\n", {"n"})
-    check("named paths: `./x`, `a/./b` normalise, `PYTHONPATH=a:dir` splits on `:`, `..` and absolute tokens are dropped",
-          fs == {"openbank-infra/scripts/x.py", "openbank-infra/scripts/y.py"} and ds == {"openbank-infra/scripts/", "docs/adr/"}, f"{fs} {ds}")
+    check("named paths: `./x`, `a/./b` normalise, `PYTHONPATH=a:dir` splits on `:` (a code root), `..` and absolute tokens are dropped, "
+          "`--root=docs/adr/` is a subject",
+          fs == {"openbank-infra/scripts/x.py", "openbank-infra/scripts/y.py"} and ds == {"openbank-infra/scripts/"}, f"{fs} {ds}")
+    # #16843: a single-segment directory token (`build-logic/`, `docs/`) loses its `/` under normpath and was
+    # dropped by PATH_TOKEN_RE; recorded as a directory from the raw token. Both are named here; both hold
+    # executed code (a PYTHONPATH root, a `python3 docs/x.py`), so both are judge.
+    # stale-ref-ok: docs/x.py is a synthetic self-test input, not a file reference.
+    fs, ds = gate_named_paths("gates:\n  - id: n\n    run: PYTHONPATH=build-logic/ python3 docs/x.py --root=docs/\n", {"n"})
+    check("named paths (#16843): single-segment directory tokens `PYTHONPATH=build-logic/` and `--root=docs/` are recognised",
+          ds == {"build-logic/", "docs/"} and fs == {"docs/x.py"}, f"{fs} {ds}")
+    # Review of #16832: a directory a gate SCANS, DIFFS or GENERATES INTO is its subject, never its judge —
+    # the real shapes: shellcheck's `for root in ... openbank-infra/scripts`, gen-network-policies-drift-gate's
+    # `git diff --exit-code openbank-infra/gitops/components/`, service-runbook-drift's `docs/runbooks/`.
+    # A directory counts only when the gate executes code under it: a named script token, a PYTHONPATH
+    # root, or `unittest discover -s`. Named FILES always count.
+    gates_subject = ("gates:\n  - id: s\n    run: |\n"
+                     "      for root in .github/scripts openbank-infra/scripts; do\n"
+                     "        shellcheck -S warning $(find \"$root\" -name '*.sh')\n"
+                     "      done\n"
+                     "  - id: g\n    run: |\n"
+                     "      python3 openbank-infra/scripts/gen-network-policies.py\n"
+                     "      git add -A --intent-to-add openbank-infra/gitops/components/\n"
+                     "      git diff --exit-code openbank-infra/gitops/components/ docs/runbooks/ --root=docs/\n"
+                     "  - id: t\n    run: |\n"
+                     "      python3 -m unittest discover -s perf/tests -p 'test_*.py'\n"
+                     "      # the harness lives in openbank-infra/tests/promtool/ (prose names the directory)\n"
+                     "      bash openbank-infra/tests/promtool/run.sh\n"
+                     "      ls -s docs/build/\n")
+    fs, ds = gate_named_paths(gates_subject, {"s", "g"})
+    check("named paths (subject dirs): a scanned (`for root in`), diffed (`git diff`) or generated-into directory is NOT judge; the "
+          "executed script still is",
+          fs == {"openbank-infra/scripts/gen-network-policies.py"} and ds == set(), f"{fs} {ds}")
+    fs, ds = gate_named_paths(gates_subject, {"t"})
+    check("named paths (code roots): `unittest discover -s dir` and a directory holding a named `bash dir/run.sh` are judge; "
+          "`-s` outside a discover is not",
+          fs == {"openbank-infra/tests/promtool/run.sh"} and ds == {"perf/tests/", "openbank-infra/tests/promtool/"}, f"{fs} {ds}")
+    # Per gate: the directory red gate `s` SCANS is not made judge by the script red gate `g` executes under it.
+    gates_pair = gates_subject.replace("gen-network-policies.py", "x.py").replace("      done\n", "      done\n      echo openbank-infra/scripts/\n")
+    fs, ds = gate_named_paths(gates_pair, {"s", "g"})
+    check("named paths (per gate): a directory one red gate scans is not judge because ANOTHER red gate executes a script under it",
+          "openbank-infra/scripts/" not in ds and fs == {"openbank-infra/scripts/x.py"}, f"{fs} {ds}")
+    # Review of #16885: the subject rule was fail-open for directories code runs FROM. Each shape below is a
+    # judge directory; each is must-FAIL against the rule that only knew named scripts and code roots.
+    real_dirs = {"tools/", "tools/lint/", "pkg/", "pkg/sub/"}
+    shapes = [
+        ("cd", "cd openbank-infra/tooling && ./run-all", {"openbank-infra/tooling/"}),
+        ("make -C", "make -C openbank-infra/make check", {"openbank-infra/make/"}),
+        ("-C", "git -C openbank-x/sub status", {"openbank-x/sub/"}),
+        ("-p bare segment (gates.yaml selftest shape)", "./gradlew -p build-logic test --build-cache", {"build-logic/"}),
+        ("--prefix", "npm --prefix openbank-admin-ui run lint-gate", {"openbank-admin-ui/"}),
+        ("--project-dir", "tool --project-dir=perf/proj verify", {"perf/proj/"}),
+        ("node dir/", "node openbank-x/gate/ --check", {"openbank-x/gate/"}),
+        ("find -exec", "find openbank-x/checks -name '*.t' -exec {} +", {"openbank-x/checks/"}),
+        ("xargs", "ls openbank-x/bin | xargs -n1 sh", {"openbank-x/bin/"}),
+        ("-m a.b.c", "python3 -m pkg.sub.mod --strict", {"pkg/", "pkg/sub/"}),
+        ("bash -c fallback", "bash -c \"$CMD\" openbank-x/opaque/", {"openbank-x/opaque/"}),
+        ("eval fallback", "eval \"$X\"; ls openbank-x/also/", {"openbank-x/also/"}),
+    ]
+    for name, cmd, want in shapes:
+        _fs, ds = gate_named_paths(f"gates:\n  - id: q\n    run: {cmd}\n", {"q"}, is_dir=lambda d: d in real_dirs)
+        check(f"named paths (#16885 review): `{name}` makes its directory judge", want <= ds, f"{cmd!r}: {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: q\n    run: bash tools/gate/run --all\n", {"q"}, is_dir=lambda d: False)
+    check("named paths (#16885 review): an extensionless program `bash tools/gate/run` is an executed FILE, never a (subject) directory",
+          fs == {"tools/gate/run"} and ds == set(), f"{fs} {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: q\n    run: ls tools/gate/; bash tools/gate/run\n", {"q"}, is_dir=lambda d: False)
+    check("named paths (#16885 review): a named directory holding an extensionless executed program is judge",
+          fs == {"tools/gate/run"} and ds == {"tools/gate/"}, f"{fs} {ds}")
+    fs, ds = gate_named_paths("gates:\n  - id: q\n    run: python3 -m nopkg.mod; git diff --exit-code docs/runbooks/\n", {"q"},
+                              is_dir=lambda d: False)
+    check("named paths (#16885 review): `-m` prefixes that are not directories, and a diffed directory, are still not judge",
+          ds == set(), f"{fs} {ds}")
+    # REAL text: this checkout's own gates.yaml (synthetic fixtures once hid 355/355 UNKNOWN, #16832). The
+    # subject directories of the review finding must not be judge; the code roots and named scripts must be.
+    real_gates = pathlib.Path(GATES_YAML)
+    if real_gates.is_file():
+        rtext = real_gates.read_text(encoding="utf-8")
+        rids = set(gate_ids(rtext))
+        want = {"gen-network-policies-drift-gate", "shellcheck", "service-runbook-drift", "governance-script-unit-tests"}
+        rfs, rds = gate_named_paths(rtext, want)
+        rfs_net, rds_net = gate_named_paths(rtext, {"gen-network-policies-drift-gate"})
+        rfs_sh, rds_sh = gate_named_paths(rtext, {"shellcheck"})
+        rfs_rb, rds_rb = gate_named_paths(rtext, {"service-runbook-drift"})
+        rfs_gu, rds_gu = gate_named_paths(rtext, {"governance-script-unit-tests"})
+        check("real gates.yaml: the four gates of the review finding exist (a renamed gate makes this case vacuous)",
+              want <= rids, str(sorted(want - rids)))
+        check("real gates.yaml: gen-network-policies-drift-gate names its generator as judge and NOT openbank-infra/gitops/components/",
+              "openbank-infra/scripts/gen-network-policies.py" in rfs_net and "openbank-infra/gitops/components/" not in rds_net
+              and not any(d.startswith("openbank-infra/gitops/") for d in rds_net), f"{rfs_net} {rds_net}")
+        check("real gates.yaml: shellcheck (lints openbank-infra/scripts/) names no judge directory at all",
+              rds_sh == set(), f"{rfs_sh} {rds_sh}")
+        check("real gates.yaml: service-runbook-drift names its generator, NOT docs/runbooks/",
+              "openbank-infra/scripts/generate-service-runbooks.py" in rfs_rb and "docs/runbooks/" not in rds_rb, f"{rfs_rb} {rds_rb}")
+        _f, rds_tp = gate_named_paths(rtext, {"test-provenance-cache"})
+        check("real gates.yaml: test-provenance-cache's `./gradlew -p build-logic` selftest makes build-logic/ judge (#16885 review)",
+              "test-provenance-cache" in rids and "build-logic/" in rds_tp, f"{rds_tp}")
+        check("real gates.yaml: governance-script-unit-tests' `unittest discover -s` roots are judge directories",
+              {"openbank-infra/scripts/", "perf/tests/"} <= rds_gu, f"{rfs_gu} {rds_gu}")
+        all_fs, all_ds = gate_named_paths(rtext, rids)
+        check("real gates.yaml: no judge directory is a top-level service, docs or gitops tree (over-refusal is what bit before)",
+              not any(d.startswith(("openbank-infra/gitops/", "docs/")) or re.fullmatch(r"openbank-[a-z-]+/src/main/", d) for d in all_ds),
+              str(sorted(all_ds)))
     def ngit(*a, **_k):
         if a[0] == "show" and a[1].endswith(f":{GATES_YAML}"):
             return _R(0, gates_named)
         return git(*a, **_k)
     named_edits = {"a" * 39 + "2": "openbank-infra/scripts/check-db-migration.py", "a" * 39 + "3": "docs/adr/0011-under-named-dir.md",
-                   "a" * 39 + "4": "openbank-infra/scripts/lib/db.py", "a" * 39 + "5": "openbank-infra/scripts/other.py"}
+                   "a" * 39 + "4": "openbank-infra/scripts/lib/db.py", "a" * 39 + "5": "openbank-infra/scripts/other.py",
+                   "a" * 39 + "9": "build-logic/helper.py"}
     files.update(named_edits)
     for h_ in named_edits:
         heads[h_] = {"data": [{"id": "adr-registry", "status": "ok"}]}
@@ -4821,8 +6125,12 @@ def gate_level_fix_self_test(check) -> None:
     nf_n = cache_n.get(NOT_FIX_KEY, {})
     check("named paths (live): a head editing the script a RED gate's run names (outside .github/) is refused, naming the path",
           got_n["a" * 39 + "2"] == [] and "check-db-migration.py" in nf_n.get(40, "") and "names in its run/selftest" in nf_n.get(40, ""), f"{got_n['a' * 39 + '2']} {nf_n.get(40)}")
-    check("named paths (live): a head editing a file under a directory the red gate's run names is refused",
-          got_n["a" * 39 + "3"] == [] and "docs/adr/0011-under-named-dir.md" in nf_n.get(41, ""), f"{got_n['a' * 39 + '3']} {nf_n.get(41)}")
+    check("named paths (live): a head editing a file under a directory the red gate merely SCANS (`--root docs/adr/`) is the fix, gate-verified",
+          got_n["a" * 39 + "3"] == [MR] and 41 not in nf_n and cache_n.get((FIX_STRENGTH_KEY, "a" * 39 + "3", MR), (0, ""))[0] == V,
+          f"{got_n['a' * 39 + '3']} {nf_n.get(41)}")
+    check("named paths (live, #16843): a head editing a file under a single-segment code root (`PYTHONPATH=build-logic/`) is refused",
+          got_n["a" * 39 + "9"] == [] and "build-logic/helper.py" in nf_n.get(44, "") and "names in its run/selftest" in nf_n.get(44, ""),
+          f"{got_n['a' * 39 + '9']} {nf_n.get(44)}")
     check("named paths (live): a head editing a red gate's declared selftest INPUT outside .github/ is still the fix, gate-verified "
           "(subjects are not judge code)",
           got_n["a" * 39 + "4"] == [MR] and 42 not in nf_n and cache_n.get((FIX_STRENGTH_KEY, "a" * 39 + "4", MR), (0, ""))[0] == V,
@@ -5963,6 +7271,27 @@ def main_ci_result(gh, git, ctx: str, sha: str, cache: dict | None = None, depth
     return None
 
 
+def stale_base_refusal(gh, git, base: str, view: dict, summary: dict) -> str | None:
+    """Why an armed, behind PR whose red was NOT red on main at its base (but is green on main now) must
+    NOT be update-branched, or None. Only a refresh: no merge decision reads this. Fails closed."""
+    head = view["head_sha"]
+    if view.get("draft"):
+        return "it is a draft"
+    if not view.get("auto_merge"):
+        return "it is not armed"
+    if head in _STALE_BASE_MEMO:
+        return "this head was already update-branched — its own defect"
+    parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
+    if any(gh.app_statuses(sha).get(STALE_BASE_CONTEXT, ("", ""))[0] == "success" for sha in [head] + parents[1:2]):
+        return "its lineage was already refreshed over a newer main — its own defect"
+    if len(summary.get("stale_base_refreshed", [])) >= STALE_BASE_REFRESH_CAP:
+        return f"the stale-base cap ({STALE_BASE_REFRESH_CAP}/tick) is reached"
+    if git("merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", base, head,
+           check=False).returncode != 0:
+        return "it conflicts with main"
+    return None
+
+
 def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict) -> None:
     """Stale-red refresh (ADR-0343): an armed PR left red only because MAIN was red when its CI ran gets
     ONE update-branch once main is green again. Every failing required context must have failed on main
@@ -5971,6 +7300,7 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
     then fails the attribution test and is never refreshed again — no loop. Oldest first, at most
     STALE_RED_CAP per tick. Git queries and the API only; no PR code runs."""
     summary.setdefault("refreshed", [])
+    summary.setdefault("stale_base_refreshed", [])
     cache: dict = {}
     for view, failing in red:
         if len(summary["refreshed"]) >= STALE_RED_CAP:
@@ -5983,17 +7313,36 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
         if not mb:
             continue
         why = None
+        base_stale = []
         for ctx in failing:
-            at_base = main_ci_result(gh, git, ctx, mb, cache)
-            if not at_base or at_base[1] != "failure":
-                why = f"{ctx} was not red on main at its base {mb[:12]} — its own defect"
-                break
             at_tip = main_ci_result(gh, git, ctx, base, cache)   # one walk per tick, not one per PR
             if not at_tip or at_tip[1] not in OK_STATES:
                 why = f"{ctx} is not green on main yet — no point refreshing"
                 break
+            at_base = main_ci_result(gh, git, ctx, mb, cache)
+            if not at_base or at_base[1] != "failure":
+                base_stale.append(ctx)
         if why:
             log(f"#{n:>6} stale-red skip: {why}")
+            continue
+        if base_stale:
+            why = stale_base_refusal(gh, git, base, view, summary)
+            if why:
+                log(f"#{n:>6} stale-red skip: {', '.join(base_stale)} was not red on main at its base "
+                    f"{mb[:12]} and {why}")
+                continue
+            msg = (f"stale-base refresh: {', '.join(failing)} red over old base {mb[:12]}, "
+                   f"not red on main {base[:12]}")
+            if shadow:
+                log(f"#{n:>6} {msg} (shadow: no update)")
+                continue
+            ok = gh.update_branch(n, head)
+            _STALE_BASE_MEMO.add(head)
+            log(f"#{n:>6} {msg}: update-branch {'requested' if ok else 'refused'}")
+            if ok:
+                gh.post_status(head, "success", f"update-branched once over main {base[:12]}",
+                               context=STALE_BASE_CONTEXT)
+                summary["stale_base_refreshed"].append(n)
             continue
         msg = f"stale-red refresh: {', '.join(failing)} was red on main {mb[:12]}, green on {base[:12]}"
         if shadow:
@@ -6029,6 +7378,193 @@ def fix_job_evidence(main_jobs: dict[str, str | None] | None, head_jobs: dict[st
         return "no job record on the head"
     missing = [f"{n} ({head_jobs.get(n) or 'absent'})" for n in failed if head_jobs.get(n) not in OK_STATES]
     return f"did not run green on the head: {', '.join(missing)}" if missing else None
+
+
+def pin_changes(diff: str | None) -> tuple[list[tuple[str, str, str]], str | None]:
+    """([(service, new tag, new ref)], why-not) of a `git diff -U0` text. Parsed by structure, never by
+    line prefix: a file block's header runs from `diff --git` to its first `@@`, and only `index`,
+    `--- a/` and `+++ b/` may appear there (a new, deleted, renamed, copied, mode-changed or binary file
+    refuses). Inside a hunk every `-`/`+` line is CONTENT — an added `++x` or a removed `---` YAML
+    separator is a changed line like any other, and must be an image pin. Each hunk must replace pins
+    one for one, and a new pin must keep the replaced line's indentation and exact registry/repository:
+    only the tag and digest may change."""
+    if diff is None:
+        return [], "diff unreadable"
+    out: list[tuple[str, str, str]] = []
+    state, rem, add = "none", [], []
+
+    def close() -> str | None:
+        if len(rem) != len(add):
+            return "a hunk does not replace image pins one for one"
+        for r, a in zip(rem, add, strict=True):
+            if (r.group(1), r.group(2)) != (a.group(1), a.group(2)):
+                return f"a pin changes its registry or repository ({r.group(2)} -> {a.group(2)})"
+            out.append((a.group(3), a.group(4), a.group(2)))
+        rem.clear()
+        add.clear()
+        return None
+
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            why = close()
+            if why:
+                return [], why
+            state = "header"
+            continue
+        if state == "header":
+            if line.startswith("@@ "):
+                state = "hunk"
+            elif not (line.startswith("index ") or line.startswith("--- a/") or line.startswith("+++ b/")):
+                return [], f"not a plain modification of an existing file: {line[:60]!r}"
+            continue
+        if state != "hunk":
+            return [], f"unparseable diff line: {line[:60]!r}"
+        if line.startswith("@@ "):
+            why = close()
+            if why:
+                return [], why
+            continue
+        if line.startswith("\\"):
+            continue   # "\ No newline at end of file"
+        if not line.startswith(("+", "-")):
+            return [], f"unexpected diff line: {line[:60]!r}"
+        m = PIN_LINE_RE.fullmatch(line[1:])
+        if not m:
+            return [], f"changes a line that is not an image pin: {line[:60]!r}"
+        (add if line[0] == "+" else rem).append(m)
+    why = close()
+    if why:
+        return [], why
+    if not out:
+        return [], "changes no image pin"
+    return out, None
+
+
+def deploy_fix_refusal(view: dict, ctx: str, main_jobs: dict[str, str | None] | None,
+                       entries: list[tuple[str, str, str, str]] | None, diff: str | None, run: dict | None,
+                       run_jobs: dict[str, str | None] | None, src_on_main: bool, label_why: str | None,
+                       commits: list[dict] | None = None, label_at: str | None = None) -> str | None:
+    """Why `view` may NOT claim the fix slot for `ctx` as an auto-deploy gitops PR (see DEPLOY_FIX_LABEL),
+    or None when it may. Pure: every input was read by deploy_fix_claim from git or the API. `entries` are
+    (status, old mode, new mode, path) of base...head; `commits` the head's commits since the merge-base
+    (GitHub.compare_commits); `label_at` the owner's latest label event time.
+
+    Trust anchor: the run publishes its built digests nowhere this script can read, so the pins are not
+    cross-checked against the build. What ties the pins to the run is that every commit is the App's —
+    authored by it and committed by it or by GitHub on its behalf (`web-flow`, which is how the API
+    commits of auto-deploy and the train's own update-branch merges are committed), with a signature
+    GitHub verified — and that the owner's label is newer than every non-merge commit, so a push after
+    the label withdraws the grant."""
+    if view.get("author") != BOT_LOGIN:
+        return f"author {view.get('author') or 'unknown'} is not {BOT_LOGIN}"
+    m = DEPLOY_BRANCH_RE.fullmatch(view.get("head_ref") or "")
+    if not m:
+        return "head branch is not an auto-deploy gitops branch"
+    src, run_id = m.group(1), int(m.group(2))
+    if not entries:
+        return "changed files unreadable"
+    for status, old_mode, new_mode, path in entries:
+        if status != "M" or old_mode != "100644" or new_mode != "100644":
+            return f"{path}: {status} {old_mode}->{new_mode} is not a plain modification of a regular file"
+        if unsafe_path(path) or not path.startswith(GITOPS_PIN_PREFIX) or not path.endswith(".yaml"):
+            return f"changes {path}, not a gitops image-pin file"
+    pins, why = pin_changes(diff)
+    if why:
+        return why
+    stale = [f"{s}:{t}" for s, t, _r in pins if not t.endswith(f"-{src[:8]}")]
+    if stale:
+        return f"pin {stale[0]} was not built from the run's source {src[:12]} (a carried or foreign pin)"
+    if not commits:
+        return "the head's commits are unreadable"
+    for c in commits:
+        # A merge commit (two parents) may also be the train's own update-branch merge, authored by the
+        # branch-updater App (#16947); its content is still bounded by the pin-only base...head diff above.
+        authors = (BOT_LOGIN, BRANCH_UPDATER_LOGIN) if c.get("parents") == 2 else (BOT_LOGIN,)
+        if not (c.get("author") in authors and c.get("committer") in (BOT_LOGIN, "web-flow") and c.get("verified") is True):
+            return (f"commit {str(c.get('sha'))[:12]} is not the App's verified commit "
+                    f"(author {c.get('author')}, committer {c.get('committer')}, verified {c.get('verified')})")
+    if not isinstance(run, dict):
+        return f"auto-deploy run {run_id} unreadable"
+    if (run.get("id") != run_id or run.get("path") != AUTO_DEPLOY_WORKFLOW or run.get("head_sha") != src
+            or run.get("head_branch") != "main"):
+        return f"run {run_id} is not {AUTO_DEPLOY_WORKFLOW} over main at {src[:12]}"
+    if not src_on_main:
+        return f"the run's source {src[:12]} is not on main"
+    missing = [j for j in DEPLOY_REQUIRED_JOBS if (run_jobs or {}).get(j) != "success"]
+    if missing:
+        return f"run {run_id} job `{missing[0]}` did not succeed ({(run_jobs or {}).get(missing[0]) or 'absent'})"
+    if not main_jobs:
+        return "no job record for main's red run"
+    failed = sorted(n for n, c in main_jobs.items() if c is not None and c not in FIX_JOB_OK and n != ctx)
+    if not failed:
+        return "main's red run names no failed job besides the aggregate"
+    other = [n for n in failed if not CONTRACT_JOB_RE.fullmatch(n)]
+    if other:
+        return f"main is red on `{other[0]}`, not a contract job: a deploy cannot fix it"
+    if label_why:
+        return label_why
+    pushed = [str(c.get("date") or "") for c in commits if c.get("parents") != 2]
+    if not label_at or not pushed or any(not ISO_Z_RE.fullmatch(d) for d in pushed + [label_at]):
+        return "label or commit times unreadable"
+    if label_at <= max(pushed):
+        return f"{DEPLOY_FIX_LABEL} was applied ({label_at}) before the last commit ({max(pushed)}): re-apply it"
+    return None
+
+
+def deploy_fix_claim(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None,
+                     now: float | None = None) -> str | None:
+    """None = `view`'s head claims `ctx` as an auto-deploy fix (deploy_fix_refusal). The cheap refusals
+    (author, label, branch) cost no API read; the rest is read once per head and context per tick."""
+    if view.get("author") != BOT_LOGIN:
+        return deploy_fix_refusal(view, ctx, None, None, None, None, None, False, None)
+    if DEPLOY_FIX_LABEL not in (view.get("labels") or []):
+        return f"no {DEPLOY_FIX_LABEL} label"
+    m = DEPLOY_BRANCH_RE.fullmatch(view.get("head_ref") or "")
+    head = view.get("head_sha") or ""
+    if not m or not SHA_RE.fullmatch(head):
+        return deploy_fix_refusal({**view, "head_ref": ""}, ctx, None, None, None, None, None, False, None)
+    key = ("deploy_fix", view.get("number"), head, ctx, main_commit)
+    if cache is not None and key in cache:
+        return cache[key]
+    src, run_id = m.group(1), int(m.group(2))
+    r = git("diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--no-textconv", f"{base}...{head}", check=False)
+    diff = r.stdout if r.returncode == 0 else None
+    entries = [(c.status, c.old_mode, c.new_mode, p) for c in changed_entries(git, f"{base}...{head}") for p in c.paths]
+    src_on_main = git("merge-base", "--is-ancestor", src, base, check=False).returncode == 0
+    mb = git("merge-base", base, head, check=False).stdout.strip()
+    commits = gh.compare_commits(mb, head) if SHA_RE.fullmatch(mb) else None
+    owner = (getattr(gh, "repo", "") or "").split("/", 1)[0]
+    day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if now is None else now))
+    n = view.get("number")
+    label_why, label_at = "repository owner or PR number unknown", None
+    if owner and isinstance(n, int):
+        events = gh.issue_events(n)
+        label_at, _ = urgent_grant(events, owner, DEPLOY_FIX_LABEL)
+        label_why = urgent_refusal(n, events, owner, gh.urgent_grants_today(day, owner, DEPLOY_FIX_LABEL),
+                                   DEPLOY_FIX_DAILY_CAP, day, label=DEPLOY_FIX_LABEL)
+    why = deploy_fix_refusal(view, ctx, cached_ctx_jobs(gh, main_commit, ctx, cache), entries, diff,
+                             gh.workflow_run(run_id), gh.run_jobs(run_id), src_on_main, label_why, commits, label_at)
+    if cache is not None:
+        cache[key] = why
+    return why
+
+
+def claim_evidence(gh, git, base: str, ctx: str, main_commit: str, view: dict, cache: dict | None,
+                   now: float | None = None) -> str | None:
+    """fix_evidence, or — for an App-authored auto-deploy PR only — the deploy fix claim (#16943). The
+    deploy path is consulted only after the job rule refused, and its refusal is appended to that reason
+    when the PR carries the label, so a refused deploy fix says why."""
+    head = view["head_sha"]
+    why = fix_evidence(gh, git, base, ctx, main_commit, head, cache)
+    if not why or view.get("author") != BOT_LOGIN or DEPLOY_FIX_LABEL not in (view.get("labels") or []):
+        return why
+    dwhy = deploy_fix_claim(gh, git, base, ctx, main_commit, view, cache, now=now)
+    if dwhy:
+        return f"{why}; deploy fix refused: {dwhy}"
+    if cache is not None:
+        cache[(FIX_STRENGTH_KEY, head, ctx)] = (FIX_JOB_LEVEL, "deploy fix (can-i-deploy passed, owner-labelled)")
+    log(f"#{view.get('number', 0):>6} deploy fix for {ctx}: auto-deploy pins, can-i-deploy green, {DEPLOY_FIX_LABEL}")
+    return None
 
 
 def note_not_fix(cache: dict | None, view: dict, why: str) -> None:
@@ -6201,7 +7737,7 @@ def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache
         at_base = main_ci_result(gh, git, ctx, mb, cache)
         if not at_base or at_base[1] != "failure":
             continue
-        why = fix_evidence(gh, git, base, ctx, at_base[0], view["head_sha"], cache)
+        why = claim_evidence(gh, git, base, ctx, at_base[0], view, cache)
         if why:
             note_not_fix(cache if record else None, view, f"{ctx} {why}")
             continue
@@ -6261,7 +7797,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
         mb = git("merge-base", claim_from, base, check=False).stdout.strip()
         for c in claimed:
             at_base = main_ci_result(gh, git, c, mb, cache) if mb else None
-            why = (fix_evidence(gh, git, base, c, at_base[0], head, cache)
+            why = (claim_evidence(gh, git, base, c, at_base[0], {**view, "head_sha": head}, cache)
                    if at_base else "no main verdict at the claim's base")
             if why:
                 note_not_fix(cache, view, f"combined head: {c} {why}")
@@ -7050,29 +8586,39 @@ def check_declaration() -> int:
     if not re.search(r'^\s*MERGE_TRAIN_SHADOW: "(true|false)"\s*$', code, re.MULTILINE):
         fails.append('MERGE_TRAIN_SHADOW must be declared as "true" or "false"')
     # The strict batch cap is the rollback switch of the strict carrier: declared, a positive integer.
-    if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as a positive integer ("1" = no strict carrier)')
+    if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "\$\{\{ vars\.MERGE_TRAIN_STRICT_BATCH_CAP \|\| \'(?:[1-9]|1[0-6])\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as "${{ vars.MERGE_TRAIN_STRICT_BATCH_CAP || \'<n>\' }}" ("1" = no strict carrier)')
     # Speculative stacking's rollback switch: declared outright, carried by settle, its window handed to publish.
-    if not re.search(r'^\s*MERGE_TRAIN_SPECULATIVE_STACK: "(true|false)"\s*$', code, re.MULTILINE):
-        fails.append('MERGE_TRAIN_SPECULATIVE_STACK must be declared as "true" or "false" ("false" = no stacking)')
+    if not re.search(r'^\s*MERGE_TRAIN_SPECULATIVE_STACK: "\$\{\{ vars\.MERGE_TRAIN_SPECULATIVE_STACK \|\| \'false\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_SPECULATIVE_STACK must be declared as \"${{ vars.MERGE_TRAIN_SPECULATIVE_STACK || 'false' }}\"")
     if "SPECULATIVE_STACK: ${{ env.MERGE_TRAIN_SPECULATIVE_STACK }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_SPECULATIVE_STACK")
     if "STACK_HEAD: ${{ needs.settle.outputs.stack_head }}" not in jobs.get("publish", ""):
         fails.append("publish must receive settle's stacking window (stack_pr / stack_head)")
     # Expedite lane's rollback switch and cap: declared outright, carried by settle, its window handed on.
-    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "(true|false)"\s*$', code, re.MULTILINE):
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_LANE: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_LANE \|\| \'(true|false)\' \}\}"\s*$',
+                     code, re.MULTILINE):
         fails.append('MERGE_TRAIN_EXPEDITE_LANE must be declared as "true" or "false" ("false" = no expedite lane)')
-    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as a positive integer")
+    if not re.search(r'^\s*MERGE_TRAIN_EXPEDITE_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_EXPEDITE_DAILY_CAP \|\| \'(?:[0-9]|1[0-9]|20)\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_EXPEDITE_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_EXPEDITE_DAILY_CAP || '<0-20>' }}\"")
     if "EXPEDITE_LANE: ${{ env.MERGE_TRAIN_EXPEDITE_LANE }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_EXPEDITE_LANE")
     for job in ("build", "publish"):
         if "EXPEDITE_PR: ${{ needs.settle.outputs.expedite_pr }}" not in jobs.get(job, ""):
             fails.append(f"{job} must receive settle's expedite window (expedite_pr)")
-    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
-        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as a positive integer")
+    if not re.search(r'^\s*MERGE_TRAIN_URGENT_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_URGENT_DAILY_CAP \|\| \'(?:[0-9]|1[0-9]|20)\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_URGENT_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_URGENT_DAILY_CAP || '<0-20>' }}\"")
     if "URGENT_DAILY_CAP: ${{ env.MERGE_TRAIN_URGENT_DAILY_CAP }}" not in jobs.get("settle", ""):
         fails.append("settle must carry MERGE_TRAIN_URGENT_DAILY_CAP")
+    if not re.search(r'^\s*MERGE_TRAIN_HOTFIX_DAILY_CAP: "\$\{\{ vars\.MERGE_TRAIN_HOTFIX_DAILY_CAP \|\| \'(?:[0-9]|1[0-9]|20)\' \}\}"\s*$',
+                     code, re.MULTILINE):
+        fails.append("MERGE_TRAIN_HOTFIX_DAILY_CAP must be declared as \"${{ vars.MERGE_TRAIN_HOTFIX_DAILY_CAP || '<0-20>' }}\"")
+    if "HOTFIX_DAILY_CAP: ${{ env.MERGE_TRAIN_HOTFIX_DAILY_CAP }}" not in jobs.get("settle", ""):
+        fails.append("settle must carry MERGE_TRAIN_HOTFIX_DAILY_CAP")
     if "EXPEDITE_DAILY_CAP: ${{ env.MERGE_TRAIN_EXPEDITE_DAILY_CAP }}" not in jobs.get("publish", ""):
         fails.append("publish must carry MERGE_TRAIN_EXPEDITE_DAILY_CAP (it re-checks the cap live)")
     # The safety is a runtime property: settle must consult the live ruleset before merging, whatever the flag says.
@@ -7221,6 +8767,22 @@ class FakeGitHub:
                        "base": {"ref": self.branch, "repo": {"full_name": self.repo}}}
 
     def head_refspec(self, n): return f"refs/heads/{self.prs[n]['head']['ref']}"
+    # Hotfix lane / strict aging (end-to-end cases): fixtures default to "nothing labelled, times unknowable".
+    def pr_timeline(self, n): return list(self.__dict__.get("timelines", {}).get(n, []))
+    def urgent_grants_today(self, day, owner, label=URGENT_LABEL):
+        evs = [{**e, "issue": {"number": n}} for n, t in self.__dict__.get("timelines", {}).items() for e in t]
+        return urgent_grants(evs, owner, day, label)
+    def issue_comments(self, n):
+        return [{"user": {"login": BOT_LOGIN}, "body": t} for m, t in self.comments if m == n]
+    def commit_parents(self, sha):
+        return self.g("rev-list", "--parents", "-n", "1", sha).stdout.split()[1:]
+    def head_arrived_at(self, sha, branch): return self.__dict__.get("arrivals", {}).get(sha)
+    def commit_meta(self, sha): return None
+    def green_since(self, sha): return self.__dict__.get("green_at", {}).get(sha)
+    def armed_since(self, n): return self.__dict__.get("armed_at", {}).get(n)
+    def unverified(self, sha, guard):
+        bad = [c for c in self.required() if c != STATUS_CONTEXT and self.checks(sha).get(c) != "success"]
+        return f"required context(s) not green on the head now: {', '.join(bad)}" if bad else None
     def required(self): return list(SYN_REQUIRED)
     def main_sha(self):
         # Semantically "live main NOW", re-read by production code before every merge; the fixture's
@@ -7310,7 +8872,7 @@ class FakeGitHub:
         self.__dict__["_n"] = self.__dict__.get("_n", 0) + 1
         seq[sha] = seq.get(sha, [])[:len(self.statuses[sha]) - 1] + [self._n]
 
-    def comment(self, n, text): self.comments.append((n, text))
+    def comment(self, n, text): self.comments.append((n, text)); return True
 
     def merge(self, n, head):
         if self.prs[n]["head"]["sha"] != head or n in self.refuse_merge:
@@ -7324,6 +8886,7 @@ class FakeGitHub:
         sha = self.main_sha()
         self.prs[n]["state"] = "closed"
         self.prs[n]["merged_at"] = "2026-01-01T00:00:00Z"
+        self.prs[n]["merged"], self.prs[n]["merge_commit_sha"] = True, sha
         self.merged.append(n)
         if self.foreign_after_merge:
             p = pathlib.Path(self.origin, self.foreign_after_merge)
@@ -8176,6 +9739,391 @@ def prefetch_self_test(check) -> None:
         API_STATS.update(saved[3])
 
 
+def strict_aging_self_test(check) -> None:
+    """Strict-lane aging: threshold, lift on reservation, fail open, exemptions."""
+    now, thr = 1795262400.0, 1800
+
+    class GH:
+        def __init__(self, green, armed): self.g, self.a = green, armed
+        def green_since(self, sha): return self.g
+        def armed_since(self, n): return self.a
+
+    strict = [("green", {"number": 17003, "head_sha": "a" * 40})]
+
+    def settle(gh, summary=None, holder=None, sco=False, exempt=frozenset()):
+        s = {"in_flight": False} if summary is None else summary
+        apply_strict_aging(gh, s, strict, set(exempt), holder, sco, now, thr)
+        return s
+
+    s = settle(GH(now - thr, now - 4000))
+    check("strict aging must-FAIL: green+armed exactly at threshold -> no new carrier (starvation case)",
+          s["in_flight"] is True and s.get("strict_aging_hold") == f"strict-aging hold: #17003 waited {thr}s", repr(s))
+    s = settle(GH(now - thr + 1, now - 4000))
+    check("strict aging: below threshold -> carriers publish as before", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 4000, now - 100))
+    check("strict aging: re-armed recently -> the later time counts, no hold", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, now - 9000), holder=17003)
+    check("strict aging: hold lifts once the strict reservation is taken", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, now - 9000), sco=True)
+    check("strict aging: no hold while a strict carrier is open", s == {"in_flight": False}, repr(s))
+    s = settle(GH(None, now - 9000))
+    check("strict aging: unknowable green time -> no hold (fail open)", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, None))
+    check("strict aging: unknowable armed time -> no hold (fail open)", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 9000, now - 9000), exempt={17003})
+    check("strict aging: urgent/hotfix PRs are not aged", s == {"in_flight": False}, repr(s))
+    s = settle(GH(now - 3000, now - 3000), summary={"in_flight": True, "expedite_window": 5})
+    check("strict aging must-FAIL: an aged strict PR closes the expedite window",
+          s["in_flight"] is True and "expedite_window" not in s, repr(s))
+    s = settle(GH(now - 9000, now - 9000), summary={"in_flight": True})
+    check("strict aging: in-flight carriers untouched (nothing cancelled)", s == {"in_flight": True}, repr(s))
+    s = {"in_flight": False}
+    apply_strict_aging(GH(now - thr - 3600, now - 99999), s, strict, set(), None, False, now, thr, 3600)
+    check("strict aging: a head past its hold budget is released (fast lane proceeds)", s == {"in_flight": False}, repr(s))
+    s = {"in_flight": False}
+    apply_strict_aging(GH(now - thr - 3599, now - 99999), s, strict, set(), None, False, now, thr, 3600)
+    check("strict aging must-FAIL: within its hold budget the head still holds", s.get("in_flight") is True, repr(s))
+    s = {"in_flight": False}
+    apply_strict_aging(GH(now - 3000, now - 3000), s, strict, set(), None, False, now, thr, 3600, main_red=True)
+    check("strict aging: red main (fix and deploy-fix lanes) is never held", s == {"in_flight": False}, repr(s))
+    # Global budget: total held since the last carrier merge, not per head only.
+    s = {"in_flight": False}
+    got = strict_aging_candidate(GH(now - thr - 600, now - 99999), strict, set(), now, thr, 3600,
+                                 lambda: now - 4000)
+    check("strict aging: within the global budget since the last carrier merge -> holds", got is not None, repr(got))
+    got = strict_aging_candidate(GH(now - thr - 600, now - 99999), [*strict, ("green", {"number": 17004, "head_sha": "b" * 40})],
+                                 set(), now, thr, 3600, lambda: None)
+    check("strict aging: no carrier merge in the horizon -> earliest hold start counts", got is not None, repr(got))
+
+    class Rot(GH):   # a rotation of heads: each young for its own budget, but the hold has run for 2 h overall
+        def green_since(self, sha): return {"a" * 40: now - thr - 100, "b" * 40: now - thr - 7300}[sha]
+    got = strict_aging_candidate(Rot(0, now - 99999), [("green", {"number": 1, "head_sha": "a" * 40})], set(), now, thr,
+                                 3600, lambda: now - 7200)
+    check("strict aging must-FAIL: the hold has run > budget since the last carrier merge -> released (global cap)",
+          got is not None and strict_aging_candidate(Rot(0, now - 99999), [("green", {"number": 1, "head_sha": "a" * 40}),
+                                                                           ("green", {"number": 2, "head_sha": "b" * 40})],
+                                                     set(), now, thr, 3600, lambda: now - 7200) is None, repr(got))
+    # REAL-tree case: the auto-merge items of #16863's live timeline (captured 2026-11-21 22:10Z, trimmed to the
+    # fields read). Squash-armed, disarmed, re-armed: armed since the LAST enable, never "unknowable".
+    real_16863 = [{"event": "auto_squash_enabled", "created_at": "2026-11-21T00:50:32Z", "actor": {"login": "JiRaska"}},
+                  {"event": "committed", "sha": "7" * 40},
+                  {"event": "auto_merge_disabled", "created_at": "2026-11-21T16:04:17Z", "actor": {"login": "JiRaska"}},
+                  {"event": "auto_squash_enabled", "created_at": "2026-11-21T22:00:41Z", "actor": {"login": "JiRaska"}}]
+    check("strict aging (real tree #16863) must-FAIL: a squash-armed PR has a known armed time = its last enable",
+          aging_armed_at(real_16863) == iso_epoch("2026-11-21T22:00:41Z"), repr(aging_armed_at(real_16863)))
+    check("strict aging: disabled after the last enable -> not armed (None)",
+          aging_armed_at(real_16863[:3]) is None, repr(aging_armed_at(real_16863[:3])))
+    check("strict aging: merge- and rebase-method enables count too",
+          aging_armed_at([{"event": "auto_merge_enabled", "created_at": "2026-11-21T01:00:00Z"}]) is not None
+          and aging_armed_at([{"event": "auto_rebase_enabled", "created_at": "2026-11-21T01:00:00Z"}]) is not None)
+    g = GitHub("o/r", "main", "")
+    g.pr_timeline = lambda n: real_16863
+    check("strict aging (real tree): GitHub.armed_since reads the captured payload", g.armed_since(16863) is not None)
+    # Reads that fail are "unknowable" (no hold), never a tick abort (#17009 review MEDIUM).
+    real_api = api
+    try:
+        for code in (403, 500):
+            globals()["api"] = lambda *a, _c=code, **k: (_c, {"message": "x"})
+            g = GitHub("o/r", "main", "")
+            g.required = lambda: ["CI", STATUS_CONTEXT]
+            check(f"strict aging must-FAIL: green_since on HTTP {code} -> None, no exception",
+                  g.green_since("a" * 40) is None)
+            check(f"strict aging must-FAIL: armed_since on HTTP {code} -> None, no exception", g.armed_since(5) is None)
+        # A persistent outage surfaces as ApiAbort (retries spent): the armed-time read must fail open too.
+        def outage(*a, **k):
+            raise ApiAbort("transient", "retries spent (self-test)")
+        globals()["api"] = outage
+        g = GitHub("o/r", "main", "")
+        check("strict aging must-FAIL: armed_since during an API outage (ApiAbort) -> None, no exception",
+              g.armed_since(5) is None)
+    finally:
+        globals()["api"] = real_api
+    logged: list[str] = []
+    check("aging knob: 0 = off", aging_knob("0", logged.append) == 0 and not logged, repr(logged))
+    check("aging knob must-FAIL: 599 -> 1800 with a warning", aging_knob("599", logged.append) == 1800 and logged, repr(logged))
+    logged.clear()
+    check("knob must-FAIL: a whitespace-only variable warns and defaults",
+          knob("   ", "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S", logged.append) == 3600 and len(logged) == 1
+          and knob_bool("  ", "MERGE_TRAIN_SPECULATIVE_STACK", False, logged.append) == "false" and len(logged) == 2,
+          repr(logged))
+    check("strict aging: knob default 1800, range 0..14400 (0 off, 1..599 refused by aging_knob)",
+          aging_knob(None) == 1800 and aging_knob("599", lambda _m: None) == 1800
+          and aging_knob("600") == 600 and aging_knob("14401", lambda _m: None) == 1800)
+
+
+def hotfix_lane_self_test(check) -> None:
+    """Owner hotfix lane (ADR-0343 amendment 2026-11-21). Every must-FAIL case is a grant that must not happen."""
+    owner, repo = "JiRaska", "JiRaska/open-bank-oss"
+    now = 1795219200.0 + 12 * 3600   # 2026-11-21T12:00:00Z
+    base, head, other, upd = "b" * 40, "c" * 40, "d" * 40, "e" * 40
+    t_label = "2026-11-21T10:00:00Z"
+    before, after = iso_epoch("2026-11-21T09:00:00Z"), iso_epoch("2026-11-21T11:00:00Z")
+
+    def label(actor="JiRaska", at=t_label, eid=901):
+        return {"event": "labeled", "id": eid, "label": {"name": HOTFIX_LABEL}, "actor": {"login": actor}, "created_at": at}
+
+    class Probe:
+        def __init__(self, contains=True, paths=("src/x.kt",), fetched=True, merge_ok=True):
+            self.c, self.p, self.f, self.m = contains, list(paths), fetched, merge_ok
+        def head_ok(self, n, h): return self.f
+        def contains(self, b, h): return self.c
+        def paths(self, b, h): return self.p
+        def update_merge_ok(self, prev, sha, b): return self.m
+
+    class GH:
+        def __init__(self, timeline=None, title="fix(ledger): x", grants=None, unverified=None, merged=None,
+                     comments=None, parents=None, prs=None, arrived=None, meta=None, app=None, cur=head, app_by=None):
+            self.app_by = app_by or {}
+            self.timeline = [label()] if timeline is None else timeline
+            self.title, self.why, self.cur = title, unverified, cur
+            self.grants = {7: t_label} if grants is None else grants
+            self.merged = merged or {}
+            self.comments_of = comments or {}
+            self.parents = parents
+            self.arrived = {head: before} if arrived is None else arrived
+            self.meta = meta or {}
+            self.app = app or {}
+            self.posted, self.commented, self.guards = [], [], []
+            self.prs = prs
+        def open_prs(self):
+            if self.prs is not None:
+                return self.prs
+            return [{"number": 7, "state": "open", "draft": False, "auto_merge": {"m": 1}, "title": self.title,
+                     "labels": [{"name": HOTFIX_LABEL}], "head": {"sha": self.cur, "ref": "fix/x", "repo": {"full_name": repo}},
+                     "user": {"login": "JiRaska"}}]
+        def urgent_grants_today(self, d, o, label=URGENT_LABEL):
+            return self.__dict__.get("by_day", {}).get(d, self.grants if d == "2026-11-21" else {})
+        def pr(self, n): return self.merged.get(n, {"number": n, "merged_at": None})
+        def issue_comments(self, n): return self.comments_of.get(n, [])
+        def commit_parents(self, sha): return self.parents
+        def pr_timeline(self, n): return self.timeline
+        def head_arrived_at(self, sha, branch): return self.arrived.get(sha) if branch == "fix/x" else None
+        def commit_meta(self, sha): return self.meta.get(sha)
+        def unverified(self, sha, guard): self.guards.append(guard); return self.why
+        def app_statuses(self, sha): return self.__dict__.get("app_by", {}).get(sha, self.app)
+        def post_status(self, sha, state, desc, context=STATUS_CONTEXT, **kw): self.posted.append((sha, state, context))
+        def comment(self, n, text): self.commented.append((n, text)); return True
+        def head_refspec(self, n): return f"refs/pull/{n}/head"
+
+    def run(gh, probe=None, main_red=None, busy=None, cap=2, shadow=False, admissible=None):
+        summary: dict = {}
+        adm = {7: gh.cur} if admissible is None else admissible
+        got = hotfix_lane(gh, None, repo, base, main_red or {}, busy, cap, shadow, summary, now=now,
+                          probe=probe or Probe(), admissible=adm)
+        return got, summary
+
+    gh = GH()
+    got, summary = run(gh)
+    check("hotfix: owner label after the head arrived, admitted, green, up to date -> granted", got == {7}, repr(summary))
+    check("hotfix: success posted on the CURRENT head", (head, "success", STATUS_CONTEXT) in gh.posted
+          and (head, "success", HOTFIX_GRANT_CONTEXT) in gh.posted, repr(gh.posted))
+    check("hotfix: required checks re-read with the merge guard (guard=True)", gh.guards == [True], repr(gh.guards))
+    check("hotfix: grant logged with PR, head, actor and label event id",
+          summary.get("hotfix") == [{"pr": 7, "head": head, "actor": owner, "label_event": 901}], repr(summary))
+    check("hotfix: grant record comment carries head and judged main",
+          any(HOTFIX_GRANT_RE.search(t) and t.count(head) and t.count(base) for _n, t in gh.commented), repr(gh.commented))
+    check("hotfix: build never batches a granted head",
+          hotfix_granted({"labels": [HOTFIX_LABEL]}, {HOTFIX_GRANT_CONTEXT: ("success", "x")})
+          and not hotfix_granted({"labels": [HOTFIX_LABEL]}, {})
+          and not hotfix_granted({"labels": []}, {HOTFIX_GRANT_CONTEXT: ("success", "x")}))
+
+    def refused(name, gh, **kw):
+        got, summary = run(gh, **kw)
+        check(f"hotfix must-FAIL: {name}", got == set() and not [p for p in gh.posted if p[1] == "success"],
+              f"granted {got} posted {gh.posted} {summary}")
+
+    upd_meta = {upd: {"parents": [head, "f" * 40], "author_login": BRANCH_UPDATER_LOGIN, "committer_login": "web-flow",
+                      "verified": True}}
+    refused("label applied by a non-owner", GH(timeline=[label(actor="some-bot[bot]")]))
+    refused("owner label, then a later relabel by a non-owner", GH(timeline=[label(), label(actor="agent", eid=902)]))
+    refused("label then push (head arrived after the label)", GH(arrived={head: after}))
+    refused("backdated commit pushed after the label (author dates ignored; arrival is server-side)",
+            GH(arrived={head: after}, meta={head: {"parents": [other], "author_login": "JiRaska",
+                                                   "committer_login": "JiRaska", "verified": True}}))
+    refused("head arrival not determinable -> fail closed", GH(arrived={}))
+    refused("timeline API error", type("E", (GH,), {"pr_timeline": lambda s, n: None})())
+    refused("cap exhausted", GH(grants={3: "2026-11-21T08:00:00Z", 5: "2026-11-21T09:00:00Z", 7: t_label}))
+    refused("cap 0 = lane off", GH(), cap=0)
+    refused("grants enumeration failed", type("G", (GH,), {"urgent_grants_today": lambda s, d, o, label=None: None})())
+    refused("yesterday's label", GH(timeline=[label(at="2026-11-20T23:00:00Z")]))
+    refused(".github PR during a strict carrier", GH(), probe=Probe(paths=(".github/workflows/x.yml",)),
+            busy="a strict carrier is in flight")
+    refused(".github PR during an urgent reservation", GH(), probe=Probe(paths=(".github/scripts/y.py",)),
+            busy="urgent reservation #9 is in flight")
+    refused("red main + feat type", GH(title="feat(ledger): x"), main_red={"all-green": "x"})
+    refused("head does not contain live main", GH(), probe=Probe(contains=False))
+    refused("fetched head differs", GH(), probe=Probe(fetched=False))
+    refused("required checks not green on the head", GH(unverified="required context(s) not green on the head now: CI"))
+    refused("auto-merge not armed", GH(prs=[{**GH().open_prs()[0], "auto_merge": None}]))
+    refused("draft", GH(prs=[{**GH().open_prs()[0], "draft": True}]))
+    refused("not admitted by the per-head gates (path, admission, qualifies)", GH(), admissible={})
+    refused("admitted on a DIFFERENT head", GH(), admissible={7: other})
+    # Train-App update-branch after the label keeps it (actor + merge-tree), any other push does not.
+    got, _ = run(GH(cur=upd, arrived={upd: after, head: before}, meta=upd_meta))
+    check("hotfix: the train's own update-branch merge after the label keeps the grant", got == {7})
+    refused("update merge whose tree is not old head + main",
+            GH(cur=upd, arrived={upd: after, head: before}, meta=upd_meta), probe=Probe(merge_ok=False),
+            admissible={7: upd})
+    refused("push after the label by a non-updater actor",
+            GH(cur=upd, arrived={upd: after, head: before},
+               meta={upd: {**upd_meta[upd], "author_login": "someone"}}), admissible={7: upd})
+    refused("unsigned update merge after the label",
+            GH(cur=upd, arrived={upd: after, head: before},
+               meta={upd: {**upd_meta[upd], "verified": False}}), admissible={7: upd})
+    # Withdraw: granted at an earlier tick, failing now.
+    wd = GH(unverified="required context(s) not green on the head now: CI",
+            app={HOTFIX_GRANT_CONTEXT: ("success", "x"), STATUS_CONTEXT: ("success", "x")})
+    got, summary = run(wd)
+    check("hotfix must-FAIL: a check passing at grant then failing next tick -> grant withdrawn",
+          got == set() and (head, "failure", HOTFIX_GRANT_CONTEXT) in wd.posted and (head, "pending", STATUS_CONTEXT) in wd.posted
+          and summary.get("hotfix_withdrawn") == [7], f"{wd.posted} {summary}")
+    # Binding (review #17025 HIGH): a grant belongs to the head it was made on.
+    rec = {"user": {"login": BOT_LOGIN}, "body": f"{HOTFIX_GRANT_MARK}\nhotfix lane: granted head {head} over main {base} (label event 901 by JiRaska)"}
+    granted_app = {HOTFIX_GRANT_CONTEXT: ("success", "x"), STATUS_CONTEXT: ("success", "x")}
+    fp = GH(timeline=[label(), {"event": "head_ref_force_pushed", "commit_id": head, "created_at": "2026-11-21T11:00:00Z"}],
+            comments={7: [rec]}, app=granted_app)
+    got, summary = run(fp)
+    check("hotfix must-FAIL: force-push back to the granted head after the label -> refused AND withdrawn",
+          got == set() and (head, "failure", HOTFIX_GRANT_CONTEXT) in fp.posted and summary.get("hotfix_withdrawn") == [7],
+          f"{fp.posted} {summary}")
+    refused("previously-granted head restored after the label",
+            GH(timeline=[label(), {"event": "head_ref_restored", "created_at": "2026-11-21T11:00:00Z"}], comments={7: [rec]}))
+    refused("a commit after the label that is not the train's update merge",
+            GH(timeline=[label(), {"event": "committed", "sha": other}], comments={7: [rec]}))
+    moved_off = GH(cur=other, comments={7: [rec]}, app_by={head: granted_app}, arrived={other: before})
+    got, summary = run(moved_off, admissible={7: other})
+    check("hotfix must-FAIL: head moved off the bound head (even if it 'arrived' before the label) -> refused, "
+          "old head's grant withdrawn", got == set() and (head, "failure", HOTFIX_GRANT_CONTEXT) in moved_off.posted
+          and (head, "pending", STATUS_CONTEXT) in moved_off.posted, f"{moved_off.posted} {summary}")
+    got, _ = run(GH(cur=upd, comments={7: [rec]}, meta=upd_meta, arrived={}))
+    check("hotfix: bound head + the train's verified update merge on top keeps the grant (no arrival read needed)",
+          got == {7})
+    got, _ = run(GH(comments={7: [rec]}, arrived={}))
+    check("hotfix: the bound head itself stays granted on later ticks", got == {7})
+    refused("comments unreadable at grant time -> fail closed", type("NC", (GH,), {"issue_comments": lambda s, n: None})())
+    # Suites: this repository's branch only; a fork's same-named branch never counts.
+    suite = lambda repo_name, at: {"head_branch": "fix/x", "head_sha": head, "created_at": at,
+                                   "head_repository": {"full_name": repo_name}}
+    check("suite_arrival: a fork's same-branch suite is ignored",
+          suite_arrival({"total_count": 2, "check_suites": [suite("evil/fork", "2026-11-21T08:00:00Z"),
+                                                            suite(repo, "2026-11-21T11:00:00Z")]},
+                        head, "fix/x", repo) == after)
+    check("suite_arrival must-FAIL: only a fork suite -> unknowable",
+          suite_arrival({"total_count": 1, "check_suites": [suite("evil/fork", "2026-11-21T08:00:00Z")]},
+                        head, "fix/x", repo) is None)
+    check("suite_arrival must-FAIL: an incomplete suite page -> unknowable",
+          suite_arrival({"total_count": 101, "check_suites": [suite(repo, "2026-11-21T08:00:00Z")]},
+                        head, "fix/x", repo) is None)
+    # Unlabel revokes (review #17025 MEDIUM).
+    ul = GH(prs=[], app=granted_app)
+    _got, summary = hotfix_lane(ul, None, repo, base, {}, None, 2, False, {}, now=now, probe=Probe(),
+                                admissible={}, marked={7: (head, [])}), None
+    check("hotfix must-FAIL: label removed while the head carries the grant -> withdrawn",
+          (head, "failure", HOTFIX_GRANT_CONTEXT) in ul.posted and (head, "pending", STATUS_CONTEXT) in ul.posted, repr(ul.posted))
+    kept = GH(prs=[], app=granted_app)
+    hotfix_lane(kept, None, repo, base, {}, None, 2, False, {}, now=now, probe=Probe(), admissible={},
+                marked={7: (head, [HOTFIX_LABEL])})
+    check("hotfix: a still-labelled marked head is not revoked by the unlabel scan", not kept.posted, repr(kept.posted))
+    # Revocation sweep (re-review of f6ebe025, HIGH): grant X, push Y whose CI is pending -> X loses its grant
+    # in that tick, whatever state the PR is in, before any eligibility read can return early.
+    for variant, extra in (("armed", {}), ("disarmed", {"auto_merge": None}), ("drafted", {"draft": True})):
+        pr_y = {**GH().open_prs()[0], "head": {"sha": other, "ref": "fix/x", "repo": {"full_name": repo}}, **extra}
+        sw = GH(prs=[pr_y], comments={7: [rec]}, app_by={head: granted_app, other: {}},
+                unverified="required context(s) pending on the head now: CI")
+        got, summary = run(sw, admissible={})
+        check(f"hotfix must-FAIL: grant X, push Y with CI pending ({variant}) -> X marker failure + merge-train pending",
+              got == set() and (head, "failure", HOTFIX_GRANT_CONTEXT) in sw.posted
+              and (head, "pending", STATUS_CONTEXT) in sw.posted, f"{sw.posted} {summary}")
+    off = GH(prs=[{**GH().open_prs()[0]}], comments={7: [rec]}, app=granted_app)
+    run(off, cap=0)
+    check("hotfix must-FAIL: cap 0 (lane off) revokes a standing grant", (head, "failure", HOTFIX_GRANT_CONTEXT) in off.posted,
+          repr(off.posted))
+    stay = GH(comments={7: [rec]}, app=granted_app, arrived={})
+    got, _ = run(stay)
+    check("hotfix: the sweep never withdraws the head granted in this tick", got == {7}
+          and not [x for x in stay.posted if x[1] in ("failure", "pending")], repr(stay.posted))
+    # Record first (re-review of e911830f, MEDIUM).
+    nostore = type("NS", (GH,), {"comment": lambda s, n, t: (s.commented.append((n, t)), False)[1]})()
+    got, summary = run(nostore)
+    check("hotfix must-FAIL: the grant record POST fails -> no grant statuses at all",
+          got == set() and not [x for x in nostore.posted if x[1] == "success"] and not summary.get("hotfix"),
+          f"{nostore.posted} {summary}")
+    orphan = GH(prs=[{**GH().open_prs()[0]}], comments={7: []}, app=granted_app)
+    run(orphan, cap=0)
+    hotfix_lane(orphan, None, repo, base, {}, None, 0, False, {}, now=now, probe=Probe(), admissible={},
+                marked={7: (head, [HOTFIX_LABEL])})
+    check("hotfix must-FAIL: a head carrying the grant marker with no grant record -> withdrawn",
+          (head, "failure", HOTFIX_GRANT_CONTEXT) in orphan.posted and (head, "pending", STATUS_CONTEXT) in orphan.posted,
+          repr(orphan.posted))
+    norec = GH(merged={7: {"number": 7, "merged_at": "2026-11-21T11:00:00Z", "head": {"sha": head},
+                           "merge_commit_sha": "a" * 40}}, comments={7: []}, parents=[base], app=granted_app, prs=[])
+    _got, summary = run(norec)
+    check("hotfix audit must-FAIL: merged head with the grant marker but no grant record -> incident + disabled",
+          "no grant record" in summary.get("hotfix_disabled", "")
+          and any(HOTFIX_INCIDENT_MARK in t for _n, t in norec.commented), repr(summary))
+    got, _ = run(GH(), probe=Probe(paths=(".github/workflows/x.yml",)))
+    check("hotfix: a .github PR with no strict carrier/urgent in flight is granted", got == {7})
+    got, _ = run(GH(title="security(auth): x"), main_red={"all-green": "x"})
+    check("hotfix: red main + security type is granted", got == {7})
+    shadow_gh = GH()
+    got, _ = run(shadow_gh, shadow=True)
+    check("hotfix: shadow grants nothing on GitHub", got == {7} and not shadow_gh.posted and not shadow_gh.commented)
+
+    # Post-merge verification (next tick): merged at the marked head onto the judged main, else disabled.
+    grant_c = {"user": {"login": BOT_LOGIN}, "body": f"{COMMENT_MARK}\n{HOTFIX_GRANT_MARK}\nhotfix lane: granted head {head} over main {base} (label event 901 by JiRaska)"}
+    merged = {7: {"number": 7, "merged_at": "2026-11-21T11:00:00Z", "head": {"sha": head}, "merge_commit_sha": "a" * 40}}
+    ok_gh = GH(merged=merged, comments={7: [grant_c]}, parents=[base], prs=[])
+    _got, summary = run(ok_gh)
+    check("hotfix audit: merge onto the judged main at the marked head keeps the lane on",
+          "hotfix_disabled" not in summary and not ok_gh.commented, repr(summary))
+    bad = GH(merged=merged, comments={7: [grant_c]}, parents=[other])
+    got, summary = run(bad)
+    check("hotfix audit must-FAIL: first parent != judged main -> incident + lane disabled",
+          got == set() and "first parent" in summary.get("hotfix_disabled", "")
+          and any(HOTFIX_INCIDENT_MARK in t for _n, t in bad.commented), repr(summary))
+    moved = GH(merged={7: {**merged[7], "head": {"sha": other}}}, comments={7: [grant_c]}, parents=[base])
+    _got, summary = run(moved)
+    check("hotfix audit must-FAIL: merged head != marked head -> lane disabled",
+          "marked head" in summary.get("hotfix_disabled", ""), repr(summary))
+    forged = {"user": {"login": "someone"}, "body": grant_c["body"].replace(base, other)}
+    _got, summary = run(GH(merged=merged, comments={7: [forged, grant_c]}, parents=[base], prs=[]))
+    check("hotfix audit: a non-App grant comment is ignored", "hotfix_disabled" not in summary, repr(summary))
+    yd = GH(merged=merged, comments={7: [grant_c]}, parents=[other], grants={}, prs=[])
+    yd.by_day = {"2026-11-21": {}, "2026-11-20": {7: "2026-11-20T23:50:00Z"}}
+    _got, summary = run(yd)
+    check("hotfix audit must-FAIL: yesterday's grant merged wrongly is still audited -> disabled",
+          "first parent" in summary.get("hotfix_disabled", ""), repr(summary))
+    _got, summary = run(GH(merged=merged, comments={7: [grant_c]}, parents=None))
+    check("hotfix audit must-FAIL: merge commit unreadable -> disabled", "hotfix_disabled" in summary, repr(summary))
+    _got, summary = run(type("C", (GH,), {"issue_comments": lambda s, n: None})(merged=merged))
+    check("hotfix audit must-FAIL: comments unreadable -> disabled", "hotfix_disabled" in summary, repr(summary))
+    check("hotfix: cap knob default 2, range 0..20",
+          knob(None, "MERGE_TRAIN_HOTFIX_DAILY_CAP") == 2 and knob("0", "MERGE_TRAIN_HOTFIX_DAILY_CAP") == 0
+          and knob("21", "MERGE_TRAIN_HOTFIX_DAILY_CAP", lambda _m: None) == 2)
+    # update_merge_ok on real git: an exact `git merge` of old head + main passes; extra content does not.
+    with tempfile.TemporaryDirectory() as d:
+        def g(*a):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=d, text=True,
+                                  capture_output=True, check=True, env=base_env()).stdout.strip()
+        g("init", "-q", "-b", "main")
+        pathlib.Path(d, "a").write_text("a\n"); g("add", "a"); g("commit", "-qm", "base")
+        g("checkout", "-qb", "pr"); pathlib.Path(d, "p").write_text("p\n"); g("add", "p"); g("commit", "-qm", "pr")
+        old = g("rev-parse", "HEAD")
+        g("checkout", "-q", "main"); pathlib.Path(d, "m").write_text("m\n"); g("add", "m"); g("commit", "-qm", "main")
+        live = g("rev-parse", "HEAD")
+        g("checkout", "-q", "pr"); g("merge", "-q", "--no-edit", "main")
+        good = g("rev-parse", "HEAD")
+        pathlib.Path(d, "x").write_text("smuggled\n"); g("add", "x"); g("commit", "-q", "--amend", "--no-edit")
+        evil = g("rev-parse", "HEAD")
+        hg = HotfixGit(None, Git(d))
+        check("hotfix update_merge_ok (real git): old head + main merged exactly -> accepted",
+              hg.update_merge_ok(old, good, live))
+        check("hotfix update_merge_ok must-FAIL (real git): a merge carrying extra content -> refused",
+              not hg.update_merge_ok(old, evil, live))
+        check("hotfix update_merge_ok must-FAIL (real git): first parent is not the old head",
+              not hg.update_merge_ok(live, good, live))
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -8190,7 +10138,20 @@ def self_test() -> int:
     train_turn_main_red_self_test(check)
     fix_preempts_strict_self_test(check)
     urgent_strict_self_test(check)
+    hotfix_lane_self_test(check)
+    strict_aging_self_test(check)
+    for raw, want in ((None, "false"), ("", "false"), ("false", "false"), ("true", "true"), ("TRUE", "true"),
+                      ("yes", "false"), ("1", "false"), ("on", "false")):
+        seen: list[str] = []
+        got = speculative_stack_setting(raw, seen.append)
+        check(f"speculative stack GUARDED: {raw!r} -> {want}", got == want
+              and (bool(seen) == (raw not in (None, "") and raw.strip().lower() not in ("true", "false"))), f"{got} {seen}")
+    check("speculative stack: 'true' is logged prominently", "EFFECTIVE" in SPECULATIVE_STACK_ON_NOTICE
+          and SPECULATIVE_STACK_ON_NOTICE.startswith("::notice::"))
     selftest_skip_fix_self_test(check)
+    selftest_deploy_fix(check)
+    lane_cap_self_test(check)
+    knobs_self_test(check)
     gate_level_fix_self_test(check)
     train_turn_fairness_self_test(check)
     branch_updater_self_test(check)
@@ -9648,6 +11609,26 @@ def self_test() -> int:
             open_only("pS", "p1")
             cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
             check("gate code + symlink: never a train candidate", [m.number for m in cands] == [1], str([m.number for m in cands]))
+            # #16955: the diff-only shortcut in build/publish changes no verdict. Same queue (trainable,
+            # gate-code+symlink, workflow, generator, gates.yaml members), with and without it: identical
+            # candidates at identical heads, and the shortcut demonstrably skipped the per-PR reads.
+            open_only("pW", "pG", "pR", "p2")
+            def shortcut_run(off: bool):
+                PATH_SHORTCUT_OFF[0] = off
+                reads: list[str] = []
+                real = gh.app_statuses
+                gh.app_statuses = lambda sha: (reads.append(sha), real(sha))[1]
+                try:
+                    c, a = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+                finally:
+                    gh.app_statuses = real
+                    PATH_SHORTCUT_OFF[0] = False
+                return [(m.number, m.head_sha) for m in c], sorted(a), len(reads)
+            full, fast = shortcut_run(True), shortcut_run(False)
+            check("diff-only shortcut: identical candidates, heads and app map with and without it (#16955)",
+                  full[:2] == fast[:2] and full[0], f"full={full} fast={fast}")
+            check("diff-only shortcut: CONTROL — it skipped the reads for the manual-lane PRs",
+                  fast[2] < full[2], f"reads full={full[2]} fast={fast[2]}")
             bdir = clone("build")
             b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",), untrainable=Untrainable(SYN_INVENTORY))
             ms = []
@@ -9936,6 +11917,152 @@ def self_test() -> int:
             del gh.pr_files
             reset()
 
+            # ---- End-to-end: main()'s parser + settle_from_args with the REAL validated knob values ----------
+            # (#16957 shipped lane functions tested and the wiring not; these go through the same path a tick does.)
+            knob_envs = ("HOTFIX_DAILY_CAP", "MERGE_TRAIN_HOTFIX_DAILY_CAP", "MERGE_TRAIN_STRICT_AGING_S",
+                         "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S", "SPECULATIVE_STACK",
+                         "STRICT_BATCH_CAP", "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", "EXPEDITE_LANE", "EXPEDITE_DAILY_CAP",
+                         "URGENT_DAILY_CAP")
+
+            def e2e_args(**env):
+                saved_env = {k: os.environ.pop(k, None) for k in knob_envs}   # unset = the reviewed defaults
+                os.environ.update(env)
+                try:
+                    return build_parser().parse_args(["settle", "--repo", "o/r"])
+                finally:
+                    for k in env:
+                        os.environ.pop(k, None)
+                    os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+
+            args = e2e_args()
+            check("e2e: unset knobs give the reviewed defaults (hotfix 2, aging 1800, max hold 3600, stack false)",
+                  (args.hotfix_cap, args.strict_aging_s, args.strict_aging_max_hold_s, args.speculative_stack)
+                  == (2, 1800, 3600, "false"),
+                  repr((args.hotfix_cap, args.strict_aging_s, args.strict_aging_max_hold_s, args.speculative_stack)))
+            t0 = time.time()
+            day0 = time.strftime("%Y-%m-%d", time.gmtime(t0))
+            lab = {"event": "labeled", "id": 4711, "label": {"name": HOTFIX_LABEL}, "actor": {"login": "o"},
+                   "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0))}
+
+            def hotfix_pr(br):
+                open_only(br)
+                n = numbers[br]
+                gh.prs[n]["labels"] = [{"name": HOTFIX_LABEL}]
+                gh.prs[n]["title"] = "fix(svc): hotfix"
+                gh.__dict__.setdefault("timelines", {})[n] = [lab]
+                gh.__dict__.setdefault("arrivals", {})[gh.prs[n]["head"]["sha"]] = t0 - 600
+                return n, gh.prs[n]["head"]["sha"]
+
+            # (a) owner-labelled green hotfix PR, nothing strict in flight: granted, and never batched.
+            n_h, h_h = hotfix_pr("pF")
+            sa = settle_from_args(gh, Git(clone("settle")), args)
+            app_h = gh.app_statuses(h_h)
+            check("e2e (a): settle grants the owner-labelled green hotfix PR (marker + merge-train success)",
+                  [g["pr"] for g in sa.get("hotfix", [])] == [n_h]
+                  and app_h.get(HOTFIX_GRANT_CONTEXT, ("",))[0] == "success"
+                  and app_h.get(STATUS_CONTEXT, ("",))[0] == "success"
+                  and n_h not in sa["fast"], f"{sa} {app_h} day={day0}")
+            bc, _ = live_candidates(gh, Git(clone("build")), "o/r", gh.required(), gh.main_sha(), Untrainable(SYN_INVENTORY))
+            check("e2e (a): the granted hotfix head is excluded from carriers (build candidates)",
+                  all(m.number != n_h for m in bc), repr([m.number for m in bc]))
+            # Withdraw: the grant passed above; a required context goes red on that head -> taken back next tick.
+            gh.head_checks[h_h] = {"derived": "failure"}
+            sw = settle_from_args(gh, Git(clone("settle")), args)
+            app_h = gh.app_statuses(h_h)
+            check("e2e must-FAIL: check green at grant, red next tick -> grant withdrawn",
+                  not sw.get("hotfix") and app_h.get(HOTFIX_GRANT_CONTEXT, ("",))[0] == "failure"
+                  and app_h.get(STATUS_CONTEXT, ("",))[0] == "pending", f"{sw} {app_h}")
+            gh.head_checks.pop(h_h, None)
+            reset()
+            # Gate parity: a hotfix the per-head gates refuse is never granted.
+            # admission-refused: the real gate's verdict (money path, unticked checklist on the live body) is
+            # what live_candidates acts on; the fixture supplies that verdict, the lane must honour it.
+            n_m, h_m = hotfix_pr("pF")
+            real_adm = admission_refusal
+            globals()["admission_refusal"] = lambda _g, _b, v, runner=None: (
+                "security-checklist-money-path fails on the live body" if v.get("number") == n_m else None)
+            try:
+                sm2 = settle_from_args(gh, Git(clone("settle")), args)
+            finally:
+                globals()["admission_refusal"] = real_adm
+            check("e2e must-FAIL: admission-refused body (money path, unticked) -> no hotfix grant",
+                  not sm2.get("hotfix") and STATUS_CONTEXT not in gh.app_statuses(h_m), f"{sm2}")
+            reset()
+            n_g, h_g = hotfix_pr("pF")
+            gh.head_checks[h_g] = {"agent-pr-guard": "failure"}   # e.g. the guard refusing an unsigned head
+            sg2 = settle_from_args(gh, Git(clone("settle")), args)
+            check("e2e must-FAIL: guard red on the head (unsigned) -> no hotfix grant",
+                  not sg2.get("hotfix") and STATUS_CONTEXT not in gh.app_statuses(h_g), f"{sg2}")
+            gh.head_checks.pop(h_g, None)
+            reset()
+            n_x, h_x = hotfix_pr("pF")   # a path refused outright (path_refusal + strict lane: unsafe path)
+            real_unsafe = unsafe_path
+            globals()["unsafe_path"] = lambda f: f == "svc/fast.txt" or real_unsafe(f)
+            try:
+                sx = settle_from_args(gh, Git(clone("settle")), args)
+            finally:
+                globals()["unsafe_path"] = real_unsafe
+            check("e2e must-FAIL: path-refused file -> no hotfix grant", not sx.get("hotfix")
+                  and STATUS_CONTEXT not in gh.app_statuses(h_x), f"{sx}")
+            reset()
+
+            # (b) an aged green strict candidate + a fast candidate while the strict lane yields to the TRAIN'S
+            # TURN (the deadlock of the #17009 review): the aged PR takes the turn back and the strict lane serves
+            # it in the same tick (update-branch = reservation). Control: not aged, the turn stands and the
+            # carrier publishes. (c): MERGE_TRAIN_STRICT_AGING_S=0 on the aged state is exactly main's settle.
+            real_turn = train_turn
+            globals()["train_turn"] = lambda *a, **k: "train's turn after a strict-lane merge (e2e fixture)"
+            try:
+                def aging_state(age, run_args=None, plain=False):
+                    reset()
+                    gh.g("checkout", "-q", "main")
+                    pathlib.Path(origin, "moved.txt").write_text("m\n")
+                    gh.g("add", "moved.txt")
+                    gh.g("commit", "-q", "-m", "move main")
+                    open_only("pW", "pF")
+                    hw = gh.prs[numbers["pW"]]["head"]["sha"]
+                    gh.__dict__["green_at"] = {hw: t0 - age}
+                    gh.__dict__["armed_at"] = {numbers["pW"]: t0 - age}
+                    if plain:
+                        return mode_settle(gh, Git(clone("settle")), "o/r", False, strict_cap=args.strict_batch_cap,
+                                           judge_cap=args.strict_judge_batch_cap, stack=False,
+                                           expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
+                                           urgent_cap=args.urgent_cap)
+                    return settle_from_args(gh, Git(clone("settle")), run_args or args)
+                young = aging_state(60)
+                aged = aging_state(1800)
+                updates_aged = list(gh.updates)
+                off_args = e2e_args(MERGE_TRAIN_STRICT_AGING_S="0")
+                off = aging_state(1800, off_args)
+                off.pop("speculative_stack", None)
+                plain = aging_state(1800, plain=True)
+            finally:
+                globals()["train_turn"] = real_turn
+                gh.__dict__.pop("green_at", None)
+                gh.__dict__.pop("armed_at", None)
+            check("e2e (b) control: a young strict candidate keeps the train's turn (carrier publishes, no update)",
+                  young["in_flight"] is False and "strict_aging_hold" not in young and not young["updated"], repr(young))
+            check("e2e (b) must-FAIL: an aged strict candidate under the train's turn -> the strict lane takes the "
+                  "reservation THIS tick (update-branch) and logs strict-aging hold",
+                  aged.get("strict_aging_hold") == f"strict-aging hold: #{numbers['pW']} waited 1800s"
+                  and numbers["pW"] in aged["updated"] and numbers["pW"] in updates_aged, f"{aged} updates={updates_aged}")
+            check("e2e (c): MERGE_TRAIN_STRICT_AGING_S=0 parses as off", off_args.strict_aging_s == 0, repr(off_args.strict_aging_s))
+            check("e2e (c): aging off (=0) on an aged state -> identical to main's settle", off == plain, f"{off} != {plain}")
+            reset()
+
+            # (c') knobs unset, times unknowable (no aged candidate): identical to the pre-change settle.
+            open_only("pF", "pX")
+            sc_new = settle_from_args(gh, Git(clone("settle")), args)
+            sc_new.pop("speculative_stack", None)
+            reset()
+            open_only("pF", "pX")
+            sc_old = mode_settle(gh, Git(clone("settle")), "o/r", False, strict_cap=args.strict_batch_cap,
+                                 judge_cap=args.strict_judge_batch_cap, stack=False, expedite=args.expedite_lane == "true",
+                                 expedite_cap=args.expedite_cap, urgent_cap=args.urgent_cap)
+            check("e2e (c): knobs unset -> the settle summary is identical to main's behaviour", sc_new == sc_old,
+                  f"{sc_new} != {sc_old}")
+            reset()
+
             # Fast lane: computed live in settle. A docs/adr member is never fast-laned, and settle
             # has no input through which a stored classification could be injected.
             open_only("pF", "pX")
@@ -9946,10 +12073,11 @@ def self_test() -> int:
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
                   # run_id/attempt name the strict carrier branch and strict_cap bounds it; expedite/expedite_cap
                   # are the lane's switch and cap; judge_cap bounds a judge carrier; urgent_cap is the urgent
-                  # path's daily cap (admission is read live): none is a classification.
+                  # path's daily cap and hotfix_cap the hotfix lane's (admission is read live): none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
                   == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "judge_cap", "stack", "expedite",
-                      "expedite_cap", "urgent_cap"})
+                      "expedite_cap", "urgent_cap", "hotfix_cap", "aging_s",
+                      "aging_max_hold_s"})
             reset()
 
             # Bundle verification, directly.
@@ -10066,6 +12194,86 @@ def self_test() -> int:
             mode_settle(gh, Git(clone("settle")), "o/r", False)
             check("foreign merge mid-settle: merging stops, the rest waits for the next tick", gh.merged == [1], str(gh.merged))
             reset()
+
+            # #16932: native auto-merge merges a carrier member just before the train's own merge call.
+            def native_race(case):
+                open_only("p1", "p2")
+                tick()
+                real = globals()["live_source_intent"]
+                fired = []
+
+                def racing(g, n, head, _real=real):
+                    if n == 1 and not fired and gh.prs[1]["state"] == "open":
+                        fired.append(n)
+                        p = gh.prs[1]
+                        if case in ("moved-open", "moved-merged"):
+                            new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
+                            gh.g("branch", "-f", p["head"]["ref"], new)
+                            p["head"]["sha"] = new
+                        if case == "parent":   # something else lands first: merged over another main
+                            gh.g("checkout", "-q", "-f", "main")
+                            gh.g("commit", "-q", "--allow-empty", "-m", "foreign first")
+                        if case in ("same", "moved-merged", "parent", "unmerged"):
+                            gh.merge(1, p["head"]["sha"])
+                        if case == "unmerged":  # closed, merged=False, though the sha is on main
+                            p["merged"] = False
+                        elif case == "closed":
+                            p["state"] = "closed"
+                        elif case == "off-main":
+                            p["state"], p["merged"], p["merge_commit_sha"] = "closed", True, gh.g(
+                                "commit-tree", f"{head}^{{tree}}", "-p", gh.main_sha(), "-m", "off main").stdout.strip()
+                    return _real(g, n, head)
+                own_merge = gh.merge
+
+                def late(n, head, _own=own_merge):
+                    # Run 44872757590 / #16817: the train's own success status released native auto-merge,
+                    # which merged the member between the loop's intent read and GitHub.merge's last read;
+                    # GitHub.merge then refuses (intent gone) and returns None.
+                    if n == 1 and not fired:
+                        fired.append(n)
+                        if case == "late-moved":
+                            new = gh.g("commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "moved").stdout.strip()
+                            gh.g("branch", "-f", gh.prs[1]["head"]["ref"], new)
+                            gh.prs[1]["head"]["sha"] = new
+                        _own(n, gh.prs[1]["head"]["sha"])
+                        return None
+                    return _own(n, head)
+                if case.startswith("late"):
+                    gh.merge = late
+                else:
+                    globals()["live_source_intent"] = racing
+                try:
+                    s = mode_settle(gh, Git(clone("settle")), "o/r", False)
+                finally:
+                    globals()["live_source_intent"] = real
+                    gh.__dict__.pop("merge", None)
+                merged = list(gh.merged)
+                reset()
+                return s, merged, bool(fired)
+            s, m, fired = native_race("same")
+            check("#16932: a member natively merged at the verified head -> the rest of the carrier still merges",
+                  fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("late")
+            check("#16932: member natively merged INSIDE the train's merge call (after its success status) -> the rest still merges",
+                  fired and m == [1, 2] and s.get("native_merged") == [1] and s["merged"] == [2], f"{fired} {m} {s.get('native_merged')}")
+            s, m, fired = native_race("late-moved")
+            check("#16932 NEGATIVE: natively merged inside the merge call at a different head -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("moved-merged")
+            check("#16932 NEGATIVE: merged with a different head -> stop, nothing else merges",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("closed")
+            check("#16932 NEGATIVE: closed but not merged -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("moved-open")
+            check("#16932 NEGATIVE: head changed but still open -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("parent")
+            check("#16932 NEGATIVE: merged over a main other than the expected one -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("unmerged")
+            check("#16932 NEGATIVE: merged=False at the verified head -> stop",
+                  fired and m == [1] and not s.get("native_merged"), f"{fired} {m}")
+            s, m, fired = native_race("off-main")
+            check("#16932 NEGATIVE: merged commit not on main -> stop", fired and m == [] and not s.get("native_merged"), f"{fired} {m}")
 
             # ---- strict lane (manual-lane PRs: executable .github/, generators, gates, inventory) ----
             def settle_now():
@@ -11099,6 +13307,48 @@ def self_test() -> int:
             gh.head_checks.clear()
             exp_reset()
 
+            # #16874: an expedited member the build always DEFERS must not hold the expedite window forever.
+            # pK (gate code) and p2 both carry the label; pK is made the oldest, and the builder defers pK's
+            # one-member train every tick, exactly as TrainBuilder.build does for gate code beside a
+            # regeneration commit (#13400). A main that really needs regeneration cannot stand in here: the
+            # fixture's derived gate then reads main red, which closes the expedite lane before it opens.
+            # Tick 1 opens the window for pK and the lane builds nothing; tick 2 passes pK over for p2, whose
+            # expedite carrier is published. Without the marker tick 2 re-opens the window for pK, as it did
+            # for #16807 every tick for ~6 h while #16852 (the main-red fix) waited.
+            real_build = TrainBuilder.build
+
+            def deferring_build(self, base_, members_):
+                rest = [m_ for m_ in members_ if m_.number != 38]
+                out_ = real_build(self, base_, rest) if rest else (base_, [], [])
+                if len(rest) < len(members_):
+                    self.deferred = [*getattr(self, "deferred", []), 38]
+                return out_
+            TrainBuilder.build = deferring_build
+            exp_setup()                                              # p1's carrier runs; p2 expedited
+            open_only("pK")
+            gh.prs[38]["labels"] = [{"name": EXPEDITE_LABEL}]
+            gh.prs[38]["created_at"] = "2025-12-01"                  # the oldest expedited candidate
+            main_e12 = gh.main_sha()
+            s1, st1 = exp_tick()
+            pk_head = gh.prs[38]["head"]["sha"]
+            mark1 = gh.app_statuses(pk_head).get(EXPEDITE_WINDOW_CONTEXT, ("", ""))
+            ex1 = [c for c in exp_open() if c.get("expedite")]
+            check("expedite (E12, #16874): tick 1 opens the window for the oldest expedited member; its one-member train is deferred "
+                  "(not dropped, no notice), nothing is built, and the window is recorded on its head naming main",
+                  s1.get("expedite_window") == 38 and st1 == "idle" and ex1 == [] and gh.prs[38]["state"] == "open"
+                  and not any(n == 38 for n, _ in gh.comments) and mark1 == ("success", f"expedite window over main {main_e12}"),
+                  f"{s1} st={st1} ex={len(ex1)} mark={mark1} comments={gh.comments}")
+            s2, st2 = exp_tick()
+            ex2 = [c for c in exp_open() if c.get("expedite")]
+            check("expedite (E13, #16874): tick 2 passes the deferred holder over — the next expedited PR gets the window and its "
+                  "expedite carrier is published",
+                  s2.get("expedite_window") == 2 and st2 == "published" and len(ex2) == 1 and carrier_members(ex2[0]) == [2]
+                  and gh.prs[38]["state"] == "open", f"{s2} st={st2} ex={[carrier_members(c) for c in ex2]}")
+            check("expedite (E14, #16874): a window marker for a DIFFERENT main does not pass the head over (a moved main is a fresh attempt)",
+                  expedite_window_held(gh, pk_head, main_e12) and not expedite_window_held(gh, pk_head, "0" * 40), str(mark1))
+            TrainBuilder.build = real_build
+            exp_reset()
+
             # SPECULATIVE STACKING (ADR-0343 amendment 2026-11-09): while strict holder pW (35) runs CI on an
             # up-to-date head h, the train carrier for p1 is published over h, never merged before pW, and
             # accepted after pW's merge only when main's tree is h's tree. Each case below is must-FAIL for
@@ -11172,6 +13422,33 @@ def self_test() -> int:
             check("stacking (S5): holder merges first, then the stacked carrier's member merges on main == tree(h), no rebuild",
                   ok_tree and gh.merged == [35, 1] and len(gh.carriers) == made and not open_carriers() and not s2["rejected"],
                   f"{s} {s2} merged={gh.merged} tree_eq={ok_tree}")
+            gh.head_checks.clear()
+            reset()
+
+            # #16932 NEGATIVE: a stacked member natively merged at the verified head and over the expected main,
+            # but to a tree other than the verified stacked step -> not counted as merged.
+            h, s, st = stacked_setup()
+            gh.head_checks.clear()
+            settle_now()                                       # the holder merges
+            real = globals()["live_source_intent"]
+            fired = []
+
+            def stacked_racing(g, n, head, _real=real):
+                if n == 1 and not fired and gh.prs[1]["state"] == "open":
+                    fired.append(n)
+                    m0 = gh.main_sha()
+                    bad = gh.g("commit-tree", f"{m0}^{{tree}}", "-p", m0, "-m", "#1 wrong tree").stdout.strip()
+                    gh.g("update-ref", "refs/heads/main", bad)
+                    gh.g("checkout", "-q", "-f", "main")
+                    gh.prs[1].update(state="closed", merged=True, merge_commit_sha=bad)
+                return _real(g, n, head)
+            globals()["live_source_intent"] = stacked_racing
+            try:
+                s2 = settle_now()
+            finally:
+                globals()["live_source_intent"] = real
+            check("#16932 NEGATIVE: stacked member natively merged to a tree other than the verified step -> stop",
+                  fired == [1] and not s2.get("native_merged") and 1 not in gh.merged, f"{fired} {s2.get('native_merged')} {gh.merged}")
             gh.head_checks.clear()
             reset()
 
@@ -12430,11 +14707,66 @@ def self_test() -> int:
                   gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
             stale_done()
 
+            # The real shape of 2026-11-20/21: Validate manifests red over an old base where main's own
+            # CI was not red, green on main now -> ONE stale-base update-branch, no merge.
+            _STALE_BASE_MEMO.clear()
             stale_red("p1", base_red=False)
             s = settle_now()
-            check("stale-red: red on a context that was green on main at its base -> NOT refreshed (own defect)",
-                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            check("stale-base: VM red over an old base, not red on main then, green on main now -> refreshed",
+                  gh.updates == [1] and s["stale_base_refreshed"] == [1] and s["refreshed"] == [] and gh.merged == [],
+                  f"updates={gh.updates} {s}")
+            gh.updates.clear()
+            s = settle_now()
+            check("stale-base: the same head is never update-branched twice (memo + marker)",
+                  gh.updates == [] and s["stale_base_refreshed"] == [], f"updates={gh.updates} {s}")
             stale_done()
+            _STALE_BASE_MEMO.clear()
+
+            stale_red("p1", base_red=False, tip_red=True)
+            s = settle_now()
+            check("stale-base: red on current main too -> NOT refreshed (not stale)",
+                  gh.updates == [] and s.get("stale_base_refreshed") == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p4", "p2", "p1", base_red=False)
+            s = settle_now()
+            check(f"stale-base: three eligible PRs -> only {STALE_BASE_REFRESH_CAP} refreshed (cap)",
+                  gh.updates == [1, 2] and s["stale_base_refreshed"] == [1, 2], f"updates={gh.updates} {s}")
+            stale_done()
+            _STALE_BASE_MEMO.clear()
+
+            class _SbGit:
+                def __init__(self, conflict=False):
+                    self.conflict = conflict
+
+                def __call__(self, *args, check=True):
+                    rc = 1 if (args[0] == "merge-tree" and self.conflict) else 0
+                    return subprocess.CompletedProcess(args, rc, stdout="h1 p1\n" if args[0] == "rev-list" else "", stderr="")
+
+            class _SbGh:
+                def __init__(self, marked=()):
+                    self.marked = set(marked)
+
+                def app_statuses(self, sha):
+                    return {STALE_BASE_CONTEXT: ("success", "x")} if sha in self.marked else {}
+
+            def sb(view=None, git_=None, gh_=None, summary=None):
+                v = {"number": 9, "head_sha": "h1", "draft": False, "auto_merge": {"x": 1}}
+                v.update(view or {})
+                return stale_base_refusal(gh_ or _SbGh(), git_ or _SbGit(), "b0", v, summary or {})
+
+            check("stale-base unit: armed, behind, clean -> update allowed", sb() is None, str(sb()))
+            check("stale-base unit: CONFLICTING -> no update", sb(git_=_SbGit(conflict=True)) is not None, "")
+            check("stale-base unit: draft -> no update", sb({"draft": True}) is not None, "")
+            check("stale-base unit: unarmed -> no update", sb({"auto_merge": None}) is not None, "")
+            check("stale-base unit: head marked already updated -> no update", sb(gh_=_SbGh({"h1"})) is not None, "")
+            check("stale-base unit: first parent marked (post-update head) -> no update (no loop)",
+                  sb(gh_=_SbGh({"p1"})) is not None, "")
+            _STALE_BASE_MEMO.add("h1")
+            check("stale-base unit: head in the per-head memo -> no update", sb() is not None, "")
+            _STALE_BASE_MEMO.clear()
+            check("stale-base unit: cap reached -> no update",
+                  sb(summary={"stale_base_refreshed": list(range(STALE_BASE_REFRESH_CAP))}) is not None, "")
 
             # Not behind: main's CI for the tip finishes mid-tick (a re-run of the failed job going
             # green), so one read says red and the next green. Only the behind test stops it.
@@ -13071,37 +15403,53 @@ def self_test() -> int:
 
 
 # --------------------------------------------------------------------------- main
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """main()'s parser; every knob default is read from the environment HERE (validated), so the
+    end-to-end self-test builds it exactly as a workflow tick does."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval", "owner-status"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
-    ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "16")))
-    ap.add_argument("--strict-batch-cap", type=int,
-                    default=int(os.environ.get("STRICT_BATCH_CAP", str(STRICT_BATCH_CAP_DEFAULT))),
+    ap.add_argument("--batch-size", type=lambda v: knob(v, "MERGE_TRAIN_BATCH_SIZE"),
+                    default=env_knob("MERGE_TRAIN_BATCH_SIZE", "TRAIN_BATCH_SIZE"))
+    ap.add_argument("--strict-batch-cap", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_BATCH_CAP"),
+                    default=knob(os.environ.get("STRICT_BATCH_CAP"), "MERGE_TRAIN_STRICT_BATCH_CAP",
+                                 default=STRICT_BATCH_CAP_DEFAULT),
                     help="settle: members per strict carrier (1 = no strict carrier, update-branch as before)")
-    ap.add_argument("--strict-judge-batch-cap", type=int,
-                    default=int(os.environ.get("MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", str(STRICT_JUDGE_BATCH_CAP_DEFAULT))),
+    ap.add_argument("--strict-judge-batch-cap", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP"),
+                    default=knob(os.environ.get("MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP"),
+                                 "MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP", default=STRICT_JUDGE_BATCH_CAP_DEFAULT),
                     help="settle: members per strict carrier holding a judge member, all path-disjoint "
                          "(1 = a judge member rides alone, as before)")
-    ap.add_argument("--speculative-stack", choices=["true", "false"],
-                    default=os.environ.get("SPECULATIVE_STACK", "true" if SPECULATIVE_STACK_DEFAULT else "false"),
+    ap.add_argument("--speculative-stack", type=speculative_stack_setting,
+                    default=speculative_stack_setting(os.environ.get("SPECULATIVE_STACK")),
                     help="settle: open a speculative-stacking window over a running strict holder")
     ap.add_argument("--stack-pr", default=os.environ.get("STACK_PR", ""),
                     help="publish: settle's stacking window, holder PR number (re-validated live)")
     ap.add_argument("--stack-head", default=os.environ.get("STACK_HEAD", ""),
                     help="publish: settle's stacking window, holder head sha (re-validated live)")
-    ap.add_argument("--expedite-lane", choices=["true", "false"],
-                    default=os.environ.get("EXPEDITE_LANE", "true" if EXPEDITE_LANE_DEFAULT else "false"),
+    ap.add_argument("--expedite-lane", type=lambda v: knob_bool(v, "MERGE_TRAIN_EXPEDITE_LANE", EXPEDITE_LANE_DEFAULT),
+                    default=knob_bool(os.environ.get("EXPEDITE_LANE"), "MERGE_TRAIN_EXPEDITE_LANE", EXPEDITE_LANE_DEFAULT),
                     help="settle: open an expedite window beside one running carrier (ADR-0343 amendment 2026-11-13)")
-    ap.add_argument("--expedite-cap", type=int,
-                    default=int(os.environ.get("EXPEDITE_DAILY_CAP", str(EXPEDITE_DAILY_CAP_DEFAULT))),
+    ap.add_argument("--expedite-cap", type=lambda v: lane_cap(v, EXPEDITE_DAILY_CAP_DEFAULT, "MERGE_TRAIN_EXPEDITE_DAILY_CAP"),
+                    default=lane_cap(os.environ.get("EXPEDITE_DAILY_CAP"), EXPEDITE_DAILY_CAP_DEFAULT,
+                                     "MERGE_TRAIN_EXPEDITE_DAILY_CAP"),
                     help="settle/publish: expedite carriers per UTC day")
-    ap.add_argument("--urgent-cap", type=int,
-                    default=int(os.environ.get("URGENT_DAILY_CAP", str(URGENT_DAILY_CAP_DEFAULT))),
+    ap.add_argument("--urgent-cap", type=lambda v: lane_cap(v, URGENT_DAILY_CAP_DEFAULT, "MERGE_TRAIN_URGENT_DAILY_CAP"),
+                    default=lane_cap(os.environ.get("URGENT_DAILY_CAP"), URGENT_DAILY_CAP_DEFAULT,
+                                     "MERGE_TRAIN_URGENT_DAILY_CAP"),
                     help="settle: distinct PRs the owner may label merge-priority:urgent per UTC day")
+    ap.add_argument("--strict-aging-s", type=aging_knob,
+                    default=aging_knob(os.environ.get("MERGE_TRAIN_STRICT_AGING_S")),
+                    help="settle: a green armed strict PR unserved this long holds new fast/expedite carriers")
+    ap.add_argument("--strict-aging-max-hold-s", type=lambda v: knob(v, "MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S"),
+                    default=env_knob("MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S"),
+                    help="settle: the most one aged strict head may hold new carriers before it is released")
+    ap.add_argument("--hotfix-cap", type=lambda v: knob(v, "MERGE_TRAIN_HOTFIX_DAILY_CAP"),
+                    default=env_knob("MERGE_TRAIN_HOTFIX_DAILY_CAP", "HOTFIX_DAILY_CAP"),
+                    help="settle: distinct PRs the owner may label merge-priority:hotfix per UTC day (0 = lane off)")
     ap.add_argument("--expedite-pr", default=os.environ.get("EXPEDITE_PR", ""),
                     help="build/publish: settle's expedite window, the one PR number (re-validated live)")
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
@@ -13114,6 +15462,25 @@ def main() -> int:
     ap.add_argument("--pr", type=int, default=0, help="owner-approval: exact PR number")
     ap.add_argument("--head", default="", help="owner-approval: full current head SHA")
     ap.add_argument("--decision", choices=["approve", "revoke"], default="approve")
+    return ap
+
+
+def settle_from_args(gh, git, args) -> dict:
+    """The settle tick as main() runs it: every validated knob passed through to mode_settle."""
+    s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
+                    strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap,
+                    stack=args.speculative_stack == "true",
+                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
+                    urgent_cap=args.urgent_cap, hotfix_cap=args.hotfix_cap, aging_s=args.strict_aging_s,
+                    aging_max_hold_s=args.strict_aging_max_hold_s)
+    s["speculative_stack"] = args.speculative_stack
+    if args.speculative_stack == "true":
+        log(SPECULATIVE_STACK_ON_NOTICE)
+    return s
+
+
+def main() -> int:
+    ap = build_parser()
     args = ap.parse_args()
     if args.self_test:
         return self_test()
@@ -13184,10 +15551,7 @@ def run_mode(gh, args, ap) -> int:
                               expedite_arg(args, ap), args.expedite_cap)
         log(f"publish: {result}")
         return 0
-    s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap, judge_cap=args.strict_judge_batch_cap, stack=args.speculative_stack == "true",
-                    expedite=args.expedite_lane == "true", expedite_cap=args.expedite_cap,
-                    urgent_cap=args.urgent_cap)
+    s = settle_from_args(gh, git, args)
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
     window = s.get("stack_window")
