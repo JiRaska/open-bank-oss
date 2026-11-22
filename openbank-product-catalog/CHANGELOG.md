@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.10.0...product-catalog-v1.11.0) (2026-11-22)
+
+
+### Features
+
+* **lending,product-catalog:** recover FOS signing and disbursement ([#16539](https://github.com/JiRaska/open-bank-oss/issues/16539)) ([491fd26](https://github.com/JiRaska/open-bank-oss/commit/491fd26e456954b41a0959306b8bd031f35626d5))
+
 ## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.9.0...product-catalog-v1.10.0) (2026-11-22)
 
 
