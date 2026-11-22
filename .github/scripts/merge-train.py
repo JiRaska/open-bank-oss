@@ -4267,6 +4267,31 @@ def bot_moves_only(waiting: list) -> bool:
     return bool(waiting) and all(isinstance(m, Member) and bot_move(m) for m in waiting)
 
 
+BOT_HOLD_CONTEXT = "merge-train/bot-move-held"   # App marker on a bot-move head: "held for #<n> since <epoch>"
+BOT_HOLD_RE = re.compile(r"held for #([0-9]+) since ([0-9]+)")
+
+
+def bot_hold_release(gh, waiting: list, who: int, now: float, shadow: bool) -> str | None:
+    """Why the bot moves must NOT be held for reservation `who`, or None (hold; each unmarked head is
+    marked). Review of #17112: a reservation that ends WITHOUT a merge never gets the train's turn, so
+    an unbounded hold could re-hold the same moves for every next reservation. Bounded twice: a head is
+    held for ONE reservation only (the marker names it), and never longer than RESERVATION_CEILING_S."""
+    marks = []
+    for m in waiting:
+        desc = gh.app_statuses(m.head_sha).get(BOT_HOLD_CONTEXT, ("", ""))[1] or ""
+        got = BOT_HOLD_RE.fullmatch(desc)
+        if got and int(got.group(1)) != who:
+            return f"#{m.number} was already held for reservation #{got.group(1)}"
+        if got and now - int(got.group(2)) >= RESERVATION_CEILING_S:
+            return f"#{m.number} has been held {int(now) - int(got.group(2))}s (ceiling {RESERVATION_CEILING_S}s)"
+        if not got:
+            marks.append(m)
+    if not shadow:
+        for m in marks:
+            gh.post_status(m.head_sha, "success", f"held for #{who} since {int(now)}", context=BOT_HOLD_CONTEXT)
+    return None
+
+
 def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tuple[list[Member], list[Member]]:
     """(fast lane, train). Computed from live git data only."""
     for m in cands:
@@ -5345,10 +5370,15 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         log(f"strict-lane #{holder} CI running on {stack_head[:12]}: the train carrier may be stacked over it")
         summary["in_flight"] = False
         summary["stack_window"] = (holder, stack_head)
-    elif ((holder is not None or len(summary["updated"]) == 1) and not carrier_in_flight and not summary["strict"]
-            and bot_moves_only(train_waiting) and not main_red):
-        # Bot moves (#17108): no deferral carrier of version bumps and image pins under a reservation; they
-        # are released by the train's turn once it ends. The reservation's one deferral stays unused.
+    elif (not carrier_in_flight and not summary["strict"] and bot_moves_only(train_waiting) and not main_red
+            and not any_carrier_open(gh, repo)
+            and ((holder is not None and not summary["updated"] and holder_may_yield(gh, git, strict, holder, urgent, base))
+                 or (holder is None and len(summary["updated"]) == 1 and summary["updated"][0] not in urgent
+                     and update_opens_deferral(gh, git, strict, summary["updated"][0], base)))
+            and bot_hold_release(gh, train_waiting, holder if holder is not None else summary["updated"][0],
+                                 time.time(), shadow) is None):
+        # Bot moves (#17108): only where a deferral carrier WOULD open, no carrier of version bumps and image
+        # pins under the reservation; bounded to one reservation and RESERVATION_CEILING_S (bot_hold_release).
         who = holder if holder is not None else summary["updated"][0]
         log(f"strict-lane #{who} reserved: {len(train_waiting)} bot move(s) "
             f"{', '.join(f'#{m.number}' for m in train_waiting)} held until the reservation ends")
@@ -14213,6 +14243,33 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 s = (bot_state("someone"), mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False))[1]
                 check("bot moves (control): the same PR by a human author opens the bounded deferral as before",
                       s.get("deferral_window") == 35 and "bot_moves_held" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+                # Review of #17112: held for ONE reservation only. A marker naming another reservation (A went red,
+                # B was updated the same tick) releases the move: the deferral opens as for any candidate.
+                bot_state(BOT_LOGIN)
+                bh = gh.prs[19]["head"]["sha"]
+                gh.post_status(bh, "success", f"held for #36 since {int(time.time())}", context=BOT_HOLD_CONTEXT)
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+                check("bot moves: a move already held for another reservation is released (no re-hold)",
+                      s.get("deferral_window") == 35 and "bot_moves_held" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+                bot_state(BOT_LOGIN)
+                bh = gh.prs[19]["head"]["sha"]
+                gh.post_status(bh, "success", f"held for #35 since {int(time.time()) - RESERVATION_CEILING_S - 1}",
+                               context=BOT_HOLD_CONTEXT)
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+                check("bot moves: a move held longer than RESERVATION_CEILING_S is released",
+                      s.get("deferral_window") == 35 and "bot_moves_held" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+                # Only where a deferral would open: a holder that already yielded holds nothing for the moves.
+                bot_state(BOT_LOGIN)
+                gh.post_status(gh.prs[35]["head"]["sha"], "success", "yielded", context=DEFER_CONTEXT)
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+                check("bot moves: no hold where no deferral would open (holder already yielded)",
+                      "bot_moves_held" not in s and "deferral_window" not in s, f"{s}")
                 gh.head_checks.clear()
                 reset()
             _sc = _scenario(112)
