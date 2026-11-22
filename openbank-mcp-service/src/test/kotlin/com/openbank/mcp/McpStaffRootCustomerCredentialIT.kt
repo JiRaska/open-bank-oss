@@ -2,7 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.mcp
 
+import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -16,8 +18,11 @@ import io.restassured.http.Headers
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.containsString
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Clock
+import java.time.Duration
 
 /**
  * #16590 (review of #17086): the staff root with the customer channel OFF and the REAL
@@ -45,11 +50,24 @@ class McpStaffRootCustomerCredentialIT {
     @Inject
     lateinit var registry: MeterRegistry
 
+    @Inject
+    lateinit var limiter: McpRateLimiter
+
     @BeforeEach
     fun reset() {
         CustomerTokenSource.claims = emptyMap()
         recorder.clear()
+        // A fresh minute window per test, so no case inherits another's spent anonymous budget.
+        limiter.clock = Clock.offset(Clock.systemUTC(), Duration.ofMinutes(10L * window.incrementAndGet()))
     }
+
+    @AfterEach
+    fun restoreClock() {
+        limiter.clock = Clock.systemUTC()
+    }
+
+    private fun rejected(reason: String): Double =
+        registry.find("openbank.mcp.customer.rejected").tag("reason", reason).counter()?.count() ?: 0.0
 
     private fun post(vararg authorization: String, body: String = LIST) = given().contentType(ContentType.JSON)
         .headers(Headers(authorization.map { Header("Authorization", it) }))
@@ -63,27 +81,36 @@ class McpStaffRootCustomerCredentialIT {
             "aud" to "openbank-mcp-service",
             "consent_id" to CONSENT,
         )
+        val before = rejected("customer_channel_off")
+        val pdpBefore = TestPolicyDecisionPoint.queryCount.get()
         post("Bearer t").statusCode(401).header("WWW-Authenticate", containsString("/customer/mcp"))
-        val rejected = registry.find("openbank.mcp.customer.rejected").tag("reason", "customer_channel_off").counter()
-        assertThat(rejected?.count() ?: 0.0).isGreaterThanOrEqualTo(1.0)
+        post("Bearer t", body = CALL).statusCode(401).header("WWW-Authenticate", containsString("/customer/mcp"))
+        assertThat(rejected("customer_channel_off") - before).isEqualTo(2.0)
+        assertThat(TestPolicyDecisionPoint.queryCount.get()).isEqualTo(pdpBefore)
+        val row = recorder.events.single()
+        assertThat(row.result).isEqualTo(AuditResult.DENIED)
+        assertThat(row.payload["reason"]).isEqualTo(STAFF_ROOT_REASON)
     }
 
     @Test
     fun `junk DPoP calls beyond the anonymous budget do not each write an audit row`() {
         // Unverified credential: `DPoP x` with no customers-realm token behind it.
         CustomerTokenSource.claims = emptyMap()
+        val before = rejected("customer_channel_off")
         repeat(20) { post("DPoP x", body = CALL).statusCode(401) }
-        // At most the 2-call budget plus one throttle row per window (two if straddling a minute).
-        assertThat(recorder.events.size).isBetween(1, 4)
+        assertThat(rejected("customer_channel_off") - before).isEqualTo(20.0)
+        // The 2-call budget, plus one throttle row per window (two if the run straddles a minute).
+        assertThat(recorder.events.size).isBetween(3, 4)
+        val refusals = recorder.events.filter { it.payload["reason"] == STAFF_ROOT_REASON }
+        assertThat(refusals).hasSize(2).allSatisfy { assertThat(it.result).isEqualTo(AuditResult.DENIED) }
     }
 
     @Test
-    fun `two Authorization headers are refused in either order`() {
+    fun `two Authorization headers are refused with 400 invalid_request in either order`() {
         CustomerTokenSource.claims = staffClaims
         listOf(arrayOf("Bearer t", "DPoP t"), arrayOf("DPoP t", "Bearer t"), arrayOf("Bearer t", "Bearer u"))
             .forEach { headers ->
-                val status = post(*headers).extract().statusCode()
-                assertThat(status).describedAs(headers.joinToString()).isIn(400, 401)
+                post(*headers).statusCode(400).header("WWW-Authenticate", containsString("invalid_request"))
             }
     }
 
@@ -104,6 +131,8 @@ class McpStaffRootCustomerCredentialIT {
     private companion object {
         /** application.yaml `mcp.customer.issuer` default, deliberately NOT overridden. */
         const val SHIPPED_CUSTOMER_ISSUER = "https://kc.open-bank.tech/realms/openbank-customers"
+        const val STAFF_ROOT_REASON = "customer credential on the staff root"
+        val window = java.util.concurrent.atomic.AtomicLong()
         const val CONSENT = "11111111-1111-1111-1111-111111111111"
         const val LIST = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"""
         const val CALL = """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
