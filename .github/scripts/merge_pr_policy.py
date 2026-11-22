@@ -137,6 +137,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
     # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways) merged with #17078 (deferral_chain_self_test in shard scenario 0), plus #17083's review fixes (no real-tree read in the synthetic self-test; gates.yaml shard-declaration check), reviewed with #17083.
     'b30cbdc9d1993063ec72162e98892165a84323e4',
+    # merge-train.py of #17115: CI retry planner reruns failed jobs only, since gate shards bind their own attempt's ruleset evidence (#11442), reviewed with #17115.
+    '113d12f7961e632c68f188e62b2b9e4290d73b5b',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

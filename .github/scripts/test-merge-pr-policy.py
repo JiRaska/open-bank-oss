@@ -318,6 +318,9 @@ class PolicyEvidenceTests(unittest.TestCase):
     def test_reviewed_b30cbdc9_source_preserves_bounded_policy_chain(self):
         self.assert_reviewed_source_chain('b30cbdc9d1993063ec72162e98892165a84323e4')
 
+    def test_reviewed_113d12f7_source_preserves_bounded_policy_chain(self):
+        self.assert_reviewed_source_chain('113d12f7961e632c68f188e62b2b9e4290d73b5b')
+
     def test_current_policy_source_is_within_bounds(self):
         # #16187: the controller outgrew the size bound and nothing noticed until merge records
         # were already missing. The size bound stays a PR-time check on the working tree.
