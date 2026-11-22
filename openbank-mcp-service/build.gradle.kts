@@ -25,6 +25,9 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.kotlinx.coroutines.core)
+    // ADR-0383 P4 (#16590): the customer channel's shared DPoP replay store and D5.3 budgets, so
+    // replicas share one replay window. The fleet's existing Valkey client (customer-edge, vop, ...).
+    implementation(libs.quarkus.redis.client)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     // Apache-2.0 shared libs — copyleft may consume permissive (ADR-0136). The shared ADR-0034 PDP
@@ -58,6 +61,28 @@ dependencies {
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
 }
+
+// The customer-channel shared-store boot gate (#16590) is proved on the built fast-jar in
+// LaunchMode.NORMAL, so it needs quarkusBuild and runs in its own task, not in `test`.
+tasks.named<Test>("test") {
+    exclude("**/CustomerChannelBootGuardIT.class")
+}
+
+val customerBootGuardIT = tasks.register<Test>("customerBootGuardIT") {
+    description = "Verify the customer channel refuses to boot without a configured shared Valkey store"
+    group = "verification"
+    dependsOn(tasks.named("testClasses"), tasks.named("quarkusBuild"))
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter.includeTestsMatching("*CustomerChannelBootGuardIT")
+    systemProperty(
+        "openbank.test.mcp.runner",
+        layout.buildDirectory.file("quarkus-app/quarkus-run.jar").get().asFile.absolutePath,
+    )
+}
+
+tasks.named("check") { dependsOn(customerBootGuardIT) }
 
 kover {
     reports {

@@ -34,11 +34,11 @@ class CustomerChannelAdmissionTest {
 
     /** No budget anywhere: every gate except the throttles is what is under test. */
     private object Unlimited : CustomerChannelAdmission.Throttles {
-        override fun proofKey(thumbprint: String): String? = null
+        override suspend fun proofKey(thumbprint: String): String? = null
 
-        override fun client(clientId: String): String? = null
+        override suspend fun client(clientId: String): String? = null
 
-        override fun subject(subject: String, clientId: String): String? = null
+        override suspend fun subject(subject: String, clientId: String): String? = null
     }
 
     /** The real shared limiter behind the three budgets, as McpCustomerBranch wires it. */
@@ -49,13 +49,13 @@ class CustomerChannelAdmissionTest {
         private fun refuse(key: String, o: McpRateLimiter.Outcome) =
             o.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.reason.also { spent += key }
 
-        override fun proofKey(thumbprint: String) =
+        override suspend fun proofKey(thumbprint: String) =
             CustomerChannelAdmission.proofKeyThrottleKey(thumbprint).let { refuse(it, limiter.check(it)) }
 
-        override fun client(clientId: String) =
+        override suspend fun client(clientId: String) =
             CustomerChannelAdmission.clientThrottleKey(clientId).let { refuse(it, limiter.checkShared(it)) }
 
-        override fun subject(subject: String, clientId: String) =
+        override suspend fun subject(subject: String, clientId: String) =
             CustomerChannelAdmission.throttleKey(subject, clientId).let { refuse(it, limiter.check(it)) }
     }
 
