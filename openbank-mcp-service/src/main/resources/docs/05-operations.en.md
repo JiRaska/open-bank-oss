@@ -203,3 +203,13 @@ from a peer header.
 through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
 reads the same series through the delegations MCP-channel view. Alert thresholds for the
 channel live with the fleet alerting rules, not in this service.
+
+### Why a tool call failed: `openbank_mcp_tool_call_failures_total`
+
+The tool-call counter records `result="FAILURE"` without a reason, so a client's bad arguments
+and a downstream fault look the same there. Every failed `tools/call` (and a PDP outage,
+`decision=UNAVAILABLE`) also increments `openbank_mcp_tool_call_failures_total{tool,kind}`,
+where `kind` is a closed set: `invalid_params` (client error), `unavailable` (an advertised tool
+with nothing behind it yet) and `error` (a server-side fault, also the default for any unmapped
+reason, and what a PDP outage maps to). The customer-channel availability SLO
+(`pyrra-slo-mcp-customer.yaml`) counts `kind="error"` only.

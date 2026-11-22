@@ -388,6 +388,33 @@ class McpToolCallFuzzTest {
         assertThat(sabotaged({})).isEmpty()
     }
 
+    // -- availability SLI input: a client's bad arguments must not read as a server fault ----------------
+
+    private fun failureCount(kind: String, onCall: (String) -> Unit): Double {
+        val h = Harness(mapper)
+        h.ports.onCall = onCall
+        h.endpoint.handle(mapper.readTree(call("list_accounts", "{}")))
+        return h.meters.find("openbank.mcp.tool_call.failures").tag("kind", kind).counter()?.count() ?: 0.0
+    }
+
+    @Test
+    fun `invalid params is metered as a client error, not a server error`() {
+        assertThat(failureCount("invalid_params") { throw IllegalArgumentException("bad") }).isEqualTo(1.0)
+        assertThat(failureCount("error") { throw IllegalArgumentException("bad") }).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a downstream fault is metered as a server error`() {
+        assertThat(failureCount("error") { throw IllegalStateException("downstream") }).isEqualTo(1.0)
+        assertThat(failureCount("invalid_params") { throw IllegalStateException("downstream") }).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `an unwired tool is metered as unavailable, and a success meters no failure`() {
+        assertThat(failureCount("unavailable") { throw UnsupportedOperationException("not wired") }).isEqualTo(1.0)
+        assertThat(failureCount("error") {}).isEqualTo(0.0)
+    }
+
     // -- known deviations (disabled; see PR body) ---------------------------------------------------
 
     @Test
