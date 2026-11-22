@@ -137,6 +137,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
     # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways) merged with #17078 (deferral_chain_self_test in shard scenario 0), plus #17083's review fixes (no real-tree read in the synthetic self-test; gates.yaml shard-declaration check), reviewed with #17083.
     'b30cbdc9d1993063ec72162e98892165a84323e4',
+    # merge-train.py of #17108's bot-move hold (no deferral carrier of bot-only moves under a running strict reservation; bounded to one reservation and RESERVATION_CEILING_S per review), reviewed with that PR.
+    'c1283f95612aa4d81f5ffe2e88b628963a682849',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
