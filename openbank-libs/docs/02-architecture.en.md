@@ -64,6 +64,8 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
 
+`TopicProducers` attributes `openbank.delegation.payment-proposal-events` to delegation-service (ADR-0383 D6, #16590). audit-service subscribes before the producer publishes; `rules.yaml` lists the topic as a consumer-first exemption until the producer PR removes it.
+
 The same table attributes `openbank.tpp.registry.event` to tpp-registry-service, so audit-service can label the TPP register changes (registered, blacklisted) it records on the audit trail.
 
 The same table attributes `openbank.delegation.payment-proposal-events` (the ADR-0383 D6 customer MCP payment-proposal lifecycle) to delegation-service, so audit-service can label those rows.
