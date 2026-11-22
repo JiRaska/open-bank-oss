@@ -711,8 +711,6 @@ change_requirements:
         reason: "#9073 stage 1 of 2, consumer-first: audit-service and analytics-sink subscribe, with the topic and ACLs, before account-service publishes there. Today AccountEventPublisher ignores the topic its callers name and emits status changes on account-events-out (account.created); the producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
       - topic: "openbank.accounts.savings-withdrawal.approved"
         reason: "#9073 stage 1 of 2, consumer-first: same sequencing as account.status-changed above; the account-service producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
-      - topic: "openbank.delegation.payment-proposal-events"
-        reason: "ADR-0383 D6 consumer-first: audit-service subscribes, with the topic and Read ACL, before delegation-service's proposal store publishes there; the producer PR MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-19, #16590): #16590."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -4825,6 +4823,8 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/domain/model/PaymentProposal.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/rest/PaymentProposalResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -5154,6 +5154,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/CatalogFosLoanAdapter.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
