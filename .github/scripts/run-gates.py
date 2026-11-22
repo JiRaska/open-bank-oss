@@ -1414,16 +1414,19 @@ gates:
     name: "a gate whose CPU (and wall) time exceed its budget: real work, FAILS"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
   - id: wall-over-budget
     name: "a gate long in wall time but idle on CPU (a loaded runner): reported, PASSES"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "sleep 0.6"
   - id: not-evaluated
     name: "a gate that could not read its subject (#13400): red, never PASS, never a budget overrun"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "sleep 0.5; echo 'GATE_VERDICT=NOT_EVALUATED  # API timed out'; exit 1"
   - id: not-evaluated-exit-zero
     name: "the NOT EVALUATED line never turns a zero exit into anything but its own verdict"
@@ -1433,6 +1436,7 @@ gates:
     name: "a gate that found something AND was slow is a finding, not a budget overrun"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'; exit 1"
   - id: within-budget
     name: "a gate inside its budget"
