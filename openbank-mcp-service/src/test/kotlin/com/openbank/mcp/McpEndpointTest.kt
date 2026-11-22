@@ -70,6 +70,7 @@ class McpEndpointTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(registry)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, toolsListCacheTtlMs)
@@ -645,6 +646,12 @@ class McpEndpointTest {
 
         assertThat(toolCalls("list_accounts", "UNAVAILABLE", "DENIED")).isEqualTo(1.0)
         assertThat(toolCalls("list_accounts", "DENY", "DENIED")).isEqualTo(1.0)
+
+        // Availability SLI input: the outage is a server fault; the policy DENY is not a failure at all.
+        assertThat(
+            registry.get("openbank.mcp.tool_call.failures").tag("kind", "error").counter().count(),
+        ).isEqualTo(1.0)
+        assertThat(registry.find("openbank.mcp.tool_call.failures").counters().sumOf { it.count() }).isEqualTo(1.0)
     }
 
     @Test

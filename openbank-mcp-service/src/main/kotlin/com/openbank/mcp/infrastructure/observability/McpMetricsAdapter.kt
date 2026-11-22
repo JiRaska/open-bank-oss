@@ -28,6 +28,9 @@ import java.time.Duration
  *    every agent; `tool="unmapped"` is the deny-by-default gate firing.
  *  - `openbank_mcp_tool_call_duration_seconds{tool}` — includes the PDP round-trip and the tool's own
  *    work, i.e. what the agent actually waits for.
+ *  - `openbank_mcp_tool_call_failures_total{tool,kind,channel,client,synthetic}` — one increment per
+ *    `result=FAILURE` tool call, saying why: `invalid_params` (client error), `unavailable` (tool not
+ *    wired) or `error` (server-side fault). The availability SLI counts `kind="error"` only.
  *  - `openbank_mcp_customer_rejected_total{layer,reason,client,synthetic}` — ADR-0384 D1: a
  *    customer-channel request refused before a tool ran. `client` is the allowlist short id or
  *    `unlisted`; the tool-call and duration series carry `channel`, `client` and `synthetic` too.
@@ -95,6 +98,22 @@ class McpMetricsAdapter(
             .description("End-to-end MCP tool-call latency, including the PDP round-trip")
             .register(r)
             .record(duration)
+    }
+
+    override fun toolCallFailed(
+        tool: String,
+        kind: McpMetricsPort.ToolFailureKind,
+        channel: McpMetricsPort.ChannelTags,
+    ) {
+        val r = registry ?: return
+        Counter.builder("openbank.mcp.tool_call.failures")
+            .tag("service", SERVICE)
+            .tag("tool", tool)
+            .tag("kind", kind.name.lowercase())
+            .tags(channelTags(channel))
+            .description("MCP tool calls that ended in FAILURE, by cause; only kind=error is a server-side fault")
+            .register(r)
+            .increment()
     }
 
     override fun callerIdentityResolved(source: CallerIdentitySource) {
