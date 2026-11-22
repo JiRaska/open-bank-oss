@@ -562,7 +562,7 @@ def evaluate_network(docs_by_path: dict[str, list[dict] | None], modules: set[st
             findings.append(f"{path}: {name} does not list Egress in policyTypes")
         if not rules:
             findings.append(f"{path}: {name} has no internet egress rule — the broker cannot fetch")
-        for nets, ports, open_to in rules:
+        for _nets, ports, open_to in rules:
             if open_to:
                 findings.append(f"{path}: {name} has an egress rule with no `to` — every destination, no except")
                 continue
