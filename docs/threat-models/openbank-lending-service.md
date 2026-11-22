@@ -1147,3 +1147,11 @@ Residual: a malformed catalogue country code (like any other malformed catalogue
 catalogue-unavailable refusal. It fails closed: no application is persisted. Only the status code
 misattributes the fault to the caller. Lending has no catalogue-unavailable outcome yet, and adding
 one belongs with the other `toProfile` validation errors, not with this check alone.
+
+### Durable catalogue-backed signature (ADR-0380)
+
+The signature endpoint records an intent for the authenticated signer against the application's
+pinned product revision. Taking over work from PostgreSQL never reconstructs actor, artefact or
+product evidence from a new caller. A row lock serializes the signature transition with other
+origination state changes. The signature, outbox and completion marker commit together.
+The scheduler restores the stored synthetic taint before publishing evidence.
