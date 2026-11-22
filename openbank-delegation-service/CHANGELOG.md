@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.1...delegation-service-v0.27.2) (2026-11-22)
+
+
+### Security
+
+* **customer-edge:** approve MCP payment proposals in the app with hash-bound SCA ([#16845](https://github.com/JiRaska/open-bank-oss/issues/16845)) ([060aafa](https://github.com/JiRaska/open-bank-oss/commit/060aafa1990aab37fbd35dd9a3397bc1eb902bb0))
+
 ## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.0...delegation-service-v0.27.1) (2026-11-22)
 
 
