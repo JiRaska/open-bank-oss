@@ -125,6 +125,14 @@ class DelegationEventPactBrokerProviderVerificationTest {
     @State("no MCP_CLIENT propose grant exists for the pact party, client, key and account")
     fun mcpClientProposeGrantAbsent() = Unit
 
+    // customer-edge's HTTP payment-proposal interactions are likewise excluded by @PactFilter and
+    // replayed by DelegationProposalPactFolderProviderVerificationTest; listed for the same parity gate.
+    @State("a PENDING payment proposal exists for the customer")
+    fun pendingProposal() = Unit
+
+    @State("an APPROVED payment proposal exists for the customer")
+    fun approvedProposal() = Unit
+
     @PactVerifyProvider("a DelegationActivated event for an account")
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
