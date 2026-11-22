@@ -46,20 +46,20 @@ the same permit ledger to loan signing (`SIGN`) and disbursement (`DISBURSE`).
 | T6 | Signing and disbursement share one permit, or an account operation reaches the loan path | `SIGN` and `DISBURSE` consume separate permits keyed by their own operation IDs. `admit_passport_account` now admits only `OPEN`/`ACTIVATE`, and `admit_passport_commitment` only `SIGN`/`DISBURSE`. | `PassportPermitFenceTest` |
 | I2 | The route read leaks grants or admits something | The route read returns route fields only for an approved, unrevoked FOS grant with live subject evidence for that party and revision. It neither issues nor consumes a permit, and the receipt read never consumes one. | `PassportPermitFenceTest` (`only an approved live route for the exact verified subject and revision is returned`) |
 | T7 | A refused loan commitment is later admitted for the same command, for example after new subject evidence arrives, so the lending side's terminal decision and the catalogue disagree | V20 retains each exact refusal in `passport_commitment_refusals` under the grant lock. `admit_passport_commitment` refuses any later attempt with the same operation, operation ID, grant, party, revision and binding. The response carries `X-FOS-Decision: refused` only for a retained refusal, so lending can tell a definitive refusal from a transient one. A route mismatch is not retained and stays retryable. | `PassportPermitFenceTest` (`an exact refusal does not become an admission when evidence arrives later`) |
+| T8 | A FOS receipt or permit authorizes a BRANCH commitment, or the reverse | V21 passes the requested mode into `admit_passport_scoped_operation` and `admit_passport_commitment`, and refuses unless it equals the locked grant's `mode`. Establishment and route are matched under the same lock, so a FOS receipt cannot be replayed as a BRANCH one. | `PassportPermitFenceTest` (`revocation that owns the grant prevents a new loan admission`, `loan admission that owns the grant preserves only its exact receipt`, `only exact consumed loan operations return receipts`; each runs for FOS and BRANCH) |
 
 ## Residual risk / follow-ups
 - **No subject-evidence writer exists yet.** `admit_passport_account` requires an unexpired row
   in `passport_grant_subject_evidence`, and nothing in this change writes one. In production,
   every new admission is therefore refused. That is fail-closed by design until the evidence
   publisher (C4) lands.
-- **BRANCH mode is refused.** A `BRANCH` grant can be stored and approved, but admission returns no
-  permit for it. Branch booking needs the separately approved branch ledger path.
-- **Lending does not call the commitment endpoint yet.** Wiring durable, server-derived signature
-  and disbursement requests in lending is the next PR in this stack (#16490, #16539). Until then
-  the endpoint is reachable only by the lending service account and admits nothing without a
-  subject-evidence row, which nothing writes yet.
-- **BRANCH loan commitments are refused.** `admit_passport_commitment` requires `mode = 'FOS'`;
-  branch commitments are #16587.
+- **BRANCH account operations are refused.** `admit_passport_scoped_operation` refuses `OPEN` and
+  `ACTIVATE` in BRANCH mode. Account booking on a branch needs the separately approved branch
+  ledger path (B2).
+- **Nothing writes subject evidence yet.** Lending calls the commitment endpoint (#16539, #16587).
+  It still admits nothing without a subject-evidence row, which nothing writes yet.
+- **BRANCH loan commitments are admitted by the catalogue but not executed.** Lending refuses branch
+  origination and commitment execution at normal runtime until B2 provides branch-aware booking.
 - Consumers of the V18 grant lifecycle stream are not enabled yet. Until one is, the outbox rows
   wait unconsumed. They are not on the admission path, so they admit nothing.
 
