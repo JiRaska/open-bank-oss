@@ -45,6 +45,24 @@ maximum first-retry delay while holding claim time before the deadline, then adv
 past it. The checks exercise the real repository and database; they do not replace the eligibility
 predicate with a mock. Keep clock control confined to the test profile when adopting the callback.
 
+## Outbox native row projections
+
+The shared Panache repository derives its claim and peek projections from Hibernate's mapping
+of the concrete entity. Unmapped additive table columns stay outside native entity hydration;
+mapped service extensions, inherited columns, physical discriminators and claim tokens remain
+included. Rows still pass through the entity's `toEntry()` override, including traced outboxes.
+The projection is cached per repository and metamodel identity, without a schema query.
+
+These native row reads require physical columns from one outbox table. Formula or secondary-table
+mappings fail before the native claim is created rather than silently omitting mapped values.
+The public one-argument `OutboxSql` templates retain their wildcard behavior for compatibility;
+direct template callers remain responsible for their result mapping. Existing service-specific
+projections and the public `OutboxTableShape` constructor are unchanged.
+
+Real ORM/database regressions add unmapped columns and verify ordinary, traced and fenced rows.
+The plan gate exercises the projected renderer with the existing negative control and buffer bound.
+Neither these tests nor a compatible schema expansion authorizes a mixed-dispatcher cutover.
+
 ## XML output construction and isolation
 
 ISO builders create output DOMs through `SecureXml.newDocument()`. A private, lazily initialized,

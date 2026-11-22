@@ -74,7 +74,11 @@ class McpPiiMasker(private val mapper: ObjectMapper) {
         }
     }
 
-    private fun looksLikeIban(value: String): Boolean = IBAN_PATTERN.matches(value.replace(" ", ""))
+    /**
+     * Country code with its ISO 13616 registry length (shared with [McpIbanDetection]), so an
+     * RF creditor reference or another IBAN-shaped token that is not an account is not masked.
+     */
+    private fun looksLikeIban(value: String): Boolean = McpIbanDetection.isIban(value.trim())
 
     /** Keeps the last [IBAN_TAIL] characters of an identifier, e.g. `CZ65…4567` -> `****4567`. */
     private fun tail(value: String): String {
@@ -87,7 +91,6 @@ class McpPiiMasker(private val mapper: ObjectMapper) {
         const val MASK_PREFIX = "****"
         const val IBAN_TAIL = 4
 
-        val IBAN_PATTERN = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$")
         val UUID_PATTERN = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
         /** Field-name fragments whose value is an account identifier — masked to a correlatable tail. */
