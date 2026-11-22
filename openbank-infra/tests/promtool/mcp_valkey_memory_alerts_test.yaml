@@ -48,7 +48,7 @@ tests:
             exp_annotations:
               summary: "mcp-valkey is above 80% of maxmemory"
               description: "mcp-valkey (mcp-valkey-7d9f-abcde) uses 85% of maxmemory. It runs noeviction, so at 100% every customer-channel request answers 503 replay_store_unavailable. Check for a proof-key or subject flood (the D5.3 buckets bound it) before raising maxmemory; never switch to an evicting policy."
-              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
       - eval_time: 10m
         alertname: MCPValkeyMemoryFull
         exp_alerts: []
@@ -72,7 +72,7 @@ tests:
             exp_annotations:
               summary: "mcp-valkey is at maxmemory: the customer MCP channel is refusing requests"
               description: "mcp-valkey (mcp-valkey-7d9f-abcde) uses 97% of maxmemory with noeviction; new DPoP claims and budget counters fail, so the customer channel answers 503 for everyone."
-              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md"
 
   - interval: 1m
     name: "maxmemory unset (0) never fires on a healthy store; another Valkey is out of scope"
