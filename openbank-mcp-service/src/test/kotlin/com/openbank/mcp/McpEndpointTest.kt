@@ -70,6 +70,7 @@ class McpEndpointTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(registry)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, toolsListCacheTtlMs)
