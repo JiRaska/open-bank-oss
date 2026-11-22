@@ -112,7 +112,7 @@ class PassportPermitFenceTest {
     fun `loan admission that owns the grant preserves only its exact receipt`(operation: String) {
         val request = seed(operation, issue = false)
         dataSource.connection.use { winner ->
-            assertNull(winner.admitLoan(request))
+            assertNull(winner.admitLoan(request.copy(operationId = UUID.randomUUID())))
             winner.grantSubjectEvidence(request)
             assertNull(winner.admitLoan(request.copy(country = "AT")))
             assertNull(winner.admitLoan(request.copy(establishment = UUID.randomUUID())))
@@ -141,7 +141,7 @@ class PassportPermitFenceTest {
         dataSource.connection.use { it.grantSubjectEvidence(signature) }
         callLoanAdmission(signature, "/receipt", 404)
         val differentPin = signature.copy(contentHash = "2".repeat(64))
-        callLoanAdmission(differentPin, "", 409)
+        callLoanAdmission(differentPin, "", 409).header("X-FOS-Decision", org.hamcrest.Matchers.nullValue())
         callLoanAdmission(signature, "", 204)
         callLoanAdmission(signature, "/receipt", 204)
         callLoanAdmission(differentPin, "/receipt", 404)
@@ -179,7 +179,7 @@ class PassportPermitFenceTest {
             assertTrue(db.revoke(request.grant))
         }
         callRoute(request).then().statusCode(409)
-        callLoanAdmission(request, "", 409)
+        callLoanAdmission(request, "", 409).header("X-FOS-Decision", "refused")
     }
 
     private fun callRoute(request: PermitRequest) = given().contentType("application/json").body(
@@ -190,6 +190,17 @@ class PassportPermitFenceTest {
             "revisionContentHash" to request.contentHash,
         ),
     ).post("/api/v2/internal/passport-commitments/route")
+
+    @Test
+    fun `an exact refusal does not become an admission when evidence arrives later`() {
+        val request = seed("SIGN", issue = false)
+        dataSource.connection.use { db ->
+            assertNull(db.admitLoan(request))
+            db.grantSubjectEvidence(request)
+            assertNull(db.admitLoan(request))
+            assertNotNull(db.admitLoan(request.copy(operationId = UUID.randomUUID())))
+        }
+    }
 
     @Test
     @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
@@ -206,7 +217,7 @@ class PassportPermitFenceTest {
         callRoute(request).then().statusCode(403)
     }
 
-    private fun callLoanAdmission(request: PermitRequest, suffix: String, status: Int) {
+    private fun callLoanAdmission(request: PermitRequest, suffix: String, status: Int) =
         given().contentType("application/json").body(
             mapOf(
                 "grantId" to request.grant,
@@ -224,7 +235,6 @@ class PassportPermitFenceTest {
                 "packSetDigest" to HASH,
             ),
         ).post("/api/v2/internal/passport-commitments$suffix").then().statusCode(status)
-    }
 
     private fun Connection.grantSubjectEvidence(request: PermitRequest) = execute(
         """

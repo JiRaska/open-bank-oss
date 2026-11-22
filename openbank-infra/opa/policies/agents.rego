@@ -28,9 +28,29 @@ default allow := false
 # AI_AGENT is prefixed "agent:" (AuthorizeInterceptor.principalType()'s own convention, e.g.
 # "agent:onboarding" per its test). trim_prefix is a no-op when the prefix isn't present, so
 # this normalises both callers to the bare charter id without needing two lookup rules.
+#
+# A charter with `enabled: false` is NOT returned here, so a disabled agent has no charter on
+# every path that derives a grant from it: the plain-pattern MCP allowlist, the {tier, resources}
+# object grants, the REST bridge (rest.rego delegates to `allow` below) and any later rule built
+# on `charter`. agents.yaml documents `enabled: false` as the per-agent halt; before this guard
+# no rule read the field, so a disabled charter kept every grant live (draft.ticket answered
+# allow for card-scheme-bulletin-agent). An ABSENT `enabled` key means enabled -- eight
+# charters omit it -- so only an explicit `false` disables. Written as `not a.enabled == false`
+# (not object.get) so gen-agents-opa-data.py's static pass sees the `a.enabled` dereference and
+# keeps the field in the served projection; its differential proof fails the write if it ever
+# did not.
 charter contains a if {
 	some a in data.agents.agents
 	a.id == trim_prefix(input.agent, "agent:")
+	not a.enabled == false
+}
+
+# The caller names a chartered agent whose charter is switched off. Used for the decision
+# reason and as an explicit veto in `allow`, independent of `charter` excluding it.
+charter_disabled if {
+	some a in data.agents.agents
+	a.id == trim_prefix(input.agent, "agent:")
+	a.enabled == false
 }
 
 # The hard-forbidden tier is forbidden for ALL agents, regardless of charter (agents.yaml: tool_tiers.deny).
@@ -202,6 +222,7 @@ skill_ok if {
 # The decision. Allow only when nothing forbids AND the charter permits AND skill is in scope.
 # ---------------------------------------------------------------------------------------
 allow if {
+	not charter_disabled
 	not hard_denied
 	not charter_denied
 	charter_allowed
@@ -243,7 +264,9 @@ decision := {
 	"reason": reason,
 }
 
-reason := "hard-denied tool tier" if hard_denied
+reason := "agent charter disabled" if charter_disabled
+
+else := "hard-denied tool tier" if hard_denied
 
 else := "denied by charter tier/resource grant" if tier_resource_charter_denied
 
