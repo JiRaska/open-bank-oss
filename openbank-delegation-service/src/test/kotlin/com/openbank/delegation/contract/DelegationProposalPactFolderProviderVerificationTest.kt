@@ -56,6 +56,13 @@ import java.util.UUID
  * `X-Customer-Party-Id`; the class-level identity is exactly that, so the replay goes through the
  * same guard production does.
  *
+ * ## Negative half
+ *
+ * The pact carries the happy path only. The refusals — a caller that is not the edge service account
+ * (403), a proposal id that belongs to another customer (404, enumeration resistance) and a wrong
+ * payload hash — are asserted against the same routes in [PaymentProposalApiIT]; a plain `@Test`
+ * here cannot resolve the `PactVerificationContext` the `@BeforeEach` takes.
+ *
  * ## Seeding a fixed id into an append-only table
  *
  * The contract pins the proposal id (the payload hash covers it), and the table forbids DELETE by
