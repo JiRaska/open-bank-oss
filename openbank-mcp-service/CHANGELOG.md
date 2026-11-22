@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.1...mcp-service-v0.18.2) (2026-11-22)
+
+
+### Security
+
+* **mcp:** sanitise free text in tool results (ADR-0383 D7) ([#16637](https://github.com/JiRaska/open-bank-oss/issues/16637)) ([5afbbc4](https://github.com/JiRaska/open-bank-oss/commit/5afbbc4268b7554a615d5bcef9689a5759f997e1))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.0...mcp-service-v0.18.1) (2026-11-22)
 
 
