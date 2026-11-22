@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: none
+ownsNoDatabase: true
+dataLineageRole: consumer
+dataClassification: public
+retentionPolicy: transient
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: public-web
+      relationType: api
+      description: reads allowlisted public HTTPS pages (GET only) on behalf of governed agents
+        (ADR-0387); JS-only hosts are rendered by an external browser-rendering provider

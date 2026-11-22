@@ -50,10 +50,11 @@ jobs:
     # (never a fork head). Merged OR closed-unmerged — both leave the per-SHA branch
     # behind unless removed here (GitHub auto-delete only covers the merged case).
     if: >-
-      github.event_name == 'pull_request' &&
+      (github.event_name != 'schedule' || (vars.BRANCH_CLEANUP_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
+      (github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-') ||
-      startsWith(github.event.pull_request.head.ref, 'chore/admin-ui-deploy-'))
+      startsWith(github.event.pull_request.head.ref, 'chore/admin-ui-deploy-')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,7 +84,9 @@ jobs:
   prune-stale-branches:
     name: Prune stale branches
     # Never on pull_request — the event-driven job above owns that path.
-    if: github.event_name != 'pull_request'
+    if: >-
+      (github.event_name != 'schedule' || (vars.BRANCH_CLEANUP_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
+      (github.event_name != 'pull_request')
     runs-on: ubuntu-latest
     permissions:
       contents: write

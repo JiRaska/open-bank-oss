@@ -230,6 +230,20 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-22** — **Payment-proposal idempotency: a 5xx is released, never stored** (ADR-0383 D6,
+  #16845). `PaymentProposalResource.idempotent` previously saved whatever answer the handler
+  returned under the reserved key; it now saves only a definitive (non-5xx) answer and releases the
+  reservation on a 5xx, exactly as it already did when the handler throws.
+  - **Denial of service via replay (repudiation of a customer's decision).** customer-edge sends a
+    FIXED key per proposal for reject (`mcp-proposal-reject-<id>`), so a stored transient failure
+    would have been replayed to every retry for the record's whole TTL and the customer could never
+    reject the proposal. A retry under the same key now re-executes the operation instead.
+  - **Replay safety of re-execution.** The handler path that returns a 5xx persists no idempotency
+    record, and re-execution is bounded by the store's own controls (dedupe on create, revision CAS
+    on every transition), so a retry cannot apply a transition twice. Definitive answers (2xx/4xx)
+    are still stored and replayed verbatim; a key reused for a different request is still 409.
+    Tested by `PaymentProposalIdempotencyTest`.
+
 - **2026-11-19** — **Customer MCP payment-proposal store** (ADR-0383 D6, #16590). New table
   `delegation_payment_proposals` (V38), REST family `/api/v1/payment-proposals` and topic
   `openbank.delegation.payment-proposal-events`. A proposal moves no money; it is executed only by

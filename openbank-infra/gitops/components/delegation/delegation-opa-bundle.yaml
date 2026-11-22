@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "d6f1de0bcb8ef512"
+    openbank.tech/policy-checksum: "ffa5d3500e729840"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1046,7 +1046,9 @@ data:
     # bound to the proposal's payload hash, and initiates the payment through the ordinary path.
     allowed_reasons contains "mcp-service-payment-proposal-create" if {
     	input.principal.type == "HUMAN"
-    	machine_named("service-account-openbank-mcp")
+    	# Pinned via mcp_service_principal: machine_named's legacy branch would admit a principal
+    	# with NO service_account marker by name alone.
+    	mcp_service_principal
     	input.action == "delegation.proposal.create"
     }
 
@@ -1066,7 +1068,7 @@ data:
     # allow reason can widen either half.
     prohibited if {
     	input.action == "delegation.proposal.create"
-    	not machine_named("service-account-openbank-mcp")
+    	not mcp_service_principal
     }
 
     prohibited if {
@@ -1105,9 +1107,29 @@ data:
     # AI_AGENT is prefixed "agent:" (AuthorizeInterceptor.principalType()'s own convention, e.g.
     # "agent:onboarding" per its test). trim_prefix is a no-op when the prefix isn't present, so
     # this normalises both callers to the bare charter id without needing two lookup rules.
+    #
+    # A charter with `enabled: false` is NOT returned here, so a disabled agent has no charter on
+    # every path that derives a grant from it: the plain-pattern MCP allowlist, the {tier, resources}
+    # object grants, the REST bridge (rest.rego delegates to `allow` below) and any later rule built
+    # on `charter`. agents.yaml documents `enabled: false` as the per-agent halt; before this guard
+    # no rule read the field, so a disabled charter kept every grant live (draft.ticket answered
+    # allow for card-scheme-bulletin-agent). An ABSENT `enabled` key means enabled -- eight
+    # charters omit it -- so only an explicit `false` disables. Written as `not a.enabled == false`
+    # (not object.get) so gen-agents-opa-data.py's static pass sees the `a.enabled` dereference and
+    # keeps the field in the served projection; its differential proof fails the write if it ever
+    # did not.
     charter contains a if {
     	some a in data.agents.agents
     	a.id == trim_prefix(input.agent, "agent:")
+    	not a.enabled == false
+    }
+
+    # The caller names a chartered agent whose charter is switched off. Used for the decision
+    # reason and as an explicit veto in `allow`, independent of `charter` excluding it.
+    charter_disabled if {
+    	some a in data.agents.agents
+    	a.id == trim_prefix(input.agent, "agent:")
+    	a.enabled == false
     }
 
     # The hard-forbidden tier is forbidden for ALL agents, regardless of charter (agents.yaml: tool_tiers.deny).
@@ -1214,6 +1236,52 @@ data:
     	glob_match(pattern, input.resource)
     }
 
+    # ADR-0387: the public-web read. The fetch broker queries data.openbank.rest.allow for an
+    # AI_AGENT with action `read.public_web` and attributes {tool: web.fetch, tier: read, host}, so
+    # rest.rego's bridge arrives here with input.tool == "read.public_web", no input.tier and no
+    # input.resource -- the generic tier/resource rule above can never fire for it. The grant needs
+    # all four: the declared tier is `read` (a write/execute claim gets nothing), the tool is the
+    # broker's one tool, the charter's object-shaped `read` grant covers the resource, AND the
+    # request host is listed verbatim in that SAME charter's data_scope.public_web.hosts (a string
+    # entry or a {host, render} mapping). The broker re-checks the host after DNS; this rule is the
+    # PDP half of ADR-0387 D2, so an off-list host is denied by policy, not only by broker code.
+    public_web_resource := "read.public_web"
+
+    charter_allowed if public_web_allowed
+
+    charter_denied if public_web_denied
+
+    public_web_allowed if {
+    	input.tool == public_web_resource
+    	input.attributes.tier == "read"
+    	input.attributes.tool == "web.fetch"
+    	is_string(input.attributes.host)
+    	some a in charter
+    	some entry in a.tools.allow
+    	entry.tier == "read"
+    	some pattern in entry.resources
+    	glob_match(pattern, public_web_resource)
+    	public_web_host_listed(a.data_scope.public_web.hosts, input.attributes.host)
+    }
+
+    # A charter's own tools.deny on the resource beats its allow, whatever tier the caller claims.
+    public_web_denied if {
+    	input.tool == public_web_resource
+    	some entry in tier_resource_deny_entries
+    	some pattern in entry.resources
+    	glob_match(pattern, public_web_resource)
+    }
+
+    public_web_host_listed(hosts, host) if {
+    	some h in hosts
+    	h == host
+    }
+
+    public_web_host_listed(hosts, host) if {
+    	some h in hosts
+    	h.host == host
+    }
+
     # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
     # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
     # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
@@ -1279,6 +1347,7 @@ data:
     # The decision. Allow only when nothing forbids AND the charter permits AND skill is in scope.
     # ---------------------------------------------------------------------------------------
     allow if {
+    	not charter_disabled
     	not hard_denied
     	not charter_denied
     	charter_allowed
@@ -1320,7 +1389,9 @@ data:
     	"reason": reason,
     }
 
-    reason := "hard-denied tool tier" if hard_denied
+    reason := "agent charter disabled" if charter_disabled
+
+    else := "hard-denied tool tier" if hard_denied
 
     else := "denied by charter tier/resource grant" if tier_resource_charter_denied
 
@@ -1353,7 +1424,7 @@ data:
     # MCP and REST decision is unchanged before it writes.
     #
     # Derived paths (read out of the .rego sources, never listed by hand):
-    #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
+    #   data.agents.agents  (each element projected to: data_scope.public_web.hosts, enabled, id, skills, tools.allow, tools.deny)
     #   data.agents.tool_tiers.deny
     #   data.agents.tool_tiers.read
     #   data.agents.tool_tiers.write_proposal
@@ -1399,6 +1470,7 @@ data:
       - product.sign
     agents:
     - id: compliance-officer
+      data_scope: {}
       tools:
         allow:
         - query.ledger.readonly
@@ -1423,6 +1495,7 @@ data:
       - bump
       - open-pr
       - release
+      data_scope: {}
       tools:
         allow:
         - git.branch
@@ -1436,6 +1509,7 @@ data:
         - gh.pr.approve
         - money.*
     - id: ui-assistant
+      data_scope: {}
       tools:
         allow:
         - query.ledger.readonly
@@ -1453,6 +1527,7 @@ data:
         - query.disputes.readonly
         - query.observability.readonly
     - id: product-author
+      data_scope: {}
       tools:
         allow:
         - product.lint
@@ -1468,6 +1543,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: rca-investigator
+      data_scope: {}
       tools:
         allow:
         - query.observability.readonly
@@ -1480,6 +1556,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: customer-copilot
+      data_scope: {}
       tools:
         allow:
         - query.balance.readonly
@@ -1492,6 +1569,7 @@ data:
         - gh.pr.*
         - secrets.read.raw
     - id: mcp-anonymous
+      data_scope: {}
       tools:
         allow:
         - query.account.readonly
@@ -1505,6 +1583,7 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: ap2-anonymous
+      data_scope: {}
       tools:
         allow:
         - verify.mandate
@@ -1514,6 +1593,8 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      enabled: false
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1530,6 +1611,8 @@ data:
           resources:
           - '*'
     - id: regulatory-obligations-watcher
+      enabled: false
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1546,6 +1629,8 @@ data:
           resources:
           - '*'
     - id: card-dispute-evidence-agent
+      enabled: false
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1562,6 +1647,8 @@ data:
           resources:
           - '*'
     - id: treasury-dealing-assistant
+      enabled: false
+      data_scope: {}
       tools:
         allow:
         - treasury.deal.read
@@ -1586,6 +1673,8 @@ data:
         - gh.pr.*
         - secrets.read.raw
     - id: finops-agent
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1606,6 +1695,8 @@ data:
           resources:
           - '*'
     - id: devops-agent
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1626,6 +1717,8 @@ data:
           resources:
           - '*'
     - id: control-liveness-sentinel
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1643,6 +1736,8 @@ data:
           resources:
           - '*'
     - id: governance-auditor
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1661,6 +1756,8 @@ data:
           resources:
           - '*'
     - id: release-steward
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1678,6 +1775,8 @@ data:
           resources:
           - '*'
     - id: docs-truth-agent
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1694,6 +1793,8 @@ data:
           resources:
           - '*'
     - id: authz-policy-auditor
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1710,6 +1811,8 @@ data:
           resources:
           - '*'
     - id: flaky-test-hunter
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1729,6 +1832,8 @@ data:
           resources:
           - '*'
     - id: case-coordinator
+      enabled: true
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1751,6 +1856,8 @@ data:
           - gh.pr.*
           - secrets.*
     - id: kyb-analyst
+      enabled: false
+      data_scope: {}
       tools:
         allow:
         - tier: read
@@ -1768,6 +1875,8 @@ data:
           resources:
           - '*'
     - id: business-copilot
+      enabled: false
+      data_scope: {}
       tools:
         allow:
         - query.balance.readonly

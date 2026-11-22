@@ -108,6 +108,22 @@ The only caller in the tree today is admin-ui's OBO route, which exchanges for `
 
 If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with HTTP 500 rather than 401. That is fail-closed (nothing reaches the endpoint) and is left as is here.
 
+## Staff-root Authorization allowlist (#16590, #17099)
+
+On the staff root `/mcp`, an `Authorization` header is optional, but if it is present it must be exactly
+**one** header whose whole value is `Bearer <b64token>` (RFC 6750 §2.1). The scheme is case-insensitive,
+followed by a single space and `[A-Za-z0-9-._~+/]+=*`, with nothing else. Staff Keycloak JWTs fit this.
+
+| Request | Answer |
+|---|---|
+| No `Authorization` header, or one valid `Bearer <b64token>` | Normal handling (audience check, then dispatch) |
+| A value starting with the `DPoP` scheme (any case, any whitespace), or a valid Bearer issued by the customers realm | 401 `invalid_token`, pointing the client at `/customer/mcp` |
+| Anything else: comma lists, tabs, extra or non-ASCII spaces, other schemes such as `Basic`, an empty token | 400 `invalid_request` |
+| More than one `Authorization` header, an unreadable header, or no injected request | 400 `invalid_request` (fail closed) |
+
+The check runs before the audience check and the rate limiter. A 400 here means the client sent a malformed
+credential, not that the token was rejected.
+
 ## Throttling and request bounds (ADR-0383)
 
 `McpRateLimiter` runs BEFORE the policy decision, so a flood of calls that would be denied anyway costs no PDP round trip.
@@ -195,6 +211,14 @@ from a peer header.
   stays plain HTTP for in-cluster callers and probes. The customer root `/customer/mcp` (DPoP-only,
   `customers` tenant) and its RFC 9728 metadata are served ONLY on `:8443`; on `:8150` they answer
   404. Staff `/mcp` keeps Bearer on both listeners.
+- **Customer credentials on the staff root.** `/mcp` answers 401 (`WWW-Authenticate: Bearer
+  error="invalid_token"`, description naming `/customer/mcp`) to any customers-realm token or any
+  `Authorization: DPoP` credential, whatever the channel state, before the audience check and the
+  limiter. Counted as `openbank_mcp_customer_rejected_total{layer="token"}` with
+  `reason="customer_channel_off"` (channel off) or `reason="customer_root_required"` (channel on);
+  a refused `tools/call` is audited DENIED within the shared anonymous budget (beyond it, once per
+  window). More than one `Authorization` header on `/mcp` answers 400 `invalid_request`. A steady rate of `customer_root_required` means a client
+  is configured with the staff URL.
 - **DPoP `htu`.** quarkus-oidc compares the proof's `htu` with `absoluteURI()`. On `:8443`, with the
   external Host passed through by the edge, that is `https://<published host>/customer/mcp`, so no
   forwarding is needed; a proof for another host, scheme or path answers 401 at the tenant.
@@ -236,3 +260,13 @@ from a peer header.
 through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
 reads the same series through the delegations MCP-channel view. Alert thresholds for the
 channel live with the fleet alerting rules, not in this service.
+
+### Why a tool call failed: `openbank_mcp_tool_call_failures_total`
+
+The tool-call counter records `result="FAILURE"` without a reason, so a client's bad arguments
+and a downstream fault look the same there. Every failed `tools/call` (and a PDP outage,
+`decision=UNAVAILABLE`) also increments `openbank_mcp_tool_call_failures_total{tool,kind}`,
+where `kind` is a closed set: `invalid_params` (client error), `unavailable` (an advertised tool
+with nothing behind it yet) and `error` (a server-side fault, also the default for any unmapped
+reason, and what a PDP outage maps to). The customer-channel availability SLO
+(`pyrra-slo-mcp-customer.yaml`) counts `kind="error"` only.

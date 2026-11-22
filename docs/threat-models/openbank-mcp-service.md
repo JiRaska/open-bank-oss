@@ -443,6 +443,114 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-22 (#16590 follow-up, #17099)** — Staff-root `Authorization` parsing is an ALLOWLIST.
+  - *Spoofing / tenant confusion.* The DPoP check was a denylist (`startsWith("DPoP ")`), so
+    `DPoP<TAB>x`, a bare `DPoP`, `DPoP<NBSP>x`, or a comma list such as `Bearer a, DPoP b` was not
+    recognised as a customer credential and reached the anonymous path. On `/mcp` an `Authorization`
+    header, when present, must now be exactly ONE header whose whole value is `Bearer <b64token>`
+    (RFC 6750 §2.1: scheme case-insensitive, one SP, `[A-Za-z0-9-._~+/]+=*`, nothing else). A value
+    starting with the DPoP scheme after any whitespace (Unicode included), or a valid Bearer from the
+    customers realm, gets the 401 that points at `/customer/mcp`. Every other shape (comma lists,
+    tabs, double or leading/trailing spaces, non-ASCII whitespace, `Basic` and other schemes) is
+    400 `invalid_request`. Staff JWTs are base64url with dots, so they are inside the allowlist.
+  - *Fail open on a read error or missing request.* An `Authorization` header that throws on read,
+    and a hand-built endpoint with no injected request, are refused 400 instead of reading as
+    "no credential". `httpRequest` is CDI-`@Inject`ed on every served request.
+  - *Tests.* `McpStaffRootCredentialParsingTest` (each shape above, legit JWT and `bearer` controls)
+    and two real-HTTP cases in `McpStaffRootCustomerCredentialIT` (`DPoP<TAB>x` → 401,
+    `Bearer a, DPoP b` → 400). Each guard was sabotaged (missing request read as no header, b64token
+    loosened to `.*`, DPoP match ASCII-only) and its tests went red.
+- **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
+  - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
+    on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
+    check ran there, and a customer token carries this server's audience, so the request was
+    dispatched — and served as ANONYMOUS, because `CallerContextResolver` never resolves a
+    customers-realm token (empty `tools/list`, `tools/call` denied before the PDP). Not
+    exploitable, but the only barrier was one `null` return deep in the resolver. `McpEndpoint`
+    now refuses on the staff root any token whose `iss` is the customers realm, and any
+    `Authorization: DPoP` credential, with 401 pointing the client at `/customer/mcp`, regardless
+    of channel state (reasons `customer_channel_off` / `customer_root_required`, layer `token`).
+  - *Repudiation / audit flooding.* The credential is unverified at that point, so a refused
+    `tools/call` spends the shared anonymous bucket before its audit row; beyond the budget only
+    the throttle's once-per-window row is written. A request with more than one `Authorization`
+    header is refused 400 (`invalid_request`), and a DPoP scheme in ANY of them counts.
+  - *Tests.* `McpStaffRootCustomerCredentialIT` (channel off, shipped `mcp.customer.issuer`, two
+    `Authorization` headers in both orders, metric, audit budget), `McpCustomerChannelIT` (channel on,
+    both schemes, list and call), `McpCustomerTenantResolutionIT` (a token signed by the real
+    customers-realm key on `/mcp`). With the refusal removed the first two went red (200, served
+    anonymous); the third stays green either way, because the OIDC layer already refuses it (the
+    customers tenant is path-bound to `/customer/mcp`, and the staff tenant rejects its `iss`).
+
+- **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
+  IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
+  - *Spoofing (forwarded headers).* `ProxyForwardingGuard` now refuses to boot with ANY
+    `quarkus.http.proxy.*` switch on or ANY trusted-proxies value, so no listener rewrites scheme,
+    host or address from a peer header. The customers tenant's DPoP `htu` check needs none: on the
+    8443 listener (client auth REQUIRED) the request absolute URI is `https://<Host>/customer/mcp` with the Host the
+    edge passes through, and on plain 8150 it is `http://…`, which no published-resource proof
+    matches. Proven by `McpGatewayMtlsIT` over real TLS 1.3: admitted via the gateway certificate;
+    refused at the tenant over plain HTTP (forged `X-Forwarded-Proto` ignored) and with another Host.
+  - *Spoofing (client address).* `ClientAddressResolver` honours the one edge header only over TLS
+    from a verified leaf whose DNS SAN equals `mcp.edge.gateway-identity` (CN never consulted).
+    Every fleet workload holds an `openbank-ca` certificate, so the SAN pin is the control, not the
+    CA: `McpGatewayMtlsIT` shows another trusted certificate (whose CN even names the gateway) and
+    plain HTTP leave the key on the TCP peer. The guard refuses the header without the pin or
+    without client-auth REQUIRED (one removal test per element).
+  - *Spoofing (authentication scheme).* Measured: with the listener-parity permission
+    `auth-mechanism: bearer` on the customer path, an `Authorization: DPoP` request was never
+    authenticated by the customers tenant (a proof for a foreign `htu` answered 200, as an
+    anonymous caller). The customer channel therefore has its OWN root, `/customer/mcp`, with an
+    `auth-mechanism: DPoP` permission and `tenant-paths` binding it to the customers tenant; staff
+    `/mcp` keeps `bearer`. `CustomerMcpEndpoint` serves the root (and its RFC 9728 metadata) only on
+    the mTLS listener, `ProxyForwardingGuard` refuses the channel without client-auth REQUIRED, a
+    non-customer token on the customer root is refused (never dispatched), and the staff path
+    refuses a customers-realm token. `McpGatewayMtlsIT` holds the must-reject cases (foreign `htu`,
+    foreign Host, plain HTTP) and staff Bearer on `/mcp`.
+  - *Tampering (path spelling).* Review of #17004: the customer branch was chosen by the RAW path,
+    so `/customer/mcp;a=b`, `/customer/%6dcp`, `/customer/./mcp` or `/x/../customer/mcp` reached
+    `CustomerMcpEndpoint` and took the staff dispatch (no DPoP challenge, customer refusal, throttle
+    or audit). The branch is now decided by which resource matched (`McpEndpoint.handleCustomer`),
+    and `McpPathCanonicalFilter` answers 400 to any non-canonical raw path before authentication on
+    both listeners. `McpGatewayMtlsIT` holds every spelling as a must-reject case.
+  - *Residual.* `openbank-ca` is a ClusterIssuer: whoever can create a cert-manager `Certificate`
+    can mint the gateway SAN. Constrain issuance of that SAN (approver policy or a dedicated
+    issuer) before go-live. The gateway presents its client certificate to every
+    BackendTLSPolicy backend (option A, owner decision); that discloses no key.
+- **2026-11-21 (#16847 follow-up)** — Subject-less audit key budget per allocation and region.
+  - *Repudiation / audit suppression.* The per-minute cap of 4096 distinct subject-less keys could
+    be spent by one party holding one IPv6 allocation (a /48 is 65 536 /64s), pushing every other
+    subject-less caller into the shared overflow key for the rest of the minute. Distinct keys are
+    now capped per allocation (IPv6 /48, IPv4 /24: 64 keys, then one shared allocation key) and per
+    IPv6 region (/32: 256 keys including allocation keys, then one shared region key). One
+    allocation therefore admits at most 65 keys a minute and one /32 at most 257, so filling the
+    global budget needs at least 16 distinct /32s (RIR scale) or a spread of IPv4 /24s. The first
+    global overflow per minute is logged; every refusal remains metered regardless of key.
+  - *Tradeoff.* Once an allocation (or region) has spent its slots, a new neighbour inside it
+    shares that allocation's (region's) key, and so its one-row-per-minute refusal audit window,
+    for at most 60 s. Neighbours admitted earlier in the minute keep their own key. The key feeds
+    only that audit window, not a rate limit.
+
+- **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
+  - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
+    edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
+    `authorization-scheme: DPoP`) compares `htu` with the request's absolute URI — measured; this service's own
+    admission compares with the static published resource, but with
+    `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
+    then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
+    forwarding on and no list (or a trust-all one). Superseded the next day by the mTLS-identity
+    entry above (2026-11-21), whose `McpGatewayMtlsIT` replaces the IP-trust ITs.
+  - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
+    value, so one caller's flood could spend every subject-less caller's audit window. It is now
+    keyed by `ClientAddressKey` (HMAC under a per-boot key; IPv4 /32, IPv6 /64 so rotation inside one
+    /64 shares a window; strict literal parse; distinct keys capped per minute) over
+    the address `ClientAddressResolver` picks: the raw TCP peer, or one edge-set header from a
+    trusted peer — never Quarkus' leftmost `X-Forwarded-For`, which an appending edge leaves under
+    the client's control (IT: an appended forged entry does not become the key).
+  - *Residual / route prerequisite.* Forwarding stays OFF in the deployment until the route PR, which
+    must narrow `trusted-proxies` to the gateway's source (not the pod CIDR), make the edge overwrite
+    client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
+    NetworkPolicy on `:8150` to the gateway and known callers.
+
 - **2026-11-18 (ADR-0383 P4 / D5.3, #16590)** — Shared, fail-closed customer-channel state. Still
   **off by default**; this closes the first residual of the entry below.
   - *Replay across replicas / pod rolls.* `mcp.customer.shared-store=valkey` puts the DPoP `jti`
@@ -531,77 +639,6 @@ a stub (T-T2/T-D2).
     verifier's 360 s acceptance span (`maxAge` 300 s + `futureSkew` 60 s) leaves a 5 s margin that
     any realistic drift stays far inside. No per-key replay quota in Valkey (memory is bounded by the
     proof-key bucket that runs first).
-
-- **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
-  IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
-  - *Spoofing (forwarded headers).* `ProxyForwardingGuard` now refuses to boot with ANY
-    `quarkus.http.proxy.*` switch on or ANY trusted-proxies value, so no listener rewrites scheme,
-    host or address from a peer header. The customers tenant's DPoP `htu` check needs none: on the
-    8443 listener (client auth REQUIRED) the request absolute URI is `https://<Host>/customer/mcp` with the Host the
-    edge passes through, and on plain 8150 it is `http://…`, which no published-resource proof
-    matches. Proven by `McpGatewayMtlsIT` over real TLS 1.3: admitted via the gateway certificate;
-    refused at the tenant over plain HTTP (forged `X-Forwarded-Proto` ignored) and with another Host.
-  - *Spoofing (client address).* `ClientAddressResolver` honours the one edge header only over TLS
-    from a verified leaf whose DNS SAN equals `mcp.edge.gateway-identity` (CN never consulted).
-    Every fleet workload holds an `openbank-ca` certificate, so the SAN pin is the control, not the
-    CA: `McpGatewayMtlsIT` shows another trusted certificate (whose CN even names the gateway) and
-    plain HTTP leave the key on the TCP peer. The guard refuses the header without the pin or
-    without client-auth REQUIRED (one removal test per element).
-  - *Spoofing (authentication scheme).* Measured: with the listener-parity permission
-    `auth-mechanism: bearer` on the customer path, an `Authorization: DPoP` request was never
-    authenticated by the customers tenant (a proof for a foreign `htu` answered 200, as an
-    anonymous caller). The customer channel therefore has its OWN root, `/customer/mcp`, with an
-    `auth-mechanism: DPoP` permission and `tenant-paths` binding it to the customers tenant; staff
-    `/mcp` keeps `bearer`. `CustomerMcpEndpoint` serves the root (and its RFC 9728 metadata) only on
-    the mTLS listener, `ProxyForwardingGuard` refuses the channel without client-auth REQUIRED, a
-    non-customer token on the customer root is refused (never dispatched), and the staff path
-    refuses a customers-realm token. `McpGatewayMtlsIT` holds the must-reject cases (foreign `htu`,
-    foreign Host, plain HTTP) and staff Bearer on `/mcp`.
-  - *Tampering (path spelling).* Review of #17004: the customer branch was chosen by the RAW path,
-    so `/customer/mcp;a=b`, `/customer/%6dcp`, `/customer/./mcp` or `/x/../customer/mcp` reached
-    `CustomerMcpEndpoint` and took the staff dispatch (no DPoP challenge, customer refusal, throttle
-    or audit). The branch is now decided by which resource matched (`McpEndpoint.handleCustomer`),
-    and `McpPathCanonicalFilter` answers 400 to any non-canonical raw path before authentication on
-    both listeners. `McpGatewayMtlsIT` holds every spelling as a must-reject case.
-  - *Residual.* `openbank-ca` is a ClusterIssuer: whoever can create a cert-manager `Certificate`
-    can mint the gateway SAN. Constrain issuance of that SAN (approver policy or a dedicated
-    issuer) before go-live. The gateway presents its client certificate to every
-    BackendTLSPolicy backend (option A, owner decision); that discloses no key.
-- **2026-11-21 (#16847 follow-up)** — Subject-less audit key budget per allocation and region.
-  - *Repudiation / audit suppression.* The per-minute cap of 4096 distinct subject-less keys could
-    be spent by one party holding one IPv6 allocation (a /48 is 65 536 /64s), pushing every other
-    subject-less caller into the shared overflow key for the rest of the minute. Distinct keys are
-    now capped per allocation (IPv6 /48, IPv4 /24: 64 keys, then one shared allocation key) and per
-    IPv6 region (/32: 256 keys including allocation keys, then one shared region key). One
-    allocation therefore admits at most 65 keys a minute and one /32 at most 257, so filling the
-    global budget needs at least 16 distinct /32s (RIR scale) or a spread of IPv4 /24s. The first
-    global overflow per minute is logged; every refusal remains metered regardless of key.
-  - *Tradeoff.* Once an allocation (or region) has spent its slots, a new neighbour inside it
-    shares that allocation's (region's) key, and so its one-row-per-minute refusal audit window,
-    for at most 60 s. Neighbours admitted earlier in the minute keep their own key. The key feeds
-    only that audit window, not a rate limit.
-
-- **2026-11-20 (ADR-0383 D5, #16847)** — Forwarded-header trust and the subject-less audit key.
-  - *Spoofing (forwarded headers).* Quarkus forwarding (`quarkus.http.proxy.*`) is needed behind the
-    edge because quarkus-oidc's bearer authentication mechanism (a framework class, not code in this repo; customers tenant,
-    `authorization-scheme: DPoP`) compares `htu` with the request's absolute URI — measured; this service's own
-    admission compares with the static published resource, but with
-    `trusted-proxies` unset Quarkus applies `X-Forwarded-*` from ANY peer — a direct caller could
-    then choose its own scheme, host and client address. `ProxyForwardingGuard` refuses to boot with
-    forwarding on and no list (or a trust-all one). Superseded the next day by the mTLS-identity
-    entry above (2026-11-21), whose `McpGatewayMtlsIT` replaces the IP-trust ITs.
-  - *Repudiation / audit suppression.* A refusal with no token subject was keyed by one shared
-    value, so one caller's flood could spend every subject-less caller's audit window. It is now
-    keyed by `ClientAddressKey` (HMAC under a per-boot key; IPv4 /32, IPv6 /64 so rotation inside one
-    /64 shares a window; strict literal parse; distinct keys capped per minute) over
-    the address `ClientAddressResolver` picks: the raw TCP peer, or one edge-set header from a
-    trusted peer — never Quarkus' leftmost `X-Forwarded-For`, which an appending edge leaves under
-    the client's control (IT: an appended forged entry does not become the key).
-  - *Residual / route prerequisite.* Forwarding stays OFF in the deployment until the route PR, which
-    must narrow `trusted-proxies` to the gateway's source (not the pod CIDR), make the edge overwrite
-    client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
-    NetworkPolicy on `:8150` to the gateway and known callers.
-
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`

@@ -73,7 +73,8 @@ import java.util.UUID
 @Provider("openbank-delegation-service")
 // Messages only: pact-jvm's @PactFilter defaults to matching provider-STATE names; this filters by
 // interaction TYPE instead, so it does not depend on how states are named. mcp-service's HTTP pact is
-// replayed against the running service by DelegationMcpClientGrantPactFolderProviderVerificationTest.
+// replayed against the running service by DelegationMcpClientGrantPactFolderProviderVerificationTest, and
+// the HTTP payment-proposal interactions by DelegationProposalPactFolderProviderVerificationTest.
 @PactFilter(value = ["Asynchronous/Messages"], filter = InteractionFilter.ByInteractionType::class)
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
@@ -123,6 +124,14 @@ class DelegationEventPactBrokerProviderVerificationTest {
 
     @State("no MCP_CLIENT propose grant exists for the pact party, client, key and account")
     fun mcpClientProposeGrantAbsent() = Unit
+
+    // customer-edge's HTTP payment-proposal interactions are likewise excluded by @PactFilter and
+    // replayed by DelegationProposalPactFolderProviderVerificationTest; listed for the same parity gate.
+    @State("a PENDING payment proposal exists for the customer")
+    fun pendingProposal() = Unit
+
+    @State("an APPROVED payment proposal exists for the customer")
+    fun approvedProposal() = Unit
 
     @PactVerifyProvider("a DelegationActivated event for an account")
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(
