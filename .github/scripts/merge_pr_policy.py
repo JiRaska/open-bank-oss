@@ -133,8 +133,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '82f517cde74e25753d7c498401c4cc9d861074b5',
     # merge-train.py of #16885 stacked on #16988 and #16986, merged with #16972 (ruff B007 + stale-ref fix kept), reviewed with #16885.
     'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
-    # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate), reviewed with that PR.
-    '52d6722662dd880ac03eb44f34b4a106661c2e89',
+    # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways), reviewed with #17083.
+    '93476a3df17829b517a9404996cdcf2519f8a01a',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

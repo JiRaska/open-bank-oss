@@ -3760,17 +3760,18 @@ gates:
     group: registry
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
-    # Hard kill for this gate only (#16788). The runner default is 420 s and a budget above the
-    # effective timeout is unenforceable (run-gates load() refuses it). Measured 2026-11-18: the
-    # self-test read 335.9 s wall on main (run 44318606328), 75 s under the default kill and the
-    # local loaded-machine run already hit 420 s. #16785 raises this budget to 495 (1.5 x p95);
-    # 750 = ~1.5 x 495 keeps it enforceable.
-    timeout_seconds: 750
+    # The synthetic self-test outgrew one gate: 753.9 s against a 750 s kill on #17083 (#17006).
+    # It is sharded (merge-train.py SELF_TEST_SHARDS) instead of given a longer kill: this gate runs
+    # shard 0/4 and merge-train-selftest-shard-{1,2,3} the rest, in other CI shards. Every shard
+    # asserts it saw every scenario marker once and ran exactly the ones it owns, and that no
+    # scenario leaves fixture state behind; --self-test-shard-plan (their run:) refuses a plan that
+    # drops a scenario from every shard. Budget re-derived from CI once the split has run.
     review_after: "2027-04-18"
-    budget_seconds: 495   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 2026-11-07 CI read 199.6 s; 30 main push runs 2026-11-18 04:26Z-13:54Z ranged 182.6-335.9 s on largely the same code (runner variance, no step at #16675), 495 = ceil(1.5 x p95 329.76 s over 30 main runs, gate-runtime-measurements.json)
+    budget_seconds: 300   # shard 0/4 of the self-test; the whole self-test read 753.9 s on CI (#17083), 1798 s locally under load ~12 vs 440 s for shard 0 under load ~11-20 with three siblings running
+    timeout_seconds: 420
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
-      python3 .github/scripts/merge-train.py --self-test
+      python3 .github/scripts/merge-train.py --self-test-shard 0/4
       python3 .github/scripts/test-merge-train-owner-approval.py
       python3 .github/scripts/test-merge-train-close-linked-issues.py
       python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
@@ -3798,6 +3799,99 @@ gates:
       - .gitattributes
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
+
+  - id: merge-train-selftest-shard-1
+    name: "merge-train synthetic self-test, shard 1/4 (#17006, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "Shard 1 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 300   # 1/4 of a self-test that read 753.9 s on CI (#17083); re-derive from CI
+    timeout_seconds: 420
+    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 1/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-selftest-shard-2
+    name: "merge-train synthetic self-test, shard 2/4 (#17006, enforced)"
+    group: security
+    mode: enforced
+    rationale: "Shard 2 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 300   # 1/4 of a self-test that read 753.9 s on CI (#17083); re-derive from CI
+    timeout_seconds: 420
+    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 2/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-selftest-shard-3
+    name: "merge-train synthetic self-test, shard 3/4 (#17006, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "Shard 3 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 300   # 1/4 of a self-test that read 753.9 s on CI (#17083); re-derive from CI
+    timeout_seconds: 420
+    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 3/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
 
   - id: merge-train-real-tree-drift
     name: "merge-train's privileged-gate-code drift guard holds on the real tree (#13750, enforced)"
