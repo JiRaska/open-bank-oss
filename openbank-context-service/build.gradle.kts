@@ -24,6 +24,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.pact.provider)
+    // consumer: AmlCaseStatusPactConsumerTest publishes the context→aml consumer contract
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(project(":openbank-libs-testing"))
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.3...kyb-service-v0.11.4) (2026-11-20)
+
+
+### Bug Fixes
+
+* **kyb:** check-digit rules for SK VAT, SIREN and the remaining EU member states (refs [#16774](https://github.com/JiRaska/open-bank-oss/issues/16774), [#16748](https://github.com/JiRaska/open-bank-oss/issues/16748)) ([#16887](https://github.com/JiRaska/open-bank-oss/issues/16887)) ([e46fa46](https://github.com/JiRaska/open-bank-oss/commit/e46fa4640783e1ffb353c920669e2cadcf7a874c))
+
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.2...kyb-service-v0.11.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* **kyb:** validate CZ DIČ and EU VAT check digits ([#16771](https://github.com/JiRaska/open-bank-oss/issues/16771)) ([61a5464](https://github.com/JiRaska/open-bank-oss/commit/61a546479e4d181ba7bb0917cf4af738c1e18b8c))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.1...kyb-service-v0.11.2) (2026-11-16)
 
 

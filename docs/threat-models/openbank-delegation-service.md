@@ -230,6 +230,81 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-19** — **Customer MCP payment-proposal store** (ADR-0383 D6, #16590). New table
+  `delegation_payment_proposals` (V38), REST family `/api/v1/payment-proposals` and topic
+  `openbank.delegation.payment-proposal-events`. A proposal moves no money; it is executed only by
+  customer-edge, after the customer's own SCA, through the ordinary payment initiation path.
+  - **Elevation of privilege (MCP approves its own proposal).** Two disjoint caller halves, checked
+    in the resource by verified client identity (`ServiceAccountIdentity.isPrincipal`, #12448) AND
+    in `delegation_rest_ext.rego`: mcp-service may only `create`; the edge may only
+    `read/approve/reject/execution`; staff and the shared backend identity reach neither (veto at
+    the allow head). Tests: `PaymentProposalApiIT`, `delegation_rest_ext_test.rego`.
+  - **Spoofing a grant.** The grant is FOUND from (party, `azp`, `cnf.jkt`) among ACTIVE MCP_CLIENT
+    grants with `ACCOUNT_PROPOSE_PAYMENT` over the debtor account, never named by the caller.
+    Residual: mcp-service passes the party/client/key as body fields under its own M2M token, so a
+    compromised mcp-service could propose under any party that holds such a grant; a proposal still
+    needs that customer's SCA in the app. Binding the create to the exchanged customer token is a
+    follow-up.
+  - **Trust in mcp-service and the edge (stated, not verified).** The store does not re-verify
+    the `mcpClientId`/`keyThumbprint` mcp-service passes (it sees only mcp-service's service-account
+    token), nor the `paymentId` the edge records on execution (it sees only the edge's token; the
+    edge takes it from the payment service's create response). Both callers are pinned by verified
+    client identity and OPA; a lie from either can at worst attach a proposal to the wrong grant of
+    a party that holds one, or mislabel which payment executed it — never move money, which still
+    needs the customer's SCA at the edge and the payment service's own checks.
+  - **Tampering / TOCTOU.** The instruction columns and hash are immutable (entity
+    `updatable = false` plus the V38 trigger), the state graph is one-way at the database, DELETE
+    raises, TRUNCATE raises (statement trigger). The SHA-256 covers proposal id, party and every instruction field; approval and
+    execution both re-compare it, and a row whose hash does not describe its columns fails to load.
+  - **Stale authority.** A proposal is only as alive as its grant: reading or approving one whose
+    grant is no longer ACTIVE persists REJECTED first, and a grant write that leaves ACTIVE rejects
+    its PENDING proposals in the same transaction.
+  - **Display spoofing (D7).** Payee name and reference refuse Unicode Cc/Cf/Zl/Zp (bidi
+    overrides, zero-width, line separators), Cs (unpaired surrogates), Co and Cn, `<>[]` backtick
+    and `://`, and must be NFC (refused, never re-encoded).
+  - **Denial of service.** ≤10 open and ≤20 created per party per 24 h, decided under a per-party
+    advisory transaction lock; an open proposal identical in every instruction field from the same client and grant is
+    deduplicated; TTL 24 h (capped).
+  - **Repudiation.** Every transition writes an outbox event in the same transaction (data-
+    minimised: no IBAN/name/reference).
+  - Not in this slice: the push coalescing and VoP display of D6 (app/edge), an expiry sweep
+    (expiry is applied on read and at create).
+
+- **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
+  the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
+  service.
+  - *Information disclosure.* The query filters in SQL on grantor party, client id, key thumbprint,
+    `grantee_type = 'MCP_CLIENT'` and `ACTIVE` (V34 partial index `idx_delegation_mcp_client_binding`),
+    so another customer's grant to the same client is never loaded; the resolver repeats every check
+    in code (thumbprint compared in constant time, in-window, non-exposure). The answer carries only
+    grant id, resource type/id, capabilities and `validTo` — no names, limits, approval policy,
+    thumbprint or other PII. An empty list is the refusal, so it cannot enumerate.
+  - *Elevation of privilege.* OPA admits only `service-account-openbank-mcp` (reason
+    `mcp-client-grant-resolve`), with `service_account == true` pinned explicitly — `machine_named`'s
+    legacy branch would otherwise admit a principal with no marker by name alone — and `client_id ==
+    openbank-mcp`. Every other principal is VETOED, so a staff ROLE_OPERATOR/ROLE_ADMIN token
+    (`operator-delegation-write`), `operator-read-any` and other service accounts cannot reach it.
+    The handler re-checks the verified client id in code and refuses a request carrying the
+    customer-party header, so an advisory PDP does not widen it.
+  - *Spoofing (unauthenticated caller).* The route carries `@RolesAllowed("ROLE_API")`, so Quarkus
+    refuses a tokenless request 401 before the handler runs. Before that, an anonymous call reached
+    the identity guard and got 403, the same answer as a wrong caller, and nothing showed the route
+    rejected it as unauthenticated. Control: `McpClientGrantIdentityGuardIT` drives the real route over
+    HTTP (no token 401; another service-account 403 with ROLE_API and with ROLE_OPERATOR; mcp-service 200).
+    Removing the annotation turned the no-token case red (403), as it did the pact replay below.
+  - *Evidence.* `opa test` (must-allow mcp; must-deny shared backend, edge, staff operator, renamed
+    machine, marker-less principal; each guard removed went red); `opa eval` on the regenerated
+    `delegation-opa-bundle`; `McpClientGrantResourceIT` over real HTTP and a real database (another
+    customer's grant never returned; non-mcp client and customer header 403; missing body and bad
+    thumbprint 400). The HTTP `@PactFolder` replay
+    (`DelegationMcpClientGrantPactFolderProviderVerificationTest`) starts verifying when mcp-service's
+    consumer pact lands with the S4 mcp-service PR; until then it has no pact to replay. It also
+    verifies the consumer's no-token interaction: an interaction whose expected status is 401 runs
+    with the test identity cleared, so the real security layer has to answer it, while every other
+    interaction stays authenticated as mcp-service.
+  - No write path changes: MCP_CLIENT grants stay dormant, so in practice the endpoint answers empty
+    until the connect flow ships. Rollback: revert; no schema change.
+
 - **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
   customer-admitted third-party MCP client as grantee instead of a party. Existing grants are
   `PARTY` (V34 defaults the column), and their behaviour is unchanged. Elevation of privilege is

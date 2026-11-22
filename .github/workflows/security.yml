@@ -26,7 +26,10 @@ concurrency:
   # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
   # stops the job being created at all (#3082).
   group: security-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # Only a superseded PR head is cancelled (keyed per PR: github.ref is refs/pull/<n>/merge).
+  # push-to-main, schedule and workflow_dispatch runs are never cancelled. Merge-train carriers
+  # are pull_request runs on a fresh train/<run>-<attempt> PR each, so no carrier supersedes another.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -257,7 +260,7 @@ jobs:
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
@@ -536,7 +539,7 @@ jobs:
     if: needs.detect-deps.outputs.run_sbom == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "25"

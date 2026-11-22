@@ -21,6 +21,17 @@ class OutboxSqlTest {
     private fun String.squash() = replace(Regex("\\s+"), " ").trim()
 
     @Test
+    fun `projected row reads preserve eligibility and locking while fixing the returned shape`() {
+        val columns = "id, payload, trace_context, claim_token"
+        assertThat(OutboxRowSql.claim(ledger, columns).squash())
+            .isEqualTo(OutboxSql.claim(ledger).squash().removeSuffix("*") + columns)
+        assertThat(OutboxRowSql.listProcessable(ledger, columns))
+            .isEqualTo(OutboxSql.listProcessable(ledger).replace("SELECT *", "SELECT $columns"))
+        assertThat(OutboxClaimFenceSql.claim(ledger, columns).squash())
+            .isEqualTo(OutboxClaimFenceSql.claim(ledger).squash().removeSuffix("*") + columns)
+    }
+
+    @Test
     fun `claim is the D3 head claim - rewritten predicate, two anti-joins, SKIP LOCKED, RETURNING`() {
         val sql = OutboxSql.claim(ledger).squash()
         assertThat(

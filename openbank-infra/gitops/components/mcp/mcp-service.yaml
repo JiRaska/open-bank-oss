@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "eadd259e26dde72a"
+        openbank.tech/policy-checksum: "d2769f042e058b72"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,14 +50,42 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mcp-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-bd011ccf@sha256:d9d1073ea3b17d76762cba90773c609f8368a33053c61d13cfcd9b68407053d0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-d0afd669@sha256:a170e0625fe4ef542c7d35cf2d88cdbdfdf63a7bc010caada235d34092dcb729
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8150
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # ADR-0383 D5 / #16847 (owner decision 2026-11-21): the edge hop is trusted by its mTLS
+            # IDENTITY, never by IP. NO QUARKUS_HTTP_PROXY_* and NO trusted-proxies (ProxyForwardingGuard
+            # refuses both). The customer route (still disabled) must target the `https` port below; the
+            # edge presents edge-backend-client-tls (envoy-gateway/) and only that DNS SAN may set the
+            # client-address header. DPoP htu needs no forwarding: on 8443 absoluteURI() is
+            # https://<external Host>/customer/mcp. The route PR adds the BackendTLSPolicy (CA bundle +
+            # hostname mcp-service.platform.svc) and admits the gateway to 8443 in network-policies.yaml.
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            # Re-read the pair cert-manager rewrites before expiry (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_CLIENT_AUTH
+              value: REQUIRED
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
+            - name: MCP_EDGE_CLIENT_ADDRESS_HEADER
+              value: X-Envoy-External-Address
+            - name: MCP_EDGE_GATEWAY_IDENTITY
+              value: edge-gateway.envoy-gateway-system.client.open-bank.tech
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0224 D2: the agent-session store — CNPG `mcp-db` cluster (postgres.yaml here),
@@ -152,6 +180,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -222,6 +253,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: mcp-service-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -242,3 +277,6 @@ spec:
     - name: http
       port: 8150
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

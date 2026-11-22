@@ -41,8 +41,27 @@ interface McpMetricsPort {
     /** Record one JSON-RPC request, by (bounded) method name. */
     fun requestHandled(method: String)
 
-    /** Record one completed `tools/call`, mirroring the tags of its audit event. */
-    fun toolCallCompleted(tool: String, decision: McpCallAuditor.Decision, result: AuditResult, duration: Duration)
+    /**
+     * Record one completed `tools/call`, mirroring the tags of its audit event. [channel] adds the
+     * ADR-0384 D1 `channel`, `client` and `synthetic` tags; it defaults to the agent channel with
+     * the fixed placeholders, because Prometheus accepts one tag-key set per meter name and every
+     * channel must therefore carry the same keys.
+     */
+    fun toolCallCompleted(
+        tool: String,
+        decision: McpCallAuditor.Decision,
+        result: AuditResult,
+        duration: Duration,
+        channel: ChannelTags = ChannelTags.AGENT,
+    )
+
+    /**
+     * Record one customer-channel request refused before it reached a tool (ADR-0384 D1). The
+     * reason carries its layer, so an impossible (layer, reason) pair cannot be expressed. Counts a
+     * REFUSAL observed by this server — never a judgement about the caller. Default no-op so test
+     * doubles need not implement it.
+     */
+    fun customerRejected(reason: CustomerRejectReason, client: String?, synthetic: Boolean) = Unit
 
     /** Record how the acting agent's identity was established for one `tools/call`. */
     fun callerIdentityResolved(source: CallerIdentitySource)
@@ -61,6 +80,59 @@ interface McpMetricsPort {
      * doubles need not implement it; the Micrometer adapter overrides it.
      */
     fun inputRefused(reason: InputRefusal) = Unit
+
+    /** Which MCP channel a call arrived on (ADR-0384 D1), derived from the resolution path, never a client claim. */
+    enum class McpChannel { AGENT, OPERATOR, CUSTOMER }
+
+    /**
+     * The channel tags of one call. [client] is the RAW `azp` for a customer call; the adapter maps
+     * it through the allowlist to a bounded value (`unlisted` for anything else), so a caller can
+     * never mint a series. Agent and operator calls carry the placeholders `none` / `false`.
+     */
+    data class ChannelTags(val channel: McpChannel, val client: String? = null, val synthetic: Boolean = false) {
+        companion object {
+            val AGENT = ChannelTags(McpChannel.AGENT)
+            val OPERATOR = ChannelTags(McpChannel.OPERATOR)
+        }
+    }
+
+    /** Where in the customer admission path a request was refused (ADR-0384 D1). Closed set. */
+    enum class CustomerRejectLayer { EDGE_UNAUTH, TOKEN, DPOP, GRANT, THROTTLE, POLICY, DOWNSTREAM }
+
+    /** Why a customer request was refused. Each reason belongs to exactly one layer (closed enum, safe as a tag). */
+    enum class CustomerRejectReason(val layer: CustomerRejectLayer) {
+        UNAUTHENTICATED(CustomerRejectLayer.EDGE_UNAUTH),
+        REVOKED_GRANT(CustomerRejectLayer.TOKEN),
+        EXPIRED(CustomerRejectLayer.TOKEN),
+        WRONG_AUDIENCE(CustomerRejectLayer.TOKEN),
+
+        /** A customer credential presented on the staff root while the customer channel is off (#16590). */
+        CUSTOMER_CHANNEL_OFF(CustomerRejectLayer.TOKEN),
+
+        /** A customer credential presented on the staff root; it belongs on `/customer/mcp` (#16590). */
+        CUSTOMER_ROOT_REQUIRED(CustomerRejectLayer.TOKEN),
+
+        MISSING(CustomerRejectLayer.DPOP),
+        BAD_SIG(CustomerRejectLayer.DPOP),
+        HTU_MISMATCH(CustomerRejectLayer.DPOP),
+        ATH_MISMATCH(CustomerRejectLayer.DPOP),
+        STALE_IAT(CustomerRejectLayer.DPOP),
+        REPLAY(CustomerRejectLayer.DPOP),
+        JKT_MISMATCH(CustomerRejectLayer.DPOP),
+        NONCE_REQUIRED(CustomerRejectLayer.DPOP),
+        REPLAY_STORE_UNAVAILABLE(CustomerRejectLayer.DPOP),
+        NO_GRANT(CustomerRejectLayer.GRANT),
+        CLIENT_SUSPENDED(CustomerRejectLayer.GRANT),
+        UNAUTH_BUCKET(CustomerRejectLayer.THROTTLE),
+        PARTY_CLIENT_BUCKET(CustomerRejectLayer.THROTTLE),
+        PARTY_DAILY(CustomerRejectLayer.THROTTLE),
+        CONCURRENCY(CustomerRejectLayer.THROTTLE),
+        DOWNSTREAM_BUDGET(CustomerRejectLayer.THROTTLE),
+        CIRCUIT_OPEN(CustomerRejectLayer.THROTTLE),
+        POLICY_DENY(CustomerRejectLayer.POLICY),
+        POLICY_UNAVAILABLE(CustomerRejectLayer.POLICY),
+        DOWNSTREAM_ERROR(CustomerRejectLayer.DOWNSTREAM),
+    }
 
     /** Why a request was refused before dispatch. A closed enum, so safe as a tag. */
     enum class InputRefusal { NUL, }

@@ -82,6 +82,8 @@ jobs:
               "openbank-card-processing-service",
               "openbank-card-issuance-service",
               "openbank-treasury-service",
+              "openbank-clearing-service",
+              "openbank-swift-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -203,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: |
@@ -273,6 +275,27 @@ jobs:
           docker rm -f perf-kafka >/dev/null 2>&1 || true
           docker run -d --name perf-kafka -p 9092:9092 "${KAFKA_IMAGE}" >/dev/null
 
+          # Wait for the broker itself, not just the port: the container accepts TCP long
+          # before KRaft finishes forming, and a producer that connects in that window gets
+          # accepted-then-dropped (`Bootstrap broker localhost:9092 disconnected`,
+          # EOFException on channelId=-1) — which is exactly how the messaging readiness
+          # check stayed DOWN for the whole boot window and killed the ledger lane on run
+          # 44327844740 (#16804). The image is GraalVM-native and ships no CLI scripts, so
+          # the readiness signal is the broker's own startup log line (stable across the
+          # apache/kafka and apache/kafka-native images), never a bare TCP connect.
+          KAFKA_UP=0
+          for _ in $(seq 1 60); do
+            docker logs perf-kafka 2>&1 | grep -q "Kafka Server started" && { KAFKA_UP=1; break; }
+            # A broker that exited will never log it; fail now, not after two quiet minutes.
+            [ "$(docker inspect -f '{{.State.Running}}' perf-kafka 2>/dev/null)" = "true" ] || break
+            sleep 2
+          done
+          if [ "$KAFKA_UP" != "1" ]; then
+            echo "::error::[${SERVICE}] kafka never became ready — broker log tail follows"
+            docker logs perf-kafka 2>&1 | tail -30 || true
+            exit 1
+          fi
+
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
           # No Temporal frontend exists in the throwaway stack, so every worker registrar must
           # be told not to register — an enabled worker dials at startup and readiness never
@@ -308,10 +331,17 @@ jobs:
 
           # A cold Quarkus dev boot of the Flaky Test Hunter was measured at 188 seconds on
           # the hosted runner (run 33070206256). The former 180-second probe window killed a
-          # still-starting process and incorrectly published performance as `not-run`. Keep a
-          # finite, visible five-minute ceiling: this is a smoke gate, not an unbounded build.
+          # still-starting process and incorrectly published performance as `not-run`.
+          # Five minutes proved too short on a COLD Gradle cache: the scheduled run
+          # 43026649218 (after weekly cache eviction) cut product-catalog and sca-service
+          # off at 300 s while their logs were still mid-augmentation — no error, just a
+          # build that takes longer than the window when nothing is warm (#16804). The
+          # ceiling stays finite and visible, now eight minutes: this is a smoke gate, not
+          # an unbounded build, and the loop still exits early the moment the dev process
+          # dies. The job-level 25 min timeout has the headroom (boot + k6 + teardown
+          # measured at ~9 min on a warm run).
           UP=0
-          for _ in $(seq 1 150); do
+          for _ in $(seq 1 240); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health/ready" || true)"
             if [ "$code" = "200" ]; then UP=1; break; fi
             kill -0 "$DEV_PID" 2>/dev/null || break
@@ -452,7 +482,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: |
