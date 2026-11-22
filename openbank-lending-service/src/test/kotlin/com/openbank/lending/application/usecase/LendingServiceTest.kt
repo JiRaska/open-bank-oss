@@ -54,6 +54,7 @@ import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9Stage
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.lending.origination.OriginationState
+import com.openbank.libs.market.OfferingMarkets
 import io.mockk.CapturingSlot
 import io.mockk.clearMocks
 import io.mockk.every
@@ -67,6 +68,9 @@ import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -633,8 +637,9 @@ class LendingServiceTest {
         verify(exactly = 1) { applications.save(any()) }
     }
 
-    @Test
-    fun `catalog offering overrides client price and persists immutable snapshot`() {
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `catalog offering overrides client price and persists immutable snapshot`(scoped: Boolean) {
         val slot: CapturingSlot<LoanApplication> = slot()
         val offeringId = UUID.fromString("10000000-0000-0000-0000-000000000012")
         val snapshot = CatalogLoanSnapshot(
@@ -644,7 +649,16 @@ class LendingServiceTest {
             2,
         )
         every { catalogLoanProfiles.resolvePublished(offeringId) } returns Uni.createFrom().item(
-            CatalogLoanProfile(snapshot, "EUR", 12, AmortizationMethod.ANNUITY, BigDecimal("0.0699"), null, null),
+            CatalogLoanProfile(
+                snapshot = snapshot,
+                currency = "EUR",
+                tenorMonths = 12,
+                method = AmortizationMethod.ANNUITY,
+                nominalAnnualRate = BigDecimal("0.0699"),
+                minPrincipal = null,
+                maxPrincipal = null,
+                markets = if (scoped) OfferingMarkets(setOf("CZ", "SK")) else null,
+            ),
         )
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
 
@@ -652,7 +666,41 @@ class LendingServiceTest {
 
         assertThat(result.nominalAnnualRate).isEqualByComparingTo("0.0699")
         assertThat(result.catalogSnapshot).isEqualTo(snapshot)
+        assertThat(result.jurisdiction).isEqualTo(if (scoped) "CZ" else null)
         verify(exactly = 1) { catalogLoanProfiles.resolvePublished(offeringId) }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "SK, CZ, outside the Czech domestic route",
+        "CZ, SK, requires the Czech domestic jurisdiction",
+    )
+    fun `domestic application rejects foreign catalogue scope or jurisdiction`(
+        market: String,
+        jurisdiction: String,
+        reason: String,
+    ) {
+        val offeringId = UUID.fromString("10000000-0000-0000-0000-000000000012")
+        val revisionId = UUID.fromString("20000000-0000-0000-0000-000000000012")
+        val profile = CatalogLoanProfile(
+            snapshot = CatalogLoanSnapshot(offeringId, revisionId, "b".repeat(64), 2),
+            currency = "EUR",
+            tenorMonths = 12,
+            method = AmortizationMethod.ANNUITY,
+            nominalAnnualRate = BigDecimal("0.0699"),
+            minPrincipal = null,
+            maxPrincipal = null,
+            markets = OfferingMarkets(setOf(market)),
+        )
+        every { catalogLoanProfiles.resolvePublished(offeringId) } returns Uni.createFrom().item(profile)
+
+        assertThatThrownBy {
+            val request = sampleRequest().copy(catalogOfferingId = offeringId, jurisdiction = jurisdiction)
+            service.apply(request, "alice").await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining(reason)
+
+        verify(exactly = 0) { applications.save(any()) }
     }
 
     @Test

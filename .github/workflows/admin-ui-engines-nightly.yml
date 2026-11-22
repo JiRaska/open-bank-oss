@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   engines:
+    if: github.event_name != 'schedule' || (vars.ADMIN_UI_ENGINES_NIGHTLY_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Read-only: this job runs npm lifecycle scripts and the whole suite, so it holds no write
@@ -92,7 +93,9 @@ jobs:
 
   report:
     needs: engines
-    if: always() && needs.engines.outputs.outcome == 'failure'
+    if: >-
+      (github.event_name != 'schedule' || (vars.ADMIN_UI_ENGINES_NIGHTLY_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
+      (always() && needs.engines.outputs.outcome == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -990,6 +990,24 @@ gates:
     run: |
       python3 .github/scripts/check-config-inventory.py
 
+  # ADR-0389: pausing automation must never need a PR. Every schedule-triggered workflow gates
+  # its entry jobs on vars.<WORKFLOW_ID>_SCHEDULE_PAUSED and the global vars.SCHEDULES_PAUSED,
+  # or is listed in the checker's EXCLUDED map with the reason pausing it must stay reviewed.
+  - id: schedule-pause-switch
+    name: "every scheduled workflow carries an instant pause switch or a stated exclusion (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 15
+    min_subjects: 40    # 63 scheduled workflows on 2026-11-21
+    verified: "2026-11-21 — 0 findings; 15 switched, 48 excluded with reasons"
+    rationale: "A pause that needs a PR waits in the queue the runaway cron may be flooding; the gate makes a new scheduled workflow either carry the switch or state why pausing it must stay reviewed (#17006)."
+    review_after: "2027-05-21"
+    selftest: python3 .github/scripts/check-schedule-pause-switch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-schedule-pause-switch.py"]
+    run: |
+      python3 .github/scripts/check-schedule-pause-switch.py
+
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
     group: gitops
@@ -2251,7 +2269,9 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
-    selftest_inputs: [".github/scripts/check-license-headers.py"]
+    # evals/ declared (#16623): the self-test walks every SPDX-headered source file, and
+    # evals/mcp-redteam added the first .sh/.js/.yaml under evals/, which the trace caught.
+    selftest_inputs: [".github/scripts/check-license-headers.py", "evals/"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -2950,6 +2970,48 @@ gates:
     run: |
       python3 .github/scripts/run-evals.py --require-recordings
 
+  # ADR-0383 D7 / #16617 layer 4 — MCP prompt-injection red-team pack, split in two so neither
+  # gate claims more than it measures. The deterministic server half is JUnit in
+  # openbank-mcp-service (PoisonedToolResultRedTeamTest).
+  #
+  # (1) ENFORCED: needs no model. Corpus <-> committed rendered fixture <-> scenarios.json <->
+  # generated promptfoo tests/tools agree, so a recording can only ever be about the bytes the
+  # server renders today. SUBJECTS = corpus items checked.
+  - id: mcp-redteam-fixture-integrity
+    name: "MCP red-team fixture integrity (ADR-0383 D7, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The model-in-the-loop pack replays a model against committed bytes; if the corpus, rendered fixture, scenarios or generated promptfoo files disagree, any verdict is about a server that no longer exists."
+    review_after: "2027-05-17"
+    budget_seconds: 30
+    # 85 corpus items today; the JUnit test pins the exact size.
+    min_subjects: 80
+    selftest: python3 .github/scripts/check-mcp-redteam-fixture-integrity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-redteam-fixture-integrity.py", ".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/check-mcp-redteam-fixture-integrity.py
+
+  # (2) ADVISORY (ADR-0144, rules.yaml: mcp_redteam_model_verdict): the model verdict. Until the
+  # owner commits a first live recording it evaluates NOTHING — it prints "model verdict: NOT
+  # MEASURED" and SUBJECTS=0, which is why it cannot be enforced yet. Once a recording exists it
+  # must cover every scenario (partial => fail); a moved scenario digest is STALE => fail.
+  - id: mcp-redteam-model-verdict
+    name: "MCP red-team model verdict (ADR-0383 D7, advisory)"
+    group: registry
+    mode: advisory
+    verified: "2026-11-17 — 0 of 45 scenarios evaluated: no recording committed (CI holds no model keys); self-test proves partial/stale/failing recordings fail"
+    rationale: "Whether a model given a poisoned tool result proposes an unrequested payment, fetches beyond the question or repeats an attacker URL can only be measured against a recorded model run; CI holds no keys."
+    review_after: "2026-12-15"
+    budget_seconds: 30
+    # 45 scenarios; today 0 are evaluated, so the floor reports it (advisory) until recorded.
+    min_subjects: 45
+    selftest: python3 .github/scripts/run-mcp-redteam-evals.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/run-mcp-redteam-evals.py
+
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
   # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
@@ -3172,6 +3234,30 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-agent-bounded-write-surface.py
+
+  # ADR-0387 (issue #16754): agents read the public web only through the fetch broker's
+  # `web.fetch` tool (resource read.public_web). The network layer cannot carry the host
+  # allowlist (aws-network-policy-agent matches CIDRs, not hostnames), so the charter is the
+  # control: explicit HTTPS hostnames, no write/execute next to web access, and the renderer
+  # credential mounted by the broker alone.
+  #
+  # ENFORCED. Pure python, one file read plus a gitops scan, <1 s. Falsified by effect on
+  # 2026-11-18: granting read.public_web to regulatory-obligations-watcher without a host list
+  # made it exit 1; the self-test covers wildcard, IP literal, scheme, upper case, write/execute
+  # tier, dead allowlist and a second secret mount.
+  - id: public-web-fetch
+    min_subjects: 15   # agent charters examined; 23 today (2026-11-18)
+    name: "public-web fetch bounded per charter (ADR-0387, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 30
+    rationale: "Fetched web content is untrusted and the host allowlist exists only in the application layer, so a wildcard host, a write tier beside web access or a second renderer-credential mount would each widen agent egress with nothing else to notice."
+    review_after: "2027-05-18"
+    selftest: python3 .github/scripts/check-public-web-fetch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-public-web-fetch.py"]
+    run: |
+      python3 .github/scripts/check-public-web-fetch.py
 
   - id: agent-model-parity
     name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
@@ -3692,26 +3778,152 @@ gates:
     group: registry
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
-    # Hard kill for this gate only (#16788). The runner default is 420 s and a budget above the
-    # effective timeout is unenforceable (run-gates load() refuses it). Measured 2026-11-18: the
-    # self-test read 335.9 s wall on main (run 44318606328), 75 s under the default kill and the
-    # local loaded-machine run already hit 420 s. #16785 raises this budget to 495 (1.5 x p95);
-    # 750 = ~1.5 x 495 keeps it enforceable.
-    timeout_seconds: 750
+    # The synthetic self-test outgrew one gate: 753.9 s against a 750 s kill on #17083 (#17006).
+    # It is sharded (merge-train.py SELF_TEST_SHARDS) instead of given a longer kill: this gate runs
+    # shard 0/4 and merge-train-selftest-shard-{1,2,3} the rest, in other CI shards. Every shard
+    # asserts it saw every scenario marker once and ran exactly the ones it owns, and that no
+    # scenario leaves fixture state behind; --self-test-shard-plan (their run:) refuses a plan that
+    # drops a scenario from every shard, or a gates.yaml that misses, doubles or mis-sizes one.
     review_after: "2027-04-18"
-    budget_seconds: 495   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 2026-11-07 CI read 199.6 s; 30 main push runs 2026-11-18 04:26Z-13:54Z ranged 182.6-335.9 s on largely the same code (runner variance, no step at #16675), 495 = ceil(1.5 x p95 329.76 s over 30 main runs, gate-runtime-measurements.json)
+    # gate-observability-declarations ratchet: >= ceil(measured p95 329.76 s x 1.5) = 495 (n=30,
+    # max 335.89 s, gate-runtime-measurements.json). Kill at the pre-split 750 s, above the budget.
+    budget_seconds: 495
+    timeout_seconds: 750
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
-      python3 .github/scripts/merge-train.py --self-test
+      python3 .github/scripts/merge-train.py --self-test-shard 0/4
       python3 .github/scripts/test-merge-train-owner-approval.py
       python3 .github/scripts/test-merge-train-close-linked-issues.py
       python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
-    # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
-    # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
-    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
+    # The synthetic self-test's own inputs only (#17006). The cases that read the REAL tree (every
+    # workflow, check/test script and the Gradle/test sources at HEAD, #13750) moved to
+    # merge-train-real-tree-drift below, which runs on every pull request. Enumerated from what the
+    # self-tests open/execute (Python audit-hook trace) plus their git-object reads; CI's strace
+    # (OB_SELFTEST_TRACE=require) fails this gate if a read is missing. gates.yaml is universal.
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
+
+  - id: merge-train-selftest-shard-1
+    name: "merge-train synthetic self-test, shard 1/4 (#17006, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "Shard 1 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
+    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 1/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-selftest-shard-2
+    name: "merge-train synthetic self-test, shard 2/4 (#17006, enforced)"
+    group: security
+    mode: enforced
+    rationale: "Shard 2 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
+    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 2/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-selftest-shard-3
+    name: "merge-train synthetic self-test, shard 3/4 (#17006, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "Shard 3 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
+    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 3/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-real-tree-drift
+    name: "merge-train's privileged-gate-code drift guard holds on the real tree (#13750, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A new check or test script that judges a carrier, the ruleset or the merge machinery must stay strict (PRIVILEGED_GATE_CODE); the derivation reads every workflow and script, so it runs on every PR, split out of merge-train-declaration's slow synthetic self-test (#17006)."
+    review_after: "2027-05-22"
+    budget_seconds: 30   # 2.4 s wall locally, 2026-11-22
+    min_subjects: 9      # 9 real-tree cases today (key spread + CI receiver moved in, #17083 review), 2026-11-22
+    selftest_exempt: "is-a-test-suite - the run: IS merge-train.py's real-tree self-test, which fails when a carrier-judging script is missing from PRIVILEGED_GATE_CODE"
+    run: |
+      python3 .github/scripts/merge-train.py --real-tree-self-test
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"

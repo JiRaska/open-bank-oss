@@ -125,6 +125,14 @@ spec:
       # drains), as the ingress-nginx controller's PDB.
       envoyPDB:
         minAvailable: 2
+  # The client certificate presented to every BackendTLSPolicy-targeted backend
+  # (edge-backend-client-tls.yaml). Inert until a BackendTLSPolicy exists; the first is the customer
+  # MCP route (#16847), whose backend pins this certificate's SAN.
+  backendTLS:
+    clientCertificateRef:
+      kind: Secret
+      name: edge-backend-client-tls
+      namespace: envoy-gateway-system
   telemetry:
     metrics:
       # Stated explicitly: podmonitors.yaml scrapes this endpoint (:19001

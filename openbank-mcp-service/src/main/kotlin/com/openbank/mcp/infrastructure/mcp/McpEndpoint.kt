@@ -84,6 +84,9 @@ import java.time.Duration
 @Path("/mcp")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
+// Two explicit entries (staff `handle`, customer `handleCustomer`) are the review-of-#17004 fix: the
+// branch is the matched resource, not a re-read path. Splitting the class would move that decision away.
+@Suppress("TooManyFunctions")
 class McpEndpoint(
     private val registry: McpToolRegistry,
     private val pdp: PolicyDecisionPoint,
@@ -147,21 +150,61 @@ class McpEndpoint(
     /**
      * Refusals decided before any method runs, in order: the customer-channel branch (ADR-0383 D1 /
      * ADR-0385 D1), then the RFC 8707 audience refusal (#16622). Null means dispatch normally.
+     *
+     * #16847 (owner decision 2026-11-21): the customer channel has its OWN root, [CUSTOMER_ROOT]
+     * ([CustomerMcpEndpoint], DPoP-only, 8443-only). The branch is chosen by WHICH RESOURCE matched
+     * ([handleCustomer] vs [handle]), never by re-reading the request path: a raw-path comparison let
+     * `/customer/mcp;a=b` or `/customer/%6dcp` reach [CustomerMcpEndpoint] and take the staff dispatch
+     * (review of #17004). [McpPathCanonicalFilter] refuses such paths outright. The branch runs only there, and there a token that
+     * is not a customers-realm token is refused rather than handed to the staff path. On `/mcp` the
+     * branch never runs; [CallerContextResolver] refuses a customers-realm token on the staff path.
      */
-    private val preDispatch: (String, JsonNode, JsonNode) -> Response? = { method, id, params ->
-        customerBranch?.handle(
-            callerResolver.token,
-            httpRequest.getHeader(AUTHORIZATION_HEADER),
-            httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
-            method,
-            id,
-            params,
-        ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
-    }
+    private fun preDispatch(customer: Boolean, method: String, id: JsonNode, params: JsonNode): Response? =
+        if (customer) {
+            customerBranch?.let { branch ->
+                branch.handle(
+                    callerResolver.token,
+                    httpRequest.getHeader(AUTHORIZATION_HEADER),
+                    httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
+                    method,
+                    id,
+                    params,
+                ) ?: branch.refuseNonCustomerToken()
+            } ?: Response.status(Response.Status.NOT_FOUND).build()
+        } else {
+            // #16590 defence in depth: a customer credential (customers-realm `iss`, or the DPoP scheme
+            // no staff caller uses) is refused on the staff root WHATEVER the channel state, before the
+            // audience check. The resolver would only ever treat it as anonymous; refusing it here means
+            // no staff dispatch path ever runs for it, and the client is told where it belongs.
+            audienceRefusal.takeIf { authorizationHeaders().size > 1 }?.respondAmbiguousCredential(method)
+                ?: audienceRefusal.takeIf { presentsCustomerCredential() }?.respondCustomerOnStaffRoot(
+                    method,
+                    params,
+                    if (customerBranch == null) {
+                        McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
+                    } else {
+                        McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
+                    },
+                    callerResolver.token.getClaim<String?>("azp"),
+                ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+        }
 
+    private fun authorizationHeaders(): List<String> =
+        if (::httpRequest.isInitialized) httpRequest.headers().getAll(AUTHORIZATION_HEADER).orEmpty() else emptyList()
+
+    /** Customers-realm `iss`, or ANY `Authorization` header in the DPoP scheme (review of #17086). */
+    private fun presentsCustomerCredential(): Boolean = callerResolver.presentsCustomerRealmToken() ||
+        authorizationHeaders().any { it.trimStart().startsWith("$DPOP_HEADER ", ignoreCase = true) }
+
+    /** The staff root. Never runs the customer branch, whatever the request path says. */
     @POST
+    fun handle(body: JsonNode): Response = dispatch(body, customer = false)
+
+    /** The customer root's entry, called only by [CustomerMcpEndpoint]; never runs the staff audience path. */
+    fun handleCustomer(body: JsonNode): Response = dispatch(body, customer = true)
+
     @Suppress("ReturnCount")
-    fun handle(body: JsonNode): Response {
+    private fun dispatch(body: JsonNode, customer: Boolean): Response {
         val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
         val method = body.path("method").asText("")
         val params = body.path("params")
@@ -196,7 +239,7 @@ class McpEndpoint(
         // audience is not this server.
         // The fleet NUL guard above runs FIRST, for both paths: no branch, refusal or audit sees a
         // raw U+0000, and no response echoes one (review of #16721).
-        preDispatch(method, id, params)?.let { return it }
+        preDispatch(customer, method, id, params)?.let { return it }
 
         val result: Any = when (method) {
             "initialize" -> InitializeResult(
@@ -503,19 +546,22 @@ class McpEndpoint(
     private fun error(id: JsonNode, code: Int, message: String): Response =
         Response.ok(McpResponse(id = id, error = McpError(code, message))).build()
 
-    private companion object {
+    companion object {
+        /** The customer channel's own path root (#16847); literal in [CustomerMcpEndpoint]'s `@Path`. */
+        const val CUSTOMER_ROOT = "/customer/mcp"
+
         /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
-        const val RATE_LIMITED = -32029
+        private const val RATE_LIMITED = -32029
 
-        const val DPOP_HEADER = "DPoP"
-        const val AUTHORIZATION_HEADER = "Authorization"
+        private const val DPOP_HEADER = "DPoP"
+        private const val AUTHORIZATION_HEADER = "Authorization"
 
-        const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
+        private const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 
         /**
          * The JSON-RPC methods this server implements. Used ONLY to bound the `method` metric tag —
          * the dispatch itself is the `when` in [handle], which stays the single source of behaviour.
          */
-        val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
+        private val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
     }
 }

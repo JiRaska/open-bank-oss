@@ -80,7 +80,7 @@ github:
       issue: 17006
       review_by: 2026-12-21
     - kind: variable
-      names: [AUTO_DEPLOY_MAX_PARALLEL, MERGE_TRAIN_API_RETRY_ATTEMPTS, MERGE_TRAIN_BATCH_SIZE, MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP, MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_EXPEDITE_LANE, MERGE_TRAIN_PREFETCH_BATCH, MERGE_TRAIN_RESERVATION_CEILING_S, MERGE_TRAIN_SPECULATIVE_STACK, MERGE_TRAIN_STALE_RED_CAP, MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S, MERGE_TRAIN_STRICT_AGING_S, MERGE_TRAIN_STRICT_BATCH_CAP, MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
+      names: [AUTO_DEPLOY_MAX_PARALLEL, MERGE_TRAIN_API_RETRY_ATTEMPTS, MERGE_TRAIN_BATCH_SIZE, MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP, MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_EXPEDITE_LANE, MERGE_TRAIN_HOTFIX_DAILY_CAP, MERGE_TRAIN_PREFETCH_BATCH, MERGE_TRAIN_RESERVATION_CEILING_S, MERGE_TRAIN_SPECULATIVE_STACK, MERGE_TRAIN_STALE_RED_CAP, MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S, MERGE_TRAIN_STRICT_AGING_S, MERGE_TRAIN_STRICT_BATCH_CAP, MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
       reason: "optional owner-tunable merge-train and auto-deploy knobs; unset means the reviewed workflow default applies, and merge-train.py range-validates any value"
       issue: 16932
       review_by: 2027-02-21
@@ -183,6 +183,27 @@ github:
       reason: "schema registry apply waits on the registry rollout"
       issue: 1916
       review_by: 2027-01-31
+    - kind: variable
+      names:
+        - ADMIN_UI_ENGINES_NIGHTLY_SCHEDULE_PAUSED
+        - AGENT_ISSUE_WORKER_SCHEDULE_PAUSED
+        - AGENT_PR_STEWARD_SCHEDULE_PAUSED
+        - ALERT_NOISE_WEEKLY_SCHEDULE_PAUSED
+        - APP_STATUS_REFRESH_SCHEDULE_PAUSED
+        - AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED
+        - AUTO_UPDATE_ARMED_PRS_SCHEDULE_PAUSED
+        - BRANCH_CLEANUP_SCHEDULE_PAUSED
+        - CI_ARTIFACT_MIRROR_SCHEDULE_PAUSED
+        - DEPS_FRESHNESS_SCHEDULE_PAUSED
+        - DERIVED_ARTEFACT_AUTOHEAL_SCHEDULE_PAUSED
+        - FLEET_LINT_SCHEDULE_PAUSED
+        - INCIDENT_GATE_COVERAGE_SCHEDULE_PAUSED
+        - ISSUE_KIND_SCHEDULE_PAUSED
+        - SCHEDULES_PAUSED
+        - UPSTREAM_UNBLOCK_WATCH_SCHEDULE_PAUSED
+      reason: "ADR-0389 instant pause switches for scheduled workflows; unset (or anything but 'true') means the schedule runs, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-05-21
 openbao:
   # Stores backed by OpenBao. kafka-messaging-certs is the Kubernetes provider (Strimzi-issued
   # Secrets in-cluster), not OpenBao, so it is out of scope.
@@ -264,6 +285,12 @@ openbao:
     - pricing-console
     - pricing-service
     - temporal/db
+  unprovisioned:
+    - kind: openbao
+      names: [fetch-broker/browser-run]
+      reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
+      issue: 16754
+      review_by: 2027-02-18
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
