@@ -74,3 +74,11 @@ public final class com/openbank/libs/market/OfferingMarkets {
 	public final fun includes-Eyhiwoc (Ljava/lang/String;)Z
 }
 
+public final class com/openbank/libs/market/PassportMode : java/lang/Enum {
+	public static final field BRANCH Lcom/openbank/libs/market/PassportMode;
+	public static final field FOS Lcom/openbank/libs/market/PassportMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/market/PassportMode;
+	public static fun values ()[Lcom/openbank/libs/market/PassportMode;
+}
+
