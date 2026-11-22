@@ -6,7 +6,8 @@ package com.openbank.libs.persistence.outbox
 
 /**
  * The shape of one service's outbox table, as far as the kernel repository needs to know it
- * (ADR-0327 D1). Every statement in [OutboxSql] is rendered from this and nothing else.
+ * (ADR-0327 D1). Row-returning repository queries additionally use the concrete entity's
+ * resolved ORM projection, so unmapped table additions do not change their result shape.
  *
  * The defaults describe 37 of the 38 tables in the fleet inventory (ADR-0327 Appendix A). The two
  * knobs exist for the outliers the appendix names, so they can adopt the base without a table
@@ -14,7 +15,7 @@ package com.openbank.libs.persistence.outbox
  * claim ([orderColumn], [extraClaimAssignments]) and records delivery in `published_at`
  * ([sentAtColumn]); `openbank-security-scanner`'s extra
  * `aggregate_revision` column and the four `candidate`-aliased claims need nothing — an extra
- * column is invisible to these statements, and the alias was only ever a spelling of the same
+ * column needs no shape knob, and the alias was only ever a spelling of the same
  * query. Identifiers are validated to a plain SQL-identifier grammar because they are spliced
  * into statement text; parameters never are.
  */
@@ -57,6 +58,9 @@ data class OutboxTableShape(
  * repository executes rather than a copy that could drift. Parameter names are the contract
  * between here and [AbstractPanacheOutboxRepository]; statuses are bound, never spliced, so the
  * text carries no literal a `check-outbox-claim-sql-ratchet` baseline could mis-key on.
+ *
+ * The public one-argument row templates retain their legacy wildcard behavior for compatibility.
+ * Kernel repository execution uses [OutboxRowSql] with the ORM's mapped columns.
  */
 object OutboxSql {
     /** Statuses the partial indexes (D2) cover and every eligibility predicate here filters on. */
@@ -81,31 +85,10 @@ object OutboxSql {
      * update is uncommitted) and so cannot qualify N+1. `FOR UPDATE SKIP LOCKED` on the inner
      * select is what lets two replicas claim disjoint heads without blocking.
      */
-    fun claim(shape: OutboxTableShape): String {
-        val t = shape.table
-        val ord = shape.orderColumn
-        val extra = if (shape.extraClaimAssignments.isBlank()) "" else ", ${shape.extraClaimAssignments.trim()}"
-        return """
-            UPDATE $t SET status = :dispatching, claimed_at = :now, updated_at = :now$extra
-            WHERE id IN (
-              SELECT o.id FROM $t o
-              WHERE ${eligible("o")}
-                AND NOT EXISTS (SELECT 1 FROM $t p
-                                WHERE p.aggregate_id = o.aggregate_id
-                                  AND p.status IN (:pending, :failed, :dispatching)
-                                  AND (p.$ord, p.id) < (o.$ord, o.id))
-                AND NOT EXISTS (SELECT 1 FROM $t d
-                                WHERE d.aggregate_id = o.aggregate_id
-                                  AND d.status = :dispatching AND d.claimed_at >= :stale)
-              ORDER BY o.$ord, o.id
-              LIMIT :limit FOR UPDATE SKIP LOCKED
-            ) RETURNING *
-        """.trimIndent()
-    }
+    fun claim(shape: OutboxTableShape): String = OutboxRowSql.claim(shape, "*")
 
     /** Unclaimed peek with the same eligibility predicate — the port's `listProcessable`. */
-    fun listProcessable(shape: OutboxTableShape): String =
-        "SELECT * FROM ${shape.table} o WHERE ${eligible("o")} ORDER BY o.${shape.orderColumn}, o.id LIMIT :limit"
+    fun listProcessable(shape: OutboxTableShape): String = OutboxRowSql.listProcessable(shape, "*")
 
     /**
      * D6: one statement per batch. `IN (:ids)` rather than `= ANY(:ids)`: Hibernate expands a
@@ -145,11 +128,43 @@ object OutboxSql {
         "DELETE FROM ${shape.table} WHERE id IN (SELECT id FROM ${shape.table} WHERE status = :dead AND updated_at < :cut LIMIT :limit)"
 }
 
+/** Row-returning templates with a projection supplied by the concrete ORM mapping. */
+internal object OutboxRowSql {
+    /** Repository execution supplies the concrete entity's mapped columns, not the table's shape. */
+    fun claim(shape: OutboxTableShape, projection: String): String {
+        val t = shape.table
+        val ord = shape.orderColumn
+        val extra = if (shape.extraClaimAssignments.isBlank()) "" else ", ${shape.extraClaimAssignments.trim()}"
+        return """
+            UPDATE $t SET status = :dispatching, claimed_at = :now, updated_at = :now$extra
+            WHERE id IN (
+              SELECT o.id FROM $t o
+              WHERE ${OutboxSql.eligible("o")}
+                AND NOT EXISTS (SELECT 1 FROM $t p
+                                WHERE p.aggregate_id = o.aggregate_id
+                                  AND p.status IN (:pending, :failed, :dispatching)
+                                  AND (p.$ord, p.id) < (o.$ord, o.id))
+                AND NOT EXISTS (SELECT 1 FROM $t d
+                                WHERE d.aggregate_id = o.aggregate_id
+                                  AND d.status = :dispatching AND d.claimed_at >= :stale)
+              ORDER BY o.$ord, o.id
+              LIMIT :limit FOR UPDATE SKIP LOCKED
+            ) RETURNING $projection
+        """.trimIndent()
+    }
+
+    fun listProcessable(shape: OutboxTableShape, projection: String): String =
+        "SELECT $projection FROM ${shape.table} o WHERE ${OutboxSql.eligible("o")}" +
+            " ORDER BY o.${shape.orderColumn}, o.id LIMIT :limit"
+}
+
 /** Ownership-aware statements for the optional fenced V2 repository. */
 internal object OutboxClaimFenceSql {
-    fun claim(shape: OutboxTableShape): String {
+    fun claim(shape: OutboxTableShape): String = claim(shape, "*")
+
+    fun claim(shape: OutboxTableShape, projection: String): String {
         require(shape.extraClaimAssignments.isBlank()) { "Fenced outbox claims own claim_token assignment" }
-        return OutboxSql.claim(shape.copy(extraClaimAssignments = "claim_token = :claimToken"))
+        return OutboxRowSql.claim(shape.copy(extraClaimAssignments = "claim_token = :claimToken"), projection)
     }
 
     /** Pair each event with its exact claim token. Return only rows this acknowledgement owns. */
