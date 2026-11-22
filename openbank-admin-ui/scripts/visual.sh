@@ -12,8 +12,8 @@
 set -euo pipefail
 
 # amd64 manifest of the matching Playwright image; the tag is mutable, the digest is not.
-PLAYWRIGHT_VERSION="1.65.0"
-IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble@sha256:bc4fbb329a25287ed23e9216c97063646abdd1bf2da669a9895fa3e2078b2302"
+PLAYWRIGHT_VERSION="1.65.1"
+IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble@sha256:766137e2d9caad4744187e53cdc89320ba6f2eb57cff097374020944b44dd0a9"
 ui_dir="$(cd "$(dirname "$0")/.." && pwd)"
 repo_root="$(cd "${ui_dir}/.." && pwd)"
 
