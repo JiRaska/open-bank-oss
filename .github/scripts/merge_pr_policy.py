@@ -123,6 +123,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'd628b9a9c116f2274fb76e4e8cbdf5c4f80ed22e',
     # merge-train.py of the owner hotfix lane (#17025) over #17048, reviewed with that PR.
     'aeccc5f23e736946d8147221db4e86bd4bfa9357',
+    # merge-train.py of the strict yield-once-per-reservation fix (#17072, update merges must come from main) over #17025, reviewed with that PR.
+    '647b424f6b90e79712a2f994a2ca238748a48984',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
@@ -133,8 +135,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '82f517cde74e25753d7c498401c4cc9d861074b5',
     # merge-train.py of #16885 stacked on #16988 and #16986, merged with #16972 (ruff B007 + stale-ref fix kept), reviewed with #16885.
     'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
-    # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways), reviewed with #17083.
-    '93476a3df17829b517a9404996cdcf2519f8a01a',
+    # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways) merged with #17078 (deferral_chain_self_test in shard scenario 0), reviewed with #17083.
+    '2deeae6bd5a2191e49813ff4ca22a5921055952a',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
