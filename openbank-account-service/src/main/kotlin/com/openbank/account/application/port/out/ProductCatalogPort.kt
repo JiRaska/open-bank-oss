@@ -4,6 +4,7 @@
 
 package com.openbank.account.application.port.out
 
+import com.openbank.libs.market.OfferingMarkets
 import java.time.Instant
 import java.util.UUID
 
@@ -37,6 +38,7 @@ data class PublishedRevision(
     /** Canonical IR `revisionHash` from the revision's publish-path signature; null without IR. */
     val irRevisionHash: String?,
     val irVersion: Int?,
+    val marketCountries: OfferingMarkets? = null,
 )
 
 /**
