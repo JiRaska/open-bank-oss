@@ -201,6 +201,51 @@ identical to card-issuance-service's. Both were green and nothing compared them,
 rename would have silently stopped one projection from matching — which leaves a revoked grant
 enforceable.
 
+### Offering market scope (ADR-0380)
+
+The Czech domestic route checks the offering market countries returned with the published
+product revision. A foreign-only offering is refused before account creation. Pending accounts
+with a product revision pin recheck the current offering scope before activation. Legacy
+unscoped catalogue responses and historical pending accounts without a pin retain the existing
+domestic route. This check does not activate FOS or branch sales.
+
+### Passport operation recovery (ADR-0380)
+
+A passport opening accepts a grant reference. The catalogue verifies subject evidence against
+the approved grant. Account-service persists the operation ID, exact request fingerprint, account ID,
+pinned revision and screened opening details before asking catalogue to consume. After a crash or
+lost acknowledgement, a scheduler checks for the exact consumed receipt and writes the pending
+account through the same account, pocket, idempotency and outbox transaction. That transaction also
+clears the queued details. Recovery can finish an already-consumed operation after revocation.
+
+If the original call stopped before consumption, the scheduler reads the current party record for
+the original ID, screens the registered name with a new screening attempt and asks catalogue to
+admit the same operation. A missing, closed, merged or suspended party, an inconclusive or blocking
+screening result, and catalogue refusal all prevent the account write. The request retains its
+original grant, party, revision, fingerprint and account ID. The catalogue checks current evidence
+and orders consumption against revocation. The recovery queue stores no holder name. Recovered
+accounts leave the optional cached display name empty. Existing V35 intents need a matching caller
+retry before they have enough information for automatic recovery.
+
+Activation derives its grant from the persisted opening. It gets a separate operation ID
+bound to the pending account version. Its state transition and status event commit together.
+Redelivery of the existing onboarding event, or a repeat of the activation request, resumes
+the operation after a failed account write. Existing domestic accounts follow their usual
+route. Branch booking requires its own approved route before use.
+
+### Immutable booking context (ADR-0380 B2)
+
+The exact consumed catalogue receipt supplies the shared openbank-libs-market BookingContext. Clients supply
+only the grant ID; they cannot choose bank, establishment, country or mode. Account columns freeze all four
+fields together. Opening and lifecycle events and the account read API retain the same value. Recovery re-reads
+the exact receipt after consumption, even after revocation; activation must match the original context. Legacy
+null contexts remain unknown and require evidence-backed migration before passport activation.
+
+This PR integrates #16353/#16351 and the exact Catalogue C3 schema prerequisites V19–V21 from #16587, followed by V22.
+Deploy context readers before account writers. Branch admission remains restricted to LaunchMode.TEST until
+branch launch approval; this change performs no live activation. Rollback stops new writers and retains columns,
+receipts and outbox evidence. The shared type is framework-free; SQL immutability remains the owner's rule.
+
 ## IBAN generation (#16748)
 
 Generated IBANs take their ISO 7064 check digits from the shared libs-domain `IbanCheckDigits.build`, which also re-validates the result through `Iban`. Output is unchanged; a spec fix in libs-domain now reaches every account opened.

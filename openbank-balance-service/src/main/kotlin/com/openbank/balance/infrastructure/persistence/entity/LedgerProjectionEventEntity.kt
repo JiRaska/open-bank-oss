@@ -26,6 +26,9 @@ import java.util.UUID
 @IdClass(LedgerProjectionEventId::class)
 class LedgerProjectionEventEntity {
 
+    @Column(name = "branch_book_id", updatable = false)
+    var branchBookId: UUID? = null
+
     @Id
     @Column(name = "journal_entry_id", nullable = false)
     lateinit var journalEntryId: UUID

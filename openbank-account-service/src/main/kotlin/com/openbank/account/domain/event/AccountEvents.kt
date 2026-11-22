@@ -4,6 +4,7 @@
 
 package com.openbank.account.domain.event
 
+import com.openbank.account.domain.model.AccountBookingContext
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.ProductRevisionPin
@@ -40,6 +41,7 @@ data class AccountCreatedEvent(
      * and later consumers can read the pin from here instead of resolving one themselves.
      */
     val productRevision: AccountProductRevision? = null,
+    val bookingContext: AccountBookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountCreated"
@@ -79,6 +81,7 @@ data class AccountStatusChangedEvent(
     override val occurredAt: Instant,
     /** See [AccountCreatedEvent.sourceService] (#3994/#5256). */
     val sourceService: String = "account-service",
+    val bookingContext: AccountBookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountStatusChanged"
@@ -91,6 +94,7 @@ data class AccountClosedEvent(
     override val occurredAt: Instant,
     /** See [AccountCreatedEvent.sourceService] (#3994/#5256). */
     val sourceService: String = "account-service",
+    val bookingContext: AccountBookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountClosed"

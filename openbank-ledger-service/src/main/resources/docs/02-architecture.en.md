@@ -153,3 +153,22 @@ dispatcher before V2 sends begin.
 3. **Per-currency balancing (ADR-0025)** — cross-currency events self-balance by routing through per-currency FX position accounts; never a base-currency cross-sum.
 4. **Ledger is golden, balance is projection (ADR-0039)** — the ledger owns truth; `balance-service` reconciles against it.
 5. **No remote calls inside the write TX** — Kafka publish is async via outbox; ČNB rate fetch happens in the revaluation use case, not in the journal write path.
+
+### Branch loan disbursement
+
+The bank journal carries an optional, immutable establishment dimension. Finance registers the
+branch book before Lending can use it. The named Lending client submits the establishment on the
+disbursement journal. The same transaction commits the journal, its lines and the idempotency
+receipt. A replay must match the original book and financial terms. A reversal inherits the book.
+Centrally posted borrower cash uses the existing Transaction credit reference. The branch dimension
+on the loan journal preserves attribution while the bank-wide journal continues to include it.
+
+### Branch-book events and control snapshot (ADR-0380 B2)
+
+JournalPosted, JournalReversed and AccountBookedChanged carry the immutable parent branchBookId; the historical
+booked-change replay uses that same persisted value. `GET /api/v1/journals/branch-books?bankId=...&asOf=...` reads
+one SQL snapshot of BUSINESS posted/reversed journals: native-currency deposit-control totals and base-currency
+trial-balance amounts per book. Null book is explicitly unattributed, never guessed as a home establishment.
+The bank scope covers this reference implementation's single legal bank; a registry containing multiple banks
+refuses the read because legacy null-book journals have no truthful bank dimension. Registered books cannot be
+moved to a different bank/country. Reader-first deployment and rollback retain the registry and journal evidence.

@@ -54,6 +54,8 @@ class BalanceConsumerMoneyDlqIT {
 
     @Inject lateinit var mapper: ObjectMapper
 
+    @Inject lateinit var dataSource: javax.sql.DataSource
+
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `a ledger delta Money cannot hold is dead-lettered and moves nothing`() {
@@ -89,6 +91,168 @@ class BalanceConsumerMoneyDlqIT {
         given().get("/api/v1/balances/$poisoned").then().statusCode(200)
             .extract().jsonPath().getList<Any>("balances").let { assertThat(it).isEmpty() }
         given().get("/api/v1/balances/$valid/EUR").then().statusCode(200)
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
+    fun `a wrong branch is quarantined before money moves including a changed duplicate`() {
+        val account = UUID.randomUUID()
+        val book = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        withKafka(DLQ_INIT) { producer, admin, deadLetters ->
+            send(producer, admin, INIT_TOPIC, INIT_GROUP, "$account", listOf(createdInBook(account, book)))
+            val changed = createdInBook(account, other)
+            send(producer, admin, INIT_TOPIC, INIT_GROUP, "$account", listOf(changed))
+            assertDeadLetters(deadLetters, "$account", listOf(changed))
+        }
+        val correct = bookedInBook(account, book)
+        val wrong = mapper.readTree(correct).also {
+            (it as com.fasterxml.jackson.databind.node.ObjectNode)
+                .put("branchBookId", other.toString())
+        }.toString()
+        withKafka(DLQ_LEDGER) { producer, admin, deadLetters ->
+            send(producer, admin, LEDGER_TOPIC, LEDGER_GROUP, "$account", listOf(wrong, correct, correct, wrong))
+            assertDeadLetters(deadLetters, "$account", listOf(wrong, wrong))
+        }
+        assertBranchPosting(account, book)
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
+    fun `a branch projection retries a database outage automatically and commits its event exactly once`() {
+        val account = UUID.randomUUID()
+        val book = UUID.randomUUID()
+        val suffix = account.toString().replace("-", "")
+        val sequence = "attempt_$suffix"
+        val trigger = "outage_$suffix"
+        withKafka(DLQ_LEDGER) { producer, admin, _ ->
+            send(producer, admin, INIT_TOPIC, INIT_GROUP, "$account", listOf(createdInBook(account, book)))
+            dataSource.connection.use { observer ->
+                installOutageHook(observer, account, sequence, trigger)
+                val sent = producer.send(ProducerRecord(LEDGER_TOPIC, "$account", bookedInBook(account, book)))
+                    .get(10, TimeUnit.SECONDS)
+                val role = observer.metaData.userName
+                require(role.matches(Regex("^[a-z_]+$")))
+                try {
+                    awaitCondition {
+                        observer.createStatement().use { q ->
+                            q.executeQuery("SELECT is_called FROM $sequence").use { rows ->
+                                rows.next()
+                                rows.getBoolean(1)
+                            }
+                        }
+                    }
+                    observer.createStatement().use { sql ->
+                        sql.executeQuery(
+                            "SELECT count(*) FROM ledger_projection_event WHERE account_id='$account'",
+                        ).use { rows ->
+                            rows.next()
+                            assertThat(rows.getInt(1)).isZero()
+                        }
+                        sql.execute("ALTER ROLE $role NOLOGIN")
+                        sql.execute(
+                            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity " +
+                                "WHERE usename=current_user AND pid<>pg_backend_pid()",
+                        )
+                        sql.execute("DROP TRIGGER $trigger ON ledger_projection_event")
+                    }
+                    Thread.sleep(1500)
+                } finally {
+                    observer.createStatement().use { sql ->
+                        sql.execute("ALTER ROLE $role LOGIN")
+                        sql.execute("DROP TRIGGER IF EXISTS $trigger ON ledger_projection_event")
+                        sql.execute("DROP FUNCTION $trigger()")
+                        sql.execute("DROP SEQUENCE $sequence")
+                    }
+                }
+                // Only the original Kafka send exists: restoring PostgreSQL must resume it.
+                awaitCommitted(admin, LEDGER_GROUP, TopicPartition(sent.topic(), sent.partition()), sent.offset() + 1)
+            }
+        }
+        assertBranchPosting(account, book)
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
+    fun `a branch movement waits for account context from another topic without a client retry`() {
+        val account = UUID.randomUUID()
+        val book = UUID.randomUUID()
+        withKafka(DLQ_LEDGER) { producer, admin, _ ->
+            val sent = producer.send(ProducerRecord(LEDGER_TOPIC, "$account", bookedInBook(account, book)))
+                .get(10, TimeUnit.SECONDS)
+            send(producer, admin, INIT_TOPIC, INIT_GROUP, "$account", listOf(createdInBook(account, book)))
+            awaitCommitted(admin, LEDGER_GROUP, TopicPartition(sent.topic(), sent.partition()), sent.offset() + 1)
+        }
+        assertBranchPosting(account, book)
+    }
+
+    private fun installOutageHook(observer: java.sql.Connection, account: UUID, sequence: String, trigger: String) {
+        observer.createStatement().use { sql ->
+            sql.execute("CREATE SEQUENCE $sequence")
+            sql.execute(
+                "CREATE FUNCTION $trigger() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN " +
+                    "IF NEW.account_id='$account'::uuid THEN PERFORM nextval('$sequence'); " +
+                    "RAISE EXCEPTION 'synthetic interrupted projection'; END IF; RETURN NEW; END; \$\$",
+            )
+            sql.execute(
+                "CREATE TRIGGER $trigger BEFORE INSERT ON ledger_projection_event " +
+                    "FOR EACH ROW EXECUTE FUNCTION $trigger()",
+            )
+        }
+    }
+
+    private fun createdInBook(account: UUID, book: UUID) = mapper.writeValueAsString(
+        mapOf(
+            "eventType" to "AccountCreated",
+            "aggregateId" to account,
+            "currency" to "EUR",
+            "bookingContext" to
+                mapOf("bankId" to BANK, "establishmentId" to book, "hostCountry" to "AT", "mode" to "BRANCH"),
+        ),
+    )
+
+    private fun bookedInBook(account: UUID, book: UUID) = mapper.readTree(booked(account, "EUR", "10.00")).also {
+        (it as com.fasterxml.jackson.databind.node.ObjectNode).put("branchBookId", book.toString())
+    }.toString()
+
+    private fun assertBranchPosting(account: UUID, book: UUID) {
+        dataSource.connection.use { c ->
+            c.prepareStatement("SELECT booked_amount FROM balances WHERE account_id=? AND currency='EUR'").use {
+                it.setObject(1, account)
+                it.executeQuery().use { rows ->
+                    rows.next()
+                    assertThat(rows.getBigDecimal(1)).isEqualByComparingTo("10")
+                }
+            }
+            c.prepareStatement("SELECT branch_book_id FROM ledger_projection_event WHERE account_id=?").use {
+                it.setObject(1, account)
+                it.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject(1)).isEqualTo(book)
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+            c.prepareStatement(
+                "SELECT payload::jsonb->>'branchBookId' FROM balance_outbox WHERE aggregate_id=? " +
+                    "AND event_type='BALANCE_UPDATED'",
+            ).use {
+                it.setObject(1, account)
+                it.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(1)).isEqualTo(book.toString())
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
+    }
+
+    private fun awaitCondition(condition: () -> Boolean) {
+        val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+        while (System.nanoTime() < until) {
+            if (condition()) return
+            Thread.sleep(100)
+        }
+        error("Expected database condition did not converge")
     }
 
     private fun booked(account: UUID, currency: String, delta: String) = mapper.writeValueAsString(
@@ -173,6 +337,7 @@ class BalanceConsumerMoneyDlqIT {
     }
 
     companion object {
+        private val BANK = UUID.fromString("11111111-1111-4111-8111-111111111111")
         private const val LEDGER_GROUP = "balance-money-ledger-dlq-it"
         private const val INIT_GROUP = "balance-money-init-dlq-it"
         private const val LEDGER_TOPIC = "openbank.ledger.journal.posted"

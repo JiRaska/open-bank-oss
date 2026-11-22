@@ -84,6 +84,7 @@ class ReplayBookedChangesService(
             journalEntryId = entry.id,
             transactionId = entry.transactionId,
             entryDate = entry.entryDate,
+            branchBookId = entry.branchBookId,
             occurredAt = clock.instant(),
         )
         return OutboxMessage(

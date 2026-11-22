@@ -60,9 +60,10 @@ class LedgerProjectionPortImpl(
         transactionId: UUID,
         entryDate: LocalDate,
         actorId: String,
+        branchBookId: UUID?,
     ): Balance? = Panache.withTransaction {
-        val change = Projection(accountId, currency, transactionId, actorId)
-        lockedPocket(change).flatMap { pocket ->
+        val change = Projection(accountId, currency, transactionId, actorId, branchBookId)
+        AccountBookContexts.verify(accountId, branchBookId).flatMap { lockedPocket(change) }.flatMap { pocket ->
             dedupRepo.findById(LedgerProjectionEventId(journalEntryId, accountId, currency)).flatMap { existing ->
                 val firstApplication = existing == null
                 val marker = if (firstApplication) {
@@ -78,9 +79,13 @@ class LedgerProjectionPortImpl(
                             this.transactionId = transactionId
                             this.entryDate = entryDate
                             this.appliedAt = OffsetDateTime.now(clock)
+                            this.branchBookId = branchBookId
                         },
                     ).replaceWithVoid()
                 } else {
+                    val sameMovement = existing.delta.compareTo(delta) == 0 && existing.transactionId == transactionId
+                    val sameBooking = existing.entryDate == entryDate && existing.branchBookId == branchBookId
+                    if (!sameMovement || !sameBooking) throw BookingContextConflict()
                     Uni.createFrom().voidItem()
                 }
                 marker.flatMap { consumeCover(pocket, change) }.flatMap { releaseEvents ->
@@ -100,6 +105,7 @@ class LedgerProjectionPortImpl(
         val currency: String,
         val transactionId: UUID,
         val actorId: String,
+        val branchBookId: UUID?,
     )
 
     private fun lockedPocket(change: Projection): Uni<BalanceEntity> =
@@ -157,6 +163,7 @@ class LedgerProjectionPortImpl(
             actorId = change.actorId,
             actorType = EventActor.TYPE_SYSTEM,
             sourceService = "balance-service",
+            branchBookId = change.branchBookId,
         )
 
     private fun BalanceEntity.toDomain() = Balance(

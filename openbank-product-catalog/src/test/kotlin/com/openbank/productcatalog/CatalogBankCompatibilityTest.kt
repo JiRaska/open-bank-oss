@@ -244,6 +244,9 @@ class CatalogBankCompatibilityTest {
         val revision = given().get(path).then().statusCode(200).extract().jsonPath()
         assertThat(revision.getString("state")).isEqualTo("PUBLISHED")
         assertThat(revision.getString("offeringId")).isEqualTo(offeringId.toString())
+        val offering = given().get("/api/v2/offerings/$offeringId").then().statusCode(200).extract().jsonPath()
+        assertThat(revision.getList<String>("marketCountries"))
+            .containsExactlyInAnyOrderElementsOf(offering.getList<String>("market.countries"))
         assertThat(revision.getString("schemaRef.id")).isEqualTo("org.openbank.banking.legacy-product")
         // The revision id the lookup returns is the one the immutable by-id read serves.
         given().get("/api/v2/revisions/${revision.getString("id")}").then().statusCode(200)

@@ -27,6 +27,15 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 
 ### Outbound reversal evidence for complaint investigations
 
+Branch reversal status, durable counterpayment intent and both lifecycle events commit in one
+database transaction. The original version/status check serialises competing reversal requests;
+a failed insert/event rolls back every effect. Accounts and booking contexts are swapped from
+the original immutable payment, so a current account/market outage cannot reroute a refund.
+Reversal idempotency is bound to the original subject. Existing patient branch recovery and
+bank/digest-bound Ledger receipts cover caller loss before dispatch and lost acknowledgements.
+`REVERSED` is acceptance of the durable intent, not a claim of completed settlement; the linked
+reversal's terminal event proves completion. Original synthetic origin is retained.
+
 `TransactionInitiated` may now include `reversalOf`, copied from the persisted reversal row.
 It is an internal transaction identifier, not a free-text reason or a claim that the reversal
 completed. The existing transactional outbox publishes it on the already protected transaction
@@ -709,3 +718,17 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## ADR-0380 B2: attributed cash and inter-branch clearing
+
+Transaction pins the authoritative account contexts before starting its payment workflow. A known branch cannot be paired with an unknown account or another bank. The same Account response must supply a denomination matching the payment currency for each branch leg: missing or different currency refuses before persistence, including incoming credits that have no source hold. Real HTTP tests prove both refusals leave no transaction or Ledger request. The new Account reader uses the named Transaction M2M client; its OPA grant is read-only and the adapter exposes only the id and booking context. Recovered activities use the stored route. Branch FX and transfers to unattributed legacy/home accounts fail closed pending their own route evidence.
+
+Only the named Transaction principal can call the Ledger branch-payment endpoint. A durable key binds the bank, both account/book legs, dates, currency, amount, actor and synthetic origin. A row lock serialises competing retries; both journals, booked events and receipt commit in one transaction. A failed second book leaves neither money nor receipt. Receipt bindings and final journal ids are immutable. Ledger book registration rejects another bank. Existing journal reversals preserve book provenance; a generic reversal of just one clearing side creates a detectable reconciliation break and is not an approved inter-branch reversal workflow.
+
+Independent reconciliation checks every book and bank, native-currency clearing positions and each payment pair's elimination; opposite corrupt pairs cannot hide in the bank net. Synthetic journals are excluded from BUSINESS controls. Reader/schema deployment precedes writers, no historic attribution is inferred, existing projection and branch launch restrictions remain. Rollback stops new writers and retains contexts, receipts, journals and evidence.
+
+The branch workflow is a new Temporal type: dispatch is asynchronous and recoverable from a persisted pending row. Its holds do not expire during an uncertain posting; hold/post/complete retries remain durable. This deliberately retains the reservation while operational stuck-saga controls report an unresolved operation, rather than returning funds that Ledger may already have booked.
+
+ADR-0380 B2 accounting-capability admission uses the same `BranchPaymentCurrency` contract as Ledger. Valid but unbacked ISO denominations (for example PLN/HUF/CHF) refuse before persistence and before the non-expiring branch reservation. Ledger validates the capability before its receipt transaction and maps the closed capability exhaustively, so extending admission without implementing the posting mapping fails compilation. Real HTTP tests assert refusal, no durable transaction and no hold/Ledger request.
+
+A confirmed `422 INSUFFICIENT_FUNDS` from Balance terminates branch payment cover and durably records the failed transaction. Temporary errors and uncertain outcomes keep retrying the same operation. This prevents a refused payment from settling when money arrives later.

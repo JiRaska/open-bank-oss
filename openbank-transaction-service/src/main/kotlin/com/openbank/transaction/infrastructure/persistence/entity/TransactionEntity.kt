@@ -21,6 +21,30 @@ import java.util.UUID
 @Table(name = "transactions")
 @IdClass(TransactionEntityId::class)
 class TransactionEntity : PanacheEntityBase {
+    @Column(name = "source_booking_bank_id", updatable = false)
+    var sourceBookingBankId: UUID? = null
+
+    @Column(name = "source_booking_establishment_id", updatable = false)
+    var sourceBookingEstablishmentId: UUID? = null
+
+    @Column(name = "source_booking_host_country", updatable = false)
+    var sourceBookingHostCountry: String? = null
+
+    @Column(name = "source_booking_mode", updatable = false)
+    var sourceBookingMode: String? = null
+
+    @Column(name = "target_booking_bank_id", updatable = false)
+    var targetBookingBankId: UUID? = null
+
+    @Column(name = "target_booking_establishment_id", updatable = false)
+    var targetBookingEstablishmentId: UUID? = null
+
+    @Column(name = "target_booking_host_country", updatable = false)
+    var targetBookingHostCountry: String? = null
+
+    @Column(name = "target_booking_mode", updatable = false)
+    var targetBookingMode: String? = null
+
     @Id
     @Column(name = "id")
     var id: UUID = UUID.randomUUID()

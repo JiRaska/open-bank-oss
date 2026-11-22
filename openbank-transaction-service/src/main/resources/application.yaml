@@ -68,6 +68,10 @@ quarkus:
         service.name: openbank-transaction-service
 
   rest-client:
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 3000
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       connect-timeout: 2000
@@ -193,6 +197,8 @@ openbank:
       enabled: false
   openbank:
     transaction:
+      branch-recovery:
+        enabled: false
       worker:
         # The in-process TestWorkflowEnvironment registers its own deterministic no-op worker;
         # a second (real) worker on the same queue makes dispatch a lottery (#465).

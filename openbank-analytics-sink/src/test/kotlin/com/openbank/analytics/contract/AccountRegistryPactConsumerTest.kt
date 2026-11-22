@@ -32,19 +32,15 @@ import org.junit.jupiter.api.extension.ExtendWith
  * Why it matters: [AccountRegistryPage.data] defaults to an empty list and
  * [com.openbank.analytics.infrastructure.reconcile.AccountRegistryPagination] defaults
  * `nextCursor` to null, so a renamed `data` does not fail loudly — the initial load simply
- * projects zero accounts and every downstream reconcile row is missing, quietly. The row is
- * pinned non-trivially: it binds `id`, `accountNumber`, `accountType`, `partyId`, `productId`,
- * `currencyCode` and `openedAt`, and the pagination object must be present.
+ * projects zero accounts and every downstream reconcile row is missing, quietly. A renamed
+ * `nextCursor` stops the page loop after the first page. Both fields are pinned non-trivially
+ * here: the row binds `id`, `accountNumber`, `accountType`, `partyId`, `productId`,
+ * `currencyCode` and `openedAt`. The default-size page permits an absent terminal cursor;
+ * a separate nonterminal page requires a followable cursor.
  *
- * `nextCursor` is deliberately NOT pinned here. The provider state seeds a single account, so the
- * page is the last one and account-service omits the cursor (`nextCursor` is null when
- * `hasNextPage` is false, and the DTO is `NON_NULL`). Requiring it made the provider replay fail
- * on every run and reddened main. Pinning the cursor needs a provider state with more rows than
- * the page limit — a separate interaction, not this one.
- *
- * Reuses account-service's existing provider state ("an account owned by a known party exists")
- * so AccountPactFolderProviderVerificationTest serves the 200 leg without provider-side changes;
- * the refusal leg reuses the fleet NEGATIVE_AUTH_STATE served by
+ * Reuses existing account-service provider states. The one-row continuation request seeds two
+ * ACTIVE accounts, so its cursor is required independently of interaction order. The refusal
+ * leg reuses the fleet NEGATIVE_AUTH_STATE served by
  * AccountNegativeAuthProviderVerificationTest (ADR-0279 #3).
  *
  * The expected path is a LITERAL; only the outgoing request is reflected off the client's `@Path`
@@ -62,26 +58,25 @@ class AccountRegistryPactConsumerTest {
         .uponReceiving("GET the first page of ACTIVE accounts for the analytics initial load")
         .path(EXPECTED_ACTIVE_PATH)
         .method("GET")
-        .query("limit=$PAGE_LIMIT")
+        .query("limit=$DEFAULT_PAGE_LIMIT")
         .willRespondWith()
         .status(200)
         .headers(mapOf("Content-Type" to "application/json"))
-        .body(
-            newJsonBody { o ->
-                o.minArrayLike("data", 1) { a ->
-                    a.uuid("id")
-                    a.stringType("accountNumber", "0001-0000000001/0100")
-                    a.stringType("accountType", "CURRENT")
-                    a.uuid("partyId")
-                    a.stringType("productId", "current-czk")
-                    a.stringType("currencyCode", "CZK")
-                    a.stringType("openedAt", "2026-01-15T00:00:00Z")
-                }
-                o.`object`("pagination") { p ->
-                    p.booleanType("hasNextPage", false)
-                }
-            }.build(),
-        )
+        .body(registryPageBody(continuation = false))
+        .toPact()
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun activeRegistryContinuationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an account owned by a known party exists")
+        .given("an ACTIVE CZK account exists for tax-profile resolution")
+        .uponReceiving("GET a nonterminal ACTIVE accounts page for the analytics initial load")
+        .path(EXPECTED_ACTIVE_PATH)
+        .method("GET")
+        .query("limit=$CONTINUATION_PAGE_LIMIT")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(registryPageBody(continuation = true))
         .toPact()
 
     /**
@@ -96,7 +91,7 @@ class AccountRegistryPactConsumerTest {
         .uponReceiving("GET the ACTIVE accounts page with no M2M identity is refused")
         .path(EXPECTED_ACTIVE_PATH)
         .method("GET")
-        .query("limit=$PAGE_LIMIT")
+        .query("limit=$DEFAULT_PAGE_LIMIT")
         .willRespondWith()
         .status(401)
         .toPact()
@@ -106,7 +101,7 @@ class AccountRegistryPactConsumerTest {
     fun `a registry page with no identity is refused with 401, never listed`(mockServer: MockServer) {
         given()
             .baseUri(mockServer.getUrl())
-            .queryParam("limit", PAGE_LIMIT)
+            .queryParam("limit", DEFAULT_PAGE_LIMIT)
             .get(clientDerivedActivePath())
             .then()
             .statusCode(401)
@@ -114,7 +109,19 @@ class AccountRegistryPactConsumerTest {
 
     @Test
     @PactTestFor(pactMethod = "activeRegistryPagePact")
-    fun `a registry page binds with rows and a terminal pagination block`(mockServer: MockServer) {
+    fun `a default registry page binds rows and permits an absent terminal cursor`(mockServer: MockServer) {
+        val page = readPage(mockServer, DEFAULT_PAGE_LIMIT)
+        assertThat(page.pagination?.nextCursor).isNull()
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "activeRegistryContinuationPact")
+    fun `a nonterminal registry page binds a cursor the initial load can follow`(mockServer: MockServer) {
+        val page = readPage(mockServer, CONTINUATION_PAGE_LIMIT)
+        assertThat(page.pagination?.nextCursor).isNotBlank()
+    }
+
+    private fun readPage(mockServer: MockServer, limit: Int): AccountRegistryPage {
         assertThat(clientDerivedActivePath())
             .describedAs(
                 "AccountRegistryClient's @Path no longer produces the path this pact pins — fix " +
@@ -124,7 +131,7 @@ class AccountRegistryPactConsumerTest {
 
         val raw = given()
             .baseUri(mockServer.getUrl())
-            .queryParam("limit", PAGE_LIMIT)
+            .queryParam("limit", limit)
             .get(clientDerivedActivePath())
             .then()
             .statusCode(200)
@@ -137,11 +144,29 @@ class AccountRegistryPactConsumerTest {
         val row = page.data.first()
         assertThat(row.accountNumber).isNotBlank()
         assertThat(row.currencyCode).isEqualTo("CZK")
-        // A single-row provider state is the last page: hasNextPage=false and no cursor, which is
-        // exactly what the real provider answers (see the class KDoc).
         assertThat(page.pagination).isNotNull()
-        assertThat(page.pagination?.nextCursor).isNull()
+        return page
     }
+
+    private fun registryPageBody(continuation: Boolean) = newJsonBody { o ->
+        o.minArrayLike("data", 1) { a ->
+            a.uuid("id")
+            a.stringType("accountNumber", "0001-0000000001/0100")
+            a.stringType("accountType", "CURRENT")
+            a.uuid("partyId")
+            a.stringType("productId", "current-czk")
+            a.stringType("currencyCode", "CZK")
+            a.stringType("openedAt", "2026-01-15T00:00:00Z")
+        }
+        o.`object`("pagination") { p ->
+            if (continuation) {
+                p.booleanValue("hasNextPage", true)
+                p.stringMatcher("nextCursor", ".+", "AAAAAAAAAAAAAAAAAAAAAQ")
+            } else {
+                p.booleanType("hasNextPage", false)
+            }
+        }
+    }.build()
 
     private companion object {
         /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
@@ -150,8 +175,9 @@ class AccountRegistryPactConsumerTest {
         const val CONSUMER = "openbank-analytics-sink"
         const val PROVIDER = "openbank-account-service"
 
-        /** What the initial load asks for when it passes no limit (the client's default). */
-        const val PAGE_LIMIT = 100
+        /** Literal request size used by AccountInitialLoadSource, also asserted in its paging test. */
+        const val DEFAULT_PAGE_LIMIT = 200
+        const val CONTINUATION_PAGE_LIMIT = 1
 
         /** LITERAL, retyped from account-service's `AccountResource` — never derived from the client. */
         const val EXPECTED_ACTIVE_PATH = "/api/v1/accounts/active"

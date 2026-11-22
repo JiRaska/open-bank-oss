@@ -33,6 +33,8 @@ data class TransactionSettledEvent(
      * net-new.
      */
     val sourceService: String = "transaction-service",
+    val sourceBookingContext: com.openbank.libs.market.BookingContext? = null,
+    val targetBookingContext: com.openbank.libs.market.BookingContext? = null,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionSettled"

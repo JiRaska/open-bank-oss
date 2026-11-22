@@ -54,7 +54,14 @@ class PartyStandingServiceTest {
 
     @Test
     fun `losing standing freezes the ACTIVE accounts only and says why on the event`(): Unit = runBlocking {
-        val active = account(AccountStatus.ACTIVE)
+        val active = account(AccountStatus.ACTIVE).copy(
+            bookingContext = com.openbank.libs.market.BookingContext(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "AT",
+                "BRANCH",
+            ),
+        )
         val pending = account(AccountStatus.PENDING_ACTIVATION)
         val closed = account(AccountStatus.CLOSED)
         val operatorFrozen = account(AccountStatus.FROZEN, FreezeOrigin.OPERATOR)
@@ -73,6 +80,8 @@ class PartyStandingServiceTest {
             eventPublisher.publish("openbank.accounts.account.status-changed", active.id.toString(), capture(event))
         }
         val published = event.captured as AccountStatusChangedEvent
+        assertThat(published.bookingContext).isEqualTo(active.bookingContext)
+        assertThat(written.captured.bookingContext).isEqualTo(active.bookingContext)
         assertThat(published.previousStatus).isEqualTo(AccountStatus.ACTIVE)
         assertThat(published.newStatus).isEqualTo(AccountStatus.FROZEN)
         assertThat(published.reason).isEqualTo("PARTY_SUSPENDED")

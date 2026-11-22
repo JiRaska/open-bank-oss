@@ -39,6 +39,7 @@ dependencies {
     implementation(project(":openbank-libs-temporal"))
     implementation(libs.temporal.sdk)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-market"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
 
