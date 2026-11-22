@@ -453,7 +453,12 @@ a stub (T-T2/T-D2).
     now refuses on the staff root any token whose `iss` is the customers realm, and any
     `Authorization: DPoP` credential, with 401 pointing the client at `/customer/mcp`, regardless
     of channel state (reasons `customer_channel_off` / `customer_root_required`, layer `token`).
-  - *Tests.* `McpEndpointTest` (channel off, metric + audit), `McpCustomerChannelIT` (channel on,
+  - *Repudiation / audit flooding.* The credential is unverified at that point, so a refused
+    `tools/call` spends the shared anonymous bucket before its audit row; beyond the budget only
+    the throttle's once-per-window row is written. A request with more than one `Authorization`
+    header is refused 400 (`invalid_request`), and a DPoP scheme in ANY of them counts.
+  - *Tests.* `McpStaffRootCustomerCredentialIT` (channel off, shipped `mcp.customer.issuer`, two
+    `Authorization` headers in both orders, metric, audit budget), `McpCustomerChannelIT` (channel on,
     both schemes, list and call), `McpCustomerTenantResolutionIT` (a token signed by the real
     customers-realm key on `/mcp`). With the refusal removed the first two went red (200, served
     anonymous); the third stays green either way, because the OIDC layer already refuses it (the

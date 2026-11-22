@@ -176,24 +176,25 @@ class McpEndpoint(
             // no staff caller uses) is refused on the staff root WHATEVER the channel state, before the
             // audience check. The resolver would only ever treat it as anonymous; refusing it here means
             // no staff dispatch path ever runs for it, and the client is told where it belongs.
-            audienceRefusal.takeIf { presentsCustomerCredential() }?.respondCustomerOnStaffRoot(
-                method,
-                params,
-                if (customerBranch == null) {
-                    McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
-                } else {
-                    McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
-                },
-                callerResolver.token.getClaim<String?>("azp"),
-            ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+            audienceRefusal.takeIf { authorizationHeaders().size > 1 }?.respondAmbiguousCredential(method)
+                ?: audienceRefusal.takeIf { presentsCustomerCredential() }?.respondCustomerOnStaffRoot(
+                    method,
+                    params,
+                    if (customerBranch == null) {
+                        McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
+                    } else {
+                        McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
+                    },
+                    callerResolver.token.getClaim<String?>("azp"),
+                ) ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
         }
 
+    private fun authorizationHeaders(): List<String> =
+        if (::httpRequest.isInitialized) httpRequest.headers().getAll(AUTHORIZATION_HEADER).orEmpty() else emptyList()
+
+    /** Customers-realm `iss`, or ANY `Authorization` header in the DPoP scheme (review of #17086). */
     private fun presentsCustomerCredential(): Boolean = callerResolver.presentsCustomerRealmToken() ||
-        (
-            ::httpRequest.isInitialized &&
-                httpRequest.getHeader(AUTHORIZATION_HEADER)
-                    ?.trimStart()?.startsWith("$DPOP_HEADER ", ignoreCase = true) == true
-            )
+        authorizationHeaders().any { it.trimStart().startsWith("$DPOP_HEADER ", ignoreCase = true) }
 
     /** The staff root. Never runs the customer branch, whatever the request path says. */
     @POST

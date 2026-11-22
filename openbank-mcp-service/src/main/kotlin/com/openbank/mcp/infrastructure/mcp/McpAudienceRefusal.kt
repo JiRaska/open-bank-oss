@@ -51,19 +51,33 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
             reason.name.lowercase(),
         )
         metrics.customerRejected(reason, client, synthetic = false)
+        // The credential is unverified here (a junk `DPoP x` reaches this line), so the audit write is
+        // bounded by the shared anonymous bucket FIRST: beyond it, only the throttle's once-per-window
+        // row is written, never one per request (review of #17086).
         if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
-            throttle.auditAnonymousCall(
-                McpInputBounds.echo(params.path("name").asText("")),
-                McpInputBounds.auditKeys(params.path("arguments")),
-                "customer credential on the staff root",
-            )
+            val tool = McpInputBounds.echo(params.path("name").asText(""))
+            val keys = McpInputBounds.auditKeys(params.path("arguments"))
+            if (throttle.anonymousCallRefusal(tool, keys) == null) {
+                throttle.auditAnonymousCall(tool, keys, "customer credential on the staff root")
+            }
         }
         return Response.status(Response.Status.UNAUTHORIZED)
             .header("WWW-Authenticate", CUSTOMER_CHALLENGE)
             .build()
     }
 
+    /** More than one `Authorization` header: which credential the OIDC layer validated is ambiguous. */
+    fun respondAmbiguousCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: more than one Authorization header", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", AMBIGUOUS_CHALLENGE)
+            .build()
+    }
+
     private companion object {
+        const val AMBIGUOUS_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"exactly one Authorization header is allowed\""
         const val CUSTOMER_CHALLENGE =
             "Bearer error=\"invalid_token\", error_description=\"customer credentials are accepted only at " +
                 McpEndpoint.CUSTOMER_ROOT + "\""

@@ -159,7 +159,8 @@ from a peer header.
   `Authorization: DPoP` credential, whatever the channel state, before the audience check and the
   limiter. Counted as `openbank_mcp_customer_rejected_total{layer="token"}` with
   `reason="customer_channel_off"` (channel off) or `reason="customer_root_required"` (channel on);
-  a refused `tools/call` is audited DENIED. A steady rate of `customer_root_required` means a client
+  a refused `tools/call` is audited DENIED within the shared anonymous budget (beyond it, once per
+  window). More than one `Authorization` header on `/mcp` answers 400 `invalid_request`. A steady rate of `customer_root_required` means a client
   is configured with the staff URL.
 - **DPoP `htu`.** quarkus-oidc compares the proof's `htu` with `absoluteURI()`. On `:8443`, with the
   external Host passed through by the edge, that is `https://<published host>/customer/mcp`, so no
