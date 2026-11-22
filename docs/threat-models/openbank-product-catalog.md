@@ -56,8 +56,8 @@ account-service freezes (`/api/v2/internal/passport-account-admissions/context`)
 | # | Threat | Mitigation | Evidence |
 |---|---|---|---|
 | T9 | A caller chooses or alters the bank, establishment, host country or mode an account is booked under | The context is read only from the exact consumed permit, matched on grant, operation, operation ID, party, revision and binding, under the named account-service identity. A request with any other binding, or before consumption, answers 404. Callers supply only the grant reference. | `PassportPermitFenceTest` (`receipt lookup cannot consume an issued permit and remains readable after revocation`; runs for FOS and BRANCH) |
-| T10 | A grant's booking scope is edited after a receipt was issued, so a later read reports a different context | `trg_preserve_passport_booking_scope` rejects any update to bank, establishment, host country, mode, offering, channel, segment or pack-set digest on `passport_grants` (SQLSTATE 23514). | `PassportPermitFenceTest` (same test: the `UPDATE passport_grants SET bank_id` is refused) |
-| T11 | An account is admitted in a host country the offering is not marketed in | The redefined `admit_passport_account` also requires the grant's host country in the offering's `market.countries` before it issues or consumes a permit. | Fixture seeding in `PassportPermitFenceTest` (admissions succeed only with a matching market country) |
+| T10 | A grant's booking scope is edited after a receipt was issued, so a later read reports a different context | `trg_preserve_passport_booking_scope` rejects any update to bank, establishment, host country, mode, offering, channel, segment or pack-set digest on `passport_grants` (SQLSTATE 23514). | `PassportPermitFenceTest` (same test: an update to `bank_id` is refused with SQLSTATE 23514; the other seven fields are covered by the trigger, not by a test) |
+| T11 | An account is admitted in a host country the offering is not marketed in | The redefined `admit_passport_account` also requires the grant's host country in the offering's `market.countries` before it issues or consumes a permit. | `PassportPermitFenceTest` (`account admission is refused when the offering is not marketed in the host country`: 409 and no permit row, for FOS and BRANCH) |
 | R2 | A receipt context disappears after revocation, leaving recovery unable to prove its booking | The context read, like the receipt read, stays available for an already-consumed permit after revocation and never consumes one. | `PassportPermitFenceTest` (same test, read after `revoke`) |
 
 ## Residual risk / follow-ups
@@ -72,8 +72,6 @@ account-service freezes (`/api/v2/internal/passport-account-admissions/context`)
   It still admits nothing without a subject-evidence row, which nothing writes yet.
 - **BRANCH loan commitments are admitted by the catalogue but not executed.** Lending refuses branch
   origination and commitment execution at normal runtime until B2 provides branch-aware booking.
-- **No negative test for the V22 market-country denial yet.** The check is exercised only on its
-  passing path; a dedicated mismatch case is a follow-up.
 - Consumers of the V18 grant lifecycle stream are not enabled yet. Until one is, the outbox rows
   wait unconsumed. They are not on the admission path, so they admit nothing.
 
