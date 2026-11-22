@@ -110,13 +110,19 @@ class DelegationEventPactBrokerProviderVerificationTest {
     fun accountGrantActivated() = Unit
 
     // mcp-service's HTTP interactions are excluded above by @PactFilter (messages only) and replayed
-    // by DelegationMcpClientGrantPactFolderProviderVerificationTest; these two states exist here so
+    // by DelegationMcpClientGrantPactFolderProviderVerificationTest; these states exist here so
     // the folder/broker twin @State parity gate (#9752) sees the same set on both sides.
     @State("an active MCP_CLIENT grant exists for the pact party, client and key")
     fun mcpClientGrantActive() = Unit
 
     @State("no MCP_CLIENT grant exists for the pact party, client and key")
     fun mcpClientGrantAbsent() = Unit
+
+    @State("an active MCP_CLIENT propose grant exists for the pact party, client, key and account")
+    fun mcpClientProposeGrantActive() = Unit
+
+    @State("no MCP_CLIENT propose grant exists for the pact party, client, key and account")
+    fun mcpClientProposeGrantAbsent() = Unit
 
     @PactVerifyProvider("a DelegationActivated event for an account")
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(

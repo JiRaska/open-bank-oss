@@ -24,6 +24,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Duration
 import java.time.Instant
 
@@ -71,6 +73,47 @@ class DocumentOutboxClaimIT {
             onEventLoop { Panache.withTransaction { repository.persistInTransaction(msg) }.awaitSuspending() }
         }
         return messages
+    }
+
+    @ParameterizedTest(name = "mapped trace extension: {0}")
+    @ValueSource(strings = ["peek", "claim"])
+    fun `mapped trace extension survives reads with an extra unmapped table column`(operation: String) {
+        clearOutbox()
+        changeTestSchema("ADD COLUMN future_claim_token UUID")
+        try {
+            val message = OutboxMessage(
+                aggregateId = Ids.newId(),
+                eventType = "test.event.projection",
+                payload = """{"projection":"traced"}""",
+                traceparent = "00-11111111111111111111111111111111-2222222222222222-01",
+                synthetic = true,
+            )
+            onEventLoop { Panache.withTransaction { repository.persistInTransaction(message) }.awaitSuspending() }
+            val row = onEventLoop {
+                if (operation == "claim") repository.claimProcessable(1) else repository.listProcessable(1)
+            }.single()
+            assertThat(row.eventId).isEqualTo(message.eventId)
+            assertThat(row.payload).isEqualTo(message.payload)
+            assertThat(row.synthetic).isTrue()
+            // PanacheOutboxEntityTraced.toEntry is an override; scalar/base-only hydration loses this.
+            assertThat(row.traceparent).isEqualTo(message.traceparent)
+        } finally {
+            try {
+                clearOutbox()
+            } finally {
+                changeTestSchema("DROP COLUMN future_claim_token")
+            }
+        }
+    }
+
+    private fun changeTestSchema(clauses: String) {
+        onEventLoop {
+            Panache.withTransaction {
+                Panache.getSession().chain { session ->
+                    session.createNativeQuery<Int>("ALTER TABLE document_outbox $clauses").executeUpdate()
+                }
+            }.awaitSuspending()
+        }
     }
 
     @Test

@@ -382,6 +382,26 @@ def _matrix(source: dict) -> tuple[list[dict], list[dict]]:
         for c in callers
         for t in sorted(tools)
     ]
+    # ADR-0387: the fetch broker's exact REST shape, over every host any charter lists plus an
+    # off-list one, at the granted tier and a forbidden one — so dropping
+    # data_scope.public_web.hosts from the projection changes a decision and fails the proof.
+    hosts: set[str] = {"off-list.example.com"}
+    for a in source.get("agents", []):
+        for h in (((a.get("data_scope") or {}).get("public_web") or {}).get("hosts") or []):
+            if isinstance(h, str):
+                hosts.add(h)
+            elif isinstance(h, dict) and isinstance(h.get("host"), str):
+                hosts.add(h["host"])
+    rest += [
+        {
+            "principal": {"id": f"agent:{c}", "type": "AI_AGENT", "roles": []},
+            "action": "read.public_web",
+            "attributes": {"tool": "web.fetch", "tier": tier, "host": h},
+        }
+        for c in agent_ids
+        for tier in ("read", "write")
+        for h in sorted(hosts)
+    ]
     return mcp, rest
 
 

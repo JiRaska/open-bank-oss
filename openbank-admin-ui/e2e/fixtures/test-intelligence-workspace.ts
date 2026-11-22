@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { TestIntelligenceReport, TestCaseHistory, ComponentTestPosture } from '@/lib/types/test-intelligence'
 
-export const workspaceObservedAt = '2026-11-08T12:00:00.000Z'
+// Relative to now, never absolute: the route marks evidence older than
+// OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS (default 14) as 'stale', so a pinned
+// date turns every test reading this fixture red 14 days after it was written
+// (2026-11-08T12:00Z went stale at 2026-11-22T12:00Z and reddened main).
+// Truncated to UTC midnight, one day back, so the value is stable for a whole day
+// across test files and processes.
+const DAY_MS = 86_400_000
+export const workspaceObservedAt = new Date((Math.floor(Date.now() / DAY_MS) - 1) * DAY_MS).toISOString()
 export const workspaceCase: TestCaseHistory = {
   fingerprint: 'case-1', component: 'openbank-account-service', kind: 'unit', classname: 'DuplicateRequestTest', name: 'rejects duplicate requests',
   testDefinitionPath: 'src/test/kotlin/DuplicateRequestTest.kt', owner: '@openbank/test-fixture', state: 'stable', lastState: 'passed', observations: 2,

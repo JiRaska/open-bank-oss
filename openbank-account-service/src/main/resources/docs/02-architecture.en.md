@@ -201,6 +201,14 @@ identical to card-issuance-service's. Both were green and nothing compared them,
 rename would have silently stopped one projection from matching — which leaves a revoked grant
 enforceable.
 
+### Offering market scope (ADR-0380)
+
+The Czech domestic route checks the offering market countries returned with the published
+product revision. A foreign-only offering is refused before account creation. Pending accounts
+with a product revision pin recheck the current offering scope before activation. Legacy
+unscoped catalogue responses and historical pending accounts without a pin retain the existing
+domestic route. This check does not activate FOS or branch sales.
+
 ## IBAN generation (#16748)
 
 Generated IBANs take their ISO 7064 check digits from the shared libs-domain `IbanCheckDigits.build`, which also re-validates the result through `Iban`. Output is unchanged; a spec fix in libs-domain now reaches every account opened.

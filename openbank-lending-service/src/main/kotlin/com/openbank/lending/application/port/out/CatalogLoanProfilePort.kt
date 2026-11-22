@@ -5,6 +5,7 @@ package com.openbank.lending.application.port.out
 
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.market.OfferingMarkets
 import io.smallrye.mutiny.Uni
 import java.math.BigDecimal
 import java.util.UUID
@@ -18,6 +19,8 @@ data class CatalogLoanProfile(
     val nominalAnnualRate: BigDecimal,
     val minPrincipal: BigDecimal?,
     val maxPrincipal: BigDecimal?,
+    val markets: OfferingMarkets? = null,
+    val productType: String? = null,
 )
 
 /**

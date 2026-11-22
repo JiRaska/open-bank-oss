@@ -46,6 +46,7 @@ governed.
 | **Container registries** (Docker Hub, quay.io, ghcr.io, registry.k8s.io) | Image pulls | Medium | Mitigated by ECR pull-through cache; Docker Hub rate-limit exhaustion under node churn is a *known* failure |
 | **Slack/Teams webhooks** | Outbound oversight (ADR-0059) | Low | Alerts lost; ntfy in-cluster leg survives (ADR-0088) |
 | **Maven Central / Gradle / npm** | Build only | Medium | No builds; runtime unaffected |
+| **Cloudflare Browser Run** (JS rendering for `render: js` hosts only) | fetch-broker (ADR-0387) | **Non-critical** | Those hosts answer NOT_RENDERABLE; plain-HTTP hosts and the money path unaffected. Receives public URLs only, no personal data. Exit: disable the adapter (remove the `browser-run-api-token` secret) |
 
 Self-hosted and therefore **not** third parties: Pact broker, Keycloak, GlitchTip, the PID and customer
 edges — all on `open-bank.tech`.
@@ -152,6 +153,17 @@ adds a third inference class behind `TypedDecisionPort`. It changes this registe
 - **Exit position, per §5:** *swap the adapter, or fall back to an in-process ONNX model trained on
   the labels the shadow period produced.* As with the LLM exit, this is untested until an adapter
   exists; D4 of this ADR (test one exit) applies to it in the same way.
+
+## Amendment 2026-11-18: public-web rendering provider (ADR-0387)
+
+[ADR-0387](0387-public-web-read-tool-for-governed-agents-kitesurf-behind-a-fetch-broker.md) gives
+agents one public-web read tool behind an in-cluster fetch broker, and uses Cloudflare Browser Run
+only for hosts a charter marks `render: js`. §1 gains that row as **non-critical**: the provider sees
+public URLs a charter already lists and the rendered public page, never personal data or a bank
+credential other than its own API token, and its loss degrades only JS-rendered hosts. **Exit
+position:** disable the adapter — without the `browser-run-api-token` secret the broker serves plain
+HTTP only, with no charter or code change. The broker deployment declares the secret optional, so
+that exit is the same path as the state before the provider is configured.
 
 ## Alternatives considered
 

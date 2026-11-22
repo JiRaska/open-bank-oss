@@ -19,7 +19,10 @@ concurrency:
   # Review submissions do not change build inputs and do not trigger code CI.
   # The key stays O(1) — a sha or event name, never a list (#3082).
   group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || github.event_name }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # Only a superseded PR head is cancelled (keyed per PR: github.ref is refs/pull/<n>/merge).
+  # push-to-main, schedule and workflow_dispatch runs are never cancelled. Merge-train carriers
+  # are pull_request runs on a fresh train/<run>-<attempt> PR each, so no carrier supersedes another.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   agent-admission:
@@ -868,6 +871,8 @@ jobs:
         env:
           RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
+          # ADR-0389: scales SAFE gates' budget/timeout; run-gates.py validates it (1.0..4.0, else 1.0).
+          GATE_BUDGET_MULTIPLIER: ${{ vars.GATE_BUDGET_MULTIPLIER }}
         run: |
           # matrix.group is a space-separated SET of manifest groups; --group is repeatable.
           # Unquoted on purpose so the shell word-splits it — the one place in this file where
