@@ -105,6 +105,13 @@ interface McpMetricsPort {
         REVOKED_GRANT(CustomerRejectLayer.TOKEN),
         EXPIRED(CustomerRejectLayer.TOKEN),
         WRONG_AUDIENCE(CustomerRejectLayer.TOKEN),
+
+        /** A customer credential presented on the staff root while the customer channel is off (#16590). */
+        CUSTOMER_CHANNEL_OFF(CustomerRejectLayer.TOKEN),
+
+        /** A customer credential presented on the staff root; it belongs on `/customer/mcp` (#16590). */
+        CUSTOMER_ROOT_REQUIRED(CustomerRejectLayer.TOKEN),
+
         MISSING(CustomerRejectLayer.DPOP),
         BAD_SIG(CustomerRejectLayer.DPOP),
         HTU_MISMATCH(CustomerRejectLayer.DPOP),

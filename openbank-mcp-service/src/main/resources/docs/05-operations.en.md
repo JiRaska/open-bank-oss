@@ -198,6 +198,14 @@ from a peer header.
   stays plain HTTP for in-cluster callers and probes. The customer root `/customer/mcp` (DPoP-only,
   `customers` tenant) and its RFC 9728 metadata are served ONLY on `:8443`; on `:8150` they answer
   404. Staff `/mcp` keeps Bearer on both listeners.
+- **Customer credentials on the staff root.** `/mcp` answers 401 (`WWW-Authenticate: Bearer
+  error="invalid_token"`, description naming `/customer/mcp`) to any customers-realm token or any
+  `Authorization: DPoP` credential, whatever the channel state, before the audience check and the
+  limiter. Counted as `openbank_mcp_customer_rejected_total{layer="token"}` with
+  `reason="customer_channel_off"` (channel off) or `reason="customer_root_required"` (channel on);
+  a refused `tools/call` is audited DENIED within the shared anonymous budget (beyond it, once per
+  window). More than one `Authorization` header on `/mcp` answers 400 `invalid_request`. A steady rate of `customer_root_required` means a client
+  is configured with the staff URL.
 - **DPoP `htu`.** quarkus-oidc compares the proof's `htu` with `absoluteURI()`. On `:8443`, with the
   external Host passed through by the edge, that is `https://<published host>/customer/mcp`, so no
   forwarding is needed; a proof for another host, scheme or path answers 401 at the tenant.
