@@ -54,3 +54,11 @@ forwarded (`McpInputBounds`, #16628):
 - `accountId` on `get_balance` / `list_transactions` / `get_statement` must be a canonical IBAN (uppercase, no spaces; shape and libs-domain
   mod-97) before consent-service is called; otherwise `-32602`.
 - Every NUL refusal increments `openbank.mcp.input_refused{reason="nul"}` (closed tag set).
+
+## Customer-channel shared store
+
+`mcp.customer.shared-store-timeout-ms` (250 ms) bounds every Valkey command of the customer channel's
+DPoP replay store and D5.3 budgets. A timeout, a refused connection or an unexpected reply answers
+**503** on that request and never admits it; the store is never bypassed for the per-pod fallback. The
+Valkey client has no readiness check (`quarkus.redis.health.enabled: false`), so a store outage takes
+the customer channel down without making the staff path unready.

@@ -443,6 +443,23 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-22 (#16590 follow-up, #17099)** — Staff-root `Authorization` parsing is an ALLOWLIST.
+  - *Spoofing / tenant confusion.* The DPoP check was a denylist (`startsWith("DPoP ")`), so
+    `DPoP<TAB>x`, a bare `DPoP`, `DPoP<NBSP>x`, or a comma list such as `Bearer a, DPoP b` was not
+    recognised as a customer credential and reached the anonymous path. On `/mcp` an `Authorization`
+    header, when present, must now be exactly ONE header whose whole value is `Bearer <b64token>`
+    (RFC 6750 §2.1: scheme case-insensitive, one SP, `[A-Za-z0-9-._~+/]+=*`, nothing else). A value
+    starting with the DPoP scheme after any whitespace (Unicode included), or a valid Bearer from the
+    customers realm, gets the 401 that points at `/customer/mcp`. Every other shape (comma lists,
+    tabs, double or leading/trailing spaces, non-ASCII whitespace, `Basic` and other schemes) is
+    400 `invalid_request`. Staff JWTs are base64url with dots, so they are inside the allowlist.
+  - *Fail open on a read error or missing request.* An `Authorization` header that throws on read,
+    and a hand-built endpoint with no injected request, are refused 400 instead of reading as
+    "no credential". `httpRequest` is CDI-`@Inject`ed on every served request.
+  - *Tests.* `McpStaffRootCredentialParsingTest` (each shape above, legit JWT and `bearer` controls)
+    and two real-HTTP cases in `McpStaffRootCustomerCredentialIT` (`DPoP<TAB>x` → 401,
+    `Bearer a, DPoP b` → 400). Each guard was sabotaged (missing request read as no header, b64token
+    loosened to `.*`, DPoP match ASCII-only) and its tests went red.
 - **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
   - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
     on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
@@ -534,6 +551,94 @@ a stub (T-T2/T-D2).
     client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
     NetworkPolicy on `:8150` to the gateway and known callers.
 
+- **2026-11-18 (ADR-0383 P4 / D5.3, #16590)** — Shared, fail-closed customer-channel state. Still
+  **off by default**; this closes the first residual of the entry below.
+  - *Replay across replicas / pod rolls.* `mcp.customer.shared-store=valkey` puts the DPoP `jti`
+    claim in Valkey (`SET key 1 NX PX <proof window>`), so a proof admitted by one replica is
+    REPLAYED on every other one and a roll does not reopen the window. The non-mutating peek is a
+    real `EXISTS` (not the interface's `false` default), so the "refuse a replay before spending the
+    victim's budget" ordering holds across pods too. Proven by `ValkeyCustomerStoresIT` with two
+    independent clients against a real Valkey: cross-pod replay refused, 50 concurrent claims of one
+    `jti` across two pods admit exactly one.
+  - *Budget multiplication (D5.3).* The proof-key, per-client and per-(subject, client) windows move
+    to shared Valkey counters (one Lua `INCR` + first-hit `PEXPIRE`, so no counter is left without a
+    TTL); N replicas no longer give a caller N budgets. Same IT: the limit holds for the sum of two pods.
+  - *Fail closed.* Any store failure (refused, timeout after `shared-store-timeout-ms`, odd reply) on
+    the peek, the claim or a budget is a **503** and never an admission; there is no per-pod fallback.
+    The Valkey client has no readiness check, so the outage is contained to the customer channel.
+  - *Boot gate.* With the channel on, `shared-store` must be set; in a production launch
+    (`LaunchMode.NORMAL`) anything but `valkey`, or `valkey` with no Redis client, refuses to boot.
+    `memory` remains for tests and dev.
+  - *Review hardening (#16791).* A malformed reply is parsed inside the same guard, so it is a 503, not
+    a 500; the boot gate checks `quarkus.redis.hosts` itself (not only that a client bean resolves) and
+    is proved on the built fast-jar in `LaunchMode.NORMAL` (`CustomerChannelBootGuardIT`, with a
+    positive control that must boot); a hung Valkey (container paused) answers 503 within the bounded
+    command timeout, capped at 2000 ms; subject, proof key and client id are HMAC-SHA-256'd with a
+    deployment secret in every key name (required with `valkey`, boot refused otherwise).
+  - *Operational requirement.* The replay Valkey MUST run `maxmemory-policy noeviction`: an evicting
+    policy silently drops live `jti` entries and reopens their replay window with no error anywhere.
+  - *Store hardening (#16791, GitOps).* `mcp-valkey` (namespace `platform`) runs with `requirepass`
+    from the `mcp-customer-store-valkey` Secret. It and the key HMAC secret
+    (`mcp-customer-store-hmac`) are generated in-cluster by two independent ESO `Password`
+    generators (`CreatedOnce`, 48 letters/digits each; no OpenBao copy, no human holder). The ref is
+    required: without the Secret the pod does not start, so it never runs unauthenticated, `--maxmemory 128mb` under a 192Mi limit and an explicit
+    `--maxmemory-policy noeviction`; its ingress admits only `app.kubernetes.io/name: mcp-service`
+    (`open-bank.tech/same-namespace-ingress-from`, derived by `gen-network-policies.py`), not every
+    co-tenant of the shared namespace. mcp-service refuses to boot with `valkey` and no password.
+  - **Residual — store restart or OOM-kill.** The store is ephemeral (no RDB/AOF). A restart, a
+    reschedule or an OOM-kill empties it: every proof still inside its window (up to 365 s) can be
+    replayed once more, and every D5.3 budget restarts from zero. `noeviction` and the maxmemory
+    margin make OOM unlikely but not impossible. Prod needs an operator-managed HA store with
+    persistence; until then this is accepted for the sandbox and called out in 05-operations.
+  - *Password handling (#16791 reviews).* The Valkey container gets its two passwords as FILES from
+    the Secrets (secret volumes are tmpfs, mode 0440 to the pod's fsGroup), never as env vars or argv —
+    both of which land in the OCI runtime spec (`crictl inspect`). A POSIX-sh wrapper reads the files,
+    refuses to start unless each is non-empty and `[A-Za-z0-9]+`, writes the config into a
+    memory-medium emptyDir and `exec`s `valkey-server`. Measured on the digest-pinned 9.1.3 image:
+    `/proc/1/cmdline` = `valkey-server *:6379`; no password in `/proc/1/environ` or the container's
+    configured env; unauthenticated `PING` → `NOAUTH`; a password with `"` or a space → refuses (exit 1).
+  - **Residual:** the exporter's `metrics` password is still an env var in ITS container spec:
+    redis_exporter's `--redis.password-file` only feeds the multi-target `/scrape` map (measured: a
+    plain file is rejected as non-JSON; a JSON map leaves the main target `NOAUTH`), and the URI form
+    would put it in argv. That user can run only introspection commands (no data, no `CONFIG GET`),
+    and the slowlog is off. mcp-service's `QUARKUS_REDIS_PASSWORD` and HMAC secret are env vars in its
+    own pod spec, like the fleet's other Quarkus secrets.
+  - *Images* are pinned by tag and digest (valkey `9.1.3-alpine@sha256:bf09d58e…`, redis_exporter
+    `v1.92.1@sha256:7fbc93d3…`). The Password generators and ExternalSecrets sync at wave `-1`, before
+    the workloads that mount them.
+  - *Exporter hardening (#16791 security review).* The `redis_exporter` sidecar never holds the
+    store password. It logs in as a dedicated `metrics` ACL user with its own generated password
+    (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT SETNAME`, `SLOWLOG
+    GET|LEN`, `LATENCY LATEST|HISTOGRAM`, `COMMAND INFO` and `COMMANDLOG LEN`, with no key or channel access
+    (measured: with exactly that set, `ACL LOG` stays empty across scrapes; without the last two it
+    records a denial on every scrape and those metrics silently go missing). Its multi-target
+    `/scrape?target=` endpoint is disabled (`--disable-scrape-endpoint`), so reaching :9121 cannot point
+    the exporter and its credential at another host. `CONFIG GET` is deliberately NOT granted, and the
+    exporter runs `--config-command=-`: measured on 9.1.3, `CONFIG GET requirepass` returns the
+    default user's password in clear to any user allowed `config|get`. Measured as `metrics`: `GET`,
+    `SET`, `DEL`, `FLUSHALL`, `KEYS`, `EVAL`, `CONFIG GET|SET` and `ACL LIST` all answer `NOPERM`,
+    while `redis_up 1` and `redis_memory_max_bytes` are still exported and `/scrape` answers 404.
+    Port 6379 admits only mcp-service pods, and only on 6379; port 9121 admits only the observability Prometheus pods (`open-bank.tech/metrics-ingress-prometheus-only`,
+    derived by `gen-network-policies.py`), not admin-ui. The same exporter pattern on `copilot-redis`
+    is a fleet follow-up.
+  - *Slowlog disabled.* The store runs `slowlog-log-slower-than -1`, so no command — and none of its
+    arguments (`jti`, HMAC'd key names) — is ever recorded. Measured: after a deliberately slow `EVAL`
+    returning a marker string, `SLOWLOG LEN` is 0 and the `metrics` user's `SLOWLOG GET` contains no
+    marker; with slowlog enabled the same run logs it and the marker is readable. `slowlog|get` stays
+    granted only because redis_exporter v1.92.1 calls it on every scrape with no flag to stop it
+    (dropping it fills `ACL LOG` with a denial per scrape); it now reads an empty log. `CLIENT LIST`
+    is not granted (the exporter only calls it with `--export-client-list`, which stays off).
+  - *Detection.* `MCPValkeyMemoryNearMax` / `MCPValkeyMemoryFull` (redis_exporter sidecar,
+    promtool-tested including the cold value) warn before `noeviction` turns a full store into a
+    channel-wide 503.
+  - **Residual:** replication is asynchronous: if the primary
+    acknowledges a `SET NX` and fails over before the replica has it, the promoted replica has no
+    entry and that one proof can be accepted once more (a single replayed proof, still within its
+    `iat` window and still bound to the token's key). `PX` is relative, so clock OFFSET between pods
+    and Valkey does not matter; only clock RATE drift does, and the entry's 365 s life against the
+    verifier's 360 s acceptance span (`maxAge` 300 s + `futureSkew` 60 s) leaves a 5 s margin that
+    any realistic drift stays far inside. No per-key replay quota in Valkey (memory is bounded by the
+    proof-key bucket that runs first).
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`
@@ -570,8 +675,9 @@ a stub (T-T2/T-D2).
     checks — with the issuer check off (`token.issuer=any`) a third-issuer token signed by the staff
     key is accepted. Production relies on the discovered issuer for that check.
   - **Residual, and why the channel must stay off:** the replay store is the single-pod
-    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
-    D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window; superseded by the shared
+    Valkey store above when `shared-store=valkey`); no server nonce; the
+    D5.3 windows are the in-process limiter, not the shared Valkey bucket (likewise superseded); the per-client cap is shared
     by all of a client's customers and is spent only by proofs signed by a key some token of that
     client is bound to, so exhausting it needs many valid tokens (a coarse cap by design, sized well
     above one customer's budget); the tenant-level DPoP check compares `htu` with the request URL,
