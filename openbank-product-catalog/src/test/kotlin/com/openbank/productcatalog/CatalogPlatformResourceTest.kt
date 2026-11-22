@@ -114,6 +114,7 @@ class CatalogPlatformResourceTest {
             statusCode(200)
             body("state", equalTo("PUBLISHED"))
             body("content.attributes.interest.dayCount", equalTo("ACT_365"))
+            body("marketCountries", equalTo(listOf("CZ")))
         }
 
         Given { this } When {

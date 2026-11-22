@@ -90,6 +90,25 @@ gates:
     run: |
       python3 .github/scripts/check-credential-expiry.py --coverage .github/workflows/date-driven-expiry-watch.yml
 
+  # The project does not own the old `openbank.io` domain; every key moved to `open-bank.tech/`
+  # (docs/runbooks/node-keys-open-bank-tech-migration.md), and old-prefix keys came back anyway
+  # because new manifests are copied from old ones. Only the four staged node keys are allowed,
+  # and only in the files that set or read them today. Markdown prose is exempt; fenced code
+  # blocks (the commands people paste) are not.
+  - id: no-openbank-io-keys
+    name: "no new keys under the unowned openbank.io prefix (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "Keys under a domain the project does not own kept reappearing after the open-bank.tech migration because nothing refused them. The scan covers every tracked code/config file and md code blocks, with an explicit allowlist for the four staged node keys in their current files."
+    review_after: "2027-05-19"
+    budget_seconds: 30
+    min_subjects: 1000
+    selftest: python3 .github/scripts/check-no-openbank-io-keys.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-openbank-io-keys.py"]
+    run: |
+      python3 .github/scripts/check-no-openbank-io-keys.py
+
   - id: apt-pin-verdicts-falsifiable
     name: "apt pin freshness verdicts stay reachable (#15483)"
     group: lint
@@ -2232,7 +2251,9 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
-    selftest_inputs: [".github/scripts/check-license-headers.py"]
+    # evals/ declared (#16623): the self-test walks every SPDX-headered source file, and
+    # evals/mcp-redteam added the first .sh/.js/.yaml under evals/, which the trace caught.
+    selftest_inputs: [".github/scripts/check-license-headers.py", "evals/"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -2930,6 +2951,48 @@ gates:
       python3 .github/scripts/run-evals.py --self-test
     run: |
       python3 .github/scripts/run-evals.py --require-recordings
+
+  # ADR-0383 D7 / #16617 layer 4 — MCP prompt-injection red-team pack, split in two so neither
+  # gate claims more than it measures. The deterministic server half is JUnit in
+  # openbank-mcp-service (PoisonedToolResultRedTeamTest).
+  #
+  # (1) ENFORCED: needs no model. Corpus <-> committed rendered fixture <-> scenarios.json <->
+  # generated promptfoo tests/tools agree, so a recording can only ever be about the bytes the
+  # server renders today. SUBJECTS = corpus items checked.
+  - id: mcp-redteam-fixture-integrity
+    name: "MCP red-team fixture integrity (ADR-0383 D7, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The model-in-the-loop pack replays a model against committed bytes; if the corpus, rendered fixture, scenarios or generated promptfoo files disagree, any verdict is about a server that no longer exists."
+    review_after: "2027-05-17"
+    budget_seconds: 30
+    # 85 corpus items today; the JUnit test pins the exact size.
+    min_subjects: 80
+    selftest: python3 .github/scripts/check-mcp-redteam-fixture-integrity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-redteam-fixture-integrity.py", ".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/check-mcp-redteam-fixture-integrity.py
+
+  # (2) ADVISORY (ADR-0144, rules.yaml: mcp_redteam_model_verdict): the model verdict. Until the
+  # owner commits a first live recording it evaluates NOTHING — it prints "model verdict: NOT
+  # MEASURED" and SUBJECTS=0, which is why it cannot be enforced yet. Once a recording exists it
+  # must cover every scenario (partial => fail); a moved scenario digest is STALE => fail.
+  - id: mcp-redteam-model-verdict
+    name: "MCP red-team model verdict (ADR-0383 D7, advisory)"
+    group: registry
+    mode: advisory
+    verified: "2026-11-17 — 0 of 45 scenarios evaluated: no recording committed (CI holds no model keys); self-test proves partial/stale/failing recordings fail"
+    rationale: "Whether a model given a poisoned tool result proposes an unrequested payment, fetches beyond the question or repeats an attacker URL can only be measured against a recorded model run; CI holds no keys."
+    review_after: "2026-12-15"
+    budget_seconds: 30
+    # 45 scenarios; today 0 are evaluated, so the floor reports it (advisory) until recorded.
+    min_subjects: 45
+    selftest: python3 .github/scripts/run-mcp-redteam-evals.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/run-mcp-redteam-evals.py
 
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
@@ -6112,6 +6175,28 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: trace-contract-heap
+    name: "trace-contract modules declare an explicit test JVM heap (2026-11-18 OOMs, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      A *TraceContractIT boots its own Quarkus app under TraceContractProfile, so the module's
+      test fork carries a second augmentation and boot. At Gradle's default 512 MiB test heap
+      that measured as OutOfMemoryError (loyalty, copilot, referral red in CI on 2026-11-18;
+      referral hung 45 minutes when the instrumentation agent could no longer allocate and the
+      Kafka testcontainer never started). The fix is one line — tasks.test { maxHeapSize = "2g" }
+      (statement-service convention) — and each fixed module also needed an authored docs note
+      for the docs-freshness gate. Six modules are baselined under issue #16805; new occurrences
+      fail, covered entries are reported stale.
+    review_after: '2027-05-18'
+    min_subjects: 30
+    selftest: python3 .github/scripts/check-trace-contract-heap.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-trace-contract-heap.py"]
+    run: |
+      python3 .github/scripts/check-trace-contract-heap.py --root .
+
   - id: metric-name-prefix
     name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
     group: kotlin
@@ -6855,6 +6940,31 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # ADR-0385 D1: one MCP client allowlist drives BOTH mcp-service's tier admission and the
+  # customers-realm client config. This reads the two independently of the generator that writes
+  # the realm entries, so a hand edit of the template, a generator bug, or a declaration that
+  # drifts from the realm all fail: Tier H must be confidential with a pinned private_key_jwt key
+  # set (a client secret only under an unexpired, <= 6-month exception), Tier L must be DPoP-bound
+  # with loopback-only redirects, and every MCP client must be PAR + PKCE S256 + exact redirects,
+  # no direct/implicit/device grant or service account, bound to the cookie-free fresh-passkey
+  # flow. The live behaviour of the same config is proven by
+  # openbank-infra/e2e/keycloak_mcp_client_admission_test.py against Keycloak 26.8.1.
+  - id: mcp-client-realm-parity
+    name: "MCP client allowlist and customers realm agree on every tier (ADR-0385 D1, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 15
+    rationale: "ADR-0385 makes the tier a property of one server-side declaration, never a token claim; a realm client that drifted from it (a public hosted client, a local client without DPoP, a cookie alternative in the flow, an expired secret exception) would admit exactly the clients the ADR rejects, and nothing at runtime would say so."
+    review_after: "2027-05-17"
+    # One subject per declared MCP client (two reference clients today).
+    min_subjects: 2
+    selftest: python3 .github/scripts/check-mcp-client-realm-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-client-realm-parity.py", "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml", "openbank-infra/gitops/components/keycloak/customers-realm-template.json", "openbank-mcp-service/src/main/resources/mcp-clients/"]
+    run: |
+      python3 .github/scripts/gen-mcp-realm-clients.py --check
+      python3 .github/scripts/check-mcp-client-realm-parity.py
+
   # Keycloak client secrets must name their OpenBao source (issue #3246). The import artifact
   # Keycloak rebuilds from lives in OpenBao and is not derived from the template, so a client
   # added to realm-template.json merges green and the nightly keycloak-realm-drift job goes red
@@ -7272,6 +7382,22 @@ gates:
     selftest_inputs: [".github/scripts/check-workflow-gh-token.py"]
     run: |
       python3 .github/scripts/check-workflow-gh-token.py
+
+  - id: merge-train-break-glass
+    selftest_exempt: "is-a-test-suite — the break-glass validator's own must-pass/must-FAIL cases"
+    name: "merge-train break-glass refuses non-owner, red/missing/pending context, stale, draft, unarmed and hold-lifting PRs (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The break-glass posts the one required status the train owns; if its validator stopped checking the other required contexts it would be a review bypass that still prints green. The suite includes the cases that must refuse, and --sabotage-context-check proves they detect a disabled context check (#17006)."
+    review_after: "2027-05-21"
+    budget_seconds: 10
+    min_subjects: 40   # 42 PASS cases today (2026-11-21)
+    run: |
+      rc=0
+      out=$(python3 .github/scripts/break_glass_check.py --self-test 2>&1) || rc=$?
+      printf '%s\n' "$out"
+      echo "SUBJECTS=$(printf '%s\n' "$out" | grep -c '^PASS')"
+      exit "$rc"
 
   - id: agent-pr-guard
     name: "agent PR guard (autonomous agents may not land protected paths, enforced)"

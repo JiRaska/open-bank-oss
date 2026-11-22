@@ -57,7 +57,9 @@ jobs:
   jmh:
     name: JMH allocation baseline (enforced)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # ADR-0389 SAFE knob: repo var LIBS_BENCH_TIMEOUT_MINUTES overrides (positive integer minutes); unset = today's
+    # value. A non-numeric value makes fromJSON fail the job LOUDLY at start, never silently.
+    timeout-minutes: ${{ fromJSON(vars.LIBS_BENCH_TIMEOUT_MINUTES || '45') }}
     permissions:
       contents: read
     steps:

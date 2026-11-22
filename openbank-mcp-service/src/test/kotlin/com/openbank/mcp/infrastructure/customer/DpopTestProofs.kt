@@ -17,7 +17,7 @@ import java.util.UUID
 
 /** Real RFC 9449 proofs, signed with jose4j, for the customer-channel tests. */
 object DpopTestProofs {
-    const val RESOURCE = "https://mcp.test.example/mcp"
+    const val RESOURCE = "https://mcp.test.example/customer/mcp"
     const val ISSUER = "https://kc.test.example/realms/openbank-customers"
     const val STAFF_ISSUER = "https://kc.test.example/realms/openbank"
     const val ACCESS_TOKEN = "customer-access-token-under-test"
