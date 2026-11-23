@@ -43,6 +43,8 @@ class CustomerProposePaymentToolTest {
         McpPiiMasker(mapper),
         mapper,
         CustomerPaymentProposer(store, mapper),
+        boundBalance = null,
+        boundProposalEnabled = false,
     )
     private val account = UUID.randomUUID()
     private val key = GrantKey(UUID.randomUUID(), "mcp-local-test", "0".repeat(43))
@@ -95,6 +97,7 @@ class CustomerProposePaymentToolTest {
             McpPiiMasker(mapper),
             mapper,
             CustomerPaymentProposer(store, mapper),
+            boundBalance = null,
             boundProposalEnabled = true,
         )
         every { store.create(any(), match { it.connectionId == bound.connectionId }) } returns pending()

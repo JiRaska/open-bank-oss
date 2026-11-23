@@ -299,7 +299,7 @@ class McpConnectIssuerResource(
         val parJkt: String,
         val redirectHost: String,
         val resource: String,
-        val scopes: Set<String>,
+        val scopes: Set<String?>,
         val expiresAtEpochSecond: Long,
     ) {
         fun toRequest(): McpConnectRequestStore.Request {
@@ -309,7 +309,13 @@ class McpConnectIssuerResource(
             }
             require(redirectHost.isNotBlank() && redirectHost.length <= MAX_HOST_LENGTH) { "invalid redirect host" }
             require(resource.isNotBlank() && resource.length <= MAX_RESOURCE_LENGTH) { "invalid MCP resource" }
-            require(scopes.isNotEmpty() && scopes.all(SCOPE::matches) && "offline_access" !in scopes) {
+            val requestedScopes = scopes.mapIndexed { index, scope ->
+                requireNotNull(scope) { "scopes[$index] must not be null" }
+            }.toSet()
+            require(
+                requestedScopes.isNotEmpty() && requestedScopes.all(SCOPE::matches) &&
+                    "offline_access" !in requestedScopes,
+            ) {
                 "invalid scopes"
             }
             val expiry = Instant.ofEpochSecond(expiresAtEpochSecond)
@@ -321,7 +327,7 @@ class McpConnectIssuerResource(
                 parJkt,
                 redirectHost,
                 resource,
-                scopes,
+                requestedScopes,
                 OffsetDateTime.ofInstant(expiry, ZoneOffset.UTC),
             )
         }

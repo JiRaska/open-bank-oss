@@ -45,9 +45,9 @@ class CustomerReadTools @Inject constructor(
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
     private val proposer: CustomerPaymentProposer,
-    private val boundBalance: McpBoundBalanceReader? = null,
+    private val boundBalance: McpBoundBalanceReader?,
     @ConfigProperty(name = "mcp.customer.connection-binding.propose-enabled", defaultValue = "false")
-    private val boundProposalEnabled: Boolean = false,
+    private val boundProposalEnabled: Boolean,
 ) {
     /**
      * The authenticated caller, as admission verified it. [grantKey] is the verified grant triple
@@ -212,6 +212,7 @@ class CustomerReadTools @Inject constructor(
                 capability,
                 grant.grantId,
             )
+
             is CustomerPaymentProposer.Result.Refused -> Outcome.Refused(
                 result.reason,
                 capability,

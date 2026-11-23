@@ -126,6 +126,11 @@ spec:
             # grantee's own DELEGATION_ACCEPT one are both minted and spent here.
             - name: SCA_SERVICE_URL
               value: http://sca-service.sca.svc:8110
+            # Connect receipt uses SCA's private mTLS listener and the mounted Delegation certificate.
+            - name: MCP_CONNECT_SCA_RECEIPT_URL
+              value: https://sca-service.sca.svc:8443
+            - name: MCP_CONNECT_SCA_TLS_CONFIGURATION
+              value: party-authority
             - name: PID_SERVICE_URL
               value: http://pid-service.pid.svc:8105
             # Principal type and active ADR-0284 PartyMandate. This is the authoritative

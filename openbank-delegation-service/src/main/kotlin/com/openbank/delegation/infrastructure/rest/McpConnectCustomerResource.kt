@@ -65,7 +65,9 @@ class McpConnectCustomerResource(
     ): Review {
         val party = requireCustomer(customerPartyId)
         find(party, requestRef)
-        val accounts = requireNotNull(selection) { "selection is required" }.accounts
+        val accounts = requireNotNull(selection) { "selection is required" }.accounts.mapIndexed { index, account ->
+            requireNotNull(account) { "accounts[$index] must not be null" }
+        }
         require(accounts.size in 1..MAX_ACCOUNTS && accounts.map { it.accountId }.toSet().size == accounts.size) {
             "selection must contain distinct accounts"
         }
@@ -115,7 +117,7 @@ class McpConnectCustomerResource(
         return customerPartyId
     }
 
-    data class Selection(val accounts: List<McpConnectRequestStore.AccountSelection>)
+    data class Selection(val accounts: List<McpConnectRequestStore.AccountSelection?>)
     data class Reviews(val requests: List<Review>)
     data class Connections(val connections: List<McpConnectRequestStore.Connection>)
     data class Review(

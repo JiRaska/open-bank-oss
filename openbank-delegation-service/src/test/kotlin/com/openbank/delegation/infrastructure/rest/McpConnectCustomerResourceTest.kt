@@ -39,6 +39,57 @@ class McpConnectCustomerResourceTest {
 
     @Test
     fun `selection rejects an account whose ownership is unavailable`() {
+        pendingReview()
+        coEvery { ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, account) } returns
+            OwnershipVerdict.UNVERIFIABLE
+        val input = McpConnectCustomerResource.Selection(
+            listOf(McpConnectRequestStore.AccountSelection(account, setOf("ACCOUNT_READ_BALANCES"))),
+        )
+        assertThatThrownBy { runBlocking { resource().select(party, reference, input) } }
+            .isInstanceOf(ForbiddenException::class.java)
+        coVerify(exactly = 0) { store.select(any(), any(), any()) }
+    }
+
+    @Test
+    fun `null selected account is rejected before ownership and storage`() {
+        pendingReview()
+        val input = McpConnectCustomerResource.Selection(listOf(null))
+        assertThatThrownBy { runBlocking { resource().select(party, reference, input) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("accounts[0] must not be null")
+        coVerify(exactly = 0) { ownership.verifyOwnership(any(), any(), any()) }
+        coVerify(exactly = 0) { store.select(any(), any(), any()) }
+    }
+
+    @Test
+    fun `null registration scope is rejected before creating the storage model`() {
+        val registration = McpConnectIssuerResource.Registration(
+            reference,
+            party,
+            "mcp-local-reference",
+            "A".repeat(43),
+            "example.test",
+            "https://example.test/customer/mcp",
+            setOf("openid", null),
+            OffsetDateTime.now().plusMinutes(1).toEpochSecond(),
+        )
+        assertThatThrownBy { registration.toRequest() }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("scopes[1] must not be null")
+    }
+
+    @Test
+    fun `revocation uses the verified customer's party and returns 204 only on success`() {
+        val connectionId = UUID.randomUUID()
+        coEvery { store.revoke(party, connectionId) } returns true
+        coEvery { store.revoke(OTHER_PARTY, connectionId) } returns false
+        val resource = resource()
+        assertThat(runBlocking { resource.revoke(party, connectionId).status }).isEqualTo(204)
+        assertThatThrownBy { runBlocking { resource.revoke(OTHER_PARTY, connectionId) } }
+            .isInstanceOf(NotFoundException::class.java)
+    }
+
+    private fun pendingReview() {
         val request = McpConnectRequestStore.Request(
             reference,
             party,
@@ -51,25 +102,6 @@ class McpConnectCustomerResourceTest {
         )
         coEvery { store.findForParty(party, reference) } returns
             McpConnectRequestStore.Review(request, emptyList(), null, null, null)
-        coEvery { ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, account) } returns
-            OwnershipVerdict.UNVERIFIABLE
-        val input = McpConnectCustomerResource.Selection(
-            listOf(McpConnectRequestStore.AccountSelection(account, setOf("ACCOUNT_READ_BALANCES"))),
-        )
-        assertThatThrownBy { runBlocking { resource().select(party, reference, input) } }
-            .isInstanceOf(ForbiddenException::class.java)
-        coVerify(exactly = 0) { store.select(any(), any(), any()) }
-    }
-
-    @Test
-    fun `revocation uses the verified customer's party and returns 204 only on success`() {
-        val connectionId = UUID.randomUUID()
-        coEvery { store.revoke(party, connectionId) } returns true
-        coEvery { store.revoke(OTHER_PARTY, connectionId) } returns false
-        val resource = resource()
-        assertThat(runBlocking { resource.revoke(party, connectionId).status }).isEqualTo(204)
-        assertThatThrownBy { runBlocking { resource.revoke(OTHER_PARTY, connectionId) } }
-            .isInstanceOf(NotFoundException::class.java)
     }
 
     private fun resource(client: String = "openbank-edge"): McpConnectCustomerResource {

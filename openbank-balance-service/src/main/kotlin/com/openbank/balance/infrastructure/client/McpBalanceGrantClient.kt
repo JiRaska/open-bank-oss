@@ -5,6 +5,7 @@
 package com.openbank.balance.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -15,6 +16,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
@@ -29,6 +31,7 @@ data class McpBalanceGrantRequest(
 )
 
 @RegisterRestClient(configKey = "mcp-balance-grant")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @OidcClientFilter("mcp-balance-reader")
 @Path("/api/v1/delegations/mcp-client/check-balance-grant")
 @Consumes(MediaType.APPLICATION_JSON)

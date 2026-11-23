@@ -35,7 +35,16 @@ class CustomerReadToolsTest {
         }
     }
     private val proposer: CustomerPaymentProposer = mockk()
-    private val tools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper, proposer)
+    private val tools = CustomerReadTools(
+        pdp,
+        exchange,
+        downstream,
+        McpPiiMasker(mapper),
+        mapper,
+        proposer,
+        null,
+        boundProposalEnabled = false,
+    )
     private val caller = CustomerReadTools.Caller(
         "c0ffee00-0000-0000-0000-000000000001",
         "customer-token",
@@ -158,7 +167,16 @@ class CustomerReadToolsTest {
             tls,
             tls,
         )
-        val boundTools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper, proposer, bound)
+        val boundTools = CustomerReadTools(
+            pdp,
+            exchange,
+            downstream,
+            McpPiiMasker(mapper),
+            mapper,
+            proposer,
+            bound,
+            boundProposalEnabled = false,
+        )
         val g = grant(CustomerCapabilities.READ_BALANCES)
         val claims = mapper.createObjectNode()
             .put("aud", DownstreamAudience.BALANCE.clientId)
