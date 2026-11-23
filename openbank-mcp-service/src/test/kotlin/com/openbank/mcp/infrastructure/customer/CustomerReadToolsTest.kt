@@ -156,27 +156,7 @@ class CustomerReadToolsTest {
     fun `bound balance uses the original proof and refuses a mismatched permit without legacy fallback`() {
         val issuer = mockk<McpBoundBalanceIssuer>()
         val balance = mockk<McpBoundBalanceEndpoint>()
-        val tls = Optional.of("sandbox-workload")
-        val bound = McpBoundBalanceReader(
-            issuer,
-            balance,
-            mapper,
-            true,
-            URI.create("https://issuer.test"),
-            URI.create("https://balance.test"),
-            tls,
-            tls,
-        )
-        val boundTools = CustomerReadTools(
-            pdp,
-            exchange,
-            downstream,
-            McpPiiMasker(mapper),
-            mapper,
-            proposer,
-            bound,
-            boundProposalEnabled = false,
-        )
+        val boundTools = boundBalanceTools(issuer, balance)
         val g = grant(CustomerCapabilities.READ_BALANCES)
         val claims = mapper.createObjectNode()
             .put("aud", DownstreamAudience.BALANCE.clientId)
@@ -186,14 +166,9 @@ class CustomerReadToolsTest {
             .put("account_id", account.toString())
             .put("grant_id", g.grantId.toString())
         claims.putObject("cnf").put("x5t#S256", "A".repeat(43))
-        fun answer(): JsonNode {
-            val payload = Base64.getUrlEncoder().withoutPadding().encodeToString(mapper.writeValueAsBytes(claims))
-            return mapper.createObjectNode()
-                .put("access_token", "fixture.$payload.signature")
-                .put("token_type", "Bearer")
-                .put("expires_in", 30)
-        }
-        every { issuer.issue(any(), any(), "customer-token", "original-proof", account, null) } answers { answer() }
+        every {
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, null)
+        } answers { boundPermit(claims) }
         every { balance.read(account, match { it.startsWith("Bearer fixture.") }) } returns mapper.createObjectNode()
         val args = args("accountId" to account.toString())
         val boundCaller = caller.copy(resourceProof = "original-proof")
@@ -206,7 +181,7 @@ class CustomerReadToolsTest {
         val scopedCaller = boundCaller.copy(grantKey = scopedKey)
         every {
             issuer.issue(any(), any(), "customer-token", "original-proof", account, connectionId)
-        } answers { answer() }
+        } answers { boundPermit(claims) }
         assertThat(boundTools.list(listOf(g), connectionBound = true).map { it.name })
             .containsExactly("get_balance")
         claims.put(connectionClaim, connectionId.toString())
@@ -225,6 +200,38 @@ class CustomerReadToolsTest {
         verify(exactly = 2) { balance.read(any(), any()) }
         verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
         verify(exactly = 0) { downstream.balances(any(), any()) }
+    }
+
+    private fun boundBalanceTools(issuer: McpBoundBalanceIssuer, balance: McpBoundBalanceEndpoint): CustomerReadTools {
+        val tls = Optional.of("sandbox-workload")
+        val bound = McpBoundBalanceReader(
+            issuer,
+            balance,
+            mapper,
+            true,
+            URI.create("https://issuer.test"),
+            URI.create("https://balance.test"),
+            tls,
+            tls,
+        )
+        return CustomerReadTools(
+            pdp,
+            exchange,
+            downstream,
+            McpPiiMasker(mapper),
+            mapper,
+            proposer,
+            bound,
+            boundProposalEnabled = false,
+        )
+    }
+
+    private fun boundPermit(claims: JsonNode): JsonNode {
+        val payload = Base64.getUrlEncoder().withoutPadding().encodeToString(mapper.writeValueAsBytes(claims))
+        return mapper.createObjectNode()
+            .put("access_token", "fixture.$payload.signature")
+            .put("token_type", "Bearer")
+            .put("expires_in", 30)
     }
 
     @Test
