@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.1...delegation-service-v0.27.2) (2026-11-22)
+
+
+### Security
+
+* **customer-edge:** approve MCP payment proposals in the app with hash-bound SCA ([#16845](https://github.com/JiRaska/open-bank-oss/issues/16845)) ([060aafa](https://github.com/JiRaska/open-bank-oss/commit/060aafa1990aab37fbd35dd9a3397bc1eb902bb0))
+
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.0...delegation-service-v0.27.1) (2026-11-22)
+
+
+### Security
+
+* **delegation:** proposal store for customer MCP payment proposals (ADR-0383 D6) ([#16853](https://github.com/JiRaska/open-bank-oss/issues/16853)) ([ed2f5ef](https://github.com/JiRaska/open-bank-oss/commit/ed2f5ef690b21f060930061412502526d6c9be36))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.26.0...delegation-service-v0.27.0) (2026-11-21)
+
+
+### Features
+
+* **delegation:** MCP client grant resolve endpoint ([#16793](https://github.com/JiRaska/open-bank-oss/issues/16793)) ([a00aba8](https://github.com/JiRaska/open-bank-oss/commit/a00aba8c0e0f0b39e4db69d3f834bcc57097857a))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.25.2...delegation-service-v0.26.0) (2026-11-17)
 
 

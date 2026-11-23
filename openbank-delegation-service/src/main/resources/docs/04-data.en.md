@@ -101,3 +101,25 @@ V34) or `MCP_CLIENT`, a customer-admitted third-party MCP client.
   (`400 MCP_CLIENT_GRANTEE_DORMANT`) and no lifecycle event can be built for one, because the
   current consumers (account-service, card-issuance-service, context-service) know only parties.
   The guard is lifted only after they skip non-PARTY grants.
+- **Lookup for mcp-service:** `POST /api/v1/delegations/mcp-client/resolve` returns the ACTIVE
+  `MCP_CLIENT` grants for the triple (grantor, client id, DPoP key thumbprint). Only mcp-service's own
+  service-account may call it (OPA `delegation.mcp-client.resolve` plus an in-code client-id check).
+  The answer carries only grant id, resource type and id, capabilities and `validTo`; an empty list
+  is the refusal.
+
+## `delegation_payment_proposals` (V38, ADR-0383 D6)
+
+Payment **proposals** made by a customer-connected MCP client under an ACTIVE `MCP_CLIENT` grant.
+A row moves no money. It holds the immutable instruction (operation type, debtor account, payee
+IBAN and name, amount, currency, reference), `payload_sha256` over its canonical form (domain tag,
+proposal id, party, every instruction field), the grant and client it was made under, and a
+one-way status: `PENDING → APPROVED | REJECTED | EXPIRED`, `APPROVED → EXECUTED | EXECUTION_FAILED`.
+A trigger pins the instruction columns and the state graph; DELETE raises. Proposals expire after
+24 h; at most 10 are open and 20 created per customer per 24 h. Lifecycle events go to
+`openbank.delegation.payment-proposal-events` (no payee IBAN, name or reference on the wire).
+
+The proposal store checks the payee IBAN's uppercase, unspaced form with
+`Iban.hasCanonicalShape` and retains that canonical value in the hashed instruction. The shape check
+does not validate the country, account structure or checksum. After customer approval, the
+customer edge submits the stored instruction through the usual payment initiation path, where
+the selected rail applies its own account validation.

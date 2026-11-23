@@ -824,6 +824,19 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-proposed-staleness.py"
     target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the 4-findings seed tail (0141, 0142, 0155, 0170) is decided, re-affirmed, or baselined
     blocked_on: "first live run flags 4 genuinely open proposals from 2026-06/07; enforcement is safe once that tail is triaged — the gate is sweep-proof by construction (creation-age + deliberate last-reviewed), so no mechanical commit can silently reset it"
+  mcp_redteam_model_verdict:
+    # ADR-0383 D7 / #16617 layer 4. The model-in-the-loop half of the MCP prompt-injection red team:
+    # a recorded model run must not call propose_payment unrequested, fetch beyond the question, or
+    # emit an attacker URL/IBAN when a tool result is poisoned. Advisory only because nothing is
+    # recorded yet (CI holds no model keys) — the gate prints "model verdict: NOT MEASURED".
+    detect: ["evals/mcp-redteam/scenarios.json scenarios vs evals/mcp-redteam/recordings/recording.json"]
+    require:
+      - "a committed recording covers every scenario (partial => fail), none is stale, every assertion holds"
+    gate: mcp-redteam-model-verdict
+    enforced: advisory
+    ci_producer: ".github/scripts/run-mcp-redteam-evals.py"
+    target_enforce_date: "2026-12-15"   # ADR-0144
+    blocked_on: "first owner live recording committed via evals/mcp-redteam/live.sh"
   adr_delivery_scripts:
     # An ADR's `## Delivery check` is the falsifier of its own `delivery-status`, and as prose
     # nobody runs it: ADR-0344 read `planned` while code for its decisions landed, found only by a
@@ -839,6 +852,18 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-delivery-scripts.sh"
     target_enforce_date: "2027-01-31"   # ADR-0144; enforce once two more ADRs carry an executable block
     blocked_on: "only ADR-0317 and ADR-0344 have a ```bash Delivery check today; a line whose tool the runner lacks (yq) is UNMEASURED, so enforcement waits until the blocks are written for the runner"
+  schedule_pause_switch:
+    # ADR-0389: stopping or pausing automation must never need a PR.
+    detect: [".github/workflows/*.yml with an `on.schedule` trigger"]
+    require:
+      - "each entry job (no needs:, or an if: with a status function) is gated on `github.event_name != 'schedule' || (vars.<WORKFLOW_ID>_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')`"
+      - "or the workflow is listed in the checker's EXCLUDED map with a reason (a control whose pause must stay a reviewed PR)"
+      - "an EXCLUDED entry naming no scheduled workflow is a finding"
+    gate: schedule-pause-switch
+    enforced: advisory
+    ci_producer: ".github/scripts/check-schedule-pause-switch.py"
+    target_enforce_date: "2027-02-28"   # ADR-0144; enforce once the exclusion list has had one review pass
+    blocked_on: "the exclusion list is a first classification; enforcing before a review pass would freeze it"
   requirements_traceability:
     # A functional-baseline catalogue in ADR prose has no traceability: 38 treasury items had to be
     # audited by hand to learn which existed. <service>/governance/requirements.yaml makes each item
@@ -2094,6 +2119,7 @@ dependencies:
         - openbank-ap2-service/
         - openbank-mcp-service/
         - openbank-communication-service/
+        - openbank-fetch-broker/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:
@@ -2122,7 +2148,8 @@ dependencies:
         - openbank-communication-service    # ADR-0285 D5 -- explicit, not a reasoning/acting agent
                                              # itself, but the ADR's own binding decision places it
                                              # "under ADR-0197 like the rest of that plane"
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
+        - openbank-fetch-broker             # ADR-0387 D9 -- agent-plane public-web fetch broker
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service'|':openbank-fetch-broker') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
@@ -3509,6 +3536,8 @@ delegation_exposure_delivery:
       role: historical_audit
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/DelegationResource.kt
       role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpClientGrantResolver.kt
+      role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
       role: historical_audit
 
@@ -4806,6 +4835,8 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/domain/model/PaymentProposal.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/rest/PaymentProposalResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4884,6 +4915,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/account/application/usecase/SavingsProposalService.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/BalanceServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/PartyDirectoryClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ProductCatalogClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/SanctionsServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ScaChallengeClient.kt"
@@ -4894,6 +4926,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
     cardholder: []
   openbank-balance-service:
     auth_crypto_payment:
@@ -5135,6 +5168,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/CatalogFosLoanAdapter.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"

@@ -90,6 +90,7 @@ concurrency:
 
 jobs:
   admission:
+    if: github.event_name != 'schedule' || (vars.AGENT_ISSUE_WORKER_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: Bound agent work in progress
     runs-on: ubuntu-latest
     timeout-minutes: 5

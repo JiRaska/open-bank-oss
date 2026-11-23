@@ -15,6 +15,7 @@ import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.Ifrs9Stage
 import com.openbank.libs.lending.origination.CreditProductKind
 import com.openbank.libs.lending.origination.OriginationState
+import com.openbank.libs.market.PassportMode
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -274,6 +275,8 @@ data class LoanApplicationRequest(
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
     val catalogOfferingId: UUID? = null,
+    val passportGrantId: UUID? = null,
+    val passportMode: PassportMode? = null,
 )
 
 /**

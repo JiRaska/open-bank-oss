@@ -1,0 +1,173 @@
+# Customer MCP channel alert rules (ADR-0384 D6, first slice). Fed by McpMetricsAdapter in
+# openbank-mcp-service:
+#   openbank_mcp_customer_rejected_total{layer,reason,client,synthetic}
+#   openbank_mcp_tool_calls_total{...,channel,client,synthetic}
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false), same as the other files here.
+#
+# WHAT THESE CAN AND CANNOT SAY. They count refusals mcp-service OBSERVED and tool calls it
+# COMPLETED — never what a customer's client intended, and never anything about a party (no party,
+# grant, key or subject is a label, ADR-0384 D1). Synthetic traffic is excluded
+# (synthetic="false"): the ADR-0252 negative journey sends missing/replayed proofs on purpose,
+# and an alert that fires on the canary's own negative twin is noise.
+#
+# COLD POD / t=0. Both counters are Micrometer counters registered on first increment, and until
+# the ADR-0383 customer path exists nothing increments them, so the series are ABSENT. Every
+# expression below is a rate ratio over those series, so an absent series yields an empty result
+# and no alert, and a freshly started pod (series absent, or born at 1) cannot fire either: the
+# absolute floors (> 20 refusals in 10m) are not met by a counter's birth. Proven by
+# openbank-infra/tests/promtool/mcp_customer_alerts_test.yaml (empty input and a born-at-1 series).
+#
+# NOT HERE YET (ADR-0384 delivery-status, followups): McpCustomerReplayStoreDown as a 0/1 gauge
+# (needs openbank_mcp_customer_replay_store_up from the ADR-0383 D4 store; the refusal-based
+# McpCustomerReplayStoreUnavailable below covers the outage meanwhile),
+# McpCustomerProposalRejectionHigh (needs the ADR-0383 D6 proposal store) and
+# McpCustomerGrantProjectionStale (needs the delegation-service projection, D1). Writing them
+# before their metric exists would be a rule that can never fire (check-alert-metric-emitted.py).
+# A proposal rejection RATIO is deliberately still absent: on main `propose_payment` has no store
+# (UnwiredProposalPort refuses every call), so a ratio over today's tool_calls{tool="propose_payment"}
+# would read 100% the moment the channel opens and page on a known, intended refusal.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-mcp-customer-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.mcp.customer
+      rules:
+        # One client's DPoP refusals are a large share of its traffic. nonce_required is excluded:
+        # it is the normal RFC 9449 nonce handshake, not a failure. Per client, because one broken
+        # or hostile client must not hide in the others' volume. The floor keeps a single
+        # misconfigured test call from paging.
+        - alert: McpCustomerDpopRejectSpike
+          expr: |
+            (
+              sum by (client) (increase(openbank_mcp_customer_rejected_total{
+                layer="dpop", reason!="nonce_required", synthetic="false"}[10m]))
+              /
+              clamp_min(
+                sum by (client) (increase(openbank_mcp_customer_rejected_total{synthetic="false"}[10m]))
+                + (sum by (client) (increase(openbank_mcp_tool_calls_total{channel="customer", synthetic="false"}[10m]))
+                   or sum by (client) (increase(openbank_mcp_customer_rejected_total{synthetic="false"}[10m])) * 0),
+                1)
+            ) > 0.2
+            and
+            sum by (client) (increase(openbank_mcp_customer_rejected_total{
+              layer="dpop", reason!="nonce_required", synthetic="false"}[10m])) > 20
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerdpoprejectspike
+            summary: "Customer MCP client {{ $labels.client }}: over 20% of requests fail DPoP"
+            description: >-
+              More than a fifth of client {{ $labels.client }}'s observed customer-channel requests
+              were refused at the DPoP layer for 10m (nonce handshakes excluded). A broken client
+              release, clock skew (stale_iat) or a replayed/stolen proof (replay, jkt_mismatch).
+              Check the reason label before deciding; suspending the client is a single-actor stop.
+        # One client's policy + downstream refusals stand out against the channel as a whole. A
+        # client hitting tools its grant does not allow, or driving downstream errors others do
+        # not, is a client problem rather than a bank one.
+        - alert: McpCustomerClientErrorRate
+          expr: |
+            (
+              sum by (client) (increase(openbank_mcp_customer_rejected_total{
+                layer=~"policy|downstream", synthetic="false"}[30m]))
+              /
+              clamp_min(sum by (client) (increase(openbank_mcp_tool_calls_total{channel="customer", synthetic="false"}[30m])), 1)
+            )
+            > scalar(
+              3 * clamp_min(
+                sum(increase(openbank_mcp_customer_rejected_total{layer=~"policy|downstream", synthetic="false"}[30m]))
+                /
+                clamp_min(sum(increase(openbank_mcp_tool_calls_total{channel="customer", synthetic="false"}[30m])), 1),
+                0.02)
+            )
+            and
+            sum by (client) (increase(openbank_mcp_customer_rejected_total{
+              layer=~"policy|downstream", synthetic="false"}[30m])) > 20
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerclienterrorrate
+            summary: "Customer MCP client {{ $labels.client }} is refused three times more often than the channel"
+            description: >-
+              Client {{ $labels.client }}'s policy and downstream refusal ratio over 30m is more than
+              three times the channel's (floor 2%), with over 20 refusals. Compare its reason mix
+              with the others' before acting.
+        # The DPoP replay store (Valkey) is unreachable and customer admission is failing closed:
+        # every customer request answers 503. The store's readiness check is deliberately OFF so a
+        # store outage cannot unready the staff/agent path, which makes this refusal counter the
+        # ONLY signal of the outage. Counted on any traffic, synthetic included: the canary's
+        # requests fail the same way and are the earliest witness when real traffic is sparse.
+        # A refusal only exists when the customer channel is enabled and receiving requests, so
+        # the series' presence is the "channel enabled" condition.
+        # increase() PER SERIES, then sum: a pod replaced mid-outage resets its own counter, and a
+        # sum-then-offset self-delta goes negative across the churn and silences the alert (review
+        # of #16779). Per-series increase() handles the reset. [2m] window + for: 5m means refusals
+        # in every 2-minute window for 5 minutes: a sustained outage, not a single refusal. A counter
+        # born at 1 contributes nothing until its second increment, which a real outage (every
+        # customer request refused) supplies within a scrape or two. Absent series (t=0, channel
+        # off) -> empty -> silent.
+        - alert: McpCustomerReplayStoreUnavailable
+          expr: |
+            sum(increase(openbank_mcp_customer_rejected_total{reason="replay_store_unavailable"}[2m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            subject_period: continuous
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerreplaystoreunavailable
+            summary: "Customer MCP admission is failing closed: DPoP replay store unavailable"
+            description: >-
+              mcp-service has refused customer requests with reason replay_store_unavailable
+              continuously for 5m: the DPoP replay store cannot be reached, so every customer request
+              is answered 503. Staff and agent traffic is unaffected by design (no readiness check on
+              the store), so nothing else will show this. Check the Valkey pods and mcp-service's
+              connection errors.
+        # Liveness of the channel as a whole: real customer traffic (completed tool calls plus refusals,
+        # so a channel that refuses everything still counts as reached) was present in the same hour
+        # yesterday and is entirely absent now. That is the signature of a broken route, gateway,
+        # certificate or client-facing discovery document: nothing reaches mcp-service, so every
+        # refusal- and ratio-based rule above goes quiet exactly when the channel is down.
+        #
+        # COLD POD / t=0, re-derived. (a) Channel never opened, or opened less than a day ago: the
+        # `offset 1d` term is empty, `or vector(0)` makes it 0, the floor (>= 50) is not met -> silent.
+        # (b) A deploy or pod roll: the old pod's series keep their samples inside the [1h] window, so
+        # `increase` over them is > 0 for up to an hour after the roll, and the new pod's counters
+        # (born at 1 on the first request) add their own increase from the second request on. A roll
+        # with traffic still flowing therefore never empties the "now" term. (c) Synthetic traffic is
+        # excluded on both sides: the canary keeps running when customers stop, and must not mask it.
+        # The 50/h floor keeps a channel that is quiet overnight by nature from paging every night.
+        - alert: McpCustomerChannelNoTraffic
+          expr: |
+            (
+              (sum(increase(openbank_mcp_tool_calls_total{channel="customer", synthetic="false"}[1h] offset 1d)) or vector(0))
+              + (sum(increase(openbank_mcp_customer_rejected_total{synthetic="false"}[1h] offset 1d)) or vector(0))
+            ) >= 50
+            unless
+            (
+              (sum(increase(openbank_mcp_tool_calls_total{channel="customer", synthetic="false"}[1h])) or vector(0))
+              + (sum(increase(openbank_mcp_customer_rejected_total{synthetic="false"}[1h])) or vector(0))
+            ) > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerchannelnotraffic
+            summary: "Customer MCP channel received no real traffic for an hour"
+            description: >-
+              The same hour yesterday carried at least 50 real customer-channel requests, and the
+              last hour carried none, neither completed tool calls nor refusals. Requests are not
+              reaching mcp-service: check the route, the gateway and the published discovery
+              metadata before the service itself.

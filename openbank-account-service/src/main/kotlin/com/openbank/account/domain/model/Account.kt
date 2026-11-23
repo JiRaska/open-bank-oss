@@ -67,6 +67,7 @@ data class Account(
      * automatically.
      */
     val freezeOrigin: FreezeOrigin? = null,
+    val bookingContext: AccountBookingContext? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }

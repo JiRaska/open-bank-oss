@@ -101,6 +101,9 @@ enum class PostingKind {
 interface LedgerPostingPort {
     fun post(posting: LedgerPosting): Uni<Unit>
 
+    fun postConfirmedDisbursement(posting: LedgerPosting): Uni<Unit> =
+        Uni.createFrom().failure(UnsupportedOperationException("Ledger backend cannot confirm disbursements"))
+
     /** Prepare the complete immutable request before the accrual intent is committed. No network I/O. */
     fun prepareAccrual(posting: LedgerPosting): PreparedAccrualPosting =
         throw UnsupportedOperationException("Ledger backend cannot prepare confirmed accrual postings")

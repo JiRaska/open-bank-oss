@@ -307,7 +307,6 @@ class RiskValuationApiIT {
             }
             TestDb.execute("DELETE FROM snapshot_run WHERE id = '$untied'")
             TestDb.execute("DELETE FROM curve_set WHERE id = '$foreignCurves'")
->>>>>>> origin/main
             TestDb.execute("DELETE FROM $revisions WHERE deal_id = '$deal'")
         }
     }

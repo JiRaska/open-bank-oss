@@ -234,7 +234,21 @@ variable "arc_min_runners" {
   # Warm pool rationale gone; runners-warm NodePool (arc-runners.tf) also set to 0 min.
   # Karpenter cold-start latency (~1-2 min) returns to the merge path — acceptable given
   # the cost saving (~$112/month for 2× c6g.xlarge on-demand).
-  default = 0
+  # TIME-BOXED TRIAL 0 -> 1 (2026-11-21, #16969): queue p90 ~17 min is dominated by a ~13 min
+  # Karpenter reaction to Pending runner pods. One warm runner lands on the `runners` spot pool
+  # (runners-warm stays at limits.cpu = 0), ~$0.057/h = ~$1.36/day. REVERT: set back to 0 on
+  # 2026-11-22 and re-apply, regardless of the evaluation outcome; keep only via a new PR.
+  default = 1
+  # ADR-0389: overridable from repo variable TF_ARC_MIN_RUNNERS (platform-tofu.yml); the
+  # range bounds what a variable edit can do without a PR.
+  validation {
+    condition     = var.arc_min_runners == floor(var.arc_min_runners) && var.arc_min_runners >= 0 && var.arc_min_runners <= 2
+    error_message = "arc_min_runners must be an integer in [0, 2]."
+  }
+  validation {
+    condition     = var.arc_min_runners <= var.arc_max_runners
+    error_message = "arc_min_runners must not exceed arc_max_runners."
+  }
 }
 
 variable "arc_max_runners" {
@@ -302,12 +316,24 @@ variable "arc_max_runners" {
   # DERIVED from the sum of every scale set's maxRunners (arc-runners.tf,
   # local.runners_nodepool_cpu_limit), so changing this value moves the cap with it.
   default = 12
+  # ADR-0389: overridable from repo variable TF_ARC_MAX_RUNNERS (platform-tofu.yml); the
+  # range bounds what a variable edit can do without a PR.
+  validation {
+    condition     = var.arc_max_runners == floor(var.arc_max_runners) && var.arc_max_runners >= 1 && var.arc_max_runners <= 16
+    error_message = "arc_max_runners must be an integer in [1, 16]."
+  }
 }
 
 variable "arc_deploy_max_runners" {
   description = "Max concurrent runner pods in the openbank-deploy scale set (post-merge ECR push + ArgoCD; low concurrency)."
   type        = number
   default     = 2
+  # ADR-0389: overridable from repo variable TF_ARC_DEPLOY_MAX_RUNNERS (platform-tofu.yml); the
+  # range bounds what a variable edit can do without a PR.
+  validation {
+    condition     = var.arc_deploy_max_runners == floor(var.arc_deploy_max_runners) && var.arc_deploy_max_runners >= 1 && var.arc_deploy_max_runners <= 4
+    error_message = "arc_deploy_max_runners must be an integer in [1, 4]."
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -341,13 +367,27 @@ variable "keda_http_add_on_version" {
 }
 
 variable "arc_batch_max_runners" {
+  # 0 parks the lane: its jobs queue with no error. Intended kill switch.
   description = "Max concurrent runner pods in the openbank-batch scale set (weekly scans/fuzz/perf; ADR-0277)."
   type        = number
   default     = 4
+  # ADR-0389: overridable from repo variable TF_ARC_BATCH_MAX_RUNNERS (platform-tofu.yml); the
+  # range bounds what a variable edit can do without a PR.
+  validation {
+    condition     = var.arc_batch_max_runners == floor(var.arc_batch_max_runners) && var.arc_batch_max_runners >= 0 && var.arc_batch_max_runners <= 8
+    error_message = "arc_batch_max_runners must be an integer in [0, 8]."
+  }
 }
 
 variable "arc_dr_max_runners" {
+  # 0 parks the lane: its jobs queue with no error. Intended kill switch.
   description = "Max concurrent runner pods in the openbank-dr scale set (quarterly DR/chaos lanes; ADR-0277)."
   type        = number
   default     = 1
+  # ADR-0389: overridable from repo variable TF_ARC_DR_MAX_RUNNERS (platform-tofu.yml); the
+  # range bounds what a variable edit can do without a PR.
+  validation {
+    condition     = var.arc_dr_max_runners == floor(var.arc_dr_max_runners) && var.arc_dr_max_runners >= 0 && var.arc_dr_max_runners <= 2
+    error_message = "arc_dr_max_runners must be an integer in [0, 2]."
+  }
 }

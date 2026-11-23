@@ -780,6 +780,59 @@ Self-tests:
 - (20) and (21): the relaxing and tightening checker pairs; (22) a relaxing detekt rule; (23) a companion threat model; (24) companions in one module.
 - `config_judge_path` (including `.gitleaksignore`, `.semgrep.yml`, `application.yaml`, a root dotfile and a `..` path) and `train_code_paths` are pinned against both the synthetic tree and the real one.
 
+### Amendment (2026-11-19) — an owner-applied urgent label takes the strict reservation
+
+Observed 2026-11-19: #16835, a workflow change routing PR builds to a new runner pool, was green on every required check and up to date with `main`, and could not merge for hours. `main-protection` requires the `merge-train` status, which only the train posts. The strict lane serves one PR at a time, expedited first and then oldest, and reserves `main` for the current holder (#16760). About 15 strict PRs were queued. `merge-priority:expedite` only reorders that queue, and its carrier lane does not apply to strict members. Only a fix for a red `main` pre-empted.
+
+Decision: a label `merge-priority:urgent`.
+
+- **Who may apply it: policy plus a local hook, not identity.** The train admits the label only when the latest `labeled` event for it (issue events API) has the repository owner as actor. That check is kept, and it fails closed on unreadable events, but it cannot separate the owner from an agent: agents here act through the owner's own `gh` token, so an agent-applied label reads as the owner's. The control that can separate them is local: a PreToolUse hook, kept in the operator's private agent configuration and effective only once registered there, denies any command that writes this label (`gh pr|issue edit --add-label`, `gh pr|issue create --label`, `gh api …/labels`, `curl` to the labels API, `gh label create|edit`). A command built to dodge its patterns, or a session without the hook, is not stopped. The daily cap is what bounds the damage then.
+- **Capped from authoritative events.** At most `MERGE_TRAIN_URGENT_DAILY_CAP` (default 2) distinct PRs may receive an owner `labeled merge-priority:urgent` event within the current UTC day. These are enumerated from the repository issue-event stream, never from search. Removing the label afterwards does not uncount a grant, re-applying it to the same PR counts once, and there is no index lag. A grant lasts its UTC day: a PR labelled yesterday must be relabelled, and that relabel spends today's cap. An enumeration that fails or does not reach back to the start of the day admits nothing.
+- **Pre-emption.** An admitted, green urgent PR that merges cleanly with live `main` (`git merge-tree`, checked before pre-empting, so a conflicting urgent PR never spends a holder's yield) takes the reservation at the next tick. A non-urgent holder whose CI is still running yields, and the App marks its head `merge-train/urgent-preempted`. A head yields at most once. While the urgent PR's up-to-date head is in CI, a marked head neither holds nor times out, so it is never blamed. Afterwards it keeps its oldest-first place among the non-urgent PRs. A green holder merges in its tick and is never interrupted.
+- **Bounded priority.** An urgent PR outranks the train's and the fast lane's turns only in a tick in which the strict lane can actually serve it: green, servable over this `main`, and, when up to date, with no carrier in flight (`urgent_pick`). In that case it is served by update-branch rather than batched into a strict carrier. The first such tick stamps its head `merge-train/urgent-since`. If the head is still outranking the other lanes `URGENT_PATIENCE_S` (60 min) later, because source intent changed, the merge was refused or a carrier stayed in flight, its urgent priority is dropped for that head (`merge-train/urgent-dropped`, plus one comment). It then continues as an ordinary strict PR. 60 min is two `TRAIN_TURN_S` and covers one carrier finishing; a green urgent PR that progresses leaves that state within one or two ticks.
+- **Safety unchanged.** The urgent PR merges only through the ordinary strict-lane merge: green required checks on a head containing exact `main`, with the status and the merge pinned to that head.
+- **Ordering with main red.** Every fix (the relevant fix first, then the others) precedes every urgent PR. A non-fix urgent PR pre-empts nothing and is not updated onto a red `main`. An urgent PR that is itself a fix leads the fixes of its rank.
+
+Self-tests (`urgent_strict_self_test`). Each guard was removed in turn (19 mutants: main-red guard, `urgent_yield` and its call, the fast-lane and carrier skips, the marker call and post, both fail-closed reads of each events API, the merge-tree check, the starvation drop, the carrier-in-flight test, the cap, the day rule, the owner actor, removed-label counting, once per head, and the not-blamed skip) and every mutant fails at least one case. The hook has its own suite (9 write forms denied, 4 read forms allowed), and an inert hook fails 9 of its cases.
+
+### Amendment (2026-11-21) — strict-lane aging, and stacking read as a guarded variable
+
+Observed 2026-11-21: back-to-back fast carriers kept `in_flight` true. The strict lane yields to an in-flight carrier, so it yielded every tick, and green, armed strict PRs starved for 30 minutes and more.
+
+Decision: a strict candidate that has been continuously green and armed, and unserved, for `MERGE_TRAIN_STRICT_AGING_S` is aged. That is the default 1800 s, deliberately on. `0` turns aging off and is the rollback; any other value must be in [600, 14400]. When an aged candidate exists and no strict carrier or reservation exists, two things happen:
+
+- **The turn is taken back.** If the strict lane is yielding because the train's or the fast lane's turn after a strict merge is still open, the aged PR takes that turn back. The strict lane then serves it in the same tick, by update-branch or a strict carrier. Holding the carrier while the strict lane yields would leave both lanes idle until the turn expired.
+- **No new carriers.** Otherwise settle publishes no NEW fast or expedite carrier. The aged-candidate check runs only in ticks that would publish one or are yielding a turn, so a quiet tick spends no API reads on it.
+
+- **Nothing in flight is touched.** Carriers already running are judged as usual and never cancelled. The strict lane takes the reservation on the tick after they settle.
+- **Measured from live data.** The wait runs from the later of the head's green time (its last required check completing) and its armed time (latest `auto_merge_enabled`). Both are re-derived from the live API every tick, with no stored state.
+- **Fails open.** If either time cannot be read (any API error included), there is no hold, and the miss is logged. A required context that reports skipped or neutral has no green time either, so it also gives no hold.
+- **Bounded per head.** One head holds carriers for at most `MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S` past its threshold (default 3600, validated in [600, 14400]). After that it is released and logged, so one unservable head cannot stall the fast lane. There is also a global budget: the hold, counted from the later of its earliest start (released heads included) and the last train-carrier merge, lasts at most the same `MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S` in total. A rotation of aged heads therefore cannot starve the fast lane either.
+- **Exemptions.** Nothing is held while `main` is red, so the red-main fix and deploy-fix lanes are never delayed. Urgent PRs, which pre-empt on their own, are not aged.
+- **Ordering.** The hold is decided before the expedite window, so a held tick never opens a window. The summary records `strict-aging hold: #N waited Xs`.
+- **Direction.** This is the opposite of #16736. It stops new carriers and never lets a carrier jump a strict PR.
+
+Same change: `MERGE_TRAIN_SPECULATIVE_STACK` is read from a repo variable (`vars.X || 'false'`). It is GUARDED per ADR-0389: only `true`/`false` are accepted, and anything else becomes `false` with a `::warning::`. Settle logs the effective value every tick, plus a prominent notice whenever it is `true`, because the last time it was on it made the money-path checklist gate fail closed (#15772).
+
+Self-tests: unit cases for the threshold boundary, lifting once a reservation is taken, failing open, the hold budget, red `main` and the expedite window. End-to-end settle ticks go through `build_parser` and `settle_from_args` with the real validated knob values: an aged strict PR holds and a young one does not, and with the knobs unset settle behaves exactly as before. Removing the hold, the budget or the red-`main` exemption makes cases fail.
+### Amendment (2026-11-21) — an owner hotfix lane through native auto-merge
+
+Context: even with `merge-priority:urgent`, an owner-blessed fix waits for the strict lane or a carrier cycle. Nothing about the ruleset requires that wait: `main-protection` requires the required checks plus `merge-train`, and GitHub's strict up-to-date rule already pins any merge to a head containing exact `main` (#17006).
+
+Decision: a label `merge-priority:hotfix`. Settle posts `merge-train` success on the PR's CURRENT head itself, and GitHub's native auto-merge merges it. No carrier is built, and the ruleset and its bypass list are unchanged. Nothing in the lane uses an override.
+
+- **Who.** The lane admits the label only when the latest `labeled` timeline event for it has the repository owner as actor. This is the same check `merge-priority:urgent` uses (`urgent_refusal`), with the same caveat: agents act through the owner's token, so the local hook and the daily cap are what bound an agent-applied label.
+- **Per head, from server-side evidence.** The label event's `created_at` must be later than the time the current head arrived on the PR branch. That arrival time is the earliest check suite GitHub created for that sha on that branch. Commit dates are author-controlled and timeline order is not a trust boundary, so neither is used. If the arrival time cannot be determined, the PR is ineligible. A push after the label makes the PR ineligible until it is relabelled, with one exception: the train's own update-branch merge. That exception holds only when GitHub resolves the merge's author to the branch-updater (or GitOps) App, the commit is web-flow-committed and verified, its first parent is the previous head, its second parent is on live `main`, and its tree equals `git merge-tree` of the two. The lane walks back through at most five such merges.
+- **Binding.** The first grant binds the label event to the head it was made on, recorded in the App's grant comment. On every later tick the current head must be that sha, or be reachable from it only through the train's verified update merges. Any `head_ref_force_pushed` or `head_ref_restored` after the label refuses, including a push back to the granted sha. So does any commit after the label that is not such an update merge. When the head leaves the bound sha, the grant is withdrawn on both shas. Suites count only when they come from this repository's own branch; a fork branch with the same name is ignored. Revocation does not depend on how far an eligibility check got. Every tick, and even with the cap at 0, the train runs a sweep over every open PR: draft, disarmed and unfetchable PRs included. In that sweep, every head the App has ever recorded a grant for loses it unless it is that PR's current head and was granted again in the same tick. The marker is set to failure and `merge-train` to pending. Removing the label is covered by the same sweep. Accepted residual: if someone pushes away from a granted sha and back again within one tick, native auto-merge may act on the still-standing success before the sweep runs. Only a sha the owner granted can merge that way. Withdrawing at the end of every granting tick would close the gap, but the lane would then never merge, because auto-merge needs time.
+- **Gate parity.** The lane bypasses only batching. A hotfix must be admitted by settle's own per-head verdict on that exact head in that tick: `live_candidates` (path refusal, admission on the live body, `qualifies` with the member contexts and extra gates, special paths) or the strict lane's green. The required checks are then re-read with the merge guard. A head granted earlier that fails any condition later has its grant withdrawn: the marker is set to failure and `merge-train` to pending.
+- **Conditions, re-checked every tick.** The PR is open and not a draft, with native auto-merge armed (the train never arms). Every required check is green on that head, the head contains live `main`, and the grant falls within `MERGE_TRAIN_HOTFIX_DAILY_CAP`. The cap is a repo variable, default 2, validated as an int in [0, 20] like the other knobs, and counts distinct owner-labelled PRs per UTC day from repository issue events. `0` turns the lane off and is the rollback. While `main` is red, only `fix`/`security` titles are eligible.
+- **Exclusion.** A hotfix touching `.github/**` gets no success while a strict carrier or an urgent reservation is in flight: a native merge moving `main` would invalidate a verdict judged over exact `main`, possibly on the rules being judged. A hotfix outside `.github/**` may merge beside an ordinary carrier, which is then rebuilt with no verdict (as with expedite).
+- **Isolation.** A granted head carries the App marker `merge-train/hotfix-granted`. It is dropped from batching, the fast lane and the strict lane in that tick and in every later one, until the head changes.
+- **Audit and self-disable.** Every grant is logged in the settle summary with the PR, head, actor and label event id, and is recorded in one App comment holding the head and the judged `main`. The next tick verifies each PR granted today or yesterday (UTC), so a grant just before midnight is still audited. It checks that the merged head equals the marked head and that the merge commit's first parent equals the judged `main`. On a mismatch the App posts one incident comment and disables the lane for the rest of the UTC day. Unreadable verification inputs disable it for that tick.
+
+Self-tests (`hotfix_lane_self_test`, plus end-to-end settle ticks through `build_parser` and `settle_from_args` with the real validated knob values) cover the grant path and these must-FAIL cases: a backdated commit pushed after the label, an undeterminable arrival time, an update merge with extra content or by another actor, a body refused at admission, a path refused by the train, a red guard, a check green at grant and red one tick later (the grant is withdrawn), a label applied by a non-owner, a later relabel by a non-owner, a label followed by a push or a force-push, a timeline that does not reach the head, a timeline API error, an exhausted cap, cap 0, a failed grant enumeration, yesterday's label, `.github` during a strict carrier or an urgent reservation, red `main` with a `feat` type, a head behind `main`, non-green checks, unarmed or draft PRs, and post-merge parent or head mismatches and unreadable verification inputs, each of which disables the lane. Removing the owner-actor check makes the non-owner cases fail.
+
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
@@ -1003,3 +1056,39 @@ authenticity, required and extra checks, lane routing and the exact-head merge A
 After a strict-lane update, review the combined head and its fresh CI before recording a new
 owner decision. A closed PR cannot receive a retroactive approval, and this change does not
 alter historical merge execution or recorder evidence.
+
+## Amendment: owner break-glass for the `merge-train` status (#17006)
+
+**When.** Only when the merge train itself cannot post `merge-train` — the train is broken, and
+the PR that would fix it is therefore unmergeable too. It is not a fast lane and not a way past a
+red check.
+
+**Who.** The repository owner, dispatching `.github/workflows/merge-train-break-glass.yml` from
+`main`, through the `merge-train-break-glass` environment. Before the workflow is usable the owner
+must create that environment (required reviewers exactly the owner, deployment branches exactly
+`main`) and store environment-scoped secrets `BREAK_GLASS_APP_ID` / `BREAK_GLASS_APP_PRIVATE_KEY`
+for the App the ruleset pins `merge-train` to (or a dedicated App, with the ruleset pin moved to
+it by the owner). Token isolation requires an environment-scoped dedicated credential; see owner
+setup. The job checks the environment protection with the workflow's own token BEFORE minting any
+App credential, never reads the repo-level `GITOPS_APP_*` secrets, and fails closed if either
+the protection or the environment secrets are missing. The environment gates the RUN; it is not
+claimed to protect any other credential. The ruleset, its required contexts and its (empty)
+bypass list are unchanged; no `--admin` is involved.
+
+**What it checks.** `break_glass_check.py` re-derives live, on the PR's current head: owner actor;
+PR open, not draft, base `main`, native auto-merge armed; head not behind `main`; every OTHER
+context required on `main` (read from the rules API, pinned to its integration) `success`; and no
+removal or weakening of a `deploy_holds` entry, no change to `money_path_services`, no file under
+a money-path service directory, and no edit to the break-glass workflow or validator themselves
+(no self-widening). A required context without an integration pin, or one produced as a commit
+status rather than a check run, refuses. `.github/`
+paths are allowed on purpose — fixing the train is the use case. A deploy hold or the money-path
+list are controls the train does not own, so lifting them waits for a working train. It then posts
+`merge-train=success` with the same App the ruleset pins the context to; native auto-merge does
+the rest. Any later push invalidates the status, as for the train's own.
+
+**Audit and post-use review.** Every use writes the job summary first, then a comment on the PR, and a
+comment on the standing `merge-train break-glass log` issue (label `governance`). Each entry is
+reviewed after the fact: was the train genuinely unable to post, and did the fix land. If any
+audit write fails after the status is posted, the run fails and posts a
+`merge-train/break-glass-audit-incomplete` failure status on the same head.

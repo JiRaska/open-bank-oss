@@ -1,0 +1,64 @@
+{
+  "identifier": "isin",
+  "reference": "stdnum.isin",
+  "sources": [
+    "https://www.iso.org/standard/78502.html"
+  ],
+  "cases": [
+    {
+      "value": "US0378331005",
+      "valid": true,
+      "rule": "Apple ISIN",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/78502.html",
+      "policy": "spec"
+    },
+    {
+      "value": "CZ0008019106",
+      "valid": true,
+      "rule": "Czech ISIN",
+      "stdnum": true,
+      "origin": "published",
+      "cite": "https://www.iso.org/standard/78502.html",
+      "policy": "spec"
+    },
+    {
+      "value": "US0378331006",
+      "valid": false,
+      "rule": "Luhn check mismatch (a [A-Z]{2}[A-Z0-9]{9}[0-9] regex accepts it)",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "XX0378331005",
+      "valid": false,
+      "rule": "country not ISO 3166",
+      "known_defect": {
+        "issue": "#16773",
+        "current": true,
+        "why": "Isin checks format and Luhn only"
+      },
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "US037833100",
+      "valid": false,
+      "rule": "11 characters",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-treasury-service",
+      "symbol": "com.openbank.treasury.domain.model.Isin.isValid",
+      "file": "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Portfolio.kt"
+    }
+  ],
+  "differential": true
+}

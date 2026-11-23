@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   kind:
+    if: github.event_name != 'schedule' || (vars.ISSUE_KIND_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     permissions:
       contents: read
       issues: write  # add/remove the needs-kind label

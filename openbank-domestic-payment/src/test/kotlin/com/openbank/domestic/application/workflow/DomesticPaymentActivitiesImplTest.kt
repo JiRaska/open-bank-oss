@@ -677,6 +677,31 @@ class DomesticPaymentActivitiesImplTest {
     }
 
     @Test
+    fun `submitScheme maps AC01 to a terminal INVALID_ACCOUNT_NUMBER reject`() {
+        // #16772: a non-issuable account is answered AC01 by the adapter; it must end REJECTED,
+        // not held in VALIDATED to be re-driven forever.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = false, reasonCode = "AC01", transmitted = false)
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.REJECTED)
+        coVerify {
+            paymentRepository.update(
+                match {
+                    it.rejectReason == DomesticRejectReason.INVALID_ACCOUNT_NUMBER &&
+                        it.rejectDetail == "rejected before transmission: AC01"
+                },
+                any(),
+            )
+        }
+        // Nothing was dispatched, so the marker must not claim it was (#16772 review).
+        coVerify(exactly = 1) { paymentRepository.clearSchemeDispatch(validated.id) }
+    }
+
+    @Test
     fun `submitScheme maps unknown scheme reason code to TECHNICAL_ERROR`() {
         val validated = payment(status = DomesticPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(validated.id) } returns validated
@@ -826,10 +851,10 @@ class DomesticPaymentActivitiesImplTest {
         idempotencyKey = "dom-idem-activity",
         status = status,
         debtorAccountId = UUID.randomUUID(),
-        debtorAccountNumber = "1234567890",
+        debtorAccountNumber = "1234567899",
         debtorBankCode = "0800",
         debtorName = "Alice Example",
-        creditorAccountNumber = "9876543210",
+        creditorAccountNumber = "9876543211",
         creditorBankCode = "0100",
         creditorName = "Brno Utility",
         amount = Money.of(BigDecimal("1500.00"), "CZK"),

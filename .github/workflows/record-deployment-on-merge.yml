@@ -195,13 +195,16 @@ jobs:
             # already verified green in the broker. Expect MORE `none` than before, on exactly
             # those commits.
             sel="$(bash .github/scripts/resolve-record-deployment-version.sh "$svc" "$SHA")"
-            case "$sel" in
-              exact:*)      REC_VER="${sel#exact:}" ;;
-              equivalent:*) REC_VER="${sel#equivalent:}"
-                            echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every recorded source — recording that (#3223, #3432)" ;;
-              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state. If that service's own src/test changed since its latest published version, that is the #9898 case: the deployed tree needs publishing, and it is NOT a provider defect. NOTE the broker's PREVIOUS record for ${svc} stays current until something replaces it: publish the deployed tree (verify-provider.yml ref=${SHA}), then re-run this workflow by workflow_dispatch with services=${svc}."
-                            continue ;;
-            esac
+            # A `none` for a pin that CHANGED fails the run (#16961): nothing is recorded and the
+            # broker keeps the PREVIOUS deployment as current, so a green run here hid a stale
+            # consumer record. Recording a fabricated version is still never the answer (#3223);
+            # the remaining services are still recorded, then the job exits 1.
+            if ! REC_VER="$(bash .github/scripts/record-deployment-selection.sh "$svc" "$SHA" "$sel")"; then
+              printf '%s\n' "$REC_VER"; rec_failed=1; continue
+            fi
+            if [ "${sel%%:*}" = equivalent ]; then
+              echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every recorded source — recording that (#3223, #3432)"
+            fi
             ok=0
             for attempt in 1 2 3; do
               if "$CLI" record-deployment \

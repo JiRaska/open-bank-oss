@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.delegation.domain.event.APPROVAL_EVENT_TYPES
 import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
+import com.openbank.delegation.domain.event.PaymentProposalEvents
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -15,6 +16,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
@@ -29,6 +31,15 @@ class KafkaDelegationOutboxEventPublisher(
     private val objectMapper: ObjectMapper,
     @Channel("approval-events-out") private val approvalEventsEmitter: MutinyEmitter<String>,
 ) : OutboxEventPublisher {
+
+    /**
+     * ADR-0383 D6 proposal lifecycle, on its own topic so no existing delegation consumer (the
+     * account/card/context projections) ever sees an event type it does not know. Field-injected
+     * so the existing constructor — and every test that builds this class by hand — is unchanged.
+     */
+    @Inject
+    @Channel("payment-proposal-events-out")
+    lateinit var paymentProposalEventsEmitter: MutinyEmitter<String>
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()
@@ -45,6 +56,7 @@ class KafkaDelegationOutboxEventPublisher(
         // ADR-0312 business-signing lifecycle: its own topic, consumed by notification-service.
         in APPROVAL_EVENT_TYPES -> approvalEventsEmitter
         in APPROVAL_GROUP_EVENT_TYPES -> approvalGroupRevisionEmitter
+        in PaymentProposalEvents.EVENT_TYPES -> paymentProposalEventsEmitter
         else -> delegationEventsEmitter
     }
 

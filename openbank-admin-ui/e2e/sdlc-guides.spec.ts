@@ -17,6 +17,10 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   const playback = train.locator('[data-play-control]')
   // The shared reduced-motion fixture pauses after hydration; toggling the SSR state races that effect.
   await expect(playback).toHaveAttribute('aria-pressed', 'false')
+  await playback.click()
+  await expect(playback).toHaveAttribute('aria-pressed', 'true')
+  await playback.click()
+  await expect(playback).toHaveAttribute('aria-pressed', 'false')
   await expect(scene).toHaveAccessibleDescription(/tří souběžných kolejí|three concurrent tracks/)
   await expect(scene.locator('[data-lane]')).toHaveCount(3)
   await expect(scene).toHaveAccessibleDescription(/čeká na ověření|awaits verification/)

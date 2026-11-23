@@ -15,8 +15,14 @@
 #   delegation.suspend    — bank-side fraud/AML signal
 #   delegation.reinstate  — bank-side undo of a suspend
 #   delegation.check      — "does an active grant cover this?" for services with no projection
+#   delegation.mcp-client.resolve — mcp-service only: ACTIVE MCP_CLIENT grants for (party, azp, jkt)
 #   delegation.recertification.read    — customer reads own pending review tasks
 #   delegation.recertification.confirm — customer records an authority-neutral review
+#   delegation.proposal.create    — mcp-service records a customer MCP client's payment PROPOSAL
+#   delegation.proposal.read      — the edge lists/reads the customer's own proposals
+#   delegation.proposal.approve   — the edge records the customer's SCA-consumed approval
+#   delegation.proposal.reject    — the edge records the customer's rejection
+#   delegation.proposal.execution — the edge records the outcome of the customer's own payment
 #
 # WHY THIS FILE IS NARROW. Every backend service authenticates on the shared `openbank-services`
 # Keycloak client, and that service account carries ROLE_OPERATOR in the realm — the trap
@@ -48,6 +54,7 @@ allowed_reasons contains "operator-delegation-write" if {
 	startswith(input.action, "delegation.")
     not startswith(input.action, "delegation.approval.")
     not startswith(input.action, "delegation.signing.")
+    not startswith(input.action, "delegation.proposal.")
     input.action != "delegation.recertification.confirm"
 }
 
@@ -125,6 +132,30 @@ allowed_reasons contains "service-delegation-check" if {
 	input.action == "delegation.check"
 }
 
+# ADR-0383 D3: mcp-service resolving a customer's MCP_CLIENT grants from the triple
+# (grantor party, client id, DPoP key thumbprint) it has just verified on the customer channel.
+# Read-only, and the caller must already hold all three to ask - it cannot enumerate another
+# party's grants. Granted to mcp-service's OWN service-account only, never the shared backend
+# identity, and vetoed for everyone else below so operator-read-any cannot reach it either.
+allowed_reasons contains "mcp-client-grant-resolve" if {
+	input.principal.type == "HUMAN"
+	# Pinned explicitly: machine_named's legacy branch admits a principal with NO service_account
+	# marker by name alone (phase-1 PEPs). This grant must never ride that fallback.
+	input.principal.service_account == true
+	machine_named("service-account-openbank-mcp")
+	input.action == "delegation.mcp-client.resolve"
+}
+
+prohibited if {
+	input.action == "delegation.mcp-client.resolve"
+	not mcp_service_principal
+}
+
+mcp_service_principal if {
+	input.principal.service_account == true
+	machine_named("service-account-openbank-mcp")
+}
+
 # Only the authenticated customer edge may record a customer's review, regardless of other roles.
 prohibited if {
     input.action == "delegation.recertification.confirm"
@@ -163,5 +194,45 @@ allowed_reasons contains "edge-service-business-signing" if {
 # for every principal except the edge: an extra allow reason can never bypass `prohibited`.
 prohibited if {
 	startswith(input.action, "delegation.signing.")
+	not machine_named("service-account-openbank-edge")
+}
+
+# ADR-0383 D6 — customer MCP proposals. Two callers, two DISJOINT halves, both enumerated:
+#   * mcp-service may only CREATE. It cannot read a proposal back, approve, reject or record an
+#     execution: "MCP proposes, the customer authorises in the app" is the whole decision.
+#   * the customer edge may read and decide, never create — a proposal it could create would be
+#     indistinguishable from one the customer typed, which D6 forbids.
+# Approving moves no money here; the edge has already consumed the customer's SCA challenge,
+# bound to the proposal's payload hash, and initiates the payment through the ordinary path.
+allowed_reasons contains "mcp-service-payment-proposal-create" if {
+	input.principal.type == "HUMAN"
+	# Pinned via mcp_service_principal: machine_named's legacy branch would admit a principal
+	# with NO service_account marker by name alone.
+	mcp_service_principal
+	input.action == "delegation.proposal.create"
+}
+
+allowed_reasons contains "edge-service-payment-proposal" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-edge")
+	input.action in {
+		"delegation.proposal.read",
+		"delegation.proposal.approve",
+		"delegation.proposal.reject",
+		"delegation.proposal.execution",
+	}
+}
+
+# Base rest.rego's operator-read-any admits staff and the shared backend identity to any read, and
+# operator-delegation-write excludes this family only by prefix. Veto at the allow head: no other
+# allow reason can widen either half.
+prohibited if {
+	input.action == "delegation.proposal.create"
+	not mcp_service_principal
+}
+
+prohibited if {
+	startswith(input.action, "delegation.proposal.")
+	input.action != "delegation.proposal.create"
 	not machine_named("service-account-openbank-edge")
 }

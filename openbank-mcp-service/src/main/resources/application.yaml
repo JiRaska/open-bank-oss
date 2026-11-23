@@ -7,10 +7,25 @@ quarkus:
       # ADR-0383 D5: bound a request body before it is parsed. Global to this service, which only
       # serves small JSON-RPC and session-control bodies; oversize requests get HTTP 413.
       max-body-size: ${MCP_MAX_BODY_SIZE:64K}
+    # ADR-0383 D5 / #16847 (owner decision 2026-11-21): the edge hop is trusted by its mTLS IDENTITY,
+    # never by IP. NO `quarkus.http.proxy.*` switch and NO trusted-proxies: ProxyForwardingGuard refuses
+    # to boot with any of them. quarkus-oidc's DPoP check for the customers tenant compares the proof
+    # `htu` with HttpServerRequest.absoluteURI(); on the TLS listener (8443) that is `https://<Host>/…`
+    # with the Host the edge passes through unchanged, so the external URL matches with no forwarding,
+    # and on plain 8150 it is `http://…`, which no published-resource proof can match.
   management:
     enabled: true
     port: 8085
     host: 0.0.0.0
+  # ADR-0383 P4 (#16590): the Valkey client exists only for the customer channel's shared store
+  # (mcp.customer.shared-store=valkey). No Dev Services container for every test/dev boot, and no
+  # readiness check: the staff path must not go unready because the customer store is down — the
+  # customer channel fails closed (503) on its own.
+  redis:
+    devservices:
+      enabled: false
+    health:
+      enabled: false
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
     # ADR-0195 step 4: resource-server mode enabled. Quarkus now validates any presented Bearer
@@ -22,6 +37,20 @@ quarkus:
     # deny, not a framework-level 401. A PRESENT-but-invalid/expired token IS rejected by Quarkus
     # OIDC itself before reaching the endpoint (fail-closed either way).
     tenant-enabled: true
+    # ADR-0383 D1: the customers realm is a SEPARATE tenant selected by the token's `iss`. Both the
+    # tenant and issuer-based resolution stay OFF unless the customer channel is enabled, so the staff
+    # tenant's behaviour is unchanged by default. Not yet verified against a live Keycloak (ADR-0383 P3).
+    resolve-tenants-with-issuer: ${MCP_CUSTOMER_ENABLED:false}
+    customers:
+      tenant-enabled: ${MCP_CUSTOMER_ENABLED:false}
+      # #16847: the customer root is bound to this tenant by path as well as by `iss`.
+      tenant-paths: /customer/mcp,/customer/mcp/*
+      auth-server-url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      token:
+        # Keycloak signs with its frontend URL, not the in-cluster discovery URL.
+        issuer: ${mcp.customer.issuer}
+        # RFC 9449: customer tokens arrive as `Authorization: DPoP <token>`.
+        authorization-scheme: DPoP
   # Outbound M2M client-credentials auth (ADR-0195 step 3) — mirrors agent-service's oidc-client
   # exactly: DownstreamClients / ConsentValidateClient (@RegisterProvider
   # OidcClientRequestReactiveFilter) mint an `openbank-services` token and attach it as a Bearer, so
@@ -87,6 +116,16 @@ quarkus:
       url: http://localhost:8116
       connect-timeout: 2000
       read-timeout: 5000
+    # ADR-0383 D3: the customer's MCP_CLIENT grant lookup (mcp-service's own m2m identity).
+    delegation-service:
+      url: http://localhost:8126
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0383 D4: the customers-realm token endpoint for the RFC 8693 exchange.
+    customer-token-exchange:
+      url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      connect-timeout: 2000
+      read-timeout: 3000
   smallrye-openapi:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
@@ -130,6 +169,40 @@ mcp:
     name: openbank-mcp
     version: "0.1.0"
     protocol-version: "2025-06-18"
+  # Customer MCP channel (ADR-0383 / ADR-0385, #16590). OFF by default. With it on, the service
+  # refuses to boot unless the issuer is set and the client allowlist exists and parses
+  # (CustomerChannel is @Startup).
+  # #16847: `mcp.edge.client-address-header` (env MCP_EDGE_CLIENT_ADDRESS_HEADER) names the ONE
+  # edge-set header carrying the client address (e.g. X-Envoy-External-Address), read only over the
+  # mTLS listener from a peer whose verified certificate carries the DNS SAN in
+  # `mcp.edge.gateway-identity` (env MCP_EDGE_GATEWAY_IDENTITY). Both deliberately not defined here:
+  # unset = never read. ProxyForwardingGuard refuses one without the other, or either without
+  # client-auth required.
+  # ClientAddressResolver never uses Quarkus' leftmost X-Forwarded-For for the audit key.
+  customer:
+    enabled: ${MCP_CUSTOMER_ENABLED:false}
+    issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
+    allowlist: ${MCP_CUSTOMER_ALLOWLIST:classpath:mcp-client-allowlist.yaml}
+    # ADR-0383 P4 (#16590): where DPoP replay claims and the D5.3 budgets live — `valkey` (shared by
+    # every replica) or `memory` (one pod; tests/dev). Unset while the channel is on refuses to boot,
+    # and a production launch refuses anything but `valkey`. The Valkey itself is quarkus.redis.hosts
+    # (QUARKUS_REDIS_HOSTS), supplied by the deployment; no host is defaulted here.
+    shared-store: ${MCP_CUSTOMER_SHARED_STORE:}
+    # 1..2000; a slower store is a down store (503).
+    shared-store-timeout-ms: ${MCP_CUSTOMER_SHARED_STORE_TIMEOUT_MS:250}
+    # Deployment secret (>= 32 bytes) that HMACs the customer subject and proof key in Valkey key
+    # names, so no key names a customer in clear. Required with shared-store=valkey; never defaulted.
+    key-hmac-secret: ${MCP_CUSTOMER_KEY_HMAC_SECRET:}
+    # ADR-0383 D3: positive grant lookups are cached at most this long (capped at PT30S in code), so
+    # a revoked MCP_CLIENT grant stops working within this bound. "No grant" and lookup failures are
+    # never cached.
+    grant-cache-ttl: ${MCP_CUSTOMER_GRANT_CACHE_TTL:PT15S}
+    # ADR-0383 D4: the customers-realm client that performs the RFC 8693 exchange (derived into the
+    # realm by gen-mcp-realm-clients.py). Its secret is read ONLY from the environment
+    # (MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET, OpenBao keycloak/mcp-service-customer-exchange); with
+    # none set, every customer read is refused rather than falling back to another credential.
+    exchange:
+      client-id: ${MCP_CUSTOMER_EXCHANGE_CLIENT_ID:openbank-mcp-service}
 
 # Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`
@@ -163,3 +236,37 @@ openbank:
       tenant-enabled: false
     oidc-client:
       enabled: false
+
+"%prod":
+  quarkus:
+    http:
+      # ADR-0383 D5 / #16847 (owner decision 2026-11-21): the customer route reaches this service ONLY
+      # on the TLS listener (8443, QUARKUS_HTTP_SSL_PORT in gitops), and the edge proves itself there by
+      # its client certificate (EnvoyProxy/edge backendTLS.clientCertificateRef). `client-auth` is a
+      # BUILD-TIME property (see ap2-service), so it is baked here, under %prod only: with no certificate
+      # configured, dev runs and @QuarkusTest would refuse to start.
+      ssl:
+        client-auth: required
+      # Keep plain 8150 for the in-cluster callers and the readiness probe; with client-auth REQUIRED
+      # Quarkus otherwise drops the HTTP listener.
+      insecure-requests: enabled
+      # #12511 listener parity: with client-auth on, Quarkus also registers its mTLS mechanism, which
+      # would turn any fleet-CA certificate into an authenticated identity on 8443. Every served root
+      # authenticates by bearer only; the certificate stays transport authentication (and the edge's
+      # SAN only decides which header ClientAddressResolver reads). `permit` keeps the anonymous
+      # paths (protected-resource metadata, token-less /mcp refusals) exactly as on 8150.
+      auth:
+        permission:
+          bearer-only:
+            paths: /mcp,/mcp/*,/api/v1/mcp/sessions,/api/v1/mcp/sessions/*,/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource/*
+            policy: permit
+            auth-mechanism: bearer
+          # #16847 (owner decision 2026-11-21, option b): the customer channel's own root takes the
+          # RFC 9449 DPoP scheme ONLY. Measured: under `bearer` an `Authorization: DPoP` request is never
+          # authenticated by the customers tenant (its htu check never runs), and the permission is
+          # global to both listeners, so the two schemes need two roots. CustomerMcpEndpoint also
+          # answers 404 off the mTLS listener.
+          customer-dpop:
+            paths: /customer/mcp,/customer/mcp/*
+            policy: permit
+            auth-mechanism: DPoP

@@ -45,6 +45,7 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/dashboard": { disposition: "sidebar-navigation-smoke", path: "/dashboard" },
   "/day-end": { disposition: "sidebar-navigation-smoke", path: "/day-end" },
   "/delegations": { disposition: "sidebar-navigation-smoke", path: "/delegations" },
+  "/delegations/mcp-channel": { disposition: "sidebar-navigation-smoke", path: "/delegations/mcp-channel" },
   "/devops": { disposition: "sidebar-navigation-smoke", path: "/devops" },
   "/devops/sdlc": { disposition: "sidebar-navigation-smoke", path: "/devops/sdlc" },
   "/devops/sdlc/ci": { disposition: "sidebar-navigation-smoke", path: "/devops/sdlc/ci" },

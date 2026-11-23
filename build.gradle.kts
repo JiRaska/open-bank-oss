@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Root build file. Per-service build.gradle.kts files own their own plugin set and
-// configure cyclonedxBom in-place because the CycloneDxTask type is on the per-project
+// configure cyclonedxBom in-place because the CycloneDX task types are on the per-project
 // plugin classpath, not the root.
 
 // Verify every CycloneDX owner's effective POMs before it generates an SBOM.

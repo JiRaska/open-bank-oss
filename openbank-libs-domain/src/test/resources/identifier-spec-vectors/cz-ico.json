@@ -1,0 +1,90 @@
+{
+  "identifier": "cz-ico",
+  "reference": "stdnum.cz.dic legal-entity check digit (zero-padded; DIČ-only 9-prefix rule not applied)",
+  "sources": [
+    "https://www.zakonyprolidi.cz/cs/2006-111",
+    "https://ares.gov.cz"
+  ],
+  "cases": [
+    {
+      "value": "48215732",
+      "valid": true,
+      "rule": "synthetic IČO, check digit by the mod-11 rule",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "48215733",
+      "valid": false,
+      "rule": "checksum mismatch",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "4821573",
+      "valid": false,
+      "rule": "7 digits whose zero-padded form 04821573 fails the check",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "4821573A",
+      "valid": false,
+      "rule": "non-digit",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "00000019",
+      "valid": true,
+      "rule": "generated valid, remainder case 0000001",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "00000108",
+      "valid": true,
+      "rule": "generated valid, remainder case 0000010",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "00001007",
+      "valid": true,
+      "rule": "generated valid, remainder case 0000100",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "90000005",
+      "valid": true,
+      "rule": "valid IČO with leading digit 9",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "00000019",
+      "valid": true,
+      "rule": "valid IČO with leading digit 0",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-kyb-service",
+      "symbol": "LegalEntityIdentifier.parse(CZ_ICO)",
+      "file": "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+    }
+  ],
+  "differential": true
+}

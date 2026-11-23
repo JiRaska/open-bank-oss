@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.12](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.11...psd2-service-v0.11.12) (2026-11-20)
+
+
+### Bug Fixes
+
+* **psd2:** refuse malformed VS/SS/KS before consent ([#16781](https://github.com/JiRaska/open-bank-oss/issues/16781)) ([d40b9ff](https://github.com/JiRaska/open-bank-oss/commit/d40b9ffc0e09d8b1dea55b2d4efa8442bca2c1e3))
+
 ## [0.11.11](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.10...psd2-service-v0.11.11) (2026-11-02)
 
 

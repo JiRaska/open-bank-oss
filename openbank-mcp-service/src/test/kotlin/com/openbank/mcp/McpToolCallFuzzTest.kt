@@ -125,12 +125,14 @@ class McpToolCallFuzzTest {
                         "consent_id" to "6a1f5f38-59a5-4e77-9f0d-2b1a7a2f1c11",
                     ),
                 ),
+                customerIssuer = java.util.Optional.empty(),
             ),
             mapper = mapper,
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(meters)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(registry, allow, 0)
@@ -385,6 +387,33 @@ class McpToolCallFuzzTest {
     @Test
     fun `an unsabotaged call is clean, so the four reports above are caused by the sabotage`() {
         assertThat(sabotaged({})).isEmpty()
+    }
+
+    // -- availability SLI input: a client's bad arguments must not read as a server fault ----------------
+
+    private fun failureCount(kind: String, onCall: (String) -> Unit): Double {
+        val h = Harness(mapper)
+        h.ports.onCall = onCall
+        h.endpoint.handle(mapper.readTree(call("list_accounts", "{}")))
+        return h.meters.find("openbank.mcp.tool_call.failures").tag("kind", kind).counter()?.count() ?: 0.0
+    }
+
+    @Test
+    fun `invalid params is metered as a client error, not a server error`() {
+        assertThat(failureCount("invalid_params") { throw IllegalArgumentException("bad") }).isEqualTo(1.0)
+        assertThat(failureCount("error") { throw IllegalArgumentException("bad") }).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a downstream fault is metered as a server error`() {
+        assertThat(failureCount("error") { throw IllegalStateException("downstream") }).isEqualTo(1.0)
+        assertThat(failureCount("invalid_params") { throw IllegalStateException("downstream") }).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `an unwired tool is metered as unavailable, and a success meters no failure`() {
+        assertThat(failureCount("unavailable") { throw UnsupportedOperationException("not wired") }).isEqualTo(1.0)
+        assertThat(failureCount("error") {}).isEqualTo(0.0)
     }
 
     // -- known deviations (disabled; see PR body) ---------------------------------------------------
