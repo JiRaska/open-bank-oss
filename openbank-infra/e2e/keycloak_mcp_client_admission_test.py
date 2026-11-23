@@ -453,7 +453,7 @@ class McpClientAdmission(unittest.TestCase):
 
         dockerfile = (ROOT / "openbank-infra/docker/keycloak/Dockerfile").read_text()
         image = re.search(r"FROM (quay\.io/keycloak/keycloak:\$\{KEYCLOAK_VERSION\}@sha256:[a-f0-9]+)", dockerfile).group(1)
-        version = re.search(r"ARG KEYCLOAK_VERSION=([0-9.]+)", dockerfile).group(1)
+        version = re.search(r"^ARG KEYCLOAK_VERSION=([A-Za-z0-9._-]+)$", dockerfile, re.MULTILINE).group(1)
         features = re.search(r"ENV KC_FEATURES=(\S+)", dockerfile).group(1)
         image = image.replace("${KEYCLOAK_VERSION}", version)
         # The extension, from the committed Dockerfile (compiled and unit-tested in that stage).

@@ -105,7 +105,7 @@ class WorkloadIdentity(unittest.TestCase):
         realm_file.chmod(0o644)
         dockerfile = (ROOT / "openbank-infra/docker/keycloak/Dockerfile").read_text()
         image = re.search(r"FROM (quay\.io/keycloak/keycloak:\$\{KEYCLOAK_VERSION\}@sha256:[a-f0-9]+)", dockerfile).group(1)
-        version = re.search(r"ARG KEYCLOAK_VERSION=([0-9.]+)", dockerfile).group(1)
+        version = re.search(r"^ARG KEYCLOAK_VERSION=([A-Za-z0-9._-]+)$", dockerfile, re.MULTILINE).group(1)
         image = image.replace("${KEYCLOAK_VERSION}", version)
         cls.container = "ob-workload-test-" + secrets.token_hex(6)
         cls.addClassCleanup(lambda: run("docker", "rm", "-f", cls.container))
