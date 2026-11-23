@@ -63,6 +63,7 @@ internal class McpCustomerBranch(
 ) {
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
+    /** Returns null only for an admitted protocol method that continues through MCP dispatch. */
     @Suppress("ReturnCount")
     fun handle(
         jwt: JsonWebToken,
@@ -77,7 +78,7 @@ internal class McpCustomerBranch(
                 .header(WWW_AUTHENTICATE, admission.missingTokenChallenge())
                 .build()
         }
-        if (!admission.isCustomerToken(jwt)) return null
+        if (!admission.isCustomerToken(jwt)) return refuseNonCustomerToken()
         val outcome = runBlocking { admission.admit(jwt, authorization, dpop, throttles) }
         return when (outcome) {
             is Outcome.Refused -> refuse(outcome, jwt.subject, method, params)
@@ -86,7 +87,7 @@ internal class McpCustomerBranch(
     }
 
     /** #16847: on the customer root a staff (or any non-customers-realm) token is refused, never dispatched. */
-    fun refuseNonCustomerToken(): Response {
+    private fun refuseNonCustomerToken(): Response {
         log.info("customer root refused a token that is not a customers-realm token")
         return Response.status(Response.Status.UNAUTHORIZED)
             .header(WWW_AUTHENTICATE, admission.missingTokenChallenge())

@@ -181,7 +181,10 @@ class McpEndpoint(
      */
     private fun preDispatch(customer: Boolean, method: String, id: JsonNode, params: JsonNode): Response? =
         if (customer) {
-            customerBranch?.let { branch ->
+            val branch = customerBranch
+            if (branch == null) {
+                Response.status(Response.Status.NOT_FOUND).build()
+            } else {
                 branch.handle(
                     callerResolver.token,
                     httpRequest.getHeader(AUTHORIZATION_HEADER),
@@ -189,8 +192,8 @@ class McpEndpoint(
                     method,
                     id,
                     params,
-                ) ?: branch.refuseNonCustomerToken()
-            } ?: Response.status(Response.Status.NOT_FOUND).build()
+                )
+            }
         } else {
             staffPreDispatch(method, params)
         }

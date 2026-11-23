@@ -144,6 +144,16 @@ class McpGatewayMtlsIT {
             .post("/customer/mcp").then().statusCode(401)
     }
 
+    @Test
+    fun `an admitted customer initialize reaches the protocol handshake`() {
+        val protocol = publishedProofToolsList(
+            mtls("gateway"),
+            "c0ffee00-0000-0000-0000-000000000026",
+            body = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""",
+        ).statusCode(200).extract().path<String>("result.protocolVersion")
+        assertThat(protocol).isNotBlank()
+    }
+
     /**
      * Must-reject cases (#16847). Measured 2026-11-21: under a `bearer` permission an
      * `Authorization: DPoP` request was never authenticated by the customers tenant and all of these
