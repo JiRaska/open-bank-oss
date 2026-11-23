@@ -97,7 +97,7 @@ class SddMandateServiceTest {
             status = MandateStatus.PENDING_CONFIRMATION,
             b2bConfirmed = false,
         )
-        every { mandates.findById(pending.id) } returns Uni.createFrom().item(pending)
+        every { mandates.findByIdForUpdate(pending.id) } returns Uni.createFrom().item(pending)
         stubSaveAndOutbox()
 
         val confirmed = service.confirm(pending.id).await().indefinitely()
@@ -108,7 +108,7 @@ class SddMandateServiceTest {
 
     @Test
     fun `operating on an unknown mandate id fails with MandateNotFound`() {
-        every { mandates.findById(any()) } returns Uni.createFrom().nullItem()
+        every { mandates.findByIdForUpdate(any()) } returns Uni.createFrom().nullItem()
         assertThatThrownBy { service.confirm(UUID.randomUUID()).await().indefinitely() }
             .isInstanceOf(MandateNotFoundException::class.java)
     }
@@ -160,6 +160,7 @@ class SddMandateServiceTest {
     fun `authorising a valid collection accepts, stamps the collection and emits the authorised event`() {
         val mandate = Fixtures.mandate(sequenceType = SequenceType.FRST)
         every { mandates.findByReference(any(), any()) } returns Uni.createFrom().item(mandate)
+        every { mandates.findByIdForUpdate(mandate.id) } returns Uni.createFrom().item(mandate)
         val savedSlot = slot<SddMandate>()
         every { mandates.save(capture(savedSlot)) } answers { Uni.createFrom().item(firstArg<SddMandate>()) }
         val msgSlot = slot<OutboxMessage>()
@@ -182,6 +183,31 @@ class SddMandateServiceTest {
         assertThat(savedSlot.captured.sequenceType).isEqualTo(SequenceType.RCUR)
         assertThat(savedSlot.captured.lastCollectionDate).isEqualTo(LocalDate.parse("2026-03-01"))
         assertThat(msgSlot.captured.eventType).isEqualTo("sdd.collection.authorised.v1")
+    }
+
+    @Test
+    fun `authorisation does not stamp a mandate that expired during screening`() {
+        val mandate = Fixtures.mandate(sequenceType = SequenceType.FRST)
+        every { mandates.findByReference(any(), any()) } returns Uni.createFrom().item(mandate)
+        every { mandates.findByIdForUpdate(mandate.id) } returns
+            Uni.createFrom().item(mandate.copy(status = MandateStatus.EXPIRED))
+
+        val result = service.authorise(
+            CollectionInstruction(
+                "DE98ZZZ09999999999",
+                "UMR-0001",
+                SddScheme.CORE,
+                SequenceType.FRST,
+                BigDecimal("42.00"),
+                "EUR",
+                LocalDate.parse("2026-03-01"),
+            ),
+            DebtorControls(),
+        ).await().indefinitely()
+
+        assertThat(result).isInstanceOf(AuthorisationResult.Reject::class.java)
+        verify(exactly = 0) { mandates.save(any()) }
+        verify(exactly = 0) { outbox.append(any()) }
     }
 
     @Test
