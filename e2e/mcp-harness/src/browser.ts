@@ -9,6 +9,7 @@
 import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs'
 import type { BrowserContext, Page, Route } from 'playwright-core'
 import { chromium } from 'playwright-core'
+import { reservePasskeyCounter } from './passkey-counter.ts'
 import { assertTarget } from './guard.ts'
 
 /** CDP `WebAuthn.addCredential` shape. Base64 (standard) fields, as CDP expects. */
@@ -27,7 +28,7 @@ export interface PasskeyBrowser {
   close(): Promise<void>
 }
 
-export async function openPasskeyBrowser(o: { headless: boolean; passkeyFile?: string; minimumSignCount?: number }): Promise<PasskeyBrowser> {
+export async function openPasskeyBrowser(o: { headless: boolean; passkeyFile?: string; minimumSignCount?: number; counterFile?: string }): Promise<PasskeyBrowser> {
   const browser = await chromium.launch({ headless: o.headless, channel: process.env.MCP_HARNESS_BROWSER_CHANNEL || undefined })
   try {
     const context = await browser.newContext()
@@ -49,7 +50,7 @@ export async function openPasskeyBrowser(o: { headless: boolean; passkeyFile?: s
       let cred: PasskeyCredential
       try {
         const mode = fstatSync(fd)
-        if (o.minimumSignCount !== undefined && (!mode.isFile() || (mode.mode & 0o077) !== 0 || mode.size > 16_384)) {
+        if ((o.minimumSignCount !== undefined || o.counterFile) && (!mode.isFile() || (mode.mode & 0o077) !== 0 || mode.size > 16_384)) {
           throw new Error('app sign-in requires a private passkey fixture file')
         }
         try {
@@ -58,9 +59,12 @@ export async function openPasskeyBrowser(o: { headless: boolean; passkeyFile?: s
           throw new Error('passkey fixture is not valid JSON')
         }
       } finally { closeSync(fd) }
+      const signCount = o.counterFile
+        ? reservePasskeyCounter(o.counterFile, cred)
+        : Math.max(cred.signCount ?? 0, o.minimumSignCount ?? 0)
       await cdp.send('WebAuthn.addCredential', {
         authenticatorId,
-        credential: { ...cred, isResidentCredential: true, signCount: Math.max(cred.signCount ?? 0, o.minimumSignCount ?? 0) },
+        credential: { ...cred, isResidentCredential: true, signCount },
       })
     }
     return { context, page, authenticatorId, close: () => browser.close() }

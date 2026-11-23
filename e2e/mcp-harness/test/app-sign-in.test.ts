@@ -65,6 +65,7 @@ test('durable sign-in is opt-in and requires the existing synthetic approval bou
     MCP_HARNESS_SYNTHETIC_SANDBOX: 'true',
     MCP_HARNESS_AUTH_SERVER: issuer,
     MCP_HARNESS_PASSKEY_FILE: '/synthetic-passkey.json',
+    MCP_HARNESS_APP_COUNTER_FILE: '/private/runner-counter.json',
     MCP_HARNESS_CUSTOMER_EDGE_URL: 'https://edge.test/customer/v1',
     MCP_HARNESS_PARTY_ID: party,
     MCP_HARNESS_CONNECT_CREDENTIAL_ID: 'synthetic-device',
@@ -73,10 +74,13 @@ test('durable sign-in is opt-in and requires the existing synthetic approval bou
     MCP_HARNESS_READ_TOOL_ARGS: JSON.stringify({ accountId: party }),
   }
   assert.equal(loadJourneyConfig(env, true).appSignIn, true)
+  assert.throws(() => loadJourneyConfig({ ...env, MCP_HARNESS_APP_COUNTER_FILE: undefined }, true), /durable passkey counter state/)
+  const local = { ...env, MCP_HARNESS_AUTH_SERVER: 'https://localhost/realms/openbank-customers', MCP_HARNESS_APP_COUNTER_FILE: undefined }
+  assert.equal(loadJourneyConfig(local, true).appSignIn, true)
   assert.throws(() => loadJourneyConfig({ ...env, MCP_HARNESS_APP_TOKEN: 'explicit' }, true), /app sign-in requires/)
   assert.throws(() => loadJourneyConfig({ ...env, MCP_HARNESS_AUTH_SERVER: undefined }, true), /app sign-in requires/)
   assert.throws(() => loadJourneyConfig({ ...env, MCP_HARNESS_SYNTHETIC_SANDBOX: '' }, true), /synthetic sandbox/)
-  const explicit = loadJourneyConfig({ ...env, MCP_HARNESS_APP_SIGN_IN: undefined, MCP_HARNESS_APP_TOKEN: 'explicit' }, true)
+  const explicit = loadJourneyConfig({ ...env, MCP_HARNESS_APP_SIGN_IN: undefined, MCP_HARNESS_APP_COUNTER_FILE: undefined, MCP_HARNESS_APP_TOKEN: 'explicit' }, true)
   assert.equal(explicit.softwareConnectApproval?.appToken, 'explicit')
   assert.equal(explicit.appSignIn, false)
 })

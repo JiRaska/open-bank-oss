@@ -45,6 +45,7 @@ export interface JourneyConfig extends HarnessConfig {
   softwareConnectApproval?: SoftwareConnectApproval
   verifyProposal?: boolean
   appSignIn?: boolean
+  appCounterFile?: string
 }
 
 export interface SoftwareConnectApproval {
@@ -113,10 +114,18 @@ export function loadJourneyConfig(
   verifyProposal = false,
 ): JourneyConfig {
   const appSignIn = env.MCP_HARNESS_APP_SIGN_IN === 'true'
+  const appCounterFile = env.MCP_HARNESS_APP_COUNTER_FILE
+  if (!appSignIn && appCounterFile !== undefined) throw new Error('app counter state requires app sign-in')
   const softwareConnect = env.MCP_HARNESS_SOFTWARE_CONNECT_APPROVAL === 'true'
   if (appSignIn && (!softwareConnect || env.MCP_HARNESS_APP_TOKEN !== undefined ||
       !env.MCP_HARNESS_PASSKEY_FILE || !env.MCP_HARNESS_AUTH_SERVER)) {
     throw new Error('app sign-in requires synthetic software approval, an explicit sandbox issuer and passkey file')
+  }
+  if (appSignIn && !appCounterFile) {
+    const issuerHost = new URL(env.MCP_HARNESS_AUTH_SERVER!).hostname
+    const loopback = issuerHost === 'localhost' || issuerHost === '[::1]' ||
+      /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(issuerHost)
+    if (!loopback) throw new Error('shared sandbox app sign-in requires durable passkey counter state')
   }
   if (verifyProposal && (!softwareConnect || readOnly || verifyRevocation ||
       (env.MCP_HARNESS_SCOPE !== undefined && env.MCP_HARNESS_SCOPE !== 'openid'))) {
@@ -136,7 +145,7 @@ export function loadJourneyConfig(
     MCP_HARNESS_SCOPE: env.MCP_HARNESS_SCOPE ?? (readOnly || verifyProposal ? 'openid' : undefined),
     MCP_HARNESS_RESOURCE_URL: env.MCP_HARNESS_RESOURCE_URL ?? 'https://localhost/customer/mcp',
   })
-  const cfg: JourneyConfig = { ...shared, readOnly, appSignIn }
+  const cfg: JourneyConfig = { ...shared, readOnly, appSignIn, appCounterFile }
   const edgeUrl = env.MCP_HARNESS_CUSTOMER_EDGE_URL
   const appToken = env.MCP_HARNESS_APP_TOKEN
   if (softwareConnect) {

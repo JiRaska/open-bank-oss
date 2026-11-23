@@ -95,7 +95,8 @@ export async function runJourney(cfg: JourneyConfig, log: (r: StepResult) => voi
 
   let appToken = software?.appToken
   const browser = await openPasskeyBrowser({ headless: cfg.headless, passkeyFile: cfg.passkeyFile,
-    minimumSignCount: cfg.appSignIn ? Math.floor(Date.now() / 1000) : undefined })
+    minimumSignCount: cfg.appSignIn && !cfg.appCounterFile ? Math.floor(Date.now() / 1000) : undefined,
+    counterFile: cfg.appCounterFile })
   let callback: string
   try {
     if (cfg.appSignIn) {

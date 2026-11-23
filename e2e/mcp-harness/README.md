@@ -88,12 +88,41 @@ and session files. It can be combined with `--verify-revocation`.
 To acquire the app session during each run, set `MCP_HARNESS_APP_SIGN_IN=true` in the synthetic
 software mode and omit `MCP_HARNESS_APP_TOKEN`. Set `MCP_HARNESS_AUTH_SERVER` to the exact trusted
 sandbox customers realm issuer and mount the enrolled synthetic resident passkey as
-`MCP_HARNESS_PASSKEY_FILE` with owner-only permissions. Run one job at a time for that credential
-with a synchronized clock. The ephemeral authenticator advances the fixture signature counter
-and uses the same credential for the two successive ceremonies. It signs in through the bank
-app's standard S256 authorization code flow, intercepts the registered app callback locally, and
-keeps only the short-lived access token in memory for Customer Edge calls. Existing explicit
-token mode remains available for local fixtures.
+`MCP_HARNESS_PASSKEY_FILE` with owner-only permissions. The app uses its standard S256
+authorization code flow. The registered callback is intercepted locally, and only the
+short-lived access token remains in memory for Customer Edge.
+
+For a shared sandbox, also set `MCP_HARNESS_APP_COUNTER_FILE` to an owner-only state file on a
+writable persistent volume. Launch scheduled and manual shared runs through
+`sh run-sandbox-journey.sh --read-only --verify-revocation` (or pass `--verify-proposal`).
+The Linux runner needs util-linux `flock`. The wrapper holds a nonblocking exclusive file lock
+for the entire Node process and releases it on process exit or crash. Use the same durable
+mount and path for each run. Use a single-pod write mount, or otherwise guarantee equivalent
+filesystem lock semantics for that volume. Keep CronJob `concurrencyPolicy: Forbid` as well.
+The harness atomically persists a new range before the browser makes either assertion, so a
+crash can leave unused counts without causing reuse. The state contains the credential identity
+hash and reserved counter only. Preserve it across pod replacements, and provision a new state
+when rotating the passkey. An absent, corrupt or mismatched file stops the shared run.
+
+Initialize the state once when enrolling a new synthetic credential, using its registered
+counter as the starting value and creating the file exclusively. A previously used fixture
+requires a counter upper bound from its latest state before migration.
+
+```sh
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  import { passkeyCounterIdentity } from "./src/passkey-counter.ts";
+  const credential = JSON.parse(readFileSync(process.env.MCP_HARNESS_PASSKEY_FILE, "utf8"));
+  writeFileSync(process.env.MCP_HARNESS_APP_COUNTER_FILE, JSON.stringify({
+    version: 1,
+    credentialSha256: passkeyCounterIdentity(credential),
+    reservedThrough: credential.signCount ?? 0,
+  }) + "\n", { flag: "wx", mode: 0o600 });
+'
+```
+
+For a loopback issuer, the disposable clock-based counter remains available without the state
+file. Existing explicit-token mode remains available for local fixtures.
 
 Run `npm run journey -- --verify-proposal` to verify V2 proposal creation with the same synthetic
 software device and Customer Edge settings. Keep the scope at `openid` for online authorization.
