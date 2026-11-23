@@ -92,6 +92,7 @@ class McpClientGrantResource(
     @Authorize(action = "delegation.mcp-client.authorize-balance-read")
     suspend fun authorizeBalanceRead(
         request: McpBalanceReadAuthorization.VerifiedRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: String?,
     ): McpBalanceReadAuthorization.Permit {
         if (customerPartyId != null || !ServiceAccountIdentity.isClient(identity, setOf(MCP_READ_ISSUER_CLIENT))) {
@@ -103,6 +104,7 @@ class McpClientGrantResource(
         }
         require(JKT.matches(request.keyThumbprint)) { "invalid keyThumbprint" }
         require(PROOF_KEY.matches(request.proofKey)) { "invalid proof reference" }
+        requireMcpConnectIdempotencyKey(idempotencyKey, request.proofKey)
         requireMatchingMode(request.connectionId)
         return balanceAuthorization.authorize(request) ?: throw ForbiddenException("MCP balance read is not authorized")
     }
@@ -114,6 +116,7 @@ class McpClientGrantResource(
     @Authorize(action = "delegation.mcp-client.check-balance-grant")
     suspend fun checkBalanceGrant(
         request: McpBalanceReadGrantCheck.Binding?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: String?,
     ): Response {
         if (customerPartyId != null || !ServiceAccountIdentity.isClient(identity, setOf(MCP_BALANCE_READER_CLIENT))) {
@@ -123,6 +126,7 @@ class McpClientGrantResource(
         require(request.clientId.isNotBlank() && request.clientId.length <= DelegationGrant.CLIENT_ID_MAX_LENGTH) {
             "invalid clientId"
         }
+        requireMcpConnectIdempotencyKey(idempotencyKey, request.grantId.toString())
         requireMatchingMode(request.connectionId)
         if (!balanceGrantCheck.isActive(request)) throw ForbiddenException("MCP balance grant is not active")
         return Response.noContent().build()

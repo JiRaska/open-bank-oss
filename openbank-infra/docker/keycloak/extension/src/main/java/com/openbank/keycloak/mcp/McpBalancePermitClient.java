@@ -47,6 +47,7 @@ final class McpBalancePermitClient {
         var body = permitBody(evidence, accountId, proofKey);
         var request = HttpRequest.newBuilder(endpoint).timeout(TIMEOUT)
                 .header("Content-Type", "application/json")
+                .header("Idempotency-Key", proofKey)
                 .header("Authorization", "Bearer " + issuerToken)
                 .POST(HttpRequest.BodyPublishers.ofString(JsonSerialization.writeValueAsString(body)))
                 .build();

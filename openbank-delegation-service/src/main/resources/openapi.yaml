@@ -771,6 +771,12 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationCheckResponse' }
   /api/v1/delegations/mcp-connect/requests:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Register the authenticated Keycloak PAR binding
       requestBody:
@@ -792,6 +798,12 @@ paths:
     parameters:
       - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Read the committed selection for the Keycloak authorization session
       requestBody:
@@ -813,6 +825,12 @@ paths:
     parameters:
       - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Bind the selected accounts to the verified SCA context
       requestBody:
@@ -834,6 +852,12 @@ paths:
     parameters:
       - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Reserve an authorization code after consumed SCA
       requestBody:
@@ -853,6 +877,12 @@ paths:
         '409': { description: Conflicting or expired transition }
   /api/v1/delegations/mcp-connect/requests/staged:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical codeBindingRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Locate a staged authorization by verified code binding
       requestBody:
@@ -873,6 +903,12 @@ paths:
     parameters:
       - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Atomically activate grants for a verified refresh family
       requestBody:
@@ -892,6 +928,12 @@ paths:
         '409': { description: Conflicting or expired transition }
   /api/v1/delegations/mcp-connect/requests/family-status:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical refreshFamilyRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Check that the exact refresh family remains active
       requestBody:
@@ -930,10 +972,17 @@ paths:
     parameters:
       - { name: connectionId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical connectionId of this operation.
+          schema: { type: string, format: uuid }
       tags: [Delegations]
       summary: Revoke a customer connection and its active grants
       responses:
         '204': { description: Connection revoked }
+        '400': { description: Missing or mismatched Idempotency-Key }
         '403': { description: Caller is not the customer edge }
         '404': { description: Connection unavailable to this customer }
   /api/v1/delegations/mcp-connect/customer/requests:
@@ -1022,6 +1071,12 @@ paths:
         '403': { description: Caller is not mcp-service, or the request carries a customer-party header }
   /api/v1/delegations/mcp-client/authorize-balance-read:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical proofKey.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
       tags: [Delegations]
       summary: Authorize one balance read for the internal token issuer
       description: |
@@ -1059,6 +1114,12 @@ paths:
         '403': { description: Caller, grant, ownership or proof claim refused }
   /api/v1/delegations/mcp-client/check-balance-grant:
     post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical grantId.
+          schema: { type: string, format: uuid }
       tags: [Delegations]
       summary: Check one current balance-read grant for the dedicated balance-service identity
       requestBody:
@@ -1694,10 +1755,13 @@ components:
         clientId: { type: string }
         resource: { type: string, format: uri }
         expiresAtEpochSecond: { type: integer, format: int64 }
-        status: { type: string, enum: [ACTIVE, REVOKED, EXPIRED] }
+        status: { $ref: '#/components/schemas/McpConnectionStatus' }
         accounts:
           type: array
           items: { $ref: '#/components/schemas/McpConnectAccountSelection' }
+    McpConnectionStatus:
+      type: string
+      enum: [ACTIVE, REVOKED, EXPIRED]
     McpConnectAccountSelection:
       type: object
       required: [accountId, capabilities]

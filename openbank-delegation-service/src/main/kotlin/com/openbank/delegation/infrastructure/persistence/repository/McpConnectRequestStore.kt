@@ -123,13 +123,19 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
         val connectionId: UUID?,
     )
 
+    enum class McpConnectionStatus {
+        ACTIVE,
+        REVOKED,
+        EXPIRED,
+    }
+
     data class Connection(
         val connectionId: UUID,
         val partyId: UUID,
         val clientId: String,
         val resource: String,
         val expiresAtEpochSecond: Long,
-        val status: String,
+        val status: McpConnectionStatus,
         val accounts: List<AccountSelection>,
     )
 
@@ -144,7 +150,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
                     row.getString("client_id"),
                     row.getString("resource"),
                     row.getOffsetDateTime("grant_valid_until").toEpochSecond(),
-                    row.getString("connection_status"),
+                    McpConnectionStatus.valueOf(row.getString("connection_status")),
                     group.mapNotNull { it.accountSelection() },
                 )
             }

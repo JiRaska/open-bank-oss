@@ -11,6 +11,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.WebApplicationException
@@ -37,13 +38,16 @@ data class McpBalanceGrantRequest(
 @Consumes(MediaType.APPLICATION_JSON)
 interface McpBalanceGrantRestClient {
     @POST
-    fun check(request: McpBalanceGrantRequest): Uni<Response>
+    fun check(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        request: McpBalanceGrantRequest,
+    ): Uni<Response>
 }
 
 @ApplicationScoped
 class McpBalanceGrantClient(@RestClient private val client: McpBalanceGrantRestClient) {
     suspend fun isActive(request: McpBalanceGrantRequest): Boolean = try {
-        client.check(request).awaitSuspending().use { it.status == Response.Status.NO_CONTENT.statusCode }
+        client.check(request.grantId.toString(), request).awaitSuspending().use { it.status == Response.Status.NO_CONTENT.statusCode }
     } catch (e: WebApplicationException) {
         if (e.response?.status != Response.Status.FORBIDDEN.statusCode) throw e
         e.response.close()

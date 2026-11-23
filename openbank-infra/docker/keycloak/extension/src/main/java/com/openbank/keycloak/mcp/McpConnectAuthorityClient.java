@@ -97,7 +97,7 @@ final class McpConnectAuthorityClient {
     }
 
     void register(Request request) throws IOException {
-        JsonNode response = post(REQUESTS, request.registration(), 200, 201);
+        JsonNode response = post(REQUESTS, request.reference(), request.registration(), 200, 201);
         requireIdentity(request, response);
         if (!textIs(response, "status", "PENDING_SELECTION")
                 || !textIs(response, "redirectHost", request.base().redirectHost())
@@ -108,18 +108,18 @@ final class McpConnectAuthorityClient {
     }
 
     List<McpConnectContextV2.AccountScope> selectedAccounts(Request request) throws IOException {
-        return selectionOf(request, post(path(request, "/selection"), request.identity(), 200));
+        return selectionOf(request, post(path(request, "/selection"), request.reference(), request.identity(), 200));
     }
 
     void bindChallenge(Request request, Challenge challenge) throws IOException {
-        JsonNode response = post(path(request, "/challenge"), challenge.binding(request), 200, 201);
+        JsonNode response = post(path(request, "/challenge"), request.reference(), challenge.binding(request), 200, 201);
         requireChallenge(request, challenge, response, "CHALLENGE_BOUND");
     }
 
     void stage(Request request, Challenge challenge, String codeBindingRef) throws IOException {
         var body = challenge.binding(request);
         body.put("codeBindingRef", codeBindingRef);
-        JsonNode response = post(path(request, "/stage"), body, 200, 201);
+        JsonNode response = post(path(request, "/stage"), request.reference(), body, 200, 201);
         requireChallenge(request, challenge, response, "APPROVED_AWAITING_FAMILY");
         if (!textIs(response, "codeBindingRef", codeBindingRef)) {
             throw new IOException("connect staging did not attest the code binding");
@@ -135,7 +135,7 @@ final class McpConnectAuthorityClient {
     }
 
     Stage staged(String partyId, String clientId, String jkt, String codeBindingRef) throws IOException {
-        JsonNode response = post(REQUESTS + "/staged",
+        JsonNode response = post(REQUESTS + "/staged", codeBindingRef,
                 Map.of("partyId", partyId, "clientId", clientId, "parJkt", jkt, "codeBindingRef", codeBindingRef), 200);
         // The bank authority binds the same immutable registered context to the verified code reference.
         var base = new McpConnectContext(clientId, response.path("redirectHost").textValue(),
@@ -152,7 +152,7 @@ final class McpConnectAuthorityClient {
     }
 
     UUID activeFamily(String partyId, String clientId, String jkt, FamilyReference family) throws IOException {
-        JsonNode response = post(REQUESTS + "/family-status",
+        JsonNode response = post(REQUESTS + "/family-status", family.value(),
                 Map.of("partyId", partyId, "clientId", clientId, "parJkt", jkt, "refreshFamilyRef", family.value()), 200);
         UUID connection = canonicalUuid(response.path("connectionId").textValue());
         if (!textIs(response, "status", "ACTIVE") || !textIs(response, "partyId", partyId)
@@ -167,7 +167,7 @@ final class McpConnectAuthorityClient {
         var body = stage.challenge().binding(stage.request());
         body.put("codeBindingRef", stage.codeBindingRef());
         body.put("refreshFamilyRef", family.value());
-        JsonNode response = post(path(stage.request(), "/activate"), body, 200, 201);
+        JsonNode response = post(path(stage.request(), "/activate"), stage.request().reference(), body, 200, 201);
         requireChallenge(stage.request(), stage.challenge(), response, "ACTIVE");
         if (!textIs(response, "codeBindingRef", stage.codeBindingRef())) {
             throw new IOException("connect activation did not attest the staged code");
@@ -284,8 +284,9 @@ final class McpConnectAuthorityClient {
         return REQUESTS + "/" + request.reference() + suffix;
     }
 
-    private JsonNode post(String path, Object body, int... successStatuses) throws IOException {
-        HttpResponse<String> response = transport.postWithBankIdentity(HttpRequest.newBuilder(URI.create(origin + path)),
+    private JsonNode post(String path, String idempotencyKey, Object body, int... successStatuses) throws IOException {
+        HttpResponse<String> response = transport.postWithBankIdentity(HttpRequest.newBuilder(URI.create(origin + path))
+                        .header("Idempotency-Key", idempotencyKey),
                 body);
         for (int allowed : successStatuses) {
             if (response.statusCode() == allowed) {

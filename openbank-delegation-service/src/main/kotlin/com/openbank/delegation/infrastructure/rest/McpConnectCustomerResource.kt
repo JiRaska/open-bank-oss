@@ -99,8 +99,11 @@ class McpConnectCustomerResource(
     suspend fun revoke(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
         @PathParam("connectionId") connectionId: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        if (!store.revoke(requireCustomer(customerPartyId), connectionId)) throw NotFoundException()
+        val party = requireCustomer(customerPartyId)
+        requireMcpConnectIdempotencyKey(idempotencyKey, connectionId.toString())
+        if (!store.revoke(party, connectionId)) throw NotFoundException()
         return Response.noContent().build()
     }
 

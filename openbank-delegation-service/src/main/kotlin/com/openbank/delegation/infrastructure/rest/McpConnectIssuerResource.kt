@@ -63,11 +63,13 @@ class McpConnectIssuerResource(
     @POST
     @Authorize(action = "delegation.mcp-connect.issuer.register")
     suspend fun register(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: Registration?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
         val request = requireNotNull(body) { "registration is required" }.toRequest()
+        requireMcpConnectIdempotencyKey(idempotencyKey, request.requestRef)
         if (!store.register(request)) throw conflict()
         return envelope(request, "PENDING_SELECTION") + mapOf(
             "redirectHost" to request.redirectHost,
@@ -80,11 +82,13 @@ class McpConnectIssuerResource(
     @Path("/{requestRef}/selection")
     @Authorize(action = "delegation.mcp-connect.issuer.selection")
     suspend fun selection(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: McpConnectRequestStore.Binding?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
+        requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val review = find(requestRef, requireNotNull(body) { "binding is required" })
         val status = if (review.accounts.isEmpty()) "PENDING_SELECTION" else "SELECTED"
         return envelope(review.request, status) + ("accounts" to review.accounts)
@@ -94,11 +98,13 @@ class McpConnectIssuerResource(
     @Path("/{requestRef}/challenge")
     @Authorize(action = "delegation.mcp-connect.issuer.challenge")
     suspend fun challenge(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: ChallengeBinding?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
+        requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "challenge binding is required" }
         val binding = McpConnectRequestStore.Binding(link.partyId, link.clientId, link.parJkt)
         val review = find(requestRef, binding)
@@ -122,11 +128,13 @@ class McpConnectIssuerResource(
     @Path("/{requestRef}/stage")
     @Authorize(action = "delegation.mcp-connect.issuer.stage")
     suspend fun stage(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
+        requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "code binding is required" }
         val review = find(requestRef, link.binding())
         val stage = verifyConsumed(review, link)
@@ -138,11 +146,13 @@ class McpConnectIssuerResource(
     @Path("/staged")
     @Authorize(action = "delegation.mcp-connect.issuer.staged")
     suspend fun staged(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: CodeLookup?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
         val lookup = requireNotNull(body) { "code binding is required" }
+        requireMcpConnectIdempotencyKey(idempotencyKey, lookup.codeBindingRef)
         require(REQUEST_REF.matches(lookup.codeBindingRef)) { "invalid code binding" }
         val binding = McpConnectRequestStore.Binding(lookup.partyId, lookup.clientId, lookup.parJkt)
         val review = store.findStaged(binding, lookup.codeBindingRef) ?: throw NotFoundException()
@@ -157,11 +167,13 @@ class McpConnectIssuerResource(
     @Path("/{requestRef}/activate")
     @Authorize(action = "delegation.mcp-connect.issuer.activate")
     suspend fun activate(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
+        requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "refresh family is required" }
         val family = requireNotNull(link.refreshFamilyRef) { "refresh family is required" }
         require(REQUEST_REF.matches(family)) { "invalid refresh family" }
@@ -183,11 +195,13 @@ class McpConnectIssuerResource(
     @Path("/family-status")
     @Authorize(action = "delegation.mcp-connect.issuer.family-status")
     suspend fun familyStatus(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: FamilyLookup?,
     ): Map<String, Any> {
         requireIssuer(customerParty)
         val lookup = requireNotNull(body) { "refresh family is required" }
+        requireMcpConnectIdempotencyKey(idempotencyKey, lookup.refreshFamilyRef)
         require(REQUEST_REF.matches(lookup.refreshFamilyRef)) { "invalid refresh family" }
         val binding = McpConnectRequestStore.Binding(lookup.partyId, lookup.clientId, lookup.parJkt)
         val connectionId = store.activeFamily(binding, lookup.refreshFamilyRef) ?: throw NotFoundException()
@@ -369,4 +383,9 @@ class McpConnectIssuerResource(
         val SCOPE = Regex("^[A-Za-z0-9._:/-]{1,100}$")
         fun conflict() = ClientErrorException("connect request is unavailable", Response.Status.CONFLICT)
     }
+}
+
+// The authority store already atomically checks natural references and the full immutable binding.
+internal fun requireMcpConnectIdempotencyKey(key: String?, reference: String) {
+    require(key == reference) { "Idempotency-Key must match the operation reference" }
 }

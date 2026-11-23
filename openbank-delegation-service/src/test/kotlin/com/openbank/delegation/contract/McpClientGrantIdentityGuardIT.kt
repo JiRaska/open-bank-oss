@@ -90,6 +90,7 @@ class McpClientGrantIdentityGuardIT {
 
     private fun authorizeBalanceRead(proofKey: String = "0".repeat(64)) = given().port(testPort.toInt())
         .contentType(ContentType.JSON)
+        .header("Idempotency-Key", proofKey)
         .body(
             mapOf(
                 "partyId" to PARTY.toString(),
@@ -135,6 +136,7 @@ class McpClientGrantIdentityGuardIT {
 
     private fun checkBalanceGrant(client: String = CLIENT) = given().port(testPort.toInt())
         .contentType(ContentType.JSON)
+        .header("Idempotency-Key", "d3d3d3d3-0000-4000-8000-000000000004")
         .body(
             mapOf(
                 "grantId" to "d3d3d3d3-0000-4000-8000-000000000004",

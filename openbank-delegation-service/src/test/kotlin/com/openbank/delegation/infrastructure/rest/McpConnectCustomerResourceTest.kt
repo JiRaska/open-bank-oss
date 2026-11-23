@@ -84,8 +84,8 @@ class McpConnectCustomerResourceTest {
         coEvery { store.revoke(party, connectionId) } returns true
         coEvery { store.revoke(OTHER_PARTY, connectionId) } returns false
         val resource = resource()
-        assertThat(runBlocking { resource.revoke(party, connectionId).status }).isEqualTo(204)
-        assertThatThrownBy { runBlocking { resource.revoke(OTHER_PARTY, connectionId) } }
+        assertThat(runBlocking { resource.revoke(party, connectionId, connectionId.toString()).status }).isEqualTo(204)
+        assertThatThrownBy { runBlocking { resource.revoke(OTHER_PARTY, connectionId, connectionId.toString()) } }
             .isInstanceOf(NotFoundException::class.java)
     }
 
@@ -102,6 +102,17 @@ class McpConnectCustomerResourceTest {
         )
         coEvery { store.findForParty(party, reference) } returns
             McpConnectRequestStore.Review(request, emptyList(), null, null, null)
+    }
+
+    @Test
+    fun `missing and mismatched revocation keys stop before changing state`() {
+        val connectionId = UUID.randomUUID()
+        val resource = resource()
+        for (key in listOf(null, UUID.randomUUID().toString())) {
+            assertThatThrownBy { runBlocking { resource.revoke(party, connectionId, key) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        coVerify(exactly = 0) { store.revoke(any(), any()) }
     }
 
     private fun resource(client: String = "openbank-edge"): McpConnectCustomerResource {
