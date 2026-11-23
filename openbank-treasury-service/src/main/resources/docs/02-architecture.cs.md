@@ -8,6 +8,10 @@ Dealer vytvoří návrh a předá jej ke schválení; schvaluje jiná fyzická o
 
 Pohyb hodnoty se účtuje přes API ledgeru s idempotentním klíčem odvozeným od obchodu a přechodu. Treasury nepíše do tabulek ledgeru. Vlastní migrace PostgreSQL ukládají stav obchodů, limity a záznamy párování; transakční outbox publikuje události o obchodech pro risk engine. Ten obchod vyhodnocuje jako instrument, ale nevlastní jeho zaúčtování.
 
+## Kontrola krytí před zaúčtováním
+
+Před zaúčtováním umístění nebo odchozí platby služba porovná aktuální zůstatek financujícího účtu se **všemi** zaúčtovanými nebo potvrzenými a dosud nevypořádanými odchozími platbami, bez ohledu na datum valuty. Kontrola proběhne znovu pod advisory zámkem, než se zaúčtování potvrdí. Zaúčtování, které by účet přečerpalo, je odmítnuto kódem 422 a nic se nezapíše. Nečitelný zůstatek je odmítnut kódem 502: kontrola nikdy nepovažuje chybějící zůstatek za nulu. Budoucí příchozí platby se neprojektují, takže denní projekce by dala stejný výsledek jako tento součet.
+
 ## Externí a sandboxové hranice
 
 Import a párování nostro výpisů porovnává očekávané vypořádání se skutečnými položkami a ukazuje rozdíly k prověření. Sandboxové protistrany a kotace jsou simulace; úspěšné simulované potvrzení není důkazem spojení s živým trhem. Přehledy minimálních rezerv a časové rozlišení používají datovaná zdrojová fakta; chybějící fakta nesmějí splynout s výchozí sazbou.
