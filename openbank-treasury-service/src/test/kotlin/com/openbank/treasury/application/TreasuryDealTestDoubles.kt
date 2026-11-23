@@ -257,6 +257,9 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
     /** When true, the next save throws CancellationException (the caller's coroutine was cancelled). */
     var cancelNextSave = false
 
+    /** Runs inside save before the guards re-measure (a test races a concurrent commit in here). */
+    var beforeGuardRecheck: () -> Unit = {}
+
     /** When set, the next save suspends on it (after completing [saveEntered]) until cancelled. */
     var suspendNextSave: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     val saveEntered = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -272,6 +275,7 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         extraEvents: List<DealEvent>,
         releaseClaim: String?,
         limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+        fundingGuard: com.openbank.treasury.application.port.out.FundingGuard?,
     ): Deal {
         // As the real save: the claim must still be OPEN, and is released with the state change.
         releaseClaim?.let { key ->
@@ -292,6 +296,7 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
             failNextSave = false
             error("simulated: the state-change transaction rolled back")
         }
+        beforeGuardRecheck()
         limitGuard?.let { g ->
             val others = exposure(g.counterpartyId, g.currency, deal.id)
             if (others > g.maxOthers) {
@@ -300,6 +305,8 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
                 )
             }
         }
+        // As the real save: the committed outflows are re-measured under the funding line lock.
+        recheckFunding(deal, fundingGuard)
         rows[deal.id] = deal
         journal?.let { intents?.complete(it.idempotencyKey) }
         journal?.let { recordJournal(it) } // the real save skips a journal already recorded by key
@@ -309,6 +316,19 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
         command?.let { commands[it.key] = it }
         releaseClaim?.let { intents?.refuse(it, "unposted reversal committed") }
         return deal
+    }
+
+    /** The funding guard's locked re-measure (#12115), as the real save runs it under the line lock. */
+    private suspend fun recheckFunding(
+        deal: Deal,
+        fundingGuard: com.openbank.treasury.application.port.out.FundingGuard?,
+    ) {
+        fundingGuard?.let { g ->
+            val pending = pendingOutflows(g.currency, deal.id)
+            if (!g.fits(pending)) {
+                throw com.openbank.treasury.application.port.out.FundingExceededException(g.describe(pending))
+            }
+        }
     }
 
     override suspend fun findCommand(key: String) = commands[key]
@@ -337,6 +357,13 @@ internal class InMemoryDeals(private val intents: InMemoryIntents? = null) : Dea
     }.sumOf { it.limitAmount }
     override suspend fun pendingLimitOverrides() =
         rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
+    override suspend fun pendingOutflows(currency: String, excludeDealId: UUID?) = rows.values.filter {
+        it.kind == com.openbank.treasury.domain.model.DealKind.ACTUAL &&
+            it.currency == currency &&
+            it.id != excludeDealId &&
+            it.product in com.openbank.treasury.domain.model.Funding.CONSUMING_PRODUCTS &&
+            it.state in com.openbank.treasury.domain.model.Funding.PENDING_STATES
+    }.sumOf { it.principal }
     override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
     override suspend fun recordJournal(journal: LedgerJournalRef): Boolean {
         intents?.completeAccrue(journal.idempotencyKey) // as the real record: completes an accrual day's intent

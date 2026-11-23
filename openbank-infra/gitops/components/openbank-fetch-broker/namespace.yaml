@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# ADR-0387: the fetch broker runs in a namespace of its own, so the one pod allowed to reach the
+# public internet shares no namespace (and so no same-namespace NetworkPolicy edge) with an agent.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fetch-broker
+  labels:
+    app.kubernetes.io/part-of: openbank
+    open-bank.tech/component: fetch-broker
+    pod-security.kubernetes.io/enforce: restricted

@@ -105,6 +105,8 @@ The daily run is automated by `FxRevaluationScheduler`. To re-run for a business
 
 `JournalPartitionMaintainer` rolls forward automatically. Verify partitions: `\d+ journal_entries`. Lifecycle actions are in `partition_lifecycle_audit`. A non-empty `journal_entries_default` (DEFAULT_NONEMPTY audit row) means roll-forward fell behind — investigate before it blocks new partition ATTACH.
 
+Partition DDL runs under `SET LOCAL lock_timeout` (`openbank.ledger.partition.lock-timeout`, default `5s`, must be > 0). `CREATE TABLE ... PARTITION OF` needs ACCESS EXCLUSIVE on `journal_entries`; if a long transaction holds a lock on it the DDL fails with SQLState 55P03 after the timeout instead of queueing every posting behind it. The pass records no success, so the `ledger-journal-partition-maintenance` liveness alert is what pages if it keeps failing; the next tick retries. Look for `55P03` / `partition maintenance failed` in the log and find the blocker in `pg_stat_activity`.
+
 ## Observability note: frozen-period refusals
 
 With `openbank.ledger.period-lock.mode=enforce` every refusal increments `openbank_ledger_period_lock_decisions_total{outcome="refused"}` (tags `operation`, `period_type`) and the HTTP response carries `code=ACCOUNTING_PERIOD_FROZEN`. A fiscal-year refusal carries `ACCOUNTING_YEAR_CLOSED` and has no counter of its own; find it by the response code in access logs. This is documentation only: no alert rule is defined for either code, and a non-zero `refused` count is expected whenever a caller back-dates into a closed month.

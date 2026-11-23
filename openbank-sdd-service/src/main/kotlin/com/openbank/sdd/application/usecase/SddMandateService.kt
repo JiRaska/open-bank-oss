@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sdd.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sdd.application.port.`in`.AmendMandateCommand
 import com.openbank.sdd.application.port.`in`.AmendMandateUseCase
@@ -232,5 +233,5 @@ internal fun mandateEventMessage(m: SddMandate, eventType: String, occurredAt: I
         "sequenceType":"${m.sequenceType}",
         "occurredAt":"$occurredAt"}
     """.trimIndent().replace("\n", "")
-    return OutboxMessage(UUID.randomUUID(), m.id, eventType, payload)
+    return OutboxMessage(Ids.newId(), m.id, eventType, payload)
 }

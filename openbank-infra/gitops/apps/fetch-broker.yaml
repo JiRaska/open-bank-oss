@@ -1,0 +1,29 @@
+# fetch-broker: ADR-0387 public-web fetch broker (the one agent-plane pod with internet egress). Namespace: fetch-broker.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fetch-broker
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/openbank-fetch-broker
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fetch-broker
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

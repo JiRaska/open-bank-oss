@@ -65,7 +65,9 @@ info:
   # 1.94.0 -> 1.95.0 (#16000): additive — documents the 409 PAYMENT_NOT_ACCEPTED and the 503
   # PAYMENT_TEMPORARILY_UNAVAILABLE / PAYMENT_STATUS_UNKNOWN that POST /domestic-payments answers for a DELEGATED payment
   # once the reservation-bound create is switched on. Request shape unchanged.
-  version: 1.96.0
+  # 1.96.0 -> 1.97.0 (ADR-0383 D6, #16590): additive — /mcp-proposals routes (list, read, reject,
+  # approve with SCA bound to the proposal's payload hash). App session only.
+  version: 1.97.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3670,6 +3672,64 @@ paths:
                         status: {type: string, enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]}
                         performedAt: {type: string, format: date-time}
 
+  /mcp-proposals:
+    get:
+      tags: [Payments]
+      summary: List open payment proposals from connected MCP clients
+      description: >-
+        ADR-0383 D6. Proposals a connected MCP client asked the bank to show the customer. Nothing
+        has been paid. Available only to the customer's own app session (azp openbank-app, no act).
+      responses:
+        '200': { description: Open proposals with canonical instruction, payloadSha256 and approvalRequestId }
+        '403': { description: Not the customer's own app session }
+  /mcp-proposals/{id}:
+    get:
+      tags: [Payments]
+      summary: Read one proposal with its exact canonical instruction
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The proposal }
+        '403': { description: Not the customer's own app session }
+        '404': { description: No such proposal for this customer }
+  /mcp-proposals/{id}/reject:
+    post:
+      tags: [Payments]
+      summary: Reject a proposal
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Rejected }
+        '403': { description: Not the customer's own app session }
+        '409': { description: Not PENDING }
+  /mcp-proposals/{id}/approve:
+    post:
+      tags: [Payments]
+      summary: Approve a proposal with SCA and pay it as the customer's own payment
+      description: >-
+        The X-SCA-Challenge-Id must be an APPROVAL challenge whose dynamic linking covers amount,
+        currency, payee, approvalRequestId (mcp-proposal:<id>) and payloadSha256. The edge
+        recomputes the hash from the stored instruction; no SCA exemption applies. Idempotent per
+        proposal. The response is the payment initiation response.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: X-SCA-Challenge-Id, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payloadSha256]
+              properties:
+                payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '201': { description: Payment initiated from the approved proposal }
+        '400': { description: Missing or malformed payloadSha256 }
+        '403': { description: SCA required or rejected, or not the app session }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Proposal not PENDING, hash mismatch, or stored hash invalid }
+        '503': { description: Proposal store temporarily unavailable; retry with a fresh SCA challenge }
   /domestic-payments:
     post:
       tags: [Payments]

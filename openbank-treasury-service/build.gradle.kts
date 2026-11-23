@@ -108,7 +108,12 @@ tasks.withType<Test> {
     // `build --rerun-tasks`: the heap sat at 522 of 524 MB, Kover's class transformer could no longer
     // allocate ("can't create byte array") and the run wedged without failing. Same per-module
     // override, and the same reasoning, as account-service.
-    maxHeapSize = "2g"
+    // Measured again 2026-11-22: the suite now carries 17 distinct @TestProfiles (one Quarkus boot
+    // each), not four. At 2g, origin/main completed all 89 classes / 840 tests, while the #12115
+    // branch, which adds one more profile (FundingLineRaceIT.FundingOn), died with "Java heap
+    // space" in the integration phase after 31 classes, locally and in CI alike. Raised to 3g,
+    // the ceiling swift and ledger already use; a ceiling, not an allocation.
+    maxHeapSize = "3g"
 }
 
 // Shared synthetic wire fixture is test-only; it is never packaged in the service runtime.
