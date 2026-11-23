@@ -780,8 +780,8 @@ jobs:
     if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     # The lint shard may now wait on the trusted producer inside the job (the receiver's own
-    # deadline is 30 min, the step below caps it at 32), so it gets that wait on top of 15.
-    timeout-minutes: ${{ matrix.slug == 'lint-supplychain-security' && 47 || 15 }}
+    # deadline is 30 min, the step below caps it at 32), so it gets that wait on top of the 25-minute traced gate budget.
+    timeout-minutes: ${{ matrix.slug == 'lint-supplychain-security' && 57 || 25 }}
     strategy:
       # Never fail-fast: one red shard must not hide the state of the other seven, or a PR
       # gets a one-gate-at-a-time debugging loop instead of the whole picture in one run.
