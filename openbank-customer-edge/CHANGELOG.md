@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.1...customer-edge-v1.13.2) (2026-11-23)
+
+
+### Security
+
+* **sca:** Keycloak MCP extension - withheld code, 72 h passkey floor, no token exchange (ADR-0385 C, [#16667](https://github.com/JiRaska/open-bank-oss/issues/16667)) ([#16672](https://github.com/JiRaska/open-bank-oss/issues/16672)) ([699eaf9](https://github.com/JiRaska/open-bank-oss/commit/699eaf9e7e0b3d2b0604d964d35497ab774367aa))
+
 ## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.0...customer-edge-v1.13.1) (2026-11-22)
 
 
