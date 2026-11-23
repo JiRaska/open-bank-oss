@@ -202,7 +202,7 @@ jobs:
           read -r -a selected <<< "$RBAC_TESTS"
           tests=()
           for test in "${selected[@]}"; do
-            [[ "$test" =~ ^[a-z0-9.-]+-rbac\.guard\.test\.ts$ ]] || { echo "Invalid RBAC test name" >&2; exit 1; }
+            [[ "$test" =~ ^[a-z0-9.-]+-rbac(-alignment)?\.guard\.test\.ts$ ]] || { echo "Invalid RBAC test name" >&2; exit 1; }
             tests+=("src/test/$test")
           done
           if [ "$REGISTRY_TEST" = 'true' ]; then
