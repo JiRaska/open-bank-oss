@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+# #12115: treasury funding. Booking refuses a placement the contra (nostro) account does not
+# verifiably fund, but flows that bypass the check — a payment rail, a manual ledger journal, a
+# settlement after the balance moved — can still drive the account negative. The funding monitor
+# (treasury-funding-monitor) publishes each contra account's ledger balance; a negative one is a
+# funding breach, not a liquidity report, and needs a person before the next settlement. A dead
+# monitor is covered separately by its workflow-liveness alert (ADR-0237). Picked up by the
+# Prometheus operator automatically, same as every PrometheusRule here.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-treasury-funding-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.treasury.funding
+      rules:
+        - alert: TreasuryFundingExceeded
+          # Prometheus evaluates the reported gauge. The monitor can retain the last
+          # measured value on an account-map read error, so confirm freshness at triage.
+          expr: min(openbank_treasury_funding_contra_balance) by (currency, gl) < 0
+          for: 15m
+          labels:
+            severity: critical
+            team: treasury
+          annotations:
+            summary: "A treasury contra account is negative"
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-treasury-service/src/main/resources/docs/05-operations.en.md#treasuryfundingexceeded
+            description: >-
+              The reported balance of the {{ $labels.currency }} nostro / settlement account
+              (GL {{ $labels.gl }}) stayed below zero for 15 minutes. Confirm the monitor's
+              reading against the ledger before investigating or booking a correction.

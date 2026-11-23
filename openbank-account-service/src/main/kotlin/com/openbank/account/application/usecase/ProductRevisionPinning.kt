@@ -31,7 +31,12 @@ class ProductRevisionPinning(
 ) {
 
     /** The pin for opening an account in [currency] against v1 product [productId] at [at]. */
-    suspend fun pinFor(productId: UUID, currency: String, at: Instant): ProductRevisionPin {
+    suspend fun pinFor(
+        productId: UUID,
+        currency: String,
+        at: Instant,
+        passportAdmissionRequired: Boolean = false,
+    ): ProductRevisionPin {
         val product = when (val lookup = productCatalog.findById(productId)) {
             is ProductLookupResult.Found -> lookup.product
             ProductLookupResult.NotFound -> refuse(PinOutcome.PRODUCT_NOT_FOUND) {
@@ -52,7 +57,7 @@ class ProductRevisionPinning(
             }
         }
         val revision = resolveRevision(productId, at)
-        requireDomesticMarket(productId, revision)
+        if (!passportAdmissionRequired) requireDomesticMarket(productId, revision)
         val pin = ProductRevisionPin(
             offeringId = revision.offeringId,
             productCode = product.code,

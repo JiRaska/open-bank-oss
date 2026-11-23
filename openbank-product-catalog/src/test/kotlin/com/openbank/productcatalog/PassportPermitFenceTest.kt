@@ -328,7 +328,8 @@ class PassportPermitFenceTest {
         assertEquals(listOf("PROPOSED", "APPROVED", "REVOKED"), offline.states)
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(strings = ["FOS", "BRANCH"])
     @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
     @OidcSecurity(
         claims = [
@@ -336,8 +337,8 @@ class PassportPermitFenceTest {
             Claim(key = "preferred_username", value = "service-account-openbank-account"),
         ],
     )
-    fun `receipt lookup cannot consume an issued permit and remains readable after revocation`() {
-        val request = seed("OPEN")
+    fun `receipt lookup cannot consume an issued permit and remains readable after revocation`(mode: String) {
+        val request = seed("OPEN", mode = mode)
         val body = mapOf(
             "grantId" to request.grant,
             "operationId" to request.operationId,
@@ -347,12 +348,80 @@ class PassportPermitFenceTest {
             "binding" to HASH,
         )
         assertReceipt(body, 404)
+        given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions/context").then().statusCode(404)
+        dataSource.connection.use { db ->
+            db.execute(
+                "INSERT INTO passport_grant_subject_evidence(grant_id,party_id,evidence_ref,valid_until) " +
+                    "VALUES (?,?,'synthetic-proof',CURRENT_TIMESTAMP+interval '1 day')",
+                request.grant,
+                request.party,
+            )
+        }
+        given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions").then().statusCode(204)
         dataSource.connection.use { db ->
             assertNotNull(db.consume(request))
             assertTrue(db.revoke(request.grant))
         }
         assertReceipt(body, 204)
+        val context = given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions/context").then().statusCode(200).extract().jsonPath()
+        assertEquals(request.bank.toString(), context.getString("bankId"))
+        assertEquals(request.establishment.toString(), context.getString("establishmentId"))
+        assertEquals(mode, context.getString("mode"))
+        assertEquals(request.country, context.getString("hostCountry"))
+        given().contentType("application/json").body(body + ("binding" to "1".repeat(64)))
+            .post("/api/v2/internal/passport-account-admissions/context").then().statusCode(404)
+        val refused = org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException::class.java) {
+            dataSource.connection.use { db ->
+                db.execute(
+                    "UPDATE passport_grants SET bank_id=? WHERE id=?",
+                    UUID.randomUUID(),
+                    request.grant,
+                )
+            }
+        }
+        assertEquals("23514", refused.sqlState)
         assertReceipt(body + ("binding" to "1".repeat(64)), 404)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["FOS", "BRANCH"])
+    @TestSecurity(user = "service-account-openbank-account", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-account"),
+            Claim(key = "preferred_username", value = "service-account-openbank-account"),
+        ],
+    )
+    fun `account admission is refused when the offering is not marketed in the host country`(mode: String) {
+        val request = seed("OPEN", issue = false, mode = mode, marketCountry = "DE")
+        dataSource.connection.use { db ->
+            db.execute(
+                "INSERT INTO passport_grant_subject_evidence(grant_id,party_id,evidence_ref,valid_until) " +
+                    "VALUES (?,?,'synthetic-proof',CURRENT_TIMESTAMP+interval '1 day')",
+                request.grant,
+                request.party,
+            )
+        }
+        val body = mapOf(
+            "grantId" to request.grant,
+            "operationId" to request.operationId,
+            "operation" to request.operation,
+            "partyId" to request.party,
+            "revisionId" to request.revision,
+            "binding" to HASH,
+        )
+        given().contentType("application/json").body(body)
+            .post("/api/v2/internal/passport-account-admissions").then().statusCode(409)
+        dataSource.connection.use { db ->
+            assertEquals(
+                0L,
+                db.scalar("SELECT count(*) FROM passport_account_permits WHERE operation_id = ?", request.operationId),
+            )
+        }
+        assertReceipt(body, 404)
     }
 
     private fun assertReceipt(body: Map<String, Any>, status: Int) {
@@ -445,7 +514,9 @@ class PassportPermitFenceTest {
         issue: Boolean = true,
         approved: Boolean = true,
         mode: String = "FOS",
+        marketCountry: String? = null,
     ): PermitRequest {
+        require(mode in setOf("FOS", "BRANCH"))
         val request = PermitRequest(operation, country = if (mode == "BRANCH") "AT" else "SK", mode = mode)
         dataSource.connection.use { db ->
             val offering = UUID.randomUUID()
@@ -459,7 +530,7 @@ class PassportPermitFenceTest {
                 offering,
                 specification,
                 "OFFER_$offering",
-                request.country,
+                marketCountry ?: request.country,
             )
             db.execute(
                 """
@@ -525,7 +596,7 @@ class PassportPermitFenceTest {
         request.bank,
         request.establishment,
         request.country,
-        "FOS",
+        request.mode,
         "WEB",
         "RETAIL",
         HASH,

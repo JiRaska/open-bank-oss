@@ -9,7 +9,9 @@ import com.openbank.libs.persistence.partition.PartitionExecutor
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 
 /**
@@ -23,7 +25,18 @@ import java.time.Instant
  * interpolation here is safe (identifiers cannot be bind parameters in DDL anyway).
  */
 @ApplicationScoped
-class HibernatePartitionExecutor(private val clock: Clock) : PartitionExecutor {
+class HibernatePartitionExecutor(
+    private val clock: Clock,
+    @ConfigProperty(name = "openbank.transaction.partition.lock-timeout", defaultValue = "5s")
+    private val lockTimeout: Duration,
+) : PartitionExecutor {
+
+    init {
+        // Zero would DISABLE lock_timeout in Postgres (wait forever) - the exact hazard this guards.
+        require(lockTimeout.toMillis() > 0) {
+            "openbank.transaction.partition.lock-timeout must be at least 1ms, was $lockTimeout"
+        }
+    }
 
     override suspend fun listChildPartitions(parentTable: String): List<String> {
         val rows: List<*> = Panache.withSession {
@@ -46,10 +59,23 @@ class HibernatePartitionExecutor(private val clock: Clock) : PartitionExecutor {
         return (value as Number).toLong()
     }
 
+    /**
+     * Runs one partition DDL statement under a bounded `lock_timeout`.
+     *
+     * `CREATE TABLE ... PARTITION OF` takes ACCESS EXCLUSIVE on the parent. Without a bound, a
+     * long transaction holding any lock on the parent makes the DDL queue, and every booking
+     * queues behind the DDL. `set_config(.., is_local => true)` is `SET LOCAL` with a bind
+     * parameter: it lives and dies with this transaction, so it never leaks to the pooled
+     * connection. On timeout Postgres raises SQLState 55P03, the transaction rolls back, the
+     * maintainer records no success (liveness alert) and the next tick retries.
+     */
     override suspend fun executeDdl(ddl: String) {
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
-                session.createNativeQuery<Any>(ddl).executeUpdate()
+                session.createNativeQuery<Any>(SET_LOCK_TIMEOUT_SQL)
+                    .setParameter("ms", lockTimeout.toMillis().toString())
+                    .resultList
+                    .flatMap { session.createNativeQuery<Any>(ddl).executeUpdate() }
             }
         }.awaitSuspending()
     }
@@ -70,6 +96,8 @@ class HibernatePartitionExecutor(private val clock: Clock) : PartitionExecutor {
     }
 
     companion object {
+        private const val SET_LOCK_TIMEOUT_SQL = "select set_config('lock_timeout', :ms, true)"
+
         private val LIST_CHILDREN_SQL = """
             select c.relname
             from pg_inherits i
