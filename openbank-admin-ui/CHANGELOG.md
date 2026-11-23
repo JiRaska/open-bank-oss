@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.23.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.0...admin-ui-v4.23.1) (2026-11-23)
+
+
+### Security
+
+* **mcp-service:** caller-scoped opaque accountRef for MCP tool chaining ([#16863](https://github.com/JiRaska/open-bank-oss/issues/16863)) ([cdd8413](https://github.com/JiRaska/open-bank-oss/commit/cdd8413840c923f2d5f56a80f5c9615b55a94ab9))
+
 ## [4.23.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.1...admin-ui-v4.23.0) (2026-11-22)
 
 
