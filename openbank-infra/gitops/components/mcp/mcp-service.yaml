@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5e9556aca3610592"
+        openbank.tech/policy-checksum: "a7436b8862f961ac"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -177,6 +177,16 @@ spec:
                   name: mcp-service-m2m-oidc
                   key: OIDC_M2M_CLIENT_SECRET
                   optional: false
+            # #16678: HMAC key for caller-scoped account handles. optional: true — the value is generated
+            # in-cluster (account-ref-externalsecret.yaml); until that Secret exists the service runs on a
+            # per-process key (WARN + gauge
+            # openbank_mcp_account_ref_ephemeral_key=1; refs then do not cross pods and are refused).
+            - name: OPENBANK_MCP_ACCOUNT_REF_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-account-ref
+                  key: OPENBANK_MCP_ACCOUNT_REF_SECRET
+                  optional: true
           startupProbe:
             tcpSocket:
               port: management

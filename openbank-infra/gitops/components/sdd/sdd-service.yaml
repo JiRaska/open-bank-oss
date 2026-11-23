@@ -33,7 +33,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sdd-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3de754b2d1bc761a"
+        openbank.tech/policy-checksum: "cce09e68e4a7c23c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -110,6 +110,10 @@ spec:
                   key: ca.password
             - name: QUARKUS_HTTP_PORT
               value: "8129"
+            # ADR-0036 §B idle-expiry sweep kill switch. application.yaml defaults it to false;
+            # this environment opts in. Set "false" here to stop the sweep without a code revert.
+            - name: OPENBANK_SDD_EXPIRY_ENABLED
+              value: "true"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET

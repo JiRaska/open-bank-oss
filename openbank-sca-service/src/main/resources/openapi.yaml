@@ -19,7 +19,7 @@ info:
   # 1.17 -> 1.18 (ADR-0385 D3): additive — MCP_CLIENT_CONNECT purpose (initiate requires
   # approvalRequestId `mcp-connect:<PAR request id>` + payloadSha256), a 403 on decision for a
   # device enrolled < 72 h approving it, and its reserved-namespace consume refusal.
-  version: 1.18.0
+  version: 1.19.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -370,7 +370,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/ScaChallengeResponse'
         '400':
-          description: Invalid request or challenge not approved
+          description: >-
+            Invalid request or challenge not approved. Only a still-pending challenge returns
+            SCA_CHALLENGE_PENDING. A final refusal uses VALIDATION_ERROR.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                pending:
+                  value: { code: SCA_CHALLENGE_PENDING, message: Challenge is not yet approved }
+                refused:
+                  value: { code: VALIDATION_ERROR, message: Challenge was not approved }
         '403':
           description: >-
             The challenge belongs to another party, or lies outside the caller's consumer scope

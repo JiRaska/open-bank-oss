@@ -74,7 +74,11 @@ The outbox write for `DEVICE_ENROLLED` is intentionally a **separate transaction
 
 ## Scoped consumers (ADR-0335 D1)
 
-Every consume resolves a `ConsumerScope` from the principal. `service-account-openbank-pension` is
+Every consume resolves a `ConsumerScope` from the VERIFIED service-account identity
+(`ServiceAccountIdentity.verifiedPrincipalName`: `azp` bound to `preferred_username`), never from
+the display name, and OPA's `service-sca-scoped-consumer` rule requires `service_account == true`
+plus the bound `client_id` — a person or a marker-less caller named like a scoped consumer gets
+nothing. `service-account-openbank-pension` is
 `Reserved(PENSION)`: it may spend only an `APPROVAL` challenge whose device-signed
 `approvalRequestId` starts with `pension-`. Every other principal is `General` and may spend
 anything except that namespace. A refused attempt answers 403 before the compare-and-consume, so it
@@ -101,6 +105,14 @@ PAR authorization request.
 - **72 h device floor.** A device enrolled less than 72 h ago cannot approve a connect (403 on
   decision; nothing is recorded). A denial is accepted. The passkey half of the rule lives in the
   Keycloak authenticator, not here.
-- **Fail closed.** No principal holds the namespace yet, so every consume of a connect challenge is
-  refused until the authorization server's consumer is declared in `ConsumerScopes` and
-  `rules.yaml: scoped_sca_consumers`.
+- **One consumer: the authorization server.** `service-account-openbank-keycloak-mcp` (the
+  Keycloak withheld-code authenticator, openbank realm, ROLE_API only) holds `MCP_CONNECT`; OPA
+  admits it to `scaChallenge.initiate` and `scaChallenge.consume` only. An `MCP_CLIENT_CONNECT`
+  initiate from ANY other caller (a `General` initiator such as the edge, or pension) is refused
+  403 `ScaInitiateScopeViolationException`, and that consumer may initiate nothing but
+  `MCP_CLIENT_CONNECT` in `mcp-connect:`. Shape errors are still 400 first.
+- **Pending is its own answer.** A consume of a challenge the device has not decided yet answers
+  400 with `code = SCA_CHALLENGE_PENDING`; a denied, failed or cancelled one keeps
+  `VALIDATION_ERROR`. The authenticator polls on the first and ends the session on anything else.
+- **Canonical context.** `McpConnectContext` specifies the bytes `payloadSha256` is computed over;
+  it is held byte for byte to the fixture the Keycloak extension's tests read too.

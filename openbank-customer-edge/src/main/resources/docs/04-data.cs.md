@@ -48,6 +48,17 @@ Edge je **průchozí processor**, ne controller uložených záznamů. PII, kter
 
 Protože se nic neukládá, edge nemá **žádnou retenční povinnost** (`retentionPolicy: N/A`, `evidenceExported: false` v `governance.yaml`). Právo na výmaz a retenční povinnosti dle GDPR leží na upstream controllerech (account, party atd.).
 
+## Zápis `party_id` do Keycloaku
+
+`KeycloakAdminClient.setPartyIdAttribute` (best effort) propojuje uživatele v Keycloaku s jeho party.
+Keycloak 26 ověřuje administrátorský PUT proti uživatelskému profilu realmu a vynechaný kořenový
+atribut bere jako odstraněný, takže tělo nesoucí jen `attributes.party_id` odmítne 400
+(`error-user-attribute-required`, email). Klient proto uživatele načte a zapíše zpět jeho vlastní
+reprezentaci s doplněným `party_id` (`withPartyId`). V realmu zákazníků je `party_id` deklarovaný
+atribut uživatelského profilu, který smí zobrazit a měnit jen administrátor: servisní účet edge
+(realm-management `manage-users`) ho nastavit může, zákazník ne (živý IT
+`keycloak_mcp_client_admission_test.py`).
+
 ## Logování
 
 Selhání transportu se logují s upstream URL a třídou/zprávou výjimky (`UpstreamClient`), ne s těly zákazníka. Obsah tokenu se nikdy neloguje. Vyhněte se logování syrových těl requestů/odpovědí, která mohou nést IBANy nebo jména.

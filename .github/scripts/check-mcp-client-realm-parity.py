@@ -23,7 +23,16 @@ Asserted, per declared client:
     audience mapper for the declared audience and no other audience, and the browser flow bound
     to the dedicated MCP flow;
   * the MCP flow: top-level, only REQUIRED executions, passwordless WebAuthn present, no
-    `auth-cookie` and no sub-flow anywhere (ADR-0385 D2.2);
+    `auth-cookie` and no sub-flow anywhere (ADR-0385 D2.2), and `openbank-mcp-withheld-code`
+    as its LAST step, after the passkey (ADR-0385 D3);
+  * every client's `openbank.mcp.resource` equals the allowlist resource (RFC 8707 binding);
+  * `party_id` a declared user-profile attribute viewable and editable by admin only;
+  * an enabled `any-client` client policy binding the `openbank-mcp-client-guard` executor
+    (#16667: no token exchange for or of an MCP client);
+  * per tier, an enabled policy whose ONLY condition is `client-attributes` on exactly
+    `openbank.mcp.tier=<tier>` (one value — two values for one key match nothing in Keycloak
+    26.8.1) and whose profiles carry Keycloak's built-in pkce-enforcer, reject-implicit-grant,
+    reject-ropc-grant, plus dpop-bind-enforcer for Tier L (review of #16672);
   * the realm: refreshTokenMaxReuse == 0 and revokeRefreshToken == true (never loosened).
 
     python3 .github/scripts/check-mcp-client-realm-parity.py             # enforce
@@ -45,9 +54,16 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
+RESOURCE_ATTR = "openbank.mcp.resource"
+WITHHELD = "openbank-mcp-withheld-code"
+GUARD = "openbank-mcp-client-guard"
 EXCHANGE_ATTR = "openbank.mcp.exchange"
 EXCHANGE_MAX_LIFESPAN_S = 60
 MAX_EXCEPTION_DAYS = 183
+BUILTIN_EXECUTORS = {
+    "H": {"pkce-enforcer", "reject-implicit-grant", "reject-ropc-grant"},
+    "L": {"pkce-enforcer", "reject-implicit-grant", "reject-ropc-grant", "dpop-bind-enforcer"},
+}
 EXPECTED_MAPPERS = ("sub", "party-id", "mcp-service-audience")
 LOOPBACK_PREFIXES = ("http://127.0.0.1/", "http://[::1]/")
 
@@ -127,6 +143,33 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
     return f, jwks
 
 
+def check_party_id_profile(realm: dict) -> list[str]:
+    comps = (realm.get("components") or {}).get("org.keycloak.userprofile.UserProfileProvider") or []
+    raw = [v for c in comps for v in ((c.get("config") or {}).get("kc.user.profile.config") or [])]
+    if len(raw) != 1:
+        return [f"realm: exactly one declarative user profile is required, found {len(raw)} — `party_id` "
+                f"must be a declared admin-only attribute"]
+    try:
+        profile = json.loads(raw[0])
+    except ValueError:
+        return ["realm: the user profile config is not valid JSON"]
+    attrs = [a for a in profile.get("attributes") or [] if a.get("name") == "party_id"]
+    if len(attrs) != 1:
+        return ["realm: user profile does not declare `party_id` — a customer could set the party their MCP "
+                "token and SCA consume are bound to"]
+    perms = attrs[0].get("permissions") or {}
+    out = []
+    for kind in ("view", "edit"):
+        if sorted(perms.get(kind) or []) != ["admin"]:
+            out.append(f"realm: user profile `party_id` {kind} permission is {perms.get(kind)!r}, must be ['admin'] only")
+    if attrs[0].get("annotations", {}).get("inputType") or attrs[0].get("selector") or attrs[0].get("required"):
+        out.append("realm: user profile `party_id` must carry no inputType, selector or required (no user-facing form)")
+    if profile.get("unmanagedAttributePolicy") not in (None, "ADMIN_VIEW", "ADMIN_EDIT"):
+        out.append(f"realm: unmanagedAttributePolicy {profile.get('unmanagedAttributePolicy')!r} lets users edit "
+                   f"undeclared attributes")
+    return out
+
+
 def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
     f: list[str] = []
     clients = {c.get("clientId"): c for c in realm.get("clients") or []}
@@ -151,6 +194,15 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
         execs = flow.get("authenticationExecutions") or []
         if not any(e.get("authenticator") == "webauthn-authenticator-passwordless" for e in execs):
             f.append(f"realm: flow `{flow_alias}` has no passwordless WebAuthn step")
+        # ADR-0385 D3: the withheld-code step must run AFTER the passkey (it reads the asserted
+        # credential and the authenticated party), and be the LAST step: anything after it would
+        # run once the SCA challenge is already spent.
+        ordered = [e.get("authenticator") for e in sorted(execs, key=lambda e: e.get("priority") or 0)]
+        if WITHHELD not in ordered:
+            f.append(f"realm: flow `{flow_alias}` has no {WITHHELD} step — the code would be issued "
+                     f"without an SCA consume (ADR-0385 D3)")
+        elif ordered[-1] != WITHHELD or "webauthn-authenticator-passwordless" not in ordered[:ordered.index(WITHHELD)]:
+            f.append(f"realm: flow `{flow_alias}` must run {WITHHELD} last, after the passkey (ADR-0385 D3)")
         for e in execs:
             if e.get("authenticator") == "auth-cookie":
                 f.append(f"realm: flow `{flow_alias}` contains auth-cookie — an SSO cookie would skip the "
@@ -160,6 +212,45 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             if e.get("requirement") != "REQUIRED":
                 f.append(f"realm: flow `{flow_alias}` execution {e.get('authenticator')} is "
                          f"{e.get('requirement')}, must be REQUIRED (no alternative path)")
+
+    # #16667: the guard executor must be bound to every client by an enabled any-client policy.
+    profiles = {p.get("name"): p for p in (realm.get("clientProfiles") or {}).get("profiles") or []}
+    bound = False
+    for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
+        conds = [c.get("condition") for c in pol.get("conditions") or []]
+        execs_ = [e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []]
+        if pol.get("enabled") is True and conds == ["any-client"] and GUARD in execs_:
+            bound = True
+    if not bound:
+        f.append(f"realm: no enabled any-client client policy binds the {GUARD} executor — MCP clients could "
+                 f"token-exchange (#16667) and the withheld-code step would have no request facts")
+
+    # Review of #16672 (6): Keycloak's built-in executors, bound per tier by the tier attribute.
+    for tier in sorted({c.get("tier") for c in decl.get("clients") or []} & set(BUILTIN_EXECUTORS)):
+        have: set[str] = set()
+        for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
+            if pol.get("enabled") is not True or len(pol.get("conditions") or []) != 1:
+                continue
+            cond = pol["conditions"][0]
+            conf = cond.get("configuration") or {}
+            try:
+                attrs = json.loads(conf.get("attributes")) if isinstance(conf.get("attributes"), str) else None
+            except ValueError:
+                attrs = None
+            if (cond.get("condition") != "client-attributes" or conf.get("is_negative_logic") not in (None, False, "false")
+                    or attrs != [{"key": TIER_ATTR, "value": tier}]):
+                continue
+            have |= {e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []}
+        missing = BUILTIN_EXECUTORS[tier] - have
+        if missing:
+            f.append(f"realm: no enabled client-attributes policy on {TIER_ATTR}={tier} binds the built-in "
+                     f"executor(s) {sorted(missing)} (review of #16672: a weakened client attribute must not reopen them)")
+
+    # Review of #16672: the MCP token's party_id claim and the withheld-code consume's
+    # expectedPartyId both come from the user attribute `party_id`, so a customer must never be able
+    # to set it (account console, registration, update-profile required action): it is a declared
+    # user-profile attribute that ONLY an admin may view or edit.
+    f.extend(check_party_id_profile(realm))
 
     for cid, c in clients.items():
         if TIER_ATTR in (c.get("attributes") or {}) and cid not in declared:
@@ -174,6 +265,9 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
         a = c.get("attributes") or {}
         tier = d.get("tier")
         p = f"`{cid}` (Tier {tier})"
+        if a.get(RESOURCE_ATTR) != decl.get("resource"):
+            f.append(f"{p}: {RESOURCE_ATTR} is {a.get(RESOURCE_ATTR)!r}, the allowlist resource is "
+                     f"{decl.get('resource')!r} (RFC 8707 binding, ADR-0385 D1)")
         if a.get(TIER_ATTR) != tier:
             f.append(f"{p}: realm {TIER_ATTR}={a.get(TIER_ATTR)!r} disagrees with the allowlist")
         if tier == "H":
@@ -425,6 +519,52 @@ def self_test() -> int:
             0, {"authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 1}), needle="auth-cookie")
     run("MCP flow execution ALTERNATIVE flagged",
         mutate_realm=lambda r: flow(r)["authenticationExecutions"][0].update(requirement="ALTERNATIVE"), needle="REQUIRED")
+    run("withheld-code step removed flagged",
+        mutate_realm=lambda r: flow(r).update(authenticationExecutions=[
+            e for e in flow(r)["authenticationExecutions"] if e["authenticator"] != WITHHELD]), needle="without an SCA consume")
+    run("withheld-code step before the passkey flagged",
+        mutate_realm=lambda r: next(e for e in flow(r)["authenticationExecutions"] if e["authenticator"] == WITHHELD).update(priority=1),
+        needle="last, after the passkey")
+    run("guard policy disabled flagged",
+        mutate_realm=lambda r: r["clientPolicies"]["policies"][-1].update(enabled=False), needle=GUARD)
+    run("guard policy narrowed to a grant-type condition flagged",
+        mutate_realm=lambda r: r["clientPolicies"]["policies"][-1].update(conditions=[{"condition": "grant-type"}]), needle=GUARD)
+    run("guard executor dropped from the profile flagged",
+        mutate_realm=lambda r: r["clientProfiles"]["profiles"][-1].update(executors=[]), needle=GUARD)
+    def tier_policy(r, tier):
+        return next(p for p in r["clientPolicies"]["policies"] if p["name"] == f"openbank-mcp-tier-{tier.lower()}")
+    run("built-in reject-ropc-grant dropped flagged",
+        mutate_realm=lambda r: [p.update(executors=[e for e in p["executors"] if e["executor"] != "reject-ropc-grant"])
+                                for p in r["clientProfiles"]["profiles"]], needle="reject-ropc-grant")
+    run("Tier L DPoP profile unbound flagged",
+        mutate_realm=lambda r: tier_policy(r, "L").update(profiles=["openbank-mcp-oauth-hardening"]), needle="dpop-bind-enforcer")
+    run("tier condition with two values for one key (inert in Keycloak) flagged",
+        mutate_realm=lambda r: tier_policy(r, "H")["conditions"][0]["configuration"].update(attributes=json.dumps(
+            [{"key": TIER_ATTR, "value": "H"}, {"key": TIER_ATTR, "value": "L"}])), needle="=H")
+    run("tier condition with negative logic flagged",
+        mutate_realm=lambda r: tier_policy(r, "H")["conditions"][0]["configuration"].update(is_negative_logic=True), needle="=H")
+    run("bound resource attribute drift flagged",
+        mutate_realm=lambda r: client(r, H)["attributes"].update({RESOURCE_ATTR: "https://evil.example/mcp"}), needle="RFC 8707")
+    def profile(r, mutate):
+        comp = r["components"]["org.keycloak.userprofile.UserProfileProvider"][0]["config"]
+        doc = json.loads(comp["kc.user.profile.config"][0])
+        mutate(doc)
+        comp["kc.user.profile.config"] = [json.dumps(doc)]
+
+    def party(doc):
+        return next(a for a in doc["attributes"] if a["name"] == "party_id")
+
+    run("party_id editable by the user flagged",
+        mutate_realm=lambda r: profile(r, lambda d: party(d)["permissions"].update(edit=["admin", "user"])), needle="edit permission")
+    run("party_id viewable by the user flagged",
+        mutate_realm=lambda r: profile(r, lambda d: party(d)["permissions"].update(view=["admin", "user"])), needle="view permission")
+    run("party_id undeclared flagged",
+        mutate_realm=lambda r: profile(r, lambda d: d.update(attributes=[a for a in d["attributes"] if a["name"] != "party_id"])),
+        needle="does not declare")
+    run("user profile removed flagged", mutate_realm=lambda r: r["components"].pop("org.keycloak.userprofile.UserProfileProvider"),
+        needle="declarative user profile")
+    run("unmanaged attributes user-editable flagged",
+        mutate_realm=lambda r: profile(r, lambda d: d.update(unmanagedAttributePolicy="ENABLED")), needle="unmanagedAttributePolicy")
     run("MCP flow id drift flagged", mutate_realm=lambda r: flow(r).update(id="other"), needle="overrides bind by id")
     run("undeclared realm client with the MCP marker flagged",
         mutate_realm=lambda r: r["clients"].append({**copy.deepcopy(client(r, L)), "clientId": "mcp-ghost"}), needle="not in the allowlist")

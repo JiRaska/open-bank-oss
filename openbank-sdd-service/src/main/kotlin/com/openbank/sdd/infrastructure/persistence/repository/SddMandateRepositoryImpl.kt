@@ -13,6 +13,7 @@ import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.LockModeType
 import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
@@ -31,6 +32,16 @@ class SddMandateRepositoryImpl @Inject constructor(
     @WithSession
     override fun findById(id: UUID): Uni<SddMandate?> = sf.withSession { s -> s.find(SddMandateEntity::class.java, id) }
         .map { it?.let(mapper::toDomain) }
+
+    override fun findByIdForUpdate(id: UUID): Uni<SddMandate?> = sf.withSession { session ->
+        session.find(SddMandateEntity::class.java, id).flatMap { entity ->
+            if (entity == null) {
+                Uni.createFrom().nullItem()
+            } else {
+                session.refresh(entity, LockModeType.PESSIMISTIC_WRITE).map { mapper.toDomain(entity) }
+            }
+        }
+    }
 
     @WithSession
     override fun findByReference(creditorIdentifier: String, umr: String): Uni<SddMandate?> = sf.withSession { s ->

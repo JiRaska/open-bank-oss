@@ -79,3 +79,11 @@ allowed_reasons contains "treasury-m2m-risk-valuation-read" if {
 	machine_named("service-account-openbank-treasury")
 	input.action in {"risk.snapshot.list", "risk.valuation.read"}
 }
+
+allowed_reasons contains "staff-planning-input-capture" if {
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
+    role in input.principal.roles
+    input.action == "risk.planning.capture.create"
+}

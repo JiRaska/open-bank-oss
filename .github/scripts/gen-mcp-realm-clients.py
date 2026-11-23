@@ -12,7 +12,17 @@ writes, into customers-realm-template.json:
     PAR required, PKCE S256, exact redirects, no direct/implicit/device grant, no service account,
     and the dedicated browser-flow override;
   * the `openbank-mcp-fresh-passkey` browser flow: passwordless WebAuthn REQUIRED, no auth-cookie
-    alternative (ADR-0385 D2.2).
+    alternative (ADR-0385 D2.2), then the withheld-code authenticator REQUIRED (ADR-0385 D3) —
+    the code is issued only after the context-linked SCA challenge was consumed;
+  * the `openbank-mcp` client profile + policy binding the `openbank-mcp-client-guard` executor
+    to every client (`any-client`; the executor acts only on `openbank.mcp.tier` clients): no
+    token exchange for or of an MCP client (#16667), the bound RFC 8707 resource at PAR, and the
+    PAR-held request facts the authenticator recomputes the connect context from;
+  * the `openbank-mcp-oauth-hardening` (pkce-enforcer, reject-implicit-grant, reject-ropc-grant)
+    and `openbank-mcp-dpop` (dpop-bind-enforcer) Keycloak built-in profiles, bound by the
+    `openbank-mcp-tier-h` / `openbank-mcp-tier-l` policies on the `openbank.mcp.tier` attribute.
+
+Both providers ship in the bank's Keycloak image (openbank-infra/docker/keycloak/extension).
 
 Entries it owns are recognised by the `openbank.mcp.tier` client attribute; an owned entry no
 longer declared is removed. Everything else in the template is left byte-for-byte as it was
@@ -39,6 +49,30 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
+RESOURCE_ATTR = "openbank.mcp.resource"
+WITHHELD_CODE_AUTHENTICATOR = "openbank-mcp-withheld-code"
+GUARD_EXECUTOR = "openbank-mcp-client-guard"
+POLICY_NAME = "openbank-mcp"
+# Review of #16672 (6): Keycloak's BUILT-IN executors, as a second layer under the per-client
+# attributes (pkce.code.challenge.method, implicitFlowEnabled, directAccessGrantsEnabled,
+# dpop.bound.access.tokens). A client edited in the admin console loses its attribute silently;
+# it cannot lose a client policy without a realm-level change. Scoped by the client's own tier
+# attribute (never any-client: reject-ropc-grant on every customers-realm client is not this
+# PR's decision to make).
+HARDENING_PROFILE = "openbank-mcp-oauth-hardening"
+HARDENING_POLICY_PREFIX = "openbank-mcp-tier-"
+HARDENING_EXECUTORS = [
+    {"executor": "pkce-enforcer", "configuration": {"auto-configure": "false"}},
+    {"executor": "reject-implicit-grant", "configuration": {"auto-configure": "false"}},
+    {"executor": "reject-ropc-grant", "configuration": {}},
+]
+# Only Tier L is DPoP-bound (Tier H is private_key_jwt-confidential, dpop.bound=false), so the
+# DPoP enforcer is its own profile, bound for Tier L alone.
+DPOP_PROFILE = "openbank-mcp-dpop"
+DPOP_EXECUTORS = [
+    {"executor": "dpop-bind-enforcer",
+     "configuration": {"auto-configure": "false", "enforce-authorization-code-binding-to-dpop": "false"}},
+]
 EXCHANGE_ATTR = "openbank.mcp.exchange"  # marks the ADR-0383 D4 exchange entries this script owns
 EXCHANGE_MAX_LIFESPAN_S = 60  # ADR-0383 D4: exchanged downstream tokens live at most 60 s
 
@@ -94,6 +128,7 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
     tier = c["tier"]
     attrs = {
         TIER_ATTR: tier,
+        RESOURCE_ATTR: decl["resource"],
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
         "oauth2.device.authorization.grant.enabled": "false",
@@ -247,8 +282,8 @@ def build_flow(decl: dict) -> dict:
         "alias": decl["flow"]["alias"],
         "description": (
             "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie "
-            "alternative - an SSO session never skips the assertion. DERIVED from "
-            "mcp-client-allowlist.yaml."
+            "alternative - an SSO session never skips the assertion. D3: the code is withheld "
+            "until the context-linked SCA challenge is consumed. DERIVED from mcp-client-allowlist.yaml."
         ),
         "providerId": "basic-flow",
         "topLevel": True,
@@ -260,8 +295,70 @@ def build_flow(decl: dict) -> dict:
                 "requirement": "REQUIRED",
                 "priority": 10,
                 "userSetupAllowed": False,
-            }
+            },
+            {
+                "authenticator": WITHHELD_CODE_AUTHENTICATOR,
+                "authenticatorFlow": False,
+                "requirement": "REQUIRED",
+                "priority": 20,
+                "userSetupAllowed": False,
+            },
         ],
+    }
+
+
+def build_profile() -> dict:
+    return {
+        "name": POLICY_NAME,
+        "description": "ADR-0385 / #16667: MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [{"executor": GUARD_EXECUTOR, "configuration": {}}],
+    }
+
+
+def _tier_condition(tier: str) -> dict:
+    # ONE key/value per condition: Keycloak 26.8.1's client-attributes condition deserialises the
+    # list into a Map and refuses (matches nothing, logs "More values ... cannot match any client")
+    # when one key carries two values, so "tier H or L" is two policies, not one OR condition.
+    return {
+        "condition": "client-attributes",
+        "configuration": {
+            "is_negative_logic": False,
+            "attributes": json.dumps([{"key": TIER_ATTR, "value": tier}]),
+        },
+    }
+
+
+def build_hardening() -> tuple[list[dict], list[dict]]:
+    """(profiles, policies) for the built-in executors, in the order they are written."""
+    profiles = [
+        {"name": HARDENING_PROFILE, "description": "Review of #16672: PKCE, no implicit, no ROPC for every MCP "
+         "client. DERIVED from mcp-client-allowlist.yaml.", "executors": copy.deepcopy(HARDENING_EXECUTORS)},
+        {"name": DPOP_PROFILE, "description": "Review of #16672: DPoP-bound tokens (Tier L). DERIVED from "
+         "mcp-client-allowlist.yaml.", "executors": copy.deepcopy(DPOP_EXECUTORS)},
+    ]
+    policies = []
+    for tier, names in (("H", [HARDENING_PROFILE]), ("L", [HARDENING_PROFILE, DPOP_PROFILE])):
+        policies.append({
+            "name": f"{HARDENING_POLICY_PREFIX}{tier.lower()}",
+            "description": f"Review of #16672: Keycloak built-in hardening for Tier {tier} MCP clients. "
+                           f"DERIVED from mcp-client-allowlist.yaml.",
+            "enabled": True,
+            "conditions": [_tier_condition(tier)],
+            "profiles": names,
+        })
+    return profiles, policies
+
+
+def build_policy() -> dict:
+    # any-client, not a client-id list: the executor decides by the client's own tier attribute,
+    # so a newly declared client is covered without touching the policy, and the grant-type
+    # condition (which does not fire for a v1 exchange, #16667) is not relied on.
+    return {
+        "name": POLICY_NAME,
+        "description": "ADR-0385 / #16667: bind the MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": True,
+        "conditions": [{"condition": "any-client", "configuration": {}}],
+        "profiles": [POLICY_NAME],
     }
 
 
@@ -271,6 +368,14 @@ def load_allowlist(path: Path = ALLOWLIST) -> dict:
 
 def jwks_sha256(base: Path, rel: str) -> str:
     return hashlib.sha256((base / rel).read_bytes()).hexdigest()
+
+
+class OwnedPrefix:
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and (name == self.prefix or name.startswith(self.prefix + "-"))
 
 
 def render(template: dict, decl: dict, base: Path) -> dict:
@@ -297,6 +402,18 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     alias = decl["flow"]["alias"]
     flows = [f for f in out.get("authenticationFlows", []) if f.get("alias") != alias]
     out["authenticationFlows"] = flows + [build_flow(decl)]
+    # The guard stays LAST in both lists (the parity self-test mutates `[-1]`).
+    hardening_profiles, hardening_policies = build_hardening()
+    # Every client profile/policy named `openbank-mcp*` is owned here, so a renamed one cannot linger.
+    owned_profiles = owned_policies = OwnedPrefix(POLICY_NAME)
+    profiles = out.get("clientProfiles") or {}
+    profiles["profiles"] = [p for p in profiles.get("profiles") or [] if p.get("name") not in owned_profiles] + [
+        *hardening_profiles, build_profile()]
+    out["clientProfiles"] = profiles
+    policies = out.get("clientPolicies") or {}
+    policies["policies"] = [p for p in policies.get("policies") or [] if p.get("name") not in owned_policies] + [
+        *hardening_policies, build_policy()]
+    out["clientPolicies"] = policies
     return out
 
 
