@@ -119,6 +119,12 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '5e1458d0abd19d575cd667e4fae834a5f5aebe00',
     # merge-train.py of the repo-variable knobs change (caps, operational knobs, guarded stacking, strict-lane aging), reviewed with that PR.
     '3e8b1a854530ad67b8b2c15e6b68b32788519ef2',
+    # merge-train.py of the aging real-tree fix (auto_squash_enabled counts as armed), reviewed with that PR.
+    'd628b9a9c116f2274fb76e4e8cbdf5c4f80ed22e',
+    # merge-train.py of the owner hotfix lane (#17025) over #17048, reviewed with that PR.
+    'aeccc5f23e736946d8147221db4e86bd4bfa9357',
+    # merge-train.py of the strict yield-once-per-reservation fix (#17072, update merges must come from main) over #17025, reviewed with that PR.
+    '647b424f6b90e79712a2f994a2ca238748a48984',
     # merge-train.py of the deploy-fix self-test clock fix (claim_evidence passes `now` through), reviewed with that PR.
     '4ff3f289c41f697c1f498435a0ac7bcf4fa6b507',
     # merge-train.py of #16885 after merging #16832 (9c38ccca47) and main, reviewed with that PR.
@@ -129,6 +135,20 @@ REVIEWED_POLICY_BLOBS = frozenset({
     '82f517cde74e25753d7c498401c4cc9d861074b5',
     # merge-train.py of #16885 stacked on #16988 and #16986, merged with #16972 (ruff B007 + stale-ref fix kept), reviewed with #16885.
     'e2b6a5dfdc307ad74c81f34595ac1a4d26a4c59a',
+    # merge-train.py of #17006's split (real-tree drift guard moved to --real-tree-self-test, its own gate; synthetic self-test sharded 4 ways) merged with #17078 (deferral_chain_self_test in shard scenario 0), plus #17083's review fixes (no real-tree read in the synthetic self-test; gates.yaml shard-declaration check), reviewed with #17083.
+    'b30cbdc9d1993063ec72162e98892165a84323e4',
+    # merge-train.py of #17115: CI retry planner reruns failed jobs only, since gate shards bind their own attempt's ruleset evidence (#11442), reviewed with #17115.
+    '113d12f7961e632c68f188e62b2b9e4290d73b5b',
+    # merge-train.py of #17108's bot-move hold (no deferral carrier of bot-only moves under a running strict reservation; bounded to one reservation and RESERVATION_CEILING_S per review), reviewed with that PR.
+    'c1283f95612aa4d81f5ffe2e88b628963a682849',
+    # merge-train.py of #17115's failed-only retry planner merged with #17108's bot-move hold (#17112), reviewed with #17115.
+    'a2dcce5daa332417152fddf57a13d5764d5f041f',
+    # merge-train.py of #17123 (real-tree receiver case expects `ui-e2e` in validate's needs, a one-line change over main's pinned source), reviewed with that PR.
+    '811903a6b2a9c794928ff84122babd0c32fb19eb',
+    # merge-train.py of #17123 (real-tree receiver case expects `ui-e2e` in validate's needs) merged over main's #17108 bot-move hold (#17112), reviewed with #17123.
+    'dedc258eebfb37b502915e468a7f1cd144bfeda2',
+    # merge-train.py of #17115's failed-only retry planner merged with #17123's `ui-e2e` receiver needs (validate keeps both), reviewed with #17115.
+    'fe8935b2c51667dbc4da58a843e5928cba25f1fd',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}

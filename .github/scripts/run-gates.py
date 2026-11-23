@@ -127,11 +127,40 @@ BUDGET_DENY_ID_RE = re.compile(
     r"|gate-runner|agent-pr-guard|lock-integrity|gh-token|gate-invocation|gate-selftest"
     r"|gate-subject-floor|selftest-inputs|armed-prs|taint|synthetic|pg-extension"
 )
-# The `gates` job in ci.yml runs under `timeout-minutes: 15`; a scaled per-gate kill above that
+# The `gates` job in ci.yml runs under a 25-minute gate budget; a scaled per-gate kill above that
 # (minus a margin for setup/report) could never fire — the job would be cancelled first, which
 # reads as "not a verdict" rather than a timeout finding. The self-test pins this to ci.yml.
-GATES_JOB_TIMEOUT_SECONDS = 15 * 60
+GATES_JOB_TIMEOUT_SECONDS = 25 * 60
+# Preserve the per-gate ADR-0389 cap when the aggregate job gets extra tracing time.
+SCALED_GATE_TIMEOUT_CAP_SECONDS = 14 * 60
 GATES_JOB_TIMEOUT_MARGIN = 60
+
+
+GATES_JOB_PER_SLUG_TIMEOUT_RE = re.compile(
+    r"^\$\{\{ matrix\.slug == '([a-z0-9-]+)' && ([0-9]+) \|\| ([0-9]+) \}\}$")
+GATES_FETCH_SLUG_IF_RE = re.compile(r"^matrix\.slug == '([a-z0-9-]+)'$")
+
+
+def gates_job_timeout_error(job) -> str | None:
+    """None when ci.yml's gates job gives every shard exactly GATES_JOB_TIMEOUT_SECONDS for its GATES.
+    One shard may add time, but only exactly the `timeout-minutes` of its evidence-receive step
+    (id current-evidence, `if: matrix.slug == '<that slug>'`), which runs before `Run gates`: its
+    gates keep the same ceiling (#11442)."""
+    base = GATES_JOB_TIMEOUT_SECONDS // 60
+    tmo = job.get("timeout-minutes")
+    msg = f"GATES_JOB_TIMEOUT_SECONDS ({GATES_JOB_TIMEOUT_SECONDS}s) disagrees with ci.yml jobs.gates.timeout-minutes ({tmo})"
+    if tmo == base:
+        return None
+    m = GATES_JOB_PER_SLUG_TIMEOUT_RE.fullmatch(tmo) if isinstance(tmo, str) else None
+    fetch = [s for s in job.get("steps") or [] if s.get("id") == "current-evidence"]
+    tmo_f = fetch[0].get("timeout-minutes") if len(fetch) == 1 else None
+    cond = GATES_FETCH_SLUG_IF_RE.fullmatch(str(fetch[0].get("if", ""))) if len(fetch) == 1 else None
+    # The extra time belongs to the ONE shard that runs the fetch: same slug, or it is a free budget.
+    if not m or not cond or m.group(1) != cond.group(1) or int(m.group(3)) != base \
+            or type(tmo_f) is not int or int(m.group(2)) != base + tmo_f:
+        return msg + (f"; a per-slug value must name the slug in the current-evidence step's `if:` and be "
+                      f"{base} + that step's timeout-minutes")
+    return None
 
 
 def budget_multiplier_exempt(gate) -> bool:
@@ -158,7 +187,7 @@ def apply_budget_multiplier(gates, m: float, default_timeout: int):
     The scaled timeout is clamped to MAX_TIMEOUT and to the gates job's own limit minus a margin,
     and the budget is clamped to that timeout so the pairing load() enforces stays enforceable."""
     exempt = []
-    cap = min(MAX_TIMEOUT, GATES_JOB_TIMEOUT_SECONDS - GATES_JOB_TIMEOUT_MARGIN)
+    cap = min(MAX_TIMEOUT, SCALED_GATE_TIMEOUT_CAP_SECONDS, GATES_JOB_TIMEOUT_SECONDS - GATES_JOB_TIMEOUT_MARGIN)
     for g in gates:
         if budget_multiplier_exempt(g):
             exempt.append(g["id"])
@@ -1704,7 +1733,7 @@ def self_test():
                   {"id": "x-money-path-y", "group": "lint", "budget_seconds": 30},
                   {"id": "new-group-gate", "group": "brand-new", "budget_seconds": 30}]
         ex = apply_budget_multiplier(scaled, 2.0, 420)
-        # 840 = min(MAX_TIMEOUT, 15 min job - 60 s margin); "big" keeps its declared 1800 (never lowered)
+        # 840 = the preserved scaled per-gate ceiling; "big" keeps its declared 1800 (never lowered)
         want = {"plain": (60, 840), "plain-tmo": (200, 840), "big": (800, 1800),
                 "sec": (30, None), "gitops-plain": (30, None), "x-money-path-y": (30, None),
                 "new-group-gate": (30, None)}
@@ -1746,12 +1775,34 @@ def self_test():
                         probe[0]["timeout_seconds"] != real_gates[gid].get("timeout_seconds"):
                     bad.append(f"gate `{gid}` was SCALED by the budget multiplier; it must stay exempt")
         ci_yml = real / ".github" / "workflows" / "ci.yml"
+        for label, job, want in (
+            ("plain", {"timeout-minutes": 25}, None),
+            ("plain wrong", {"timeout-minutes": 20}, "disagrees"),
+            ("per-slug exact", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 25 }}",
+                                "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                           "timeout-minutes": 32}]}, None),
+            ("per-slug extra on a shard that does not fetch",
+             {"timeout-minutes": "${{ matrix.slug == 'gitops-api' && 57 || 25 }}",
+              "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'", "timeout-minutes": 32}]},
+             "disagrees"),
+            ("per-slug extra exceeds fetch cap", {"timeout-minutes": "${{ matrix.slug == 'x' && 60 || 25 }}",
+                                                  "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                                             "timeout-minutes": 32}]},
+             "disagrees"),
+            ("per-slug base wrong", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 20 }}",
+                                     "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                                "timeout-minutes": 32}]}, "disagrees"),
+            ("per-slug without capped fetch", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 25 }}",
+                                               "steps": []}, "disagrees"),
+        ):
+            got = gates_job_timeout_error(job)
+            if (want is None) != (got is None):
+                bad.append(f"gates job timeout check `{label}`: got {got!r}")
         if ci_yml.exists():
             with open(ci_yml, encoding="utf-8") as fh:
-                job_tmo = (yaml.safe_load(fh) or {}).get("jobs", {}).get("gates", {}).get("timeout-minutes")
-            if job_tmo != GATES_JOB_TIMEOUT_SECONDS // 60:
-                bad.append(f"GATES_JOB_TIMEOUT_SECONDS ({GATES_JOB_TIMEOUT_SECONDS}s) disagrees with "
-                           f"ci.yml jobs.gates.timeout-minutes ({job_tmo})")
+                err = gates_job_timeout_error((yaml.safe_load(fh) or {}).get("jobs", {}).get("gates", {}))
+            if err:
+                bad.append(err)
 
         # Headroom warning: 85% warns, 50% does not, p95 alone triggers, failures are not repeated.
         def fake(seconds, budget=100, timeout=420, status="ok"):

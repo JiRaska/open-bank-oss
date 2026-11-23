@@ -177,14 +177,35 @@ print(json.dumps(value))
                     if name == "verified-empty":
                         self.assertIn("0 live bypass actor(s), 0 undeclared, 0 stale", output)
 
+    def test_admission_refusal_cannot_reach_a_green_validate(self):
+        # Every job that can run gate work depends on admission and is gated on proceed=true,
+        # and the aggregate re-checks admission itself, so a refused PR ends red.
+        workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
+        jobs = workflow['jobs']
+        for name in ('gates', 'ruleset-evidence'):
+            needs = jobs[name]['needs']
+            self.assertIn('agent-admission', [needs] if isinstance(needs, str) else needs, name)
+            self.assertEqual(jobs[name]['if'], "needs.agent-admission.outputs.proceed == 'true'", name)
+        self.assertIn('agent-admission', jobs['validate']['needs'])
+        self.assertEqual(jobs['validate']['if'], 'always()')
+        step = next(s for s in jobs['validate']['steps'] if s.get('name') == 'Verify agent PR admission')
+        for result, proceed, code in (('success', 'false', 1), ('success', '', 1), ('failure', '', 1),
+                                      ('skipped', '', 1), ('success', 'true', 0)):
+            ran = subprocess.run(['bash', '-c', step['run']], capture_output=True, text=True,
+                                 env={'RESULT': result, 'PROCEED': proceed, 'PATH': os.environ['PATH']})
+            self.assertEqual(ran.returncode, code, (result, proceed, ran.stdout))
+        self.assertEqual(jobs['validate']['steps'][0], step)
+
     def test_consumer_provenance_and_binding(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
         job = workflow['jobs']['ruleset-evidence']
         self.assertEqual(job['permissions'], {'actions': 'read', 'contents': 'read'})
         self.assertNotIn('secrets.', json.dumps(job))
         self.assertNotIn('continue-on-error', json.dumps(job))
-        self.assertIn('ruleset-evidence', workflow['jobs']['gates']['needs'])
-        self.assertIn('always()', workflow['jobs']['gates']['if'])
+        # #11442: shards no longer wait for the evidence job; only the consuming step does.
+        self.assertEqual(workflow['jobs']['gates']['needs'], 'agent-admission')
+        self.assertEqual(workflow['jobs']['gates']['if'], "needs.agent-admission.outputs.proceed == 'true'")
+        self.assertNotIn('needs.ruleset-evidence', json.dumps(workflow['jobs']['gates']))
         self.assertIn('ruleset-evidence', workflow['jobs']['validate']['needs'])
         receipt = yaml.safe_load((ROOT / '.github/actions/receive-ruleset-evidence/action.yml').read_text())
         self.assertEqual(receipt['runs']['using'], 'composite')
@@ -194,12 +215,16 @@ print(json.dumps(value))
         rerun = next(s for s in workflow['jobs']['gates']['steps']
                      if s.get('id') == 'current-evidence')
         self.assertEqual(rerun['uses'], './.github/actions/receive-ruleset-evidence')
-        self.assertEqual(rerun['if'], "github.run_attempt > 1 && matrix.slug == 'lint-supplychain-security'")
+        self.assertEqual(rerun['if'], "matrix.slug == 'lint-supplychain-security'")
         gate = next(s for s in workflow['jobs']['gates']['steps'] if s.get('name') == 'Run gates')
-        self.assertEqual(gate['env']['RULESET_BYPASS_SNAPSHOT'],
-                         '${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}')
+        steps = workflow['jobs']['gates']['steps']
+        self.assertEqual(steps.index(gate) - 1, steps.index(rerun))
+        self.assertEqual(gate['env']['RULESET_BYPASS_SNAPSHOT'], '${{ steps.current-evidence.outputs.snapshot }}')
+        self.assertEqual(gate['if'],
+                         "${{ !cancelled() && (success() || steps.current-evidence.outcome == 'failure') }}")
         self.assertNotIn('continue-on-error', json.dumps(rerun))
-        self.assertEqual(workflow['jobs']['gates']['timeout-minutes'], 25)
+        self.assertEqual(workflow['jobs']['gates']['timeout-minutes'],
+                         "${{ matrix.slug == 'lint-supplychain-security' && 57 || 25 }}")
         self.assertEqual(download['with']['artifact-ids'], '${{ steps.locate.outputs.artifact-id }}')
         self.assertEqual(download['with']['run-id'], '${{ steps.locate.outputs.run-id }}')
         harness = r'''

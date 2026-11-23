@@ -230,6 +230,77 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-22** — **Payment-proposal idempotency: a 5xx is released, never stored** (ADR-0383 D6,
+  #16845). `PaymentProposalResource.idempotent` previously saved whatever answer the handler
+  returned under the reserved key; it now saves only a definitive (non-5xx) answer and releases the
+  reservation on a 5xx, exactly as it already did when the handler throws.
+  - **Denial of service via replay (repudiation of a customer's decision).** customer-edge sends a
+    FIXED key per proposal for reject (`mcp-proposal-reject-<id>`), so a stored transient failure
+    would have been replayed to every retry for the record's whole TTL and the customer could never
+    reject the proposal. A retry under the same key now re-executes the operation instead.
+  - **Replay safety of re-execution.** The handler path that returns a 5xx persists no idempotency
+    record, and re-execution is bounded by the store's own controls (dedupe on create, revision CAS
+    on every transition), so a retry cannot apply a transition twice. Definitive answers (2xx/4xx)
+    are still stored and replayed verbatim; a key reused for a different request is still 409.
+    Tested by `PaymentProposalIdempotencyTest`.
+
+- **2026-11-21** — **New ingress edge: mcp-service -> delegation-service** (ADR-0383 D3).
+  `delegation-service-ingress-allow-list` now admits the `platform` namespace, where mcp-service
+  runs, so it can call `POST /api/v1/delegations/mcp-client/resolve`. The edge is derived by
+  `gen-network-policies.py` from `QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL` in the mcp-service
+  manifest, never hand-written. The lookup is read-only (`McpClientGrantResolver` queries ACTIVE
+  `MCP_CLIENT` grants for one party/client/key triple and writes nothing) and authenticated: the
+  caller is mcp-service's own `m2m` identity, and a tokenless request must be refused 401. The pact
+  interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json` states that
+  expectation but is NOT proof of it — a consumer mock answers whatever the pact says. Provider-side
+  proof lives with the route itself (#16793): `McpClientGrantIdentityGuardIT` drives it over HTTP
+  with no token (401), and the `@PactFolder` replay verifies the no-token interaction against the
+  real security layer (see the 2026-11-18 entry below).
+  Information disclosure is bounded by the triple: the party id comes from the verified customer
+  token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
+  Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the
+  endpoint's authn, not the NetworkPolicy, is the control that separates callers.
+
+- **2026-11-19** — **Customer MCP payment-proposal store** (ADR-0383 D6, #16590). New table
+  `delegation_payment_proposals` (V38), REST family `/api/v1/payment-proposals` and topic
+  `openbank.delegation.payment-proposal-events`. A proposal moves no money; it is executed only by
+  customer-edge, after the customer's own SCA, through the ordinary payment initiation path.
+  - **Elevation of privilege (MCP approves its own proposal).** Two disjoint caller halves, checked
+    in the resource by verified client identity (`ServiceAccountIdentity.isPrincipal`, #12448) AND
+    in `delegation_rest_ext.rego`: mcp-service may only `create`; the edge may only
+    `read/approve/reject/execution`; staff and the shared backend identity reach neither (veto at
+    the allow head). Tests: `PaymentProposalApiIT`, `delegation_rest_ext_test.rego`.
+  - **Spoofing a grant.** The grant is FOUND from (party, `azp`, `cnf.jkt`) among ACTIVE MCP_CLIENT
+    grants with `ACCOUNT_PROPOSE_PAYMENT` over the debtor account, never named by the caller.
+    Residual: mcp-service passes the party/client/key as body fields under its own M2M token, so a
+    compromised mcp-service could propose under any party that holds such a grant; a proposal still
+    needs that customer's SCA in the app. Binding the create to the exchanged customer token is a
+    follow-up.
+  - **Trust in mcp-service and the edge (stated, not verified).** The store does not re-verify
+    the `mcpClientId`/`keyThumbprint` mcp-service passes (it sees only mcp-service's service-account
+    token), nor the `paymentId` the edge records on execution (it sees only the edge's token; the
+    edge takes it from the payment service's create response). Both callers are pinned by verified
+    client identity and OPA; a lie from either can at worst attach a proposal to the wrong grant of
+    a party that holds one, or mislabel which payment executed it — never move money, which still
+    needs the customer's SCA at the edge and the payment service's own checks.
+  - **Tampering / TOCTOU.** The instruction columns and hash are immutable (entity
+    `updatable = false` plus the V38 trigger), the state graph is one-way at the database, DELETE
+    raises, TRUNCATE raises (statement trigger). The SHA-256 covers proposal id, party and every instruction field; approval and
+    execution both re-compare it, and a row whose hash does not describe its columns fails to load.
+  - **Stale authority.** A proposal is only as alive as its grant: reading or approving one whose
+    grant is no longer ACTIVE persists REJECTED first, and a grant write that leaves ACTIVE rejects
+    its PENDING proposals in the same transaction.
+  - **Display spoofing (D7).** Payee name and reference refuse Unicode Cc/Cf/Zl/Zp (bidi
+    overrides, zero-width, line separators), Cs (unpaired surrogates), Co and Cn, `<>[]` backtick
+    and `://`, and must be NFC (refused, never re-encoded).
+  - **Denial of service.** ≤10 open and ≤20 created per party per 24 h, decided under a per-party
+    advisory transaction lock; an open proposal identical in every instruction field from the same client and grant is
+    deduplicated; TTL 24 h (capped).
+  - **Repudiation.** Every transition writes an outbox event in the same transaction (data-
+    minimised: no IBAN/name/reference).
+  - Not in this slice: the push coalescing and VoP display of D6 (app/edge), an expiry sweep
+    (expiry is applied on read and at create).
+
 - **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
   the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
   service.

@@ -78,6 +78,7 @@ concurrency:
 
 jobs:
   fleet-lint:
+    if: github.event_name != 'schedule' || (vars.FLEET_LINT_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: fleet lint + compile
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     # Sized for a COLD build, not a warm one. Any change under build-logic/ changes the build
