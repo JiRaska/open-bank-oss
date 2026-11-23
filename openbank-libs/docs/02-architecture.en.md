@@ -77,3 +77,17 @@ a fleet-wide runtime upgrade. Original histories gate forward replay; new histor
 must not be assumed readable by the old SDK.
 
 `TopicProducers` attributes `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` to account-service (#9073); audit-service and analytics-sink subscribe to both before the producer switches.
+
+### Customer MCP proof and consent contracts
+
+The shared security library holds the common DPoP proof verifier and replay result
+used by the MCP and Balance paths. A caller may act only after its replay store
+records a fresh proof. A repeat, exhausted quota or unavailable store cannot
+produce an authorization. Delegation uses the same result vocabulary for its
+separately committed, deployment-scoped proof reference.
+
+The V2 connect context shares the canonical serialization of the request,
+customer, expiry, accounts and capabilities. Keycloak and the bank services use
+the same digest to attest the exact selection for SCA. Live ownership, TLS
+identity and grant validity remain responsibilities of the services that read or
+issue the protected resource.
