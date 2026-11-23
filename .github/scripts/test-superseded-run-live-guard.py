@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -22,6 +23,10 @@ class LiveRunGuardTest(unittest.TestCase):
                'pull_requests': [{'number': 7}]}
         with tempfile.TemporaryDirectory(prefix='superseded-run-test-') as directory:
             calls = Path(directory) / 'calls'
+            helper = Path('.github/scripts/cancel-workflow-run.sh')
+            fixture_helper = Path(directory) / helper
+            fixture_helper.parent.mkdir(parents=True)
+            shutil.copyfile(Path(__file__).resolve().parents[2] / helper, fixture_helper)
             # The mutating job consumes the read-only classifier's bounded handoff file.
             (Path(directory) / 'superseded-pr-runs.json').write_text(
                 json.dumps([{'runId': 123, 'pr': 7, 'headSha': stale}]))
@@ -43,6 +48,7 @@ gh() {
     *) printf 'unexpected mocked request\n' >&2; return 99 ;;
   esac
 }
+export -f gh
 '''
             result = subprocess.run(['bash', '-c', mock + shell.replace('/tmp/', directory + '/')],
                                     cwd=directory, env=env, capture_output=True, text=True)
