@@ -20,7 +20,6 @@ import com.openbank.mcp.infrastructure.customer.CreatePaymentProposalRequest
 import com.openbank.mcp.infrastructure.customer.CustomerCapabilities
 import com.openbank.mcp.infrastructure.customer.CustomerPaymentProposer
 import com.openbank.mcp.infrastructure.customer.DelegationGrantClient
-import com.openbank.mcp.infrastructure.customer.GrantKey
 import com.openbank.mcp.infrastructure.customer.McpProposalReceipt
 import com.openbank.mcp.infrastructure.customer.PaymentProposalStoreClient
 import com.openbank.mcp.infrastructure.customer.ResolveMcpClientGrantRequest
@@ -230,11 +229,8 @@ class DelegationGrantResolvePactConsumerTest {
         /** LITERAL, retyped from delegation-service's `PaymentProposalResource`. */
         const val PROPOSAL_PATH = "/api/v1/payment-proposals"
 
-        val IDEMPOTENCY_KEY: String = CustomerPaymentProposer.idempotencyKey(
-            GrantKey(UUID.fromString(PARTY_ID), CLIENT_ID, JKT),
-            null,
-            "pact-request-0001",
-        )
+        // A contract example, separate from the derived hash covered by the proposer tests.
+        val IDEMPOTENCY_KEY = "0".repeat(64)
 
         val PROPOSAL_REQUEST = CreatePaymentProposalRequest(
             partyId = UUID.fromString(PARTY_ID),

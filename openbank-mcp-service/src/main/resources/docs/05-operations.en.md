@@ -262,6 +262,22 @@ from a peer header.
   pass the external Host through (or routed to `:8150`); every tokenless caller sharing one audit
   key means the SAN pin does not match the gateway certificate.
 
+## Customer payment proposals (ADR-0383 D6)
+
+The customer MCP channel offers `propose_payment` when an active account grant includes
+`ACCOUNT_PROPOSE_PAYMENT`. The request names the debtor account and supplies the creditor,
+amount, currency, and a stable `clientRequestId`. A verified customer token session is required.
+Retry the same instruction with the same request ID in the same session to reuse its deduplication key.
+
+A successful call returns a `PENDING` proposal ID. The customer reviews and authorizes the payment
+with transaction-bound SCA in the banking app. The MCP service can create a proposal and has no
+route to approve or execute it.
+
+A grant denial or inaccessible account yields a tool error without creating a proposal.
+For a store outage, investigate the delegation-service create route and its policy decision.
+Match the bounded `propose_payment` tool-call counter and customer channel tag with the MCP audit
+decision. Keep customer arguments and credentials out of diagnostic logs.
+
 ## Customer channel metrics and alerts (ADR-0384 slice 1)
 
 `McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
