@@ -8,25 +8,23 @@ if [ "${#files[@]}" -eq 0 ]; then
   echo "${SERVICE} is not a consumer of any contract — nothing to publish."
   exit 0
 fi
-contracts="$(for f in "${files[@]}"; do
-  jq -nc \
-    --arg c "$(jq -r '.consumer.name' "$f")" \
-    --arg p "$(jq -r '.provider.name' "$f")" \
-    --arg content "$(base64 < "$f" | tr -d '\n')" \
-    '{consumerName:$c, providerName:$p, specification:"pact", contentType:"application/json", content:$content}'
-done | jq -sc '.')"
-body="$(jq -nc \
-  --arg name "${SERVICE}" \
-  --arg ver "$consumer_version" \
-  --arg branch "$BRANCH" \
-  --arg build "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-  --argjson contracts "$contracts" \
-  '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:$contracts}')"
 echo "Publishing ${#files[@]} pact(s) for ${SERVICE} @ ${consumer_version::8} (branch ${BRANCH})"
 body_file=$(mktemp)
 response_file=$(mktemp)
 trap 'rm -f "$body_file" "$response_file"' EXIT
-printf '%s' "$body" > "$body_file"
+for f in "${files[@]}"; do
+  jq -nc --rawfile content "$f" '
+    ($content | fromjson) as $pact
+    | {consumerName:$pact.consumer.name, providerName:$pact.provider.name,
+       specification:"pact", contentType:"application/json", content:($content | @base64)}
+  '
+done | jq -sc \
+  --arg name "${SERVICE}" \
+  --arg ver "$consumer_version" \
+  --arg branch "$BRANCH" \
+  --arg build "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+  '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:.}' \
+  > "$body_file"
 code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
   "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" "$response_file" \
   'application/hal+json, application/json')"
