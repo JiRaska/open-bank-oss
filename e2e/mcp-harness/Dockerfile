@@ -7,7 +7,8 @@ WORKDIR /opt/openbank/mcp-harness
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY src/ ./src/
+COPY run-sandbox-journey.sh ./
 
 USER pwuser
-ENTRYPOINT ["node", "src/cli.ts"]
-CMD ["--journey", "--read-only", "--verify-revocation"]
+ENTRYPOINT ["sh", "./run-sandbox-journey.sh"]
+CMD ["--read-only", "--verify-revocation"]
