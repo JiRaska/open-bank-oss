@@ -10,6 +10,7 @@ import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sdd.domain.model.SddScheme
 import com.openbank.sdd.domain.model.SequenceType
+import com.openbank.sdd.infrastructure.scheduler.MandateExpiryWriter
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -68,6 +69,9 @@ class MandateExpirySchedulerVertxContextIT {
 
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var expiryWriter: MandateExpiryWriter
 
     /** (mandate xmin, outbox xmin, event_type) for every outbox row of [mandateId]. */
     private fun outboxWritersOf(mandateId: UUID): List<Triple<String, String, String>> =
@@ -132,6 +136,28 @@ class MandateExpirySchedulerVertxContextIT {
         assertThat(outboxWritersOf(live.id))
             .describedAs("a live mandate gets no expired event")
             .isEmpty()
+    }
+
+    @Test
+    fun `expiry preserves activity and cancellation committed after the candidate was selected`() {
+        val today = LocalDate.now()
+        val collected = mandate(signatureDate = today.minusYears(4), lastCollection = null)
+        val cancelled = mandate(signatureDate = today.minusYears(4), lastCollection = null)
+        val recent = collected.copy(lastCollectionDate = today)
+        val closed = cancelled.copy(status = MandateStatus.CANCELLED)
+        onEventLoop {
+            mandates.save(recent).awaitSuspending()
+            mandates.save(closed).awaitSuspending()
+        }
+
+        assertThat(onEventLoop { expiryWriter.expireIfIdle(collected, today).awaitSuspending() }).isFalse()
+        assertThat(onEventLoop { expiryWriter.expireIfIdle(cancelled, today).awaitSuspending() }).isFalse()
+        assertThat(onEventLoop { mandates.findById(collected.id).awaitSuspending() }?.lastCollectionDate)
+            .isEqualTo(today)
+        assertThat(onEventLoop { mandates.findById(cancelled.id).awaitSuspending() }?.status)
+            .isEqualTo(MandateStatus.CANCELLED)
+        assertThat(outboxWritersOf(collected.id)).isEmpty()
+        assertThat(outboxWritersOf(cancelled.id)).isEmpty()
     }
 
     private fun mandate(signatureDate: LocalDate, lastCollection: LocalDate?) = SddMandate(

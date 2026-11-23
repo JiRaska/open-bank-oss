@@ -52,6 +52,7 @@ class MandateExpiryServiceTest {
     fun `an idle mandate is saved EXPIRED and emits sdd mandate expired v1`() {
         val idle = mandate(LocalDate.of(2023, 11, 1))
         val message = slot<OutboxMessage>()
+        every { mandates.findByIdForUpdate(idle.id) } returns Uni.createFrom().item(idle)
         every { mandates.save(any()) } answers { Uni.createFrom().item(firstArg<SddMandate>()) }
         every { outbox.append(capture(message)) } returns Uni.createFrom().voidItem()
 
@@ -72,6 +73,7 @@ class MandateExpiryServiceTest {
     fun `a live mandate is neither saved nor announced`() {
         val live = mandate(LocalDate.of(2026, 10, 1))
 
+        every { mandates.findByIdForUpdate(live.id) } returns Uni.createFrom().item(live)
         assertThat(service.expireIfIdle(live, today).await().indefinitely()).isFalse()
 
         verify(exactly = 0) { mandates.save(any()) }
@@ -81,6 +83,7 @@ class MandateExpiryServiceTest {
     @Test
     fun `a failed outbox append surfaces so the transaction rolls back`() {
         val idle = mandate(LocalDate.of(2023, 11, 1))
+        every { mandates.findByIdForUpdate(idle.id) } returns Uni.createFrom().item(idle)
         every { mandates.save(any()) } answers { Uni.createFrom().item(firstArg<SddMandate>()) }
         every { outbox.append(any()) } returns Uni.createFrom().failure(IllegalStateException("outbox down"))
 

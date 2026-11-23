@@ -26,13 +26,15 @@ class MandateExpiryService(private val mandates: SddMandateRepository, private v
     /** Clock seam (overridable in tests; CDI uses the default). */
     internal var clock: () -> Instant = Instant::now
 
-    override fun expireIfIdle(mandate: SddMandate, today: LocalDate): Uni<Boolean> {
-        val expired = MandateLifecycle.expireIfIdle(mandate, today)
-        if (expired.status == mandate.status) return Uni.createFrom().item(false)
-        return mandates.save(expired).flatMap { saved ->
-            outbox.append(mandateEventMessage(saved, MANDATE_EXPIRED_EVENT, clock())).map { true }
+    override fun expireIfIdle(mandate: SddMandate, today: LocalDate): Uni<Boolean> =
+        mandates.findByIdForUpdate(mandate.id).flatMap { current ->
+            if (current == null) return@flatMap Uni.createFrom().item(false)
+            val expired = MandateLifecycle.expireIfIdle(current, today)
+            if (expired.status == current.status) return@flatMap Uni.createFrom().item(false)
+            mandates.save(expired).flatMap { saved ->
+                outbox.append(mandateEventMessage(saved, MANDATE_EXPIRED_EVENT, clock())).map { true }
+            }
         }
-    }
 
     private companion object {
         const val MANDATE_EXPIRED_EVENT = "sdd.mandate.expired.v1"

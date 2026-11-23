@@ -101,7 +101,7 @@ class SddMandateService(
         transition(mandateId, "sdd.mandate.cancelled.v1") { MandateLifecycle.cancel(it) }
 
     override fun amend(mandateId: UUID, command: AmendMandateCommand): Uni<SddMandate> =
-        load(mandateId).flatMap { mandate ->
+        loadForUpdate(mandateId).flatMap { mandate ->
             val (field, oldValue) = currentValue(mandate, command.field)
             val amended = MandateLifecycle.amend(mandate, field, oldValue, command.newValue, clock())
             persist(applyField(amended, command), "sdd.mandate.amended.v1")
@@ -129,19 +129,37 @@ class SddMandateService(
                         if (held != null) {
                             Uni.createFrom().item(held)
                         } else {
-                            // Stamp the settled collection and emit for the downstream posting path.
-                            val stamped = MandateLifecycle.recordCollection(mandate, instruction.dueDate)
-                            mandates.save(stamped)
-                                .flatMap { saved ->
-                                    outbox.append(collectionAuthorisedEvent(saved, instruction)).map { saved }
-                                }
-                                .map { result }
+                            recordScreenedCollection(mandate, instruction, controls)
                         }
                     }
                 }
                 else -> Uni.createFrom().item(result)
             }
         }
+
+    private fun recordScreenedCollection(
+        screened: SddMandate,
+        instruction: CollectionInstruction,
+        controls: DebtorControls,
+    ): Uni<AuthorisationResult> = mandates.findByIdForUpdate(screened.id).flatMap { current ->
+        val bound = current?.takeIf {
+            it.creditorIdentifier == instruction.creditorIdentifier && it.umr == instruction.umr
+        }
+        val decision = CollectionAuthorisationPolicy.authorise(bound, instruction, controls)
+        if (decision !is AuthorisationResult.Accept || bound == null) {
+            return@flatMap Uni.createFrom().item(decision)
+        }
+        if (bound.lastCollectionDate == instruction.dueDate) return@flatMap Uni.createFrom().item(decision)
+        if (bound.debtorName != screened.debtorName || bound.creditorName != screened.creditorName) {
+            return@flatMap Uni.createFrom().item(
+                AuthorisationResult.Reject("RR04", "Mandate parties changed during screening; retry the collection"),
+            )
+        }
+        val stamped = MandateLifecycle.recordCollection(bound, instruction.dueDate)
+        mandates.save(stamped)
+            .flatMap { saved -> outbox.append(collectionAuthorisedEvent(saved, instruction)) }
+            .map { decision }
+    }
 
     override fun assessRefund(mandateId: UUID, debitDate: LocalDate, asOf: LocalDate): Uni<RefundDecision> =
         load(mandateId).map { mandate ->
@@ -160,7 +178,11 @@ class SddMandateService(
     // --- helpers -------------------------------------------------------------------------------
 
     private fun transition(mandateId: UUID, eventType: String, f: (SddMandate) -> SddMandate): Uni<SddMandate> =
-        load(mandateId).flatMap { persist(f(it), eventType) }
+        loadForUpdate(mandateId).flatMap { persist(f(it), eventType) }
+
+    private fun loadForUpdate(mandateId: UUID): Uni<SddMandate> = mandates.findByIdForUpdate(mandateId).flatMap { m ->
+        if (m == null) Uni.createFrom().failure(MandateNotFoundException(mandateId)) else Uni.createFrom().item(m)
+    }
 
     private fun load(mandateId: UUID): Uni<SddMandate> = mandates.findById(mandateId).flatMap { m ->
         if (m == null) Uni.createFrom().failure(MandateNotFoundException(mandateId)) else Uni.createFrom().item(m)
