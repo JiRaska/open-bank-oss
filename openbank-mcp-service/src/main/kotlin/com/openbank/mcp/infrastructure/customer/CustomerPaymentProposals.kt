@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.customer
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -63,6 +64,7 @@ data class CreatePaymentProposalRequest(
     val amount: String,
     val currency: String,
     val reference: String? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val connectionId: UUID? = null,
 )
 
 /** The store's answer to mcp-service: an id, a state and an expiry — never an approval handle. */

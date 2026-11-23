@@ -18,6 +18,7 @@ import com.openbank.mcp.application.protocol.ToolDefinition
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -44,6 +45,9 @@ class CustomerReadTools @Inject constructor(
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
     private val proposer: CustomerPaymentProposer,
+    private val boundBalance: McpBoundBalanceReader? = null,
+    @ConfigProperty(name = "mcp.customer.connection-binding.propose-enabled", defaultValue = "false")
+    private val boundProposalEnabled: Boolean = false,
 ) {
     /**
      * The authenticated caller, as admission verified it. [grantKey] is the verified grant triple
@@ -56,7 +60,10 @@ class CustomerReadTools @Inject constructor(
         val clientId: String,
         val grantKey: GrantKey? = null,
         val sessionId: String? = null,
-    )
+        val resourceProof: String? = null,
+    ) {
+        override fun toString(): String = "CustomerReadCaller[redacted]"
+    }
 
     sealed interface Outcome {
         /** [grantId] is the grant the call ran under; null for `list_accounts` (it reads no account). */
@@ -135,8 +142,10 @@ class CustomerReadTools @Inject constructor(
     ).associateBy { it.definition.name }
 
     /** Tools whose capability at least one active grant carries. No grant ⇒ no tools. */
-    fun list(grants: List<CustomerGrant>): List<ToolDefinition> =
-        tools.values.filter { t -> grants.any { it.allows(t.capability) } }.map { it.definition }
+    fun list(grants: List<CustomerGrant>, connectionBound: Boolean = false): List<ToolDefinition> =
+        tools.values.filter { t ->
+            toolAvailable(t.definition.name, connectionBound) && grants.any { it.allows(t.capability) }
+        }.map { it.definition }
 
     val totalTools: Int get() = tools.size
 
@@ -145,11 +154,15 @@ class CustomerReadTools @Inject constructor(
     fun call(tool: String, arguments: JsonNode, caller: Caller, grants: List<CustomerGrant>): Outcome {
         val spec = tools[tool] ?: return Outcome.Refused("tool not available on the customer channel", null)
         val capability = spec.capability
+        val connectionBound = caller.grantKey?.connectionId != null
+        if (!toolAvailable(tool, connectionBound)) {
+            return Outcome.Refused("tool not available for an MCP connection", capability)
+        }
         if (tool == LIST_ACCOUNTS) {
             val shared = grants.filter { it.allows(capability) }
             if (shared.isEmpty()) return Outcome.Refused("no active grant carries $capability", capability)
             policy(spec, caller, shared.flatMap { it.capabilities }.toSet())?.let { return it }
-            return Outcome.Allowed(render(accounts(shared)), capability, null)
+            return Outcome.Allowed(render(accounts(shared, connectionBound)), capability, null)
         }
         if (tool == PROPOSE_PAYMENT) return propose(spec, arguments, caller, grants)
         val read = readOf(tool, arguments) ?: return Outcome.Refused("invalid arguments", capability)
@@ -157,6 +170,16 @@ class CustomerReadTools @Inject constructor(
             ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
         policy(spec, caller, grant.capabilities)?.let { return it }
         return exchangeAndRead(read, caller, capability, grant)
+    }
+
+    private fun toolAvailable(tool: String, connectionBound: Boolean): Boolean {
+        if (!connectionBound) return true
+        return when (tool) {
+            LIST_ACCOUNTS -> true
+            GET_BALANCE -> boundBalance?.enabled == true
+            PROPOSE_PAYMENT -> boundProposalEnabled
+            else -> false
+        }
     }
 
     /**
@@ -252,8 +275,9 @@ class CustomerReadTools @Inject constructor(
     private fun exchangeAndRead(read: Read, caller: Caller, capability: String, grant: CustomerGrant): Outcome {
         val balance = read.tool == GET_BALANCE
         val audience = if (balance) DownstreamAudience.BALANCE else DownstreamAudience.TRANSACTION
+        val bound = if (balance) boundBalance?.takeIf { it.enabled } else null
         val token = try {
-            exchange.exchange(caller.rawToken, caller.subject, audience)
+            if (bound == null) exchange.exchange(caller.rawToken, caller.subject, audience) else null
         } catch (e: CancellationException) {
             throw e
         } catch (e: TokenExchangeRefused) {
@@ -262,14 +286,12 @@ class CustomerReadTools @Inject constructor(
             return Outcome.Refused("token exchange failed: ${e.javaClass.simpleName}", capability, unavailable = true)
         }
         val body = try {
-            if (balance) {
-                downstream.balances(
-                    token,
-                    read.accountId,
-                )
-            } else {
-                downstream.transactions(token, read.accountId, read.limit)
-            }
+            bound?.read(caller, grant) ?: downstream.readLegacy(
+                audience,
+                requireNotNull(token),
+                read.accountId,
+                read.limit,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: DownstreamRefused) {
@@ -287,20 +309,18 @@ class CustomerReadTools @Inject constructor(
         return Outcome.Allowed(render(body), capability, grant.grantId)
     }
 
-    private fun accounts(grants: List<CustomerGrant>): JsonNode {
+    private fun accounts(grants: List<CustomerGrant>, connectionBound: Boolean): JsonNode {
         val root = mapper.createObjectNode()
         val list = root.putArray("accounts")
         grants.forEach { g ->
             val entry = list.addObject().put(ACCOUNT_ID, g.accountId.toString())
             val names = entry.putArray("tools")
-            readTools(g).forEach { names.add(it) }
+            list(listOf(g), connectionBound).forEach { tool ->
+                if (tool.name != LIST_ACCOUNTS) names.add(tool.name)
+            }
         }
         return root
     }
-
-    private fun readTools(g: CustomerGrant): List<String> = tools.values.filter {
-        it.definition.name != LIST_ACCOUNTS && g.allows(it.capability)
-    }.map { it.definition.name }
 
     private fun render(result: JsonNode): ToolCallResult {
         val masked = mapper.writeValueAsString(masker.mask(result))
@@ -378,4 +398,14 @@ private fun schema(props: Map<String, Any>, required: List<String>): Map<String,
     put("type", "object")
     put("properties", props)
     if (required.isNotEmpty()) put("required", required)
+}
+
+private fun CustomerDownstream.readLegacy(
+    audience: DownstreamAudience,
+    token: String,
+    accountId: UUID,
+    limit: Int,
+): JsonNode = when (audience) {
+    DownstreamAudience.BALANCE -> balances(token, accountId)
+    DownstreamAudience.TRANSACTION -> transactions(token, accountId, limit)
 }

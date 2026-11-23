@@ -86,12 +86,9 @@ const clientAuthForm = (a: ClientAuth): Record<string, string | undefined> =>
   ({ client_id: a.clientId, client_secret: a.clientSecret })
 
 /** RFC 9126. Returns the raw response so attacks can assert the exact error. */
-export function pushAuthorizationRequest(as: AsMetadata, p: AuthorizationParams, auth: ClientAuth): Promise<RawResponse> {
+export function pushAuthorizationRequest(as: AsMetadata, p: AuthorizationParams, auth: ClientAuth, dpop?: DpopKey): Promise<RawResponse> {
   if (!as.pushed_authorization_request_endpoint) throw new Error('authorization server advertises no PAR endpoint')
-  return send(as.pushed_authorization_request_endpoint, {
-    method: 'POST',
-    form: { ...toForm(p), ...clientAuthForm(auth) },
-  })
+  return postWithDpop(as.pushed_authorization_request_endpoint, { ...toForm(p), ...clientAuthForm(auth) }, dpop)
 }
 
 export function authorizeUrlFromPar(as: AsMetadata, clientId: string, requestUri: string, extra: Record<string, string> = {}): string {
@@ -125,20 +122,20 @@ export function validateAuthorizationResponse(callbackUrl: string, expected: { s
   return code
 }
 
-async function tokenRequest(as: AsMetadata, form: Record<string, string | undefined>, dpop?: DpopKey, nonce?: string): Promise<RawResponse> {
+async function postWithDpop(endpoint: string, form: Record<string, string | undefined>, dpop?: DpopKey, nonce?: string): Promise<RawResponse> {
   const headers: Record<string, string> = {}
-  if (dpop) headers.DPoP = await createDpopProof(dpop, { htm: 'POST', htu: as.token_endpoint, nonce })
-  const res = await send(as.token_endpoint, { method: 'POST', headers, form })
+  if (dpop) headers.DPoP = await createDpopProof(dpop, { htm: 'POST', htu: endpoint, nonce })
+  const res = await send(endpoint, { method: 'POST', headers, form })
   // RFC 9449 §8: an AS may demand a nonce; retry once with it.
   const demanded = res.headers.get('dpop-nonce')
   if (dpop && !nonce && demanded && res.status === 400 && res.json?.error === 'use_dpop_nonce') {
-    return tokenRequest(as, form, dpop, demanded)
+    return postWithDpop(endpoint, form, dpop, demanded)
   }
   return res
 }
 
 export function exchangeCode(as: AsMetadata, o: { code: string; verifier?: string; redirectUri: string; resource?: string; auth: ClientAuth; dpop?: DpopKey }): Promise<RawResponse> {
-  return tokenRequest(as, {
+  return postWithDpop(as.token_endpoint, {
     grant_type: 'authorization_code',
     code: o.code,
     code_verifier: o.verifier,
@@ -149,7 +146,7 @@ export function exchangeCode(as: AsMetadata, o: { code: string; verifier?: strin
 }
 
 export function refreshGrant(as: AsMetadata, o: { refreshToken: string; resource?: string; auth: ClientAuth; dpop?: DpopKey }): Promise<RawResponse> {
-  return tokenRequest(as, {
+  return postWithDpop(as.token_endpoint, {
     grant_type: 'refresh_token',
     refresh_token: o.refreshToken,
     resource: o.resource,

@@ -79,6 +79,7 @@ class CustomerPaymentProposer @Inject constructor(
             amount = instruction.amount,
             currency = instruction.currency,
             reference = instruction.reference,
+            connectionId = key.connectionId,
         )
         val receipt = try {
             store.create(idempotencyKey(key, sessionId, instruction.clientRequestId), request)
@@ -155,6 +156,7 @@ class CustomerPaymentProposer @Inject constructor(
         const val INVALID_INSTRUCTION = "The bank refused the payment instruction as invalid."
 
         private const val KEY_VERSION = "mcp-customer-propose-v1"
+        private const val BOUND_KEY_VERSION = "mcp-customer-propose-v2"
         private const val NO_SESSION = "-"
 
         /**
@@ -162,14 +164,15 @@ class CustomerPaymentProposer @Inject constructor(
          * session and the client's request id, unit-separated so no field can shift into another.
          */
         fun idempotencyKey(key: GrantKey, sessionId: String?, clientRequestId: String): String {
-            val material = listOf(
-                KEY_VERSION,
-                key.partyId.toString(),
-                key.clientId,
-                key.keyThumbprint,
-                sessionId ?: NO_SESSION,
-                clientRequestId,
-            ).joinToString("\u001f")
+            val material = buildList {
+                add(if (key.connectionId == null) KEY_VERSION else BOUND_KEY_VERSION)
+                add(key.partyId.toString())
+                add(key.clientId)
+                add(key.keyThumbprint)
+                key.connectionId?.let { add(it.toString()) }
+                add(sessionId ?: NO_SESSION)
+                add(clientRequestId)
+            }.joinToString("\u001f")
             return MessageDigest.getInstance("SHA-256").digest(material.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it) }
         }

@@ -171,6 +171,24 @@ class CustomerPaymentProposerTest {
     }
 
     @Test
+    fun `the exact connection is forwarded and separates proposals sharing the triple and session`() {
+        val requests = mutableListOf<CreatePaymentProposalRequest>()
+        val keys = mutableListOf<String>()
+        every { store.create(capture(keys), capture(requests)) } returns receipt()
+        val instruction = CustomerPaymentProposer.parse(args())
+        val first = key.copy(connectionId = UUID.randomUUID())
+        val second = key.copy(connectionId = UUID.randomUUID())
+
+        proposer.propose(instruction, first, "sid-1")
+        proposer.propose(instruction, second, "sid-1")
+        proposer.propose(instruction, first, "sid-1")
+
+        val connections = requests.map { it.connectionId }
+        assertThat(connections).containsExactly(first.connectionId, second.connectionId, first.connectionId)
+        assertThat(keys[0]).isNotEqualTo(keys[1]).isEqualTo(keys[2])
+    }
+
+    @Test
     fun `a retry sends the same key twice - the store, not a second proposal, answers it`() {
         val keys = mutableListOf<String>()
         every { store.create(capture(keys), any()) } returns receipt()

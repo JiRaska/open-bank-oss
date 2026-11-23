@@ -73,6 +73,9 @@ ALLOWLIST: dict[tuple[str, str, str, str], str] = {
         "ADR-0383 D3 grant lookup: a POST that READS. delegation-service's McpClientGrantResolver "
         "only queries ACTIVE MCP_CLIENT grants for the (party, client, key) triple and writes "
         "nothing; POST keeps the party id and key thumbprint out of the URL and access logs.",
+    ("com.openbank.mcp.infrastructure.customer.McpBoundBalanceIssuer", "issue", "POST", "/protocol/openid-connect/token"):
+        "ADR-0383 D4: issue a certificate-bound token for one balance read through the dedicated grant. "
+        "The issuer verifies the original DPoP evidence and requires a committed read permit.",
     ("com.openbank.mcp.infrastructure.customer.CustomerTokenEndpointClient", "exchange", "POST", "/protocol/openid-connect/token"):
         "ADR-0383 D4 RFC 8693 token exchange at the customers realm: the token endpoint is POST by "
         "specification and mints a short-lived, single-audience READ-scoped token. It changes no "

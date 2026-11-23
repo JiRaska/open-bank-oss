@@ -87,4 +87,93 @@ class McpClientGrantIdentityGuardIT {
     fun `mcp-service itself is admitted`() {
         resolve().statusCode(200)
     }
+
+    private fun authorizeBalanceRead(proofKey: String = "0".repeat(64)) = given().port(testPort.toInt())
+        .contentType(ContentType.JSON)
+        .body(
+            mapOf(
+                "partyId" to PARTY.toString(),
+                "clientId" to CLIENT,
+                "keyThumbprint" to JKT,
+                "accountId" to "d3d3d3d3-0000-4000-8000-000000000003",
+                "proofKey" to proofKey,
+            ),
+        )
+        .post("/api/v1/delegations/mcp-client/authorize-balance-read")
+        .then()
+
+    @Test
+    fun `balance issuer endpoint requires authentication`() {
+        authorizeBalanceRead().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-mcp", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
+            Claim(key = "azp", value = "openbank-mcp"),
+            Claim(key = "preferred_username", value = "service-account-openbank-mcp"),
+        ],
+    )
+    fun `MCP lookup service may not authorize balance issuance`() {
+        authorizeBalanceRead().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-mcp-read-issuer", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
+            Claim(key = "azp", value = "openbank-mcp-read-issuer"),
+            Claim(key = "preferred_username", value = "service-account-openbank-mcp-read-issuer"),
+        ],
+    )
+    fun `dedicated issuer reaches balance request validation`() {
+        authorizeBalanceRead("invalid").statusCode(400)
+    }
+
+    private fun checkBalanceGrant(client: String = CLIENT) = given().port(testPort.toInt())
+        .contentType(ContentType.JSON)
+        .body(
+            mapOf(
+                "grantId" to "d3d3d3d3-0000-4000-8000-000000000004",
+                "partyId" to PARTY.toString(),
+                "clientId" to client,
+                "accountId" to "d3d3d3d3-0000-4000-8000-000000000003",
+            ),
+        )
+        .post("/api/v1/delegations/mcp-client/check-balance-grant")
+        .then()
+
+    @Test
+    fun `balance grant check requires authentication`() {
+        checkBalanceGrant().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-mcp-read-issuer", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
+            Claim(key = "azp", value = "openbank-mcp-read-issuer"),
+            Claim(key = "preferred_username", value = "service-account-openbank-mcp-read-issuer"),
+        ],
+    )
+    fun `issuer cannot perform balance-service grant rechecks`() {
+        checkBalanceGrant().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-balance-mcp-reader", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "6a8f2c1e-0b4d-4e7a-9c3f-1d2e3f4a5b6c"),
+            Claim(key = "azp", value = "openbank-balance-mcp-reader"),
+            Claim(key = "preferred_username", value = "service-account-openbank-balance-mcp-reader"),
+        ],
+    )
+    fun `dedicated balance service reaches grant check request validation`() {
+        checkBalanceGrant("").statusCode(400)
+    }
 }

@@ -82,7 +82,7 @@ internal class McpCustomerBranch(
         val outcome = runBlocking { admission.admit(jwt, authorization, dpop, throttles) }
         return when (outcome) {
             is Outcome.Refused -> refuse(outcome, jwt.subject, method, params)
-            is Outcome.Admitted -> admitted(outcome, jwt, authorization, method, id, params)
+            is Outcome.Admitted -> admitted(outcome, jwt, authorization, dpop.singleOrNull(), method, id, params)
         }
     }
 
@@ -147,6 +147,7 @@ internal class McpCustomerBranch(
         }
         val builder = Response.status(outcome.status)
         outcome.challenge?.let { builder.header(WWW_AUTHENTICATE, it) }
+        outcome.resourceNonce?.let { builder.header("DPoP-Nonce", it) }
         return builder.build()
     }
 
@@ -169,7 +170,7 @@ internal class McpCustomerBranch(
         }
         val party = claim?.takeIf { UUID_SHAPE.matches(it) }?.let(UUID::fromString)
             ?: return Grants.Unknown("token carries no party_id")
-        val key = GrantKey(party, outcome.client.clientId, outcome.keyThumbprint)
+        val key = GrantKey(party, outcome.client.clientId, outcome.keyThumbprint, outcome.connectionId)
         return try {
             Grants.Known(key, grantCache.grants(key))
         } catch (e: GrantLookupUnavailable) {
@@ -183,6 +184,7 @@ internal class McpCustomerBranch(
         outcome: Outcome.Admitted,
         jwt: JsonWebToken,
         authorization: String?,
+        resourceProof: String?,
         method: String,
         id: JsonNode,
         params: JsonNode,
@@ -210,6 +212,7 @@ internal class McpCustomerBranch(
             outcome.client.clientId,
             grantKey = known.key,
             sessionId = sessionOf(jwt),
+            resourceProof = resourceProof,
         )
         val result = tools.call(tool, args, caller, known.grants)
         val decision = result.auditDecision()
@@ -268,7 +271,7 @@ internal class McpCustomerBranch(
     }
 
     private fun list(ctx: ConsentContext, grants: Grants, id: JsonNode): Response {
-        val offered = (grants as? Grants.Known)?.let { tools.list(it.grants) }.orEmpty()
+        val offered = (grants as? Grants.Known)?.let { tools.list(it.grants, it.key.connectionId != null) }.orEmpty()
         val reason = when {
             grants is Grants.Unknown -> grants.reason
             offered.isEmpty() -> NO_ACTIVE_GRANT

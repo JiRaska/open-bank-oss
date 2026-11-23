@@ -5,6 +5,8 @@
 package com.openbank.delegation.infrastructure.rest
 
 import com.openbank.delegation.application.port.`in`.ResolveMcpClientGrantUseCase
+import com.openbank.delegation.application.usecase.McpBalanceReadAuthorization
+import com.openbank.delegation.application.usecase.McpBalanceReadGrantCheck
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
@@ -20,6 +22,8 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.time.OffsetDateTime
@@ -45,7 +49,13 @@ import java.util.UUID
 @Path("/api/v1/delegations/mcp-client")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-class McpClientGrantResource(private val resolver: ResolveMcpClientGrantUseCase) {
+class McpClientGrantResource(
+    private val resolver: ResolveMcpClientGrantUseCase,
+    private val balanceAuthorization: McpBalanceReadAuthorization,
+    private val balanceGrantCheck: McpBalanceReadGrantCheck,
+    @ConfigProperty(name = "openbank.delegation.mcp-connect-enabled", defaultValue = "false")
+    private val connectionBindingEnabled: Boolean,
+) {
     @Inject
     lateinit var identity: SecurityIdentity
 
@@ -69,12 +79,67 @@ class McpClientGrantResource(private val resolver: ResolveMcpClientGrantUseCase)
         }
         val jkt = request.keyThumbprint
         require(jkt != null && JKT.matches(jkt)) { "keyThumbprint must be an RFC 7638 SHA-256 thumbprint" }
-        return ResolveMcpClientGrantResponse(resolver.resolve(grantor, clientId, jkt).map(McpClientGrantDto::from))
+        requireMatchingMode(request.connectionId)
+        val grants = request.connectionId?.let { resolver.resolveForConnection(grantor, clientId, jkt, it) }
+            ?: resolver.resolve(grantor, clientId, jkt)
+        return ResolveMcpClientGrantResponse(grants.map(McpClientGrantDto::from))
+    }
+
+    @Operation(summary = "Authorize one bound balance read for the internal token issuer")
+    @POST
+    @Path("/authorize-balance-read")
+    @RolesAllowed("ROLE_API")
+    @Authorize(action = "delegation.mcp-client.authorize-balance-read")
+    suspend fun authorizeBalanceRead(
+        request: McpBalanceReadAuthorization.VerifiedRequest?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: String?,
+    ): McpBalanceReadAuthorization.Permit {
+        if (customerPartyId != null || !ServiceAccountIdentity.isClient(identity, setOf(MCP_READ_ISSUER_CLIENT))) {
+            throw ForbiddenException("MCP balance-read authorization is reserved to the token issuer")
+        }
+        requireNotNull(request) { "request body is required" }
+        require(request.clientId.isNotBlank() && request.clientId.length <= DelegationGrant.CLIENT_ID_MAX_LENGTH) {
+            "invalid clientId"
+        }
+        require(JKT.matches(request.keyThumbprint)) { "invalid keyThumbprint" }
+        require(PROOF_KEY.matches(request.proofKey)) { "invalid proof reference" }
+        requireMatchingMode(request.connectionId)
+        return balanceAuthorization.authorize(request) ?: throw ForbiddenException("MCP balance read is not authorized")
+    }
+
+    @Operation(summary = "Recheck the active grant for a certificate-bound balance read")
+    @POST
+    @Path("/check-balance-grant")
+    @RolesAllowed("ROLE_API")
+    @Authorize(action = "delegation.mcp-client.check-balance-grant")
+    suspend fun checkBalanceGrant(
+        request: McpBalanceReadGrantCheck.Binding?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: String?,
+    ): Response {
+        if (customerPartyId != null || !ServiceAccountIdentity.isClient(identity, setOf(MCP_BALANCE_READER_CLIENT))) {
+            throw ForbiddenException("MCP balance grant checking is reserved to balance-service")
+        }
+        requireNotNull(request) { "request body is required" }
+        require(request.clientId.isNotBlank() && request.clientId.length <= DelegationGrant.CLIENT_ID_MAX_LENGTH) {
+            "invalid clientId"
+        }
+        requireMatchingMode(request.connectionId)
+        if (!balanceGrantCheck.isActive(request)) throw ForbiddenException("MCP balance grant is not active")
+        return Response.noContent().build()
+    }
+
+    private fun requireMatchingMode(connectionId: UUID?) {
+        if (connectionBindingEnabled != (connectionId != null)) {
+            throw ForbiddenException("connection binding is required by the active policy")
+        }
     }
 
     private companion object {
         /** mcp-service's M2M client (`quarkus.oidc-client.m2m`), service-account-openbank-mcp. */
         const val MCP_SERVICE_CLIENT = "openbank-mcp"
+        const val MCP_BALANCE_READER_CLIENT = "openbank-balance-mcp-reader"
+        const val MCP_READ_ISSUER_CLIENT = "openbank-mcp-read-issuer"
+        val PROOF_KEY = Regex("^[0-9a-f]{64}$")
         val JKT = Regex("^[A-Za-z0-9_-]{43}$")
     }
 }
@@ -83,6 +148,7 @@ data class ResolveMcpClientGrantRequest(
     val grantorPartyId: UUID? = null,
     val clientId: String? = null,
     val keyThumbprint: String? = null,
+    val connectionId: UUID? = null,
 )
 
 /** Never the grant itself: no names, limits, approval policy or key thumbprint leave the service. */

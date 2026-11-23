@@ -79,6 +79,31 @@ class CustomerProposePaymentToolTest {
     }
 
     @Test
+    fun `connected proposals need the separate rollout flag and the exact verified connection`() {
+        val grants = listOf(grant(CustomerCapabilities.PROPOSE_PAYMENT))
+        val bound = key.copy(connectionId = UUID.randomUUID())
+        val who = caller.copy(grantKey = bound)
+        val tool = CustomerReadTools.PROPOSE_PAYMENT
+        assertThat(tools.list(grants, connectionBound = true)).isEmpty()
+        assertThat(tools.call(tool, args(), who, grants)).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+        verify(exactly = 0) { store.create(any(), any()) }
+
+        val enabled = CustomerReadTools(
+            pdp,
+            exchange,
+            downstream,
+            McpPiiMasker(mapper),
+            mapper,
+            CustomerPaymentProposer(store, mapper),
+            boundProposalEnabled = true,
+        )
+        every { store.create(any(), match { it.connectionId == bound.connectionId }) } returns pending()
+        assertThat(enabled.list(grants, connectionBound = true).map { it.name }).containsExactly(tool)
+        assertThat(enabled.call(tool, args(), who, grants)).isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+        verify(exactly = 1) { store.create(any(), match { it.connectionId == bound.connectionId }) }
+    }
+
+    @Test
     fun `a read-only grant cannot propose and the store is never called`() {
         val out = call(listOf(grant(CustomerCapabilities.READ_BALANCES, CustomerCapabilities.READ_TRANSACTIONS)))
         assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)

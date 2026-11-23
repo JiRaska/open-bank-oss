@@ -3,12 +3,18 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.delegation.integration
 
+import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.PaymentProposal
 import com.openbank.delegation.domain.model.PaymentProposalOperationType
 import com.openbank.delegation.domain.model.PaymentProposalPayload
+import com.openbank.delegation.infrastructure.client.RestResourceOwnershipClient
 import com.openbank.delegation.it.PostgresTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
@@ -42,7 +48,10 @@ class PaymentProposalApiIT {
             io.smallrye.reactive.messaging.memory.InMemoryConnector.switchOutgoingChannelsToInMemory(
                 "delegation-events-out",
                 "payment-proposal-events-out",
-            ) + mapOf("openbank.outbox.dispatch-enabled" to "false")
+            ) + mapOf(
+                "openbank.outbox.dispatch-enabled" to "false",
+                "openbank.delegation.mcp-connect-enabled" to "true",
+            )
 
         override fun stop() = io.smallrye.reactive.messaging.memory.InMemoryConnector.clear()
     }
@@ -146,7 +155,23 @@ class PaymentProposalApiIT {
     // ---- customer-edge: read + decide only ----
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-unrelated", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = SUB),
+            Claim(key = "azp", value = "unrelated"),
+            Claim(key = "preferred_username", value = "service-account-unrelated"),
+        ],
+    )
+    fun `operator role alone cannot inspect or decide a customer proposal`() {
+        val id = seedProposal()
+        given().header(HDR, party).get("/api/v1/payment-proposals/$id?partyId=$party").then().statusCode(403)
+        decide(id, "approve", hashOf(id), party).statusCode(403)
+        assertThat(rowStatus(id)).isEqualTo("PENDING")
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(
@@ -161,7 +186,7 @@ class PaymentProposalApiIT {
     }
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(
@@ -187,7 +212,7 @@ class PaymentProposalApiIT {
     }
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(
@@ -203,7 +228,7 @@ class PaymentProposalApiIT {
     }
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(
@@ -219,7 +244,7 @@ class PaymentProposalApiIT {
     }
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(
@@ -239,7 +264,7 @@ class PaymentProposalApiIT {
     }
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(
@@ -261,7 +286,7 @@ class PaymentProposalApiIT {
     }
 
     @Test
-    @TestSecurity(user = EDGE, roles = ["ROLE_API"])
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(key = "sub", value = SUB),
@@ -344,6 +369,72 @@ class PaymentProposalApiIT {
             }
     }
 
+    @Test
+    @TestSecurity(user = MCP, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = SUB),
+            Claim(key = "azp", value = "openbank-mcp"),
+            Claim(key = "preferred_username", value = MCP),
+        ],
+    )
+    fun `V2 create and cached receipt require the exact live connection and current ownership`() {
+        val ownership = mockk<RestResourceOwnershipClient>()
+        coEvery { ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, account) } returns
+            OwnershipVerdict.OWNED
+        QuarkusMock.installMockForType(ownership, RestResourceOwnershipClient::class.java)
+        val connection = seedConnection()
+        val targetGrant = seedGrant(connection)
+        val otherConnection = seedConnection()
+        val key = UUID.randomUUID().toString()
+
+        create(key = key).statusCode(403)
+        seedGrant()
+        create(key = key, connectionId = otherConnection).statusCode(403)
+        val id = create(key = key, connectionId = connection).statusCode(201).body("status", equalTo("PENDING"))
+            .extract().path<String>("proposalId")
+        assertThat(grantOf(UUID.fromString(id))).isEqualTo(targetGrant)
+        create(key = key, connectionId = connection).statusCode(201).header("X-Idempotency-Replayed", equalTo("true"))
+        coEvery {
+            ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, account)
+        } returns OwnershipVerdict.NOT_OWNED
+        create(key = key, connectionId = connection).statusCode(403)
+        coEvery { ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, account) } returns
+            OwnershipVerdict.OWNED
+        jdbc().use {
+            it.createStatement().executeUpdate(
+                "update delegation_grants set status = 'REVOKED' where id = '$targetGrant'",
+            )
+        }
+        create(key = key, connectionId = connection).statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = EDGE, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = SUB),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
+    )
+    fun `V2 revoke closes only its pending proposal and writes one lifecycle event`() {
+        val connection = seedConnection()
+        val grant = seedGrant(connection)
+        val target = seedProposal(grant = grant)
+        val other = seedProposal(grant = seedGrant(seedConnection()))
+        val path = "/api/v1/delegations/mcp-connect/customer/connections/$connection/revoke"
+        fun revoke(asParty: UUID) = given().contentType(ContentType.JSON).header(HDR, asParty)
+            .body("{}").post(path).then()
+        revoke(UUID.randomUUID()).statusCode(404)
+        revoke(party).statusCode(204)
+        revoke(party).statusCode(204)
+        assertThat(grantStatus(grant)).isEqualTo("REVOKED")
+        assertThat(rowStatus(target)).isEqualTo("REJECTED")
+        assertThat(rowStatus(other)).isEqualTo("PENDING")
+        assertThat(outboxCount(target, "PaymentProposalRejected")).isEqualTo(1)
+    }
+
     // ---- helpers ----
 
     private fun create(
@@ -352,12 +443,13 @@ class PaymentProposalApiIT {
         debtor: UUID = account,
         name: String = "Elektrárna Praha a.s.",
         key: String = UUID.randomUUID().toString(),
+        connectionId: UUID? = null,
     ) = given().contentType(ContentType.JSON).body(
         mapOf(
             "partyId" to party.toString(), "mcpClientId" to client, "keyThumbprint" to jkt,
             "operationType" to "DOMESTIC_PAYMENT", "debtorAccountId" to debtor.toString(),
             "creditorIban" to IBAN, "creditorName" to name, "amount" to "1250.50", "currency" to "CZK",
-        ),
+        ) + (connectionId?.let { mapOf("connectionId" to it.toString()) } ?: emptyMap()),
     ).header("Idempotency-Key", key).post("/api/v1/payment-proposals").then()
 
     private fun decide(id: UUID, verb: String, hash: String, asParty: UUID, paymentId: UUID? = null) =
@@ -387,18 +479,18 @@ class PaymentProposalApiIT {
         "openbank_secret",
     )
 
-    private fun seedGrant(): UUID {
+    private fun seedGrant(connectionId: UUID? = null): UUID {
         val id = UUID.randomUUID()
         jdbc().use { c ->
             c.createStatement().executeUpdate(
                 """
                 insert into delegation_grants
                     (id, grantor_party_id, grantee_party_id, resource_type, resource_id, valid_from, status,
-                     grantee_type, grantee_client_id, grantee_key_thumbprint)
+                     grantee_type, grantee_client_id, grantee_key_thumbprint, mcp_connection_id)
                 values ('$id', '$party', '${DelegationGrant.mcpClientGranteeId(
                     CLIENT,
                 )}', 'ACCOUNT', '$account', now() - interval '1 day', 'ACTIVE',
-                        'MCP_CLIENT', '$CLIENT', '$JKT')
+                        'MCP_CLIENT', '$CLIENT', '$JKT', ${connectionId?.let { "'$it'" } ?: "NULL"})
                 """.trimIndent(),
             )
             c.createStatement().executeUpdate(
@@ -406,6 +498,26 @@ class PaymentProposalApiIT {
             )
         }
         return id
+    }
+
+    private fun seedConnection(): UUID {
+        val connection = UUID.randomUUID()
+        fun reference() = UUID.randomUUID().toString().replace("-", "").repeat(2)
+        jdbc().use { c ->
+            c.createStatement().executeUpdate(
+                """
+                insert into mcp_connect_requests
+                    (request_ref, party_id, client_id, par_jkt, redirect_host, resource, scopes, expires_at,
+                     challenge_id, context_sha256, code_binding_ref, staged_at, refresh_family_ref,
+                     connection_id, activated_at, grant_valid_until)
+                values ('${reference()}', '$party', '$CLIENT', '$JKT', '127.0.0.1', 'https://mcp.test/customer/mcp',
+                        array['openid'], now() + interval '1 minute', '${UUID.randomUUID()}', '${reference()}',
+                        '${reference()}', now() - interval '1 minute', '${reference()}', '$connection',
+                        now() - interval '30 seconds', now() + interval '1 day')
+                """.trimIndent(),
+            )
+        }
+        return connection
     }
 
     private fun seedProposal(
