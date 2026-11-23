@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openbank:events:account-booking:v1",
+  "description": "Additive optional bookingContext; historical unassigned events remain valid.",
+  "oneOf": [
+    {
+      "type": "object",
+      "x-openbank-event-type": "AccountCreated",
+      "required": [
+        "eventId",
+        "aggregateId",
+        "aggregateType",
+        "eventType",
+        "version",
+        "occurredAt",
+        "accountNumber",
+        "accountType",
+        "partyId",
+        "productId",
+        "currency"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateType": {
+          "type": "string"
+        },
+        "eventType": {
+          "const": "AccountCreated"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "accountNumber": {
+          "type": "string"
+        },
+        "accountType": {
+          "type": "string"
+        },
+        "partyId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "productId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "sourceService": {
+          "type": "string"
+        },
+        "productRevision": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "bookingContext": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "bankId",
+            "establishmentId",
+            "hostCountry",
+            "mode"
+          ],
+          "properties": {
+            "bankId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "establishmentId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostCountry": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "FOS",
+                "BRANCH"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "x-openbank-event-type": "AccountStatusChanged",
+      "required": [
+        "eventId",
+        "aggregateId",
+        "aggregateType",
+        "eventType",
+        "version",
+        "occurredAt",
+        "previousStatus",
+        "newStatus"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateType": {
+          "type": "string"
+        },
+        "eventType": {
+          "const": "AccountStatusChanged"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "previousStatus": {
+          "type": "string"
+        },
+        "newStatus": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceService": {
+          "type": "string"
+        },
+        "bookingContext": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "bankId",
+            "establishmentId",
+            "hostCountry",
+            "mode"
+          ],
+          "properties": {
+            "bankId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "establishmentId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostCountry": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "FOS",
+                "BRANCH"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "x-openbank-event-type": "AccountClosed",
+      "required": [
+        "eventId",
+        "aggregateId",
+        "aggregateType",
+        "eventType",
+        "version",
+        "occurredAt"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "aggregateType": {
+          "type": "string"
+        },
+        "eventType": {
+          "const": "AccountClosed"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceService": {
+          "type": "string"
+        },
+        "bookingContext": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "bankId",
+            "establishmentId",
+            "hostCountry",
+            "mode"
+          ],
+          "properties": {
+            "bankId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "establishmentId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hostCountry": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "FOS",
+                "BRANCH"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}
