@@ -6,15 +6,12 @@ package com.openbank.delegation.contract
 
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
-import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import com.openbank.delegation.domain.model.DelegationGrant
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.security.TestIdentityAssociation
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.junit.jupiter.api.TestTemplate
-import org.junit.jupiter.api.extension.ExtendWith
 import java.sql.DriverManager
 import java.util.UUID
 
@@ -31,12 +28,6 @@ abstract class McpBalanceGrantProviderFixture {
         if (context?.interaction?.asSynchronousRequestResponse()?.response?.status == anonymousStatus) {
             testIdentity.setTestIdentity(null)
         }
-    }
-
-    @TestTemplate
-    @ExtendWith(PactVerificationInvocationContextProvider::class)
-    fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
     }
 
     protected fun seedActiveGrant() {

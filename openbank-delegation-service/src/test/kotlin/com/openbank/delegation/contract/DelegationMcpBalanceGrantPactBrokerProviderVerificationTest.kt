@@ -5,6 +5,7 @@
 package com.openbank.delegation.contract
 
 import au.com.dius.pact.provider.junit5.PactVerificationContext
+import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.Consumer
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
@@ -19,7 +20,9 @@ import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
+import org.junit.jupiter.api.extension.ExtendWith
 
 @QuarkusTest
 @TestProfile(McpBalanceGrantProviderFixture.ConnectionBinding::class)
@@ -41,6 +44,12 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 class DelegationMcpBalanceGrantPactBrokerProviderVerificationTest : McpBalanceGrantProviderFixture() {
     @BeforeEach
     fun replayAnonymousWhenRequired(context: PactVerificationContext?) = configureTarget(context, anonymousStatus = 401)
+
+    @TestTemplate
+    @ExtendWith(PactVerificationInvocationContextProvider::class)
+    fun verifyPacts(context: PactVerificationContext?) {
+        context?.verifyInteraction()
+    }
 
     @State("an active MCP balance grant matches the requested binding")
     fun activeGrant() = seedActiveGrant()
