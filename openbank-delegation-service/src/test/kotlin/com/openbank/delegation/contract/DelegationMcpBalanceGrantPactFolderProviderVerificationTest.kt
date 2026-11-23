@@ -33,6 +33,7 @@ import java.util.UUID
 @TestSecurity(user = "service-account-openbank-balance-mcp-reader", roles = ["ROLE_API"])
 @OidcSecurity(
     claims = [
+        Claim(key = "sub", value = "b4b4b4b4-0000-4000-8000-000000000004"),
         Claim(key = "azp", value = "openbank-balance-mcp-reader"),
         Claim(key = "preferred_username", value = "service-account-openbank-balance-mcp-reader"),
     ],
