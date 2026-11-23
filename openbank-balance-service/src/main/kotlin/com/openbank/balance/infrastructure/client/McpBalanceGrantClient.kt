@@ -38,10 +38,7 @@ data class McpBalanceGrantRequest(
 @Consumes(MediaType.APPLICATION_JSON)
 interface McpBalanceGrantRestClient {
     @POST
-    fun check(
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
-        request: McpBalanceGrantRequest,
-    ): Uni<Response>
+    fun check(@HeaderParam("Idempotency-Key") idempotencyKey: String, request: McpBalanceGrantRequest): Uni<Response>
 }
 
 @ApplicationScoped
