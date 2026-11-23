@@ -46,11 +46,8 @@ class McpBalanceReadResource(
     @GET
     @Path("/{accountId}")
     suspend fun read(@PathParam("accountId") accountId: UUID?): Response {
-        if (!enabled) throw NotFoundException()
-        val account = requireNotNull(accountId) { "accountId is required" }
-        val jwt = identity.principal as? JsonWebToken ?: throw ForbiddenException("Verified JWT required")
-        val binding = McpBalanceReadIdentity.resolve(jwt, account, issuer.orElse(""), request, connectionBindingEnabled)
-            ?: throw ForbiddenException("Invalid MCP balance-read identity")
+        val account = requireEnabledAccount(accountId)
+        val binding = requireBinding(account)
         if (accounts.getPartyId(account) != binding.partyId) throw NotFoundException()
         val liveGrant = McpBalanceGrantRequest(
             binding.grantId,
@@ -63,5 +60,16 @@ class McpBalanceReadResource(
             throw ForbiddenException("MCP balance grant is not active")
         }
         return Response.ok(mapOf("balances" to balances.getBalances(account))).build()
+    }
+
+    private fun requireEnabledAccount(accountId: UUID?): UUID {
+        if (!enabled) throw NotFoundException()
+        return requireNotNull(accountId) { "accountId is required" }
+    }
+
+    private fun requireBinding(account: UUID): McpBalanceReadIdentity.Binding {
+        val jwt = identity.principal as? JsonWebToken ?: throw ForbiddenException("Verified JWT required")
+        return McpBalanceReadIdentity.resolve(jwt, account, issuer.orElse(""), request, connectionBindingEnabled)
+            ?: throw ForbiddenException("Invalid MCP balance-read identity")
     }
 }

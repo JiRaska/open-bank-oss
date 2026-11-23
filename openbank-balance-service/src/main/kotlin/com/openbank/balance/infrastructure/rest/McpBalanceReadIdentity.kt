@@ -17,6 +17,7 @@ internal object McpBalanceReadIdentity {
     private const val AUDIENCE = "openbank-balance-service"
     private const val SCOPE = "mcp-customer-balance-read"
     private const val ACTOR = "openbank-mcp-read-delegation"
+    private const val MAX_CLIENT_ID_LENGTH = 255
     private const val CONNECTION_CLAIM = "openbank_mcp_connection_id"
 
     data class Binding(val partyId: UUID, val grantId: UUID, val clientId: String, val connectionId: UUID? = null)
@@ -36,20 +37,14 @@ internal object McpBalanceReadIdentity {
         request: HttpServerRequest,
         connectionBindingEnabled: Boolean,
     ): Binding? {
-        if (issuer.isBlank() || jwt.issuer != issuer || jwt.audience != setOf(AUDIENCE)) {
-            return null
-        }
-        if (jwt.subject.isNullOrBlank()) {
-            return null
-        }
-        if (jwt.getClaim<String>("scope") != SCOPE || jwt.getClaim<String>("azp") != ACTOR) return null
+        if (!matchesTokenIdentity(jwt, issuer)) return null
         if (uuid(jwt.getClaim<Any?>("account_id")) != accountId || !matchesCertificate(jwt, request)) return null
         val party = uuid(jwt.getClaim<Any?>("party_id")) ?: return null
         val grant = uuid(jwt.getClaim<Any?>("grant_id")) ?: return null
         val actors = jwt.getClaim<Map<*, *>>("act") ?: return null
         if (claimText(actors["sub"]) != ACTOR) return null
         val client = claimText((actors["act"] as? Map<*, *>)?.get("sub"))
-            ?.takeIf { it.isNotBlank() && it.length <= 255 } ?: return null
+            ?.takeIf { it.isNotBlank() && it.length <= MAX_CLIENT_ID_LENGTH } ?: return null
         val connection = when {
             connectionBindingEnabled -> uuid(jwt.getClaim<Any?>(CONNECTION_CLAIM)) ?: return null
             CONNECTION_CLAIM in jwt.claimNames -> return null
@@ -57,6 +52,14 @@ internal object McpBalanceReadIdentity {
         }
         return Binding(party, grant, client, connection)
     }
+
+    private fun matchesTokenIdentity(jwt: JsonWebToken, issuer: String): Boolean =
+        issuer.isNotBlank() &&
+            jwt.issuer == issuer &&
+            jwt.audience == setOf(AUDIENCE) &&
+            !jwt.subject.isNullOrBlank() &&
+            jwt.getClaim<String>("scope") == SCOPE &&
+            jwt.getClaim<String>("azp") == ACTOR
 
     private fun matchesCertificate(jwt: JsonWebToken, request: HttpServerRequest): Boolean {
         if (!request.isSSL) return false
