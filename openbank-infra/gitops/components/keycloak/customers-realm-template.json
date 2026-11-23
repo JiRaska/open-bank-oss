@@ -112,7 +112,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "openbank-edge",
+            "included.custom.audience": "openbank-edge",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -247,6 +247,34 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "openbank-mcp-read-delegation",
+      "name": "openbank-mcp-read-delegation",
+      "description": "Dedicated MCP read delegation TLS caller. Enable only with the approved subject and issuing CA DNs configured.",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-x509",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "protocolMappers": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "standard.token.exchange.enabled": "false",
+        "x509.allow.regex.pattern.comparison": "false"
+      }
     },
     {
       "clientId": "mcp-hosted-reference",

@@ -67,7 +67,7 @@ class ScaClient {
         body.put("purpose", "MCP_CLIENT_CONNECT");
         body.put("preferredMethod", "PUSH_NOTIFICATION");
         body.put("dynamicLinkingData", linking);
-        HttpResponse<String> resp = send(HttpRequest.newBuilder(uri("/api/v1/sca/challenges"))
+        HttpResponse<String> resp = postWithBankIdentity(HttpRequest.newBuilder(uri("/api/v1/sca/challenges"))
                 // Same connect => same challenge on a retry; a different context => a new one (D3).
                 .header("Idempotency-Key", McpConnectContext.sha256Hex(approvalRequestId + "|" + payloadSha256)),
                 body);
@@ -91,7 +91,7 @@ class ScaClient {
         body.put("approvalRequestId", approvalRequestId);
         body.put("payloadSha256", payloadSha256);
         try {
-            HttpResponse<String> resp = send(HttpRequest.newBuilder(
+            HttpResponse<String> resp = postWithBankIdentity(HttpRequest.newBuilder(
                     uri("/api/v1/sca/challenges/" + URLEncoder.encode(challengeId, StandardCharsets.UTF_8) + "/consume")),
                     body);
             return outcomeOf(resp.statusCode(), resp.body(), challengeId, partyId);
@@ -131,7 +131,7 @@ class ScaClient {
         return URI.create(settings.scaUrl().replaceAll("/+$", "") + path);
     }
 
-    private HttpResponse<String> send(HttpRequest.Builder builder, Object body) throws IOException {
+    HttpResponse<String> postWithBankIdentity(HttpRequest.Builder builder, Object body) throws IOException {
         try {
             return HTTP.send(builder.timeout(TIMEOUT)
                     .header("Authorization", "Bearer " + token())

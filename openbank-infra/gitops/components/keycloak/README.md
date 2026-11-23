@@ -423,3 +423,33 @@ scopes = the declared read scopes, secret `__MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET
 and one client scope per downstream carrying exactly one audience mapper. Adding the requester to the
 OpenBao import artifact is an operator step (runbook 0009). The exchange of a DPoP-bound subject token
 has not yet been run against a live Keycloak of the deployed version.
+
+### Customer MCP certificate-bound read grant
+
+The staff realm template declares two disabled confidential service accounts. Both have only
+`ROLE_API`, with browser, implicit and password flows disabled. `openbank-mcp-read-issuer`
+requests a balance-read permit from delegation-service. `openbank-balance-mcp-reader` rechecks
+the live grant there. The delegation policy limits each to its own action.
+
+For a separate, owner-approved sandbox rollout, provision their credentials at the OpenBao
+sources declared in `keycloak-realm-import-secret-sources.yaml`. Configure the issuer's
+`MCP_READ_ISSUER_TOKEN_URL` and the reader's `BALANCE_MCP_SERVICE_OIDC_URL` against the staff
+realm. The customer access and certificate-bound balance tokens still use the customers realm.
+The two service clients remain disabled on import, and this template adds no route.
+
+The Keycloak extension registers the customer MCP read grant. It starts disabled. The local
+sandbox configuration must supply all of the following before enabling it:
+
+- `MCP_READ_GRANT_ENABLED=true`
+- The HTTPS `MCP_READ_CUSTOMER_ISSUER_URL`, `MCP_READ_RESOURCE_URL` and
+  `MCP_READ_DELEGATION_ORIGIN`
+- The HTTPS `MCP_READ_ISSUER_TOKEN_URL` and `MCP_READ_ISSUER_CLIENT_SECRET` for the dedicated
+  `openbank-mcp-read-issuer` service account
+- Separate base64url-encoded `MCP_READ_NONCE_KEY` and `MCP_READ_PROOF_KEY` values of at least 32
+  bytes, and a unique `MCP_READ_DEPLOYMENT` namespace
+
+The requester uses the dedicated confidential X.509 client. The issuer verifies the original
+proof and the resource nonce. The resource nonce authenticates version, exact resource URI,
+DPoP key thumbprint, expiry and random challenge. PostgreSQL independently enforces first use of
+the original proof via a reference derived with the separate proof key. The nonce key is shared
+between the MCP resource and Keycloak. Both services must use the same key and resource URI.

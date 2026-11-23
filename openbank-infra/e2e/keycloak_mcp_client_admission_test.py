@@ -400,6 +400,7 @@ class McpClientAdmission(unittest.TestCase):
             "-v", f"{realm_file}:/opt/keycloak/data/import/realm.json:ro",
             "-v", f"{providers}:/opt/keycloak/providers:ro", image,
             "start-dev", "--import-realm", f"--features={features}",
+            f"{spi}allow-legacy-v1=true",
             f"{spi}sca-url={sca}", f"{spi}token-url={sca}/token", f"{spi}client-id=openbank-keycloak-mcp",
             f"{spi}client-secret={secrets.token_urlsafe(16)}", f"{spi}session-lifespan-seconds={SESSION_LIFESPAN_S}")
         port = run("docker", "port", cls.container, "8080/tcp").decode().strip().splitlines()[0].rsplit(":", 1)[1]

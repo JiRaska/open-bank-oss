@@ -55,10 +55,17 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
 
     private final ScaClient.Settings settings;
     private final long lifespanSeconds;
+    private final boolean connectV2;
+    private final boolean allowLegacyV1;
+    private final String connectAuthorityUrl;
 
-    McpWithheldCodeAuthenticator(ScaClient.Settings settings, long lifespanSeconds) {
+    McpWithheldCodeAuthenticator(ScaClient.Settings settings, long lifespanSeconds,
+                                 boolean connectV2, boolean allowLegacyV1, String connectAuthorityUrl) {
         this.settings = settings;
         this.lifespanSeconds = McpConnectPolicy.sessionLifespan(lifespanSeconds);
+        this.connectV2 = connectV2;
+        this.allowLegacyV1 = allowLegacyV1;
+        this.connectAuthorityUrl = connectAuthorityUrl;
     }
 
     @Override
@@ -68,7 +75,7 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
             refuse(ctx, AuthenticationFlowError.ACCESS_DENIED, "session already used");
             return;
         }
-        if (!McpClientGuardExecutor.isMcp(auth.getClient()) || !settings.complete()) {
+        if ((!connectV2 && !allowLegacyV1) || !McpClientGuardExecutor.isMcp(auth.getClient()) || !settings.complete()) {
             refuse(ctx, AuthenticationFlowError.ACCESS_DENIED, "not an MCP client, or sca-service not configured");
             return;
         }
@@ -100,6 +107,10 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
             refuse(ctx, AuthenticationFlowError.INTERNAL_ERROR, "connect context incomplete");
             return;
         }
+        if (connectV2) {
+            beginV2(ctx, auth, context, party.get());
+            return;
+        }
         String challengeId;
         try {
             challengeId = new ScaClient(settings).initiate(party.get(),
@@ -127,10 +138,16 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
             burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "cancelled by the customer");
             return;
         }
+        boolean sessionV2 = auth.getAuthNote(McpNotes.CONNECT_V2) != null;
+        if (sessionV2 != connectV2 || (!sessionV2 && !allowLegacyV1)) {
+            burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "connect version changed");
+            return;
+        }
         String challengeId = auth.getAuthNote(McpNotes.CHALLENGE_ID);
         String party = auth.getAuthNote(McpNotes.PARTY_ID);
         long started = startedAt(auth);
-        if (challengeId == null || party == null || !partyOf(ctx.getUser()).map(party::equals).orElse(false)) {
+        if ((!sessionV2 && challengeId == null) || party == null
+                || !partyOf(ctx.getUser()).map(party::equals).orElse(false)) {
             burn(ctx, AuthenticationFlowError.INVALID_USER, "no challenge, or the session's party changed");
             return;
         }
@@ -158,6 +175,10 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
         auth.setAuthNote(McpNotes.POLLS, Integer.toString(polls));
         auth.setAuthNote(McpNotes.LAST_POLL, Long.toString(nowMillis));
 
+        if (sessionV2) {
+            pollV2(ctx, auth, context, party, challengeId);
+            return;
+        }
         // D3.5: one consume attempt in flight per challenge, cluster-wide. The loser of a race
         // just keeps waiting; sca-service's CAS is the second, authoritative line.
         SingleUseObjectProvider claims = ctx.getSession().singleUseObjects();
@@ -190,6 +211,94 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
         ctx.success();
     }
 
+    private void beginV2(AuthenticationFlowContext ctx, AuthenticationSessionModel auth, McpConnectContext context,
+                         String party) {
+        try {
+            McpConnectAuthorityClient.Request request = v2Request(auth, context, party);
+            codeBinding(ctx, request);
+            new McpConnectAuthorityClient(connectAuthorityUrl, new ScaClient(settings)).register(request);
+            auth.setAuthNote(McpNotes.PARTY_ID, party);
+            auth.setAuthNote(McpNotes.CONNECT_V2, "1");
+            ctx.challenge(waitingPage(ctx, context, 200, "Choose which accounts to connect in your bank app."));
+        } catch (IOException | RuntimeException e) {
+            burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "connect authority registration refused");
+        }
+    }
+
+    private void pollV2(AuthenticationFlowContext ctx, AuthenticationSessionModel auth, McpConnectContext context,
+                        String party, String challengeId) {
+        try {
+            ScaClient sca = new ScaClient(settings);
+            McpConnectAuthorityClient authority = new McpConnectAuthorityClient(connectAuthorityUrl, sca);
+            McpConnectAuthorityClient.Request request = v2Request(auth, context, party);
+            var accounts = authority.selectedAccounts(request);
+            if (accounts.isEmpty()) {
+                if (challengeId != null) {
+                    throw new IllegalArgumentException("selection disappeared");
+                }
+                ctx.challenge(waitingPage(ctx, context, 200, "Choose which accounts to connect in your bank app."));
+                return;
+            }
+            String digest = McpConnectContextV2.of(context, party, request.parJkt(), accounts).payloadSha256();
+            if (challengeId == null) {
+                String id = sca.initiate(party, request.approvalRequestId(), digest);
+                authority.bindChallenge(request, new McpConnectAuthorityClient.Challenge(id, digest));
+                auth.setAuthNote(McpNotes.CHALLENGE_ID, id);
+                auth.setAuthNote(McpNotes.CONNECT_CONTEXT_SHA256, digest);
+                ctx.challenge(waitingPage(ctx, context, 200, "Confirm the selected accounts in your bank app."));
+                return;
+            }
+            if (!digest.equals(auth.getAuthNote(McpNotes.CONNECT_CONTEXT_SHA256))) {
+                throw new IllegalArgumentException("selected account scope changed");
+            }
+            String codeBinding = codeBinding(ctx, request);
+            String claim = "openbank.mcp.consume." + challengeId;
+            SingleUseObjectProvider claims = ctx.getSession().singleUseObjects();
+            if (!claims.putIfAbsent(claim, CLAIM_SECONDS)) {
+                ctx.challenge(waitingPage(ctx, context, 200, null));
+                return;
+            }
+            var result = sca.consume(challengeId, party, request.approvalRequestId(), digest);
+            if (result == ScaClient.Outcome.PENDING) {
+                claims.remove(claim);
+                ctx.challenge(waitingPage(ctx, context, 200, null));
+                return;
+            }
+            auth.setAuthNote(McpNotes.BURNED, "1");
+            if (result != ScaClient.Outcome.CONSUMED || !ctx.getUser().isEnabled()
+                    || ctx.getUser().getRequiredActionsStream().findAny().isPresent()
+                    || context.expiresAt() <= now()) {
+                refuse(ctx, AuthenticationFlowError.ACCESS_DENIED, "v2 post-consume checks failed");
+                return;
+            }
+            authority.stage(request, new McpConnectAuthorityClient.Challenge(challengeId, digest), codeBinding);
+            if (context.expiresAt() <= now()) {
+                refuse(ctx, AuthenticationFlowError.EXPIRED_CODE, "v2 staged request expired");
+                return;
+            }
+            // The guarded token response links the now-created refresh family and activates the
+            // connection before any OAuth token can leave Keycloak. The code is only staging.
+            ctx.success();
+        } catch (IOException | RuntimeException e) {
+            burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "v2 authority evidence refused");
+        }
+    }
+
+    private static McpConnectAuthorityClient.Request v2Request(AuthenticationSessionModel auth, McpConnectContext base,
+                                                              String party) {
+        if (!"L".equals(auth.getClient().getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))
+                || Arrays.asList(base.scopes().split(" ")).contains("offline_access")) {
+            throw new IllegalArgumentException("V2 requires an online Tier L connection");
+        }
+        return new McpConnectAuthorityClient.Request(base, party, auth.getAuthNote(McpNotes.PAR_PROOF_JKT));
+    }
+
+    private static String codeBinding(AuthenticationFlowContext ctx, McpConnectAuthorityClient.Request request) {
+        var auth = ctx.getAuthenticationSession();
+        return McpConnectTokenReferences.codeBinding(ctx.getRealm().getId(), request.partyId(), auth.getClient().getId(),
+                request.parJkt(), auth.getAuthNote(McpNotes.PKCE_CHALLENGE));
+    }
+
     private static void burn(AuthenticationFlowContext ctx, AuthenticationFlowError error, String why) {
         ctx.getAuthenticationSession().setAuthNote(McpNotes.BURNED, "1");
         refuse(ctx, error, why);
@@ -208,7 +317,7 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
                 auth.getAuthNote(McpNotes.REQUEST_URI), started + lifespanSeconds);
     }
 
-    private static Optional<String> partyOf(UserModel user) {
+    static Optional<String> partyOf(UserModel user) {
         if (user == null) {
             return Optional.empty();
         }
@@ -254,6 +363,10 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
         String action = ctx.getActionUrl(ctx.generateAccessCode()).toString();
         String name = Optional.ofNullable(ctx.getAuthenticationSession().getClient().getName())
                 .orElse(context.clientId());
+        boolean v2 = ctx.getAuthenticationSession().getAuthNote(McpNotes.CONNECT_V2) != null;
+        String capabilities = v2
+                ? "Review the selected accounts and permissions in your bank app."
+                : "Reads your data and can propose payments; it can never pay by itself.";
         String html = """
                 <!doctype html><html lang="en"><head><meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -265,7 +378,7 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
                 <dt>Assistant</dt><dd id="mcp-client">%s</dd>
                 <dt>Returns to</dt><dd id="mcp-redirect-host">%s</dd>
                 <dt>Access</dt><dd id="mcp-resource">%s</dd>
-                <dt>Can do</dt><dd>Reads your data and can propose payments; it can never pay by itself.</dd>
+                <dt>Can do</dt><dd>%s</dd>
                 <dt>Expires</dt><dd id="mcp-expires">%s</dd>
                 </dl>
                 %s
@@ -278,7 +391,7 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
                 f.appendChild(b);f.submit();},3000);</script>
                 </main></body></html>
                 """.formatted(escape(name), escape(context.redirectHost()), escape(context.resource()),
-                escape(Instant.ofEpochSecond(context.expiresAt()).toString()),
+                escape(capabilities), escape(Instant.ofEpochSecond(context.expiresAt()).toString()),
                 notice == null ? "" : "<p id=\"mcp-notice\">" + escape(notice) + "</p>", escape(action));
         return Response.status(status).type(MediaType.TEXT_HTML_TYPE.withCharset("utf-8")).entity(html)
                 .header("Cache-Control", "no-store").build();

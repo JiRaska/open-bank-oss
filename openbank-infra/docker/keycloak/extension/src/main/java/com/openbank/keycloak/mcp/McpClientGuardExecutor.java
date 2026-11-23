@@ -16,11 +16,15 @@ import org.keycloak.services.clientpolicy.ClientPolicyContext;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.services.clientpolicy.context.AuthorizationRequestContext;
 import org.keycloak.services.clientpolicy.context.TokenExchangeRequestContext;
+import org.keycloak.services.clientpolicy.context.TokenRefreshResponseContext;
+import org.keycloak.services.clientpolicy.context.TokenResponseContext;
 import org.keycloak.services.clientpolicy.executor.ClientPolicyExecutorProvider;
 import org.keycloak.sessions.AuthenticationSessionModel;
 
 import java.time.Instant;
 import java.util.List;
+
+import static org.keycloak.protocol.oidc.par.endpoints.ParEndpoint.PAR_DPOP_PROOF_JKT;
 
 /**
  * Realm client-policy executor for every client carrying {@code openbank.mcp.tier}. It is bound by
@@ -58,6 +62,8 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
             case TOKEN_EXCHANGE_REQUEST -> refuseExchange((TokenExchangeRequestContext) context);
             case PUSHED_AUTHORIZATION_REQUEST -> checkResource((PushedAuthorizationRequestContext) context);
             case AUTHORIZATION_REQUEST -> recordRequest((AuthorizationRequestContext) context);
+            case TOKEN_RESPONSE -> McpConnectTokenPolicy.authorizationCode(session, (TokenResponseContext) context);
+            case TOKEN_REFRESH_RESPONSE -> McpConnectTokenPolicy.refresh(session, (TokenRefreshResponseContext) context);
             default -> {
                 // not an MCP-relevant event
             }
@@ -133,6 +139,10 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
         if (!isMcp(client)) {
             return;
         }
+        if (context.getRequestParameters() != null
+                && context.getRequestParameters().containsKey(PAR_DPOP_PROOF_JKT)) {
+            throw new ClientPolicyException(OAuthErrorException.INVALID_REQUEST, "reserved PAR parameter");
+        }
         List<String> requested = context.getRequestParameters() == null ? null
                 : context.getRequestParameters().get("resource");
         if (!McpConnectPolicy.resourceAllowed(requested, client.getAttribute(McpConnectPolicy.RESOURCE_ATTRIBUTE))) {
@@ -165,5 +175,19 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
         auth.setAuthNote(McpNotes.REDIRECT_URI, context.getRedirectUri());
         auth.setAuthNote(McpNotes.SCOPE, context.getAuthorizationEndpointRequest().getScope());
         auth.setAuthNote(McpNotes.RESOURCE, resource);
+        // Keycloak makes the verified PAR proof available before this authorization callback.
+        // The request's optional dpop_jkt parameter is not evidence of possession.
+        var authorization = context.getAuthorizationEndpointRequest();
+        if ("S256".equals(authorization.getCodeChallengeMethod()) && authorization.getCodeChallenge() != null) {
+            auth.setAuthNote(McpNotes.PKCE_CHALLENGE, authorization.getCodeChallenge());
+        } else {
+            auth.removeAuthNote(McpNotes.PKCE_CHALLENGE);
+        }
+        String parProof = session.getAttribute(PAR_DPOP_PROOF_JKT, String.class);
+        if (parProof == null) {
+            auth.removeAuthNote(McpNotes.PAR_PROOF_JKT);
+        } else {
+            auth.setAuthNote(McpNotes.PAR_PROOF_JKT, parProof);
+        }
     }
 }

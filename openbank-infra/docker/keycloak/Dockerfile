@@ -48,6 +48,12 @@ RUN set -eu; cd /src; \
     cp -R main/resources/. /out/main/; \
     javac --release 21 -Xlint:all -Werror -cp '/out/main:/kc/main/*:/kc/boot/*' -d /out/test $(find test/java -name '*.java'); \
     java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.ExtensionTests test/resources/mcp-connect-context.fixture.json; \
+    java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.McpReadDelegationRequestTests test/resources/mcp-read-client.pem.fixture; \
+    java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.McpReadDelegationEvidenceTests; \
+    java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.McpConnectContextV2Tests test/resources/mcp-connect-context-v2.fixture.json; \
+    java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.McpBalancePermitClientTests; \
+    java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.McpReadDelegationFactoryTests; \
+    java -cp '/out/test:/out/main:/kc/main/*:/kc/boot/*' com.openbank.keycloak.mcp.McpConnectAuthorityClientTests; \
     jar --create --file /out/openbank-keycloak-mcp.jar -C /out/main .
 
 # The jar alone, for the live-Keycloak IT (`docker buildx build --target extension-jar -o ...`).

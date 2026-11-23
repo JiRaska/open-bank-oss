@@ -26,11 +26,14 @@ public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory
     private static final Logger LOG = Logger.getLogger(McpWithheldCodeAuthenticatorFactory.class);
 
     private ScaClient.Settings settings = new ScaClient.Settings(null, null, null, null);
+    private boolean connectV2;
+    private boolean allowLegacyV1;
+    private String connectAuthorityUrl;
     private long lifespanSeconds = McpConnectPolicy.MAX_SESSION_SECONDS;
 
     @Override
     public Authenticator create(KeycloakSession session) {
-        return new McpWithheldCodeAuthenticator(settings, lifespanSeconds);
+        return new McpWithheldCodeAuthenticator(settings, lifespanSeconds, connectV2, allowLegacyV1, connectAuthorityUrl);
     }
 
     @Override
@@ -40,6 +43,19 @@ public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory
                 get(config, "token-url", "tokenUrl"),
                 get(config, "client-id", "clientId"),
                 get(config, "client-secret", "clientSecret"));
+        String versionFlag = get(config, "connect-v2-enabled", "connectV2Enabled");
+        if (versionFlag != null && !"true".equalsIgnoreCase(versionFlag) && !"false".equalsIgnoreCase(versionFlag)) {
+            throw new IllegalArgumentException("connect-v2-enabled must be true or false");
+        }
+        connectV2 = Boolean.parseBoolean(versionFlag);
+        allowLegacyV1 = Boolean.parseBoolean(get(config, "allow-legacy-v1", "allowLegacyV1"));
+        if (connectV2 && allowLegacyV1) {
+            throw new IllegalArgumentException("MCP connect V2 and isolated V1 fixtures cannot both be enabled");
+        }
+        connectAuthorityUrl = get(config, "connect-authority-url", "connectAuthorityUrl");
+        if (connectV2 && connectAuthorityUrl == null) {
+            LOG.warn("MCP connect V2 has no connect authority; all V2 connects will be refused");
+        }
         String lifespan = get(config, "session-lifespan-seconds", "sessionLifespanSeconds");
         lifespanSeconds = McpConnectPolicy.sessionLifespan(lifespan == null ? 0 : Long.parseLong(lifespan.trim()));
         // Eager, at boot: the deployment supplies the client secret through an OPTIONAL secret ref (a
@@ -49,6 +65,17 @@ public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory
             LOG.warn("openbank-mcp-withheld-code is NOT configured (sca-url/token-url/client-id/client-secret);"
                     + " every MCP connect will be refused until it is");
         }
+    }
+
+    McpConnectAuthorityClient tokenAuthority() {
+        if (!connectV2 || !settings.complete()) {
+            throw new IllegalStateException("MCP connect V2 is unavailable");
+        }
+        return new McpConnectAuthorityClient(connectAuthorityUrl, new ScaClient(settings));
+    }
+
+    boolean allowsLegacyV1() {
+        return allowLegacyV1;
     }
 
     private static String get(Config.Scope config, String kebab, String camel) {

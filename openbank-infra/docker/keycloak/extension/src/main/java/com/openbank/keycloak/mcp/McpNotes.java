@@ -15,6 +15,10 @@ final class McpNotes {
     static final String REDIRECT_URI = "openbank.mcp.redirect_uri";
     static final String SCOPE = "openbank.mcp.scope";
     static final String RESOURCE = "openbank.mcp.resource";
+    static final String PAR_PROOF_JKT = "openbank.mcp.par_proof_jkt";
+    static final String PKCE_CHALLENGE = "openbank.mcp.pkce_challenge";
+    static final String CONNECT_V2 = "openbank.mcp.connect_v2";
+    static final String CONNECT_CONTEXT_SHA256 = "openbank.mcp.connect_context_sha256";
     static final String CHALLENGE_ID = "openbank.mcp.challenge_id";
     static final String PARTY_ID = "openbank.mcp.party_id";
     static final String PASSKEY_CREDENTIAL = "openbank.mcp.passkey_credential";
