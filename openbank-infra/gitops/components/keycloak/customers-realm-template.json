@@ -143,7 +143,9 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
-      "optionalClientScopes": ["kc-admin-api"],
+      "optionalClientScopes": [
+        "kc-admin-api"
+      ],
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
@@ -161,7 +163,10 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
-      "optionalClientScopes": ["offline_access", "kc-admin-api"],
+      "optionalClientScopes": [
+        "offline_access",
+        "kc-admin-api"
+      ],
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
