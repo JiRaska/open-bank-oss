@@ -71,7 +71,9 @@ class WebAuthnKeycloakClient {
         val now = System.currentTimeMillis() / MILLIS_PER_SECOND
         val cached = cachedToken
         if (cached != null && tokenExpiresAt - now > TOKEN_REFRESH_SKEW_SECONDS) return cached
-        val (token, expiresIn) = grant("grant_type=client_credentials&client_id=$clientId&client_secret=$clientSecret")
+        val (token, expiresIn) = grant(
+            "grant_type=client_credentials&client_id=$clientId&client_secret=$clientSecret&scope=kc-admin-api",
+        )
         cachedToken = token
         tokenExpiresAt = now + expiresIn
         return token

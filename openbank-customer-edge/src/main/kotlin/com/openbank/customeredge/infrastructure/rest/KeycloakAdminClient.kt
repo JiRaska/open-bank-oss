@@ -69,7 +69,8 @@ class KeycloakAdminClient {
 
     private fun fetchAdminToken(): Pair<String, Long> {
         val tokenUrl = "$adminUrl/realms/$adminRealm/protocol/openid-connect/token"
-        val requestBody = "grant_type=client_credentials&client_id=$adminClientId&client_secret=$adminClientSecret"
+        val requestBody = "grant_type=client_credentials&client_id=$adminClientId" +
+            "&client_secret=$adminClientSecret&scope=kc-admin-api"
         val resp = http.send(
             HttpRequest.newBuilder()
                 .uri(URI.create(tokenUrl))
