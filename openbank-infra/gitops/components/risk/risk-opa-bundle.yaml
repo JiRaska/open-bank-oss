@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "a01ffc39541d8ab5"
+    openbank.tech/policy-checksum: "a5bf39a5c1eb570d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -918,6 +918,14 @@ data:
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-treasury")
     	input.action in {"risk.snapshot.list", "risk.valuation.read"}
+    }
+
+    allowed_reasons contains "staff-planning-input-capture" if {
+        input.principal.type == "HUMAN"
+        not principal_is_machine
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
+        role in input.principal.roles
+        input.action == "risk.planning.capture.create"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

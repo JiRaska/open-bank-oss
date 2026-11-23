@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.33.0...risk-engine-v0.34.0) (2026-11-23)
+
+
+### Features
+
+* **risk-engine:** accept explicitly selected planning inputs ([#16491](https://github.com/JiRaska/open-bank-oss/issues/16491)) ([a013a91](https://github.com/JiRaska/open-bank-oss/commit/a013a91d7a72c5eaeeff2f26f406ada81299e94b))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.32.0...risk-engine-v0.33.0) (2026-11-16)
 
 
