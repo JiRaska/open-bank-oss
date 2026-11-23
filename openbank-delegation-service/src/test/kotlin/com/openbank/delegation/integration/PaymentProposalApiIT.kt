@@ -16,6 +16,8 @@ import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
@@ -39,19 +41,22 @@ import java.util.UUID
  * releases only the exact instruction, once, while the proposal is live and its grant ACTIVE.
  */
 @QuarkusTest
+@TestProfile(PaymentProposalApiIT.ConnectProfile::class)
 @QuarkusTestResource(PaymentProposalApiIT.InMemoryKafka::class)
 @QuarkusTestResource(PostgresTestResource::class)
 class PaymentProposalApiIT {
+
+    class ConnectProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> =
+            mapOf("openbank.delegation.mcp-connect-enabled" to "true")
+    }
 
     class InMemoryKafka : io.quarkus.test.common.QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             io.smallrye.reactive.messaging.memory.InMemoryConnector.switchOutgoingChannelsToInMemory(
                 "delegation-events-out",
                 "payment-proposal-events-out",
-            ) + mapOf(
-                "openbank.outbox.dispatch-enabled" to "false",
-                "openbank.delegation.mcp-connect-enabled" to "true",
-            )
+            ) + mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = io.smallrye.reactive.messaging.memory.InMemoryConnector.clear()
     }
