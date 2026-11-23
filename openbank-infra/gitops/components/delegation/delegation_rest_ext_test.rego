@@ -278,6 +278,45 @@ test_operator_is_prohibited_from_business_signing if {
 	prohibited with input as {"principal": operator, "action": "delegation.signing.approval.sign"}
 }
 
+# --- ADR-0383 D6 customer MCP payment proposals ---
+
+mcp := {"service_account": true, "client_id": "openbank-mcp", "type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+proposal_decisions := {
+	"delegation.proposal.read",
+	"delegation.proposal.approve",
+	"delegation.proposal.reject",
+	"delegation.proposal.execution",
+}
+
+test_mcp_may_create_a_proposal if {
+	allow with input as {"principal": mcp, "action": "delegation.proposal.create"}
+}
+
+test_mcp_may_not_read_approve_reject_or_record_execution if {
+	every action in proposal_decisions {
+		not allow with input as {"principal": mcp, "action": action}
+	}
+}
+
+test_edge_may_read_and_decide_its_customer_proposals if {
+	every action in proposal_decisions {
+		allow with input as {"principal": edge, "action": action}
+	}
+}
+
+test_edge_may_not_create_a_proposal if {
+	not allow with input as {"principal": edge, "action": "delegation.proposal.create"}
+}
+
+test_staff_and_shared_backend_may_not_touch_proposals if {
+	every principal in [operator, admin, services_m2m] {
+		every action in proposal_decisions | {"delegation.proposal.create"} {
+			not allow with input as {"principal": principal, "action": action}
+		}
+	}
+}
+
 # --- ADR-0383 D3: mcp-service resolving a customer's MCP_CLIENT grants ---
 
 mcp_m2m := {"service_account": true, "client_id": "openbank-mcp", "type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
@@ -308,4 +347,23 @@ test_renamed_machine_may_not_resolve_mcp_client_grants if {
 # machine_named's legacy branch admits a marker-less principal by name; this grant must not.
 test_mcp_name_without_service_account_marker_may_not_resolve if {
 	not allow with input as object.union(resolve, {"principal": {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}})
+}
+
+# --- proposal-create grant pinned to the service-account marker (defence in depth) ---
+
+markerless_mcp := {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+test_genuine_mcp_service_account_may_create_proposal_pinned if {
+	allow with input as {"principal": mcp_m2m, "action": "delegation.proposal.create"}
+}
+
+test_mcp_name_without_marker_may_not_create_proposal if {
+	not allow with input as {"principal": markerless_mcp, "action": "delegation.proposal.create"}
+	prohibited with input as {"principal": markerless_mcp, "action": "delegation.proposal.create"}
+}
+
+test_human_named_mcp_with_service_account_false_may_not_create_proposal if {
+	p := object.union(mcp_m2m, {"service_account": false})
+	not allow with input as {"principal": p, "action": "delegation.proposal.create"}
+	prohibited with input as {"principal": p, "action": "delegation.proposal.create"}
 }

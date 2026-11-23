@@ -104,6 +104,12 @@ def _matches_permission(pattern: str, path: str, *, conservative: bool = False) 
     return len(parts) == len(actual)
 
 
+# Header-token mechanisms that never accept a client certificate as identity: the OIDC bearer
+# mechanism under its `Bearer` and its RFC 9449 `DPoP` authorization scheme (#16847: the customer MCP
+# channel's own root is DPoP-only, staff roots stay bearer).
+TOKEN_MECHANISMS = {"bearer", "dpop"}
+
+
 def bearer_paths(flat: dict) -> list[str]:
     names = {k[len(PERMISSION) + 1:].split(".")[0] for k in flat if k.startswith(PERMISSION + ".")}
     out = []
@@ -113,7 +119,7 @@ def bearer_paths(flat: dict) -> list[str]:
         # Class-level @Path inspection cannot prove which methods each resource serves, so
         # only a permission applying to every method can establish root-wide coverage.
         methods = str(flat.get(f"{PERMISSION}.{n}.methods", "")).strip()
-        if mech == "bearer" and not methods and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
+        if mech in TOKEN_MECHANISMS and not methods and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
             out += [p for p in str(flat.get(f"{PERMISSION}.{n}.paths", "")).split(",") if p.strip()]
     return out
 
@@ -173,7 +179,7 @@ def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> l
             continue
         if str(flat.get(key + "shared", "false")).lower() == "true":
             continue
-        if str(flat.get(key + "auth-mechanism", "")).strip().lower() == "bearer":
+        if str(flat.get(key + "auth-mechanism", "")).strip().lower() in TOKEN_MECHANISMS:
             continue
         # An unconditional deny does not authenticate a certificate or reach the API.
         if str(flat.get(key + "policy", "")).strip().lower() == "deny":
@@ -355,6 +361,12 @@ def self_test() -> int:
         "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
         "          attached:\n            paths: /api/v1*\n            policy: authenticated\n"
     )
+    dpop_root = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /mcp,/mcp/*\n            auth-mechanism: bearer\n"
+        "          customer:\n            paths: /customer/mcp,/customer/mcp/*\n            auth-mechanism: DPoP\n"
+    )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
     checks = [
@@ -364,6 +376,9 @@ def self_test() -> int:
         ("bearer-only not covering /ap2 root flagged", len(findings_for(fixed, ["/ap2/verify"])) == 1),
         ("inherited multi-path bearer-only passes", findings_for(inherited, ["/ap2/verify", "/api/v1/x"]) == []),
         ("auth-mechanism other than bearer flagged", len(findings_for(wrong_mech, api)) == 1),
+        ("a DPoP-only root next to a bearer root passes", findings_for(dpop_root, ["/mcp", "/customer/mcp"]) == []),
+        ("a DPoP permission does not cover a root it does not list",
+         len(findings_for(dpop_root, ["/mcp", "/customer/mcp", "/api/v1/x"])) == 1),
         ("GET-only bearer permission does not protect POST", len(findings_for(get_only, api)) == 1),
         ("exact bearer permission leaves resource descendants open to certificate identity",
          len(findings_for(exact_root_only, api)) == 1 and

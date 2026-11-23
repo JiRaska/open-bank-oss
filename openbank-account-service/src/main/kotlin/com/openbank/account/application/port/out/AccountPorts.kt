@@ -69,7 +69,7 @@ interface AccountRepository {
      */
     suspend fun findIdempotencyRequestHash(idempotencyKey: String): String?
 
-    suspend fun update(account: Account): Account
+    suspend fun update(account: Account, committedEvent: ((Account) -> DomainEvent)? = null): Account
 
     suspend fun existsByIban(iban: Iban): Boolean
 

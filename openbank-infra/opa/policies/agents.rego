@@ -28,9 +28,29 @@ default allow := false
 # AI_AGENT is prefixed "agent:" (AuthorizeInterceptor.principalType()'s own convention, e.g.
 # "agent:onboarding" per its test). trim_prefix is a no-op when the prefix isn't present, so
 # this normalises both callers to the bare charter id without needing two lookup rules.
+#
+# A charter with `enabled: false` is NOT returned here, so a disabled agent has no charter on
+# every path that derives a grant from it: the plain-pattern MCP allowlist, the {tier, resources}
+# object grants, the REST bridge (rest.rego delegates to `allow` below) and any later rule built
+# on `charter`. agents.yaml documents `enabled: false` as the per-agent halt; before this guard
+# no rule read the field, so a disabled charter kept every grant live (draft.ticket answered
+# allow for card-scheme-bulletin-agent). An ABSENT `enabled` key means enabled -- eight
+# charters omit it -- so only an explicit `false` disables. Written as `not a.enabled == false`
+# (not object.get) so gen-agents-opa-data.py's static pass sees the `a.enabled` dereference and
+# keeps the field in the served projection; its differential proof fails the write if it ever
+# did not.
 charter contains a if {
 	some a in data.agents.agents
 	a.id == trim_prefix(input.agent, "agent:")
+	not a.enabled == false
+}
+
+# The caller names a chartered agent whose charter is switched off. Used for the decision
+# reason and as an explicit veto in `allow`, independent of `charter` excluding it.
+charter_disabled if {
+	some a in data.agents.agents
+	a.id == trim_prefix(input.agent, "agent:")
+	a.enabled == false
 }
 
 # The hard-forbidden tier is forbidden for ALL agents, regardless of charter (agents.yaml: tool_tiers.deny).
@@ -137,6 +157,52 @@ tier_resource_resources_granted(resources) if {
 	glob_match(pattern, input.resource)
 }
 
+# ADR-0387: the public-web read. The fetch broker queries data.openbank.rest.allow for an
+# AI_AGENT with action `read.public_web` and attributes {tool: web.fetch, tier: read, host}, so
+# rest.rego's bridge arrives here with input.tool == "read.public_web", no input.tier and no
+# input.resource -- the generic tier/resource rule above can never fire for it. The grant needs
+# all four: the declared tier is `read` (a write/execute claim gets nothing), the tool is the
+# broker's one tool, the charter's object-shaped `read` grant covers the resource, AND the
+# request host is listed verbatim in that SAME charter's data_scope.public_web.hosts (a string
+# entry or a {host, render} mapping). The broker re-checks the host after DNS; this rule is the
+# PDP half of ADR-0387 D2, so an off-list host is denied by policy, not only by broker code.
+public_web_resource := "read.public_web"
+
+charter_allowed if public_web_allowed
+
+charter_denied if public_web_denied
+
+public_web_allowed if {
+	input.tool == public_web_resource
+	input.attributes.tier == "read"
+	input.attributes.tool == "web.fetch"
+	is_string(input.attributes.host)
+	some a in charter
+	some entry in a.tools.allow
+	entry.tier == "read"
+	some pattern in entry.resources
+	glob_match(pattern, public_web_resource)
+	public_web_host_listed(a.data_scope.public_web.hosts, input.attributes.host)
+}
+
+# A charter's own tools.deny on the resource beats its allow, whatever tier the caller claims.
+public_web_denied if {
+	input.tool == public_web_resource
+	some entry in tier_resource_deny_entries
+	some pattern in entry.resources
+	glob_match(pattern, public_web_resource)
+}
+
+public_web_host_listed(hosts, host) if {
+	some h in hosts
+	h == host
+}
+
+public_web_host_listed(hosts, host) if {
+	some h in hosts
+	h.host == host
+}
+
 # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
 # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
 # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
@@ -202,6 +268,7 @@ skill_ok if {
 # The decision. Allow only when nothing forbids AND the charter permits AND skill is in scope.
 # ---------------------------------------------------------------------------------------
 allow if {
+	not charter_disabled
 	not hard_denied
 	not charter_denied
 	charter_allowed
@@ -243,7 +310,9 @@ decision := {
 	"reason": reason,
 }
 
-reason := "hard-denied tool tier" if hard_denied
+reason := "agent charter disabled" if charter_disabled
+
+else := "hard-denied tool tier" if hard_denied
 
 else := "denied by charter tier/resource grant" if tier_resource_charter_denied
 

@@ -2,7 +2,7 @@
 # Test fixture for the customer MCP channel ITs: same shape as src/main's allowlist (ADR-0385 D1),
 # with one ENABLED local client, one ENABLED hosted client and one declared-but-disabled client.
 schema_version: 1
-resource: https://mcp.test.example/mcp
+resource: https://mcp.test.example/customer/mcp
 audience: openbank-mcp-service
 clients:
   - client_id: mcp-local-test

@@ -71,6 +71,7 @@ concurrency:
 
 jobs:
   autoheal:
+    if: github.event_name != 'schedule' || (vars.DERIVED_ARTEFACT_AUTOHEAL_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: regenerate every derived artefact and open a PR on drift
     runs-on: ubuntu-latest
     timeout-minutes: 25
