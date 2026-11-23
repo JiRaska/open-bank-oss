@@ -22,6 +22,7 @@ import { ManualApprover, SoftwareScaDevice } from './sca-device.ts'
 import { assertBalanceRead, assertPendingProposal } from './proposal-receipt.ts'
 import { observeApproval, verifyPendingOwnerProposal } from './proposal-observation.ts'
 import { assertScaTarget } from './guard.ts'
+import { signInSandboxApp } from './app-sign-in.ts'
 import { prepareSyntheticConnectApproval } from './connect-approval.ts'
 import { verifyConnectionRevocation } from './connection-revocation.ts'
 
@@ -73,10 +74,10 @@ export async function runJourney(cfg: JourneyConfig, log: (r: StepResult) => voi
   if (!cfg.clientId) throw new Error('MCP_HARNESS_CLIENT_ID is required for the journey')
   const clientId = cfg.clientId
 
-  const synthetic = cfg.softwareConnectApproval && prepareSyntheticConnectApproval(cfg.softwareConnectApproval, cfg.verifyProposal)
+  const software = cfg.softwareConnectApproval
   const d = await step('discover (RFC 9728 + RFC 8414)', () => discover(cfg.resourceUrl, cfg.authServerUrl),
     (v) => `issuer=${v.as.issuer} par=${supportsPar(v.as)} dpop=${supportsDpop(v.as)}`)
-  if (cfg.approvalObservation || cfg.revocationVerification || synthetic) {
+  if (cfg.approvalObservation || cfg.revocationVerification || software) {
     for (const url of [d.as.issuer, d.as.authorization_endpoint, d.as.token_endpoint, d.as.pushed_authorization_request_endpoint]) {
       if (url) assertScaTarget(url)
     }
@@ -92,23 +93,32 @@ export async function runJourney(cfg: JourneyConfig, log: (r: StepResult) => voi
   }
   const auth = { clientId, clientSecret: cfg.clientSecret }
 
-  if (synthetic && (!dpop || !supportsPar(d.as))) throw new Error('software approval requires PAR and DPoP')
-  let requestUri: string | undefined
-  const authorizeUrl = await step('authorization request (PAR when advertised)', async () => {
-    if (!supportsPar(d.as)) {
-      if (d.as.require_pushed_authorization_requests) throw new Error('PAR required but no endpoint advertised')
-      return authorizeUrlFromParams(d.as, params)
-    }
-    const r = await pushAuthorizationRequest(d.as, params, auth, dpop)
-    if (r.status !== 201) throw new Error(`PAR HTTP ${r.status} ${r.json?.error ?? ''}`)
-    requestUri = r.json.request_uri
-    return authorizeUrlFromPar(d.as, clientId, r.json.request_uri)
-  })
-
-  const approver = synthetic ? undefined : await approverFor(cfg)
-  const browser = await openPasskeyBrowser({ headless: cfg.headless, passkeyFile: cfg.passkeyFile })
+  let appToken = software?.appToken
+  const browser = await openPasskeyBrowser({ headless: cfg.headless, passkeyFile: cfg.passkeyFile,
+    minimumSignCount: cfg.appSignIn ? Math.floor(Date.now() / 1000) : undefined })
   let callback: string
   try {
+    if (cfg.appSignIn) {
+      const issuer = cfg.authServerUrl
+      if (!software || !issuer) throw new Error('sandbox app sign-in needs the configured customer and issuer')
+      appToken = await step('sign in to the synthetic bank app with its passkey', () =>
+        signInSandboxApp(browser.page, d.as, issuer, software.partyId, cfg.timeoutMs))
+    }
+    const synthetic = software && prepareSyntheticConnectApproval({ ...software, appToken: appToken ?? '' }, cfg.verifyProposal)
+    const approver = synthetic ? undefined : await approverFor(cfg)
+    if (software && (!dpop || !supportsPar(d.as))) throw new Error('software approval requires PAR and DPoP')
+    let requestUri: string | undefined
+    const authorizeUrl = await step('authorization request (PAR when advertised)', async () => {
+      if (!supportsPar(d.as)) {
+        if (d.as.require_pushed_authorization_requests) throw new Error('PAR required but no endpoint advertised')
+        return authorizeUrlFromParams(d.as, params)
+      }
+      const r = await pushAuthorizationRequest(d.as, params, auth, dpop)
+      if (r.status !== 201) throw new Error(`PAR HTTP ${r.status} ${r.json?.error ?? ''}`)
+      requestUri = r.json.request_uri
+      return authorizeUrlFromPar(d.as, clientId, r.json.request_uri)
+    })
+
     callback = await step('passkey login + in-app SCA approval', () => authorizeInBrowser(browser.page, authorizeUrl, cfg.redirectUri, {
       timeoutMs: cfg.timeoutMs,
       whileWaiting: async () => {
@@ -152,7 +162,8 @@ export async function runJourney(cfg: JourneyConfig, log: (r: StepResult) => voi
     const proposalId = await exerciseTools(client, cfg, step)
     if (cfg.revocationVerification) {
       if (!dpop) throw new Error('revocation verification requires DPoP')
-      await verifyConnectionRevocation(cfg.revocationVerification, {
+      await verifyConnectionRevocation({ ...cfg.revocationVerification,
+        appToken: appToken ?? cfg.revocationVerification.appToken }, {
         client, accessToken: tokens.access_token, refreshToken: tokens.refresh_token, dpop,
         as: d.as, resource: d.resource, auth, timeoutMs: cfg.timeoutMs,
       }, step)
@@ -161,7 +172,7 @@ export async function runJourney(cfg: JourneyConfig, log: (r: StepResult) => voi
       const app = cfg.softwareConnectApproval
       if (!app) throw new Error('proposal verification requires the synthetic software approver')
       await step('verify the owner sees the same pending proposal', () =>
-        verifyPendingOwnerProposal(app, proposalId, cfg.proposeArgs, clientId, cfg.timeoutMs))
+        verifyPendingOwnerProposal({ ...app, appToken: appToken ?? app.appToken }, proposalId, cfg.proposeArgs, clientId, cfg.timeoutMs))
     } else if (proposalId && cfg.approvalObservation) {
       const observation = cfg.approvalObservation
       await step('observe in-app SCA approval and payment initiation', () =>

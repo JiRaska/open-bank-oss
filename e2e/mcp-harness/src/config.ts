@@ -44,6 +44,7 @@ export interface JourneyConfig extends HarnessConfig {
   revocationVerification?: RevocationVerification
   softwareConnectApproval?: SoftwareConnectApproval
   verifyProposal?: boolean
+  appSignIn?: boolean
 }
 
 export interface SoftwareConnectApproval {
@@ -111,7 +112,12 @@ export function loadJourneyConfig(
   verifyRevocation = false,
   verifyProposal = false,
 ): JourneyConfig {
+  const appSignIn = env.MCP_HARNESS_APP_SIGN_IN === 'true'
   const softwareConnect = env.MCP_HARNESS_SOFTWARE_CONNECT_APPROVAL === 'true'
+  if (appSignIn && (!softwareConnect || env.MCP_HARNESS_APP_TOKEN !== undefined ||
+      !env.MCP_HARNESS_PASSKEY_FILE || !env.MCP_HARNESS_AUTH_SERVER)) {
+    throw new Error('app sign-in requires synthetic software approval, an explicit sandbox issuer and passkey file')
+  }
   if (verifyProposal && (!softwareConnect || readOnly || verifyRevocation ||
       (env.MCP_HARNESS_SCOPE !== undefined && env.MCP_HARNESS_SCOPE !== 'openid'))) {
     throw new Error('proposal verification requires the synthetic software approver and exactly the openid scope')
@@ -130,7 +136,7 @@ export function loadJourneyConfig(
     MCP_HARNESS_SCOPE: env.MCP_HARNESS_SCOPE ?? (readOnly || verifyProposal ? 'openid' : undefined),
     MCP_HARNESS_RESOURCE_URL: env.MCP_HARNESS_RESOURCE_URL ?? 'https://localhost/customer/mcp',
   })
-  const cfg: JourneyConfig = { ...shared, readOnly }
+  const cfg: JourneyConfig = { ...shared, readOnly, appSignIn }
   const edgeUrl = env.MCP_HARNESS_CUSTOMER_EDGE_URL
   const appToken = env.MCP_HARNESS_APP_TOKEN
   if (softwareConnect) {
@@ -187,8 +193,8 @@ export function loadJourneyConfig(
 
 function fixtureEdge(cfg: JourneyConfig, env: NodeJS.ProcessEnv): { edgeUrl: string; appToken: string } {
   const edgeUrl = env.MCP_HARNESS_CUSTOMER_EDGE_URL
-  const appToken = env.MCP_HARNESS_APP_TOKEN
-  if (!edgeUrl || !appToken?.trim()) throw new Error('synthetic customer-edge steps require a sandbox customer-edge URL and app token')
+  const appToken = env.MCP_HARNESS_APP_TOKEN ?? ''
+  if (!edgeUrl || (!cfg.appSignIn && !appToken.trim())) throw new Error('synthetic customer-edge steps require a sandbox customer-edge URL and app token')
   for (const url of [edgeUrl, cfg.resourceUrl, cfg.authServerUrl, cfg.scaUrl]) if (url) assertScaTarget(url, env)
   const base = new URL(edgeUrl)
   const localHttp = base.hostname === 'localhost' || base.hostname === '[::1]' ||

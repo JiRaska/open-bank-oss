@@ -85,6 +85,16 @@ account, checks the V2 context against the journey's PAR and app's pending SCA c
 signs the standard app decision. This mode requires PAR and DPoP and disallows target overrides
 and session files. It can be combined with `--verify-revocation`.
 
+To acquire the app session during each run, set `MCP_HARNESS_APP_SIGN_IN=true` in the synthetic
+software mode and omit `MCP_HARNESS_APP_TOKEN`. Set `MCP_HARNESS_AUTH_SERVER` to the exact trusted
+sandbox customers realm issuer and mount the enrolled synthetic resident passkey as
+`MCP_HARNESS_PASSKEY_FILE` with owner-only permissions. Run one job at a time for that credential
+with a synchronized clock. The ephemeral authenticator advances the fixture signature counter
+and uses the same credential for the two successive ceremonies. It signs in through the bank
+app's standard S256 authorization code flow, intercepts the registered app callback locally, and
+keeps only the short-lived access token in memory for Customer Edge calls. Existing explicit
+token mode remains available for local fixtures.
+
 Run `npm run journey -- --verify-proposal` to verify V2 proposal creation with the same synthetic
 software device and Customer Edge settings. Keep the scope at `openid` for online authorization.
 Provide `MCP_HARNESS_PROPOSE_ARGS` with the synthetic instruction described above, using the same
