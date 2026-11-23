@@ -25,13 +25,6 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
-        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
-        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
-        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
-        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
-        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
-        dryRun:
-          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -39,7 +32,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Latest
+              podTemplateHashValue: Canary
       steps:
         - setWeight: 10
         - pause:
@@ -52,7 +45,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-onboarding-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5ef949a593362753"
+        openbank.tech/policy-checksum: "0d30355c97a5b7e6"
       labels:
         app.kubernetes.io/name: onboarding-service
         app.kubernetes.io/part-of: onboarding

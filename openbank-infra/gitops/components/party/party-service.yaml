@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "957067ba0803864c"
+        openbank.tech/policy-checksum: "085bca9f6104fd3b"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -411,13 +411,6 @@ spec:
           - clusterScope: true
             templateName: openbank-money-path-canary
         startingStep: 1
-        # Canary pods get NO production traffic: stableService pins the DNS Service to the stable
-        # ReplicaSet and there is no trafficRouting, so the canary-hash queries are empty and the
-        # strict analysis would go Inconclusive and pause every deploy. Dry-run keeps the analysis
-        # visible (dryRunSummary) without pretending it gates. Tracked exemption, enforced by
-        # openbank-infra/tests/canary/check.py; remove when the canary receives traffic (#16630).
-        dryRun:
-          - metricName: "*"
         args:
           - name: namespace
             valueFrom:
@@ -425,7 +418,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Latest
+              podTemplateHashValue: Canary
       steps:
         - setWeight: 10
         - pause:

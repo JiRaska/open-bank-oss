@@ -49,15 +49,20 @@ class CustomerChannelAdmission(
      * per-client cap, minute-only), then the replay claim, then [subject].
      */
     interface Throttles {
-        fun proofKey(thumbprint: String): String?
+        suspend fun proofKey(thumbprint: String): String?
 
-        fun client(clientId: String): String?
+        suspend fun client(clientId: String): String?
 
-        fun subject(subject: String, clientId: String): String?
+        suspend fun subject(subject: String, clientId: String): String?
     }
 
     sealed interface Outcome {
-        data class Admitted(val context: ConsentContext, val client: McpClientAllowlist.Client) : Outcome
+        /** [keyThumbprint] is the token's verified `cnf.jkt`: the third member of the D3 grant-lookup key. */
+        data class Admitted(
+            val context: ConsentContext,
+            val client: McpClientAllowlist.Client,
+            val keyThumbprint: String,
+        ) : Outcome
 
         /** [status] is the HTTP status; [challenge] the `WWW-Authenticate` value (null for 429/503). */
         data class Refused(
@@ -99,7 +104,13 @@ class CustomerChannelAdmission(
         val raw = jwt.rawToken
         if (raw != null && raw != presented) return invalidToken("presented token does not match the validated token")
 
-        return admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+        // Fail closed (#16590): a shared replay store or bucket that cannot answer is a 503, never an
+        // admission and never a 429 the client would read as "slow down and retry the same proof".
+        return try {
+            admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+        } catch (_: SharedStoreUnavailableException) {
+            storeUnavailable()
+        }
     }
 
     /** Everything the proof steps need, in one parameter. */
@@ -124,51 +135,58 @@ class CustomerChannelAdmission(
         val dpopHeaders = req.dpopHeaders
         val now = clock.instant()
         val checked = verifier.check(DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt), now)
-        if (checked is DpopCheck.Rejected) return outcomeOf(checked.result, subject, client)
+        if (checked is DpopCheck.Rejected) return outcomeOf(checked.result, subject, client, jkt)
         val bound = checked as DpopCheck.Bound
         // A captured proof replayed on the victim's token passes check(); refuse it before any budget,
         // so replays cannot drain the victim's proof-key bucket. claim() below stays the authority.
-        if (verifier.isReplayed(bound, now)) return outcomeOf(DpopResult.REPLAYED, subject, client)
+        if (verifier.isReplayed(bound, now)) return outcomeOf(DpopResult.REPLAYED, subject, client, jkt)
         // Only a proof signed by the token's own key reaches here; budgets keyed on it are the holder's.
         (throttles.proofKey(bound.jkt) ?: throttles.client(client.clientId))?.let { return throttled(it) }
         val result = verifier.claim(bound, now)
         if (result == DpopResult.VALID) {
             throttles.subject(subject, client.clientId)?.let { return throttled(it) }
         }
-        return outcomeOf(result, subject, client)
+        return outcomeOf(result, subject, client, jkt)
     }
 
     private fun throttled(reason: String) = Outcome.Refused(STATUS_TOO_MANY, null, reason, throttled = true)
 
-    private fun outcomeOf(result: DpopResult, subject: String, client: McpClientAllowlist.Client): Outcome =
-        when (result) {
-            DpopResult.VALID -> Outcome.Admitted(
-                ConsentContext(
-                    agentId = subject,
-                    consentId = "",
-                    grantedAccounts = emptyList(),
-                    actChain = listOf(client.clientId),
-                    sessionId = null,
-                    principalType = PRINCIPAL_HUMAN,
-                    roles = emptyList(),
-                    serviceAccount = false,
-                    channel = CHANNEL,
-                ),
-                client,
-            )
-            DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
-            DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
-            DpopResult.REPLAY_STORE_UNAVAILABLE -> Outcome.Refused(
-                STATUS_UNAVAILABLE,
-                null,
-                "dpop replay store unavailable",
-            )
-            else -> Outcome.Refused(
-                STATUS_UNAUTHORIZED,
-                challenge("invalid_dpop_proof", "dpop proof rejected"),
-                "dpop proof rejected: $result",
-            )
-        }
+    private fun outcomeOf(
+        result: DpopResult,
+        subject: String,
+        client: McpClientAllowlist.Client,
+        jkt: String,
+    ): Outcome = when (result) {
+        DpopResult.VALID -> Outcome.Admitted(
+            ConsentContext(
+                agentId = subject,
+                consentId = "",
+                grantedAccounts = emptyList(),
+                actChain = listOf(client.clientId),
+                sessionId = null,
+                principalType = PRINCIPAL_HUMAN,
+                roles = emptyList(),
+                serviceAccount = false,
+                channel = CHANNEL,
+            ),
+            client,
+            jkt,
+        )
+        DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
+        DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
+        DpopResult.REPLAY_STORE_UNAVAILABLE -> storeUnavailable()
+        else -> Outcome.Refused(
+            STATUS_UNAUTHORIZED,
+            challenge("invalid_dpop_proof", "dpop proof rejected"),
+            "dpop proof rejected: $result",
+        )
+    }
+
+    /**
+     * The ONE outcome for "the shared replay store / budgets could not answer", whichever of the
+     * peek, the claim or a budget failed — so a metric on it is a single match on [REPLAY_STORE_UNAVAILABLE].
+     */
+    private fun storeUnavailable() = Outcome.Refused(STATUS_UNAVAILABLE, null, REPLAY_STORE_UNAVAILABLE)
 
     private fun invalidToken(reason: String) =
         Outcome.Refused(STATUS_UNAUTHORIZED, challenge("invalid_token", reason), reason)
@@ -179,6 +197,16 @@ class CustomerChannelAdmission(
 
     companion object {
         val CHANNEL = McpMetricsPort.McpChannel.CUSTOMER
+
+        /**
+         * The channel as the PDP sees it. `mcp_rest_ext.rego` matches the literal string
+         * `"mcp-customer"`; [CHANNEL] is the metrics enum and would serialise as `CUSTOMER`, which
+         * the rule never matches, so every customer tool call would fall through to the default.
+         */
+        const val PDP_CHANNEL = "mcp-customer"
+
+        /** Refusal reason of every store-unavailable 503 (see [storeUnavailable]). */
+        const val REPLAY_STORE_UNAVAILABLE = "replay_store_unavailable"
         private const val PRINCIPAL_HUMAN = "HUMAN"
         private const val HTTP_METHOD = "POST"
         private const val CLAIM_AZP = "azp"

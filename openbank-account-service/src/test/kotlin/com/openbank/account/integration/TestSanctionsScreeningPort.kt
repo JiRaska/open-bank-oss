@@ -5,6 +5,7 @@
 package com.openbank.account.integration
 
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
+import com.openbank.account.application.port.out.SanctionsEntityType
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import io.quarkus.test.Mock
 import jakarta.enterprise.context.ApplicationScoped
@@ -20,6 +21,10 @@ import jakarta.enterprise.context.ApplicationScoped
 @Mock
 @ApplicationScoped
 class TestSanctionsScreeningPort : AccountSanctionsScreeningPort {
-    override suspend fun screen(name: String, idempotencyKey: String, subjectId: String): SanctionsScreenResult =
-        SanctionsScreenResult(status = "CLEAR", matchScore = 0.0, matchedName = null)
+    override suspend fun screen(
+        name: String,
+        idempotencyKey: String,
+        subjectId: String,
+        entityType: SanctionsEntityType,
+    ): SanctionsScreenResult = SanctionsScreenResult(status = "CLEAR", matchScore = 0.0, matchedName = null)
 }

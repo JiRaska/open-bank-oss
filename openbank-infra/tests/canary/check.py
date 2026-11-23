@@ -3,7 +3,9 @@
 """Exercise shipped canary PromQL with promtool and Argo's pinned result evaluator."""
 from __future__ import annotations
 
+import atexit
 import copy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -19,6 +21,7 @@ sys.path.insert(0, str(ROOT / ".github/scripts"))
 import gatelib
 
 TEMPLATE = "openbank-money-path-canary"
+STRICT_TEMPLATE = "openbank-money-path-canary-strict"
 
 
 def consumers() -> list[dict]:
@@ -28,7 +31,7 @@ def consumers() -> list[dict]:
             if not isinstance(doc, dict) or doc.get("kind") != "Rollout":
                 continue
             analysis = doc.get("spec", {}).get("strategy", {}).get("canary", {}).get("analysis", {})
-            if any(t.get("templateName") == TEMPLATE for t in analysis.get("templates", [])):
+            if any(t.get("templateName") in (TEMPLATE, STRICT_TEMPLATE) for t in analysis.get("templates", [])):
                 canary = doc["spec"]["strategy"]["canary"]
                 found.append({"path": str(path.relative_to(ROOT)), "name": doc["metadata"]["name"], "analysis": analysis,
                               "stableService": canary.get("stableService"), "trafficRouting": canary.get("trafficRouting")})
@@ -37,42 +40,39 @@ def consumers() -> list[dict]:
 
 def validate_consumer(consumer: dict) -> None:
     analysis = consumer["analysis"]
+    assert not any(t.get("templateName") == STRICT_TEMPLATE for t in analysis.get("templates", [])), "strict activation awaits reviewed real-traffic and abort/recovery proof (#16630)"
+    assert not analysis.get("dryRun"), f"legacy analysis must stay active: {consumer['name']}"
     args = {arg["name"]: arg for arg in analysis.get("args", [])}
-    assert args.get("canary-hash") == {"name": "canary-hash", "valueFrom": {"podTemplateHashValue": "Latest"}}, consumer
+    assert args.get("canary-hash") == {"name": "canary-hash", "valueFrom": {"podTemplateHashValue": "Canary"}}, consumer
     assert args.get("namespace") == {"name": "namespace", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}}, consumer
     assert any(t.get("templateName") == TEMPLATE and t.get("clusterScope") is True for t in analysis["templates"]), consumer
 
 
-def exemptions() -> set[tuple[str, str]]:
-    data = gatelib.load_yaml(HERE / "no-traffic-exemptions.yaml")
-    assert isinstance(data.get("issue"), int), "exemption list must name its tracking issue"
-    return {(r["path"], r["name"]) for r in data["rollouts"]}
+def legacy_baseline() -> dict:
+    data = gatelib.load_yaml(HERE / "legacy-analysis-baseline.yaml")
+    assert data.get("issue") == 16630, "baseline must name the real-traffic migration"
+    return data
 
 
-def canary_gets_traffic(consumer: dict) -> bool:
-    # Argo pins stableService's selector to the stable ReplicaSet even without trafficRouting, so a
-    # stableService that callers resolve leaves the canary pods with no traffic to measure.
-    return bool(consumer.get("trafficRouting")) or not consumer.get("stableService")
+def analysis_fingerprint(analysis: dict) -> str:
+    return hashlib.sha256(json.dumps(analysis, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def validate_coverage(actual: list[dict], exempt: set[tuple[str, str]]) -> None:
-    """Strict analysis on a canary with no traffic pauses every deploy; dry-run without an
-    exemption hides a gate that could work. Both directions fail, and so does a stale entry."""
+def validate_coverage(actual: list[dict], baseline: dict) -> None:
+    """This first slice changes no active consumer; strict activation needs a separate reviewed migration."""
+    expected = {(r["path"], r["name"]): r["analysis_sha256"] for r in baseline["rollouts"]}
+    assert len(expected) == len(baseline["rollouts"]), "duplicate legacy baseline row"
     keys = {(c["path"], c["name"]) for c in actual}
-    assert not exempt - keys, f"exemption names no shared-template Rollout: {sorted(exempt - keys)}"
+    assert keys == set(expected), "legacy analysis inventory changed; explicit migration review required"
+    legacy = ROOT / "openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml"
+    assert hashlib.sha256(legacy.read_bytes()).hexdigest() == baseline["legacy_template_sha256"], "legacy template changed"
     for c in actual:
-        key = (c["path"], c["name"])
-        dry = [d.get("metricName") for d in c["analysis"].get("dryRun", [])]
-        if canary_gets_traffic(c):
-            assert key not in exempt, f"stale exemption, canary now receives traffic: {key}"
-            assert not dry, f"dryRun on a canary that receives traffic: {key}"
-        else:
-            assert key in exempt, f"canary receives no traffic and is not an exemption (would pause every deploy): {key}"
-            assert dry == ["*"], f"exempt Rollout must dry-run every metric, got {dry}: {key}"
+        validate_consumer(c)
+        assert analysis_fingerprint(c["analysis"]) == expected[(c["path"], c["name"])], f"legacy active analysis changed: {c['name']}"
 
 
 def metrics() -> list[dict]:
-    template = gatelib.load_yaml(ROOT / "openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml")
+    template = gatelib.load_yaml(ROOT / "openbank-infra/gitops/components/argo-rollouts/strict-analysis-template.yaml")
     return template["spec"]["metrics"]
 
 
@@ -117,6 +117,25 @@ def expression_case(metric: dict, name: str, values: list[float], want: str) -> 
     return {"Name": metric["name"] + "/" + name, "Success": metric["successCondition"], "Failure": metric["failureCondition"], "Values": [str(v) for v in values], "Want": want}
 
 
+_EVALUATOR_COMMAND: list[str] | None = None
+
+
+def evaluator_command() -> list[str]:
+    """Build the unchanged pinned evaluator once; each proof still executes every result case."""
+    global _EVALUATOR_COMMAND
+    if _EVALUATOR_COMMAND is None:
+        directory = tempfile.TemporaryDirectory(prefix="openbank-canary-evaluator-")
+        binary = Path(directory.name) / "evaluate"
+        run = subprocess.run(["go", "build", "-mod=readonly", "-o", str(binary), "."],
+                             cwd=HERE, capture_output=True, text=True)
+        if run.returncode:
+            directory.cleanup()
+            raise AssertionError(run.stdout + run.stderr)
+        atexit.register(directory.cleanup)
+        _EVALUATOR_COMMAND = [str(binary)]
+    return list(_EVALUATOR_COMMAND)
+
+
 def prove(shipped: list[dict], *, quiet: bool = False) -> None:
     """Expected query values are first checked by the real engine, then evaluated by Argo."""
     assert [m["name"] for m in shipped] == ["error-rate", "p95-latency"]
@@ -147,7 +166,15 @@ def prove(shipped: list[dict], *, quiet: bool = False) -> None:
         path.write_text(yaml.safe_dump({"evaluation_interval": "1m", "tests": tests}, sort_keys=False))
         run = subprocess.run(["promtool", "test", "rules", str(path)], capture_output=True, text=True)
         assert run.returncode == 0, run.stdout + run.stderr
-    command = ["go", "run", "-mod=readonly", "."]
+    legacy = gatelib.load_yaml(ROOT / "openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml")["spec"]["metrics"]
+    for metric, threshold in zip(legacy, [0.05, 1.0]):
+        for name, values, phase in [("legacy-at-failure", [threshold], "Failed"),
+                                    ("legacy-above-failure", [threshold * 1.2], "Failed"),
+                                    ("legacy-infinity-failure", [math.inf], "Failed"),
+                                    ("legacy-empty-not-health-proof", [], "Successful"),
+                                    ("legacy-nan-not-health-proof", [math.nan], "Successful")]:
+            expressions.append(expression_case(metric, name, values, phase))
+    command = evaluator_command()
     run = subprocess.run(command, cwd=HERE, input=json.dumps(expressions), capture_output=True, text=True)
     assert run.returncode == 0, run.stdout + run.stderr
     if not quiet:
@@ -157,7 +184,7 @@ def prove(shipped: list[dict], *, quiet: bool = False) -> None:
 def self_test(shipped: list[dict], actual_consumers: list[dict]) -> None:
     # Mutate every real parsed consumer, not a handcrafted valid example.
     for consumer in actual_consumers:
-        for bad in ["Canary", "Stable", "", None]:
+        for bad in ["Latest", "Stable", "", None]:
             mutant = copy.deepcopy(consumer)
             next(a for a in mutant["analysis"]["args"] if a["name"] == "canary-hash")["valueFrom"]["podTemplateHashValue"] = bad
             try:
@@ -167,23 +194,22 @@ def self_test(shipped: list[dict], actual_consumers: list[dict]) -> None:
             else:
                 raise AssertionError(f"consumer guard accepted {bad!r}: {consumer['path']}")
     print(f"SELF-TEST PASS: {4 * len(actual_consumers)} parsed-consumer mutations rejected")
-    exempt = exemptions()
+    baseline = legacy_baseline()
     first = actual_consumers[0]
-    key = (first["path"], first["name"])
     coverage_mutations = {
-        "exempt-without-dryRun": ([dict(first, analysis={**first["analysis"], "dryRun": []})] + actual_consumers[1:], exempt),
-        "partial-dryRun": ([dict(first, analysis={**first["analysis"], "dryRun": [{"metricName": "error-rate"}]})] + actual_consumers[1:], exempt),
-        "no-traffic-not-exempt": (actual_consumers, exempt - {key}),
-        "stale-exemption": ([dict(first, trafficRouting={"plugins": {}})] + actual_consumers[1:], exempt),
-        "orphan-exemption": (actual_consumers, exempt | {("nowhere.yaml", "ghost")}),
+        "legacy-wildcard-dryRun": [dict(first, analysis={**first["analysis"], "dryRun": [{"metricName": "*"}]})] + actual_consumers[1:],
+        "legacy-partial-dryRun": [dict(first, analysis={**first["analysis"], "dryRun": [{"metricName": "error-rate"}]})] + actual_consumers[1:],
+        "strict-before-traffic-proof": [dict(first, analysis={**first["analysis"], "templates": [{"templateName": STRICT_TEMPLATE, "clusterScope": True}]})] + actual_consumers[1:],
+        "missing-legacy-consumer": actual_consumers[1:],
+        "changed-legacy-starting-step": [dict(first, analysis={**first["analysis"], "startingStep": 99})] + actual_consumers[1:],
     }
-    for name, (consumers_, exempt_) in coverage_mutations.items():
+    for name, consumers_ in coverage_mutations.items():
         try:
-            validate_coverage(consumers_, exempt_)
+            validate_coverage(consumers_, baseline)
         except AssertionError:
             print(f"SELF-TEST PASS: rejected {name}")
         else:
-            raise AssertionError(f"coverage guard accepted {name}")
+            raise AssertionError(f"preservation guard accepted {name}")
     mutations = {
         "allow-empty": lambda m: m.update(successCondition="len(result) == 0 || (" + m["successCondition"] + ")"),
         "allow-nan": lambda m: m.update(successCondition=m["successCondition"].replace("!isNaN(result[0]) && !isInf(result[0]) && result[0] >= 0 && result[0] <", "isNaN(result[0]) || result[0] <")),
@@ -215,7 +241,7 @@ if __name__ == "__main__":
     assert actual, "no shared-template consumers found"
     for consumer in actual:
         validate_consumer(consumer)
-    validate_coverage(actual, exemptions())
+    validate_coverage(actual, legacy_baseline())
     gatelib.subjects(len(actual), "Rollouts using shared canary analysis")
     shipped = metrics()
     prove(shipped)

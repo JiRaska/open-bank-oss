@@ -6,6 +6,7 @@ package com.openbank.account.infrastructure.client
 
 import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.AccountScreeningUnavailableException
+import com.openbank.account.application.port.out.SanctionsEntityType
 import com.openbank.account.application.port.out.SanctionsScreenResult
 import io.quarkus.logging.Log
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -21,11 +22,16 @@ class SanctionsScreeningAdapter : AccountSanctionsScreeningPort {
     @RestClient
     lateinit var client: SanctionsServiceClient
 
-    override suspend fun screen(name: String, idempotencyKey: String, subjectId: String): SanctionsScreenResult = try {
+    override suspend fun screen(
+        name: String,
+        idempotencyKey: String,
+        subjectId: String,
+        entityType: SanctionsEntityType,
+    ): SanctionsScreenResult = try {
         val response = client.screen(
             SanctionsScreenRequest(
                 idempotencyKey = idempotencyKey,
-                entityType = "INDIVIDUAL",
+                entityType = entityType.name,
                 name = name,
                 subjectId = subjectId,
             ),

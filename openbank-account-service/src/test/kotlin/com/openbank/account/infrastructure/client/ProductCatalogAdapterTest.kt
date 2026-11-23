@@ -141,6 +141,8 @@ class ProductCatalogAdapterTest {
             revision(signature = CatalogIrSignature("not-a-hash"), behaviour = CatalogBehaviour(irVersion = 1)),
             revision(signature = CatalogIrSignature("e".repeat(64)), behaviour = CatalogBehaviour(irVersion = 0)),
             revision(signature = CatalogIrSignature("e".repeat(64)), behaviour = CatalogBehaviour(irVersion = -1)),
+            revision().copy(marketCountries = setOf("ZZ")),
+            revision().copy(marketCountries = setOf("cz")),
         )
         for (body in malformed) {
             coEvery { reads.publishedRevision(productId, at) } returns CatalogRead.Answered(body)
