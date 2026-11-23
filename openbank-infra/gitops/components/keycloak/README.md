@@ -457,3 +457,20 @@ proof and the resource nonce. The resource nonce authenticates version, exact re
 DPoP key thumbprint, expiry and random challenge. PostgreSQL independently enforces first use of
 the original proof via a reference derived with the separate proof key. The nonce key is shared
 between the MCP resource and Keycloak. Both services must use the same key and resource URI.
+
+### Admin REST service accounts on Keycloak 26.8.2
+
+Keycloak 26.8.2 requires its built-in `kc-admin-api` client scope and realm Admin
+REST audience on Admin REST bearer tokens. The customers template assigns the scope
+as an optional scope to `customer-edge-admin` and `openbank-edge-webauthn`. Their
+Admin REST clients request it when obtaining a service token. Inherited default
+scopes, role mappings, and the WebAuthn token exchange scope remain in place.
+
+When upgrading an existing realm, first upgrade Keycloak and use the built-in
+administrator to add the new scope as a default on both clients. The upgrade
+assigns the scope automatically only to the built-in administrator clients.
+The default assignment lets the previous customer-edge release obtain usable
+tokens while the new release rolls out. Replace it with the optional assignment
+after every customer-edge instance requests the scope. Verify each workload's
+normal Admin REST operation with a fresh token before reopening traffic.
+Invalidate cached tokens minted before the upgrade by restarting the affected clients.
