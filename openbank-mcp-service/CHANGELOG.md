@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.5...mcp-service-v0.18.6) (2026-11-23)
+
+
+### Security
+
+* **mcp-service:** caller-scoped opaque accountRef for MCP tool chaining ([#16863](https://github.com/JiRaska/open-bank-oss/issues/16863)) ([cdd8413](https://github.com/JiRaska/open-bank-oss/commit/cdd8413840c923f2d5f56a80f5c9615b55a94ab9))
+
 ## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.4...mcp-service-v0.18.5) (2026-11-23)
 
 
