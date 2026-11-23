@@ -5,7 +5,6 @@
 package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.out.DelegationRepository
-import com.openbank.delegation.application.port.out.McpIssuerProofClaim
 import com.openbank.delegation.application.port.out.McpIssuerProofReplayStore
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
@@ -14,6 +13,7 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationGranteeType
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.libs.security.ReplayClaim
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -123,9 +123,9 @@ class McpClientGrantResolverTest {
         coEvery { ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, grant.resourceId) } returns
             OwnershipVerdict.OWNED
         coEvery { replay.claim(proofKey) } returnsMany listOf(
-            McpIssuerProofClaim.FIRST_USE,
-            McpIssuerProofClaim.REPLAYED,
-            McpIssuerProofClaim.UNAVAILABLE,
+            ReplayClaim.FIRST_USE,
+            ReplayClaim.REPLAYED,
+            ReplayClaim.UNAVAILABLE,
         )
         val permit = runBlocking { authorization.authorize(request) }
         assertThat(permit).isEqualTo(

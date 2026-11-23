@@ -4,20 +4,16 @@
 
 package com.openbank.delegation.application.port.out
 
-/** The issuer may proceed only after a committed [FIRST_USE] response. */
-enum class McpIssuerProofClaim {
-    FIRST_USE,
-    REPLAYED,
-    UNAVAILABLE,
-}
+import com.openbank.libs.security.ReplayClaim
 
+/** The issuer may proceed only after a committed [ReplayClaim.FIRST_USE] response. */
 interface McpIssuerProofReplayStore {
     /**
      * [proofKey] is the canonical lower-case hex HMAC-SHA-256 of the deployment purpose, verified
      * realm, thumbprint and proof id, encoded with length prefixes. The caller derives it only
      * after proof and nonce verification. The key is invariant across account, operation and token.
      */
-    suspend fun claim(proofKey: String): McpIssuerProofClaim
+    suspend fun claim(proofKey: String): ReplayClaim
 
     /** Removes at most [limit] expired claims. A reviewed scheduler must call before activation. */
     suspend fun purgeExpired(limit: Int): Int

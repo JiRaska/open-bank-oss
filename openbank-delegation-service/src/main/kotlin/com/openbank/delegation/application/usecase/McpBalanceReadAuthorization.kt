@@ -5,12 +5,12 @@
 package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.ResolveMcpClientGrantUseCase
-import com.openbank.delegation.application.port.out.McpIssuerProofClaim
 import com.openbank.delegation.application.port.out.McpIssuerProofReplayStore
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.libs.security.ReplayClaim
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -51,7 +51,7 @@ class McpBalanceReadAuthorization(
         val validUntil = grant.validTo ?: return null
         val verdict = ownership.verifyOwnership(request.partyId, grant.resourceType, request.accountId)
         if (verdict != OwnershipVerdict.OWNED) return null
-        if (replay.claim(request.proofKey) != McpIssuerProofClaim.FIRST_USE) return null
+        if (replay.claim(request.proofKey) != ReplayClaim.FIRST_USE) return null
         return Permit(grant.id, request.accountId, validUntil, request.connectionId)
     }
 }

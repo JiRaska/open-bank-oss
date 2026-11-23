@@ -4,8 +4,8 @@
 
 package com.openbank.delegation.infrastructure.persistence.repository
 
-import com.openbank.delegation.application.port.out.McpIssuerProofClaim
 import com.openbank.delegation.application.port.out.McpIssuerProofReplayStore
+import com.openbank.libs.security.ReplayClaim
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Tuple
@@ -14,7 +14,7 @@ import java.time.Duration
 
 @ApplicationScoped
 class McpIssuerProofReplayStoreImpl(private val pool: Pool) : McpIssuerProofReplayStore {
-    override suspend fun claim(proofKey: String): McpIssuerProofClaim {
+    override suspend fun claim(proofKey: String): ReplayClaim {
         require(PROOF_KEY.matches(proofKey)) { "expected a canonical HMAC-SHA-256 proof reference" }
 
         // Use a separate transaction so SUCCESS cannot escape before its commit. A timeout during
@@ -25,13 +25,13 @@ class McpIssuerProofReplayStoreImpl(private val pool: Pool) : McpIssuerProofRepl
                 .flatMap { connection.preparedQuery(CLAIM).execute(Tuple.of(proofKey)) }
                 .map { rows ->
                     when (rows.rowCount()) {
-                        1 -> McpIssuerProofClaim.FIRST_USE
-                        0 -> McpIssuerProofClaim.REPLAYED
-                        else -> McpIssuerProofClaim.UNAVAILABLE
+                        1 -> ReplayClaim.FIRST_USE
+                        0 -> ReplayClaim.REPLAYED
+                        else -> ReplayClaim.UNAVAILABLE
                     }
                 }
         }.ifNoItem().after(CLAIM_TIMEOUT).fail()
-            .onFailure().recoverWithItem(McpIssuerProofClaim.UNAVAILABLE)
+            .onFailure().recoverWithItem(ReplayClaim.UNAVAILABLE)
             .awaitSuspending()
     }
 
