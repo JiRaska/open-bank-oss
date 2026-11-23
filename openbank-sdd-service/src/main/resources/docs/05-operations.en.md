@@ -44,7 +44,7 @@ The **management interface** is enabled on a separate port: `management.port: 80
 | Kafka topic (`sdd-events-out`) | `openbank.sdd.event` | outbox publish target |
 | `openbank.outbox.poll-interval` | `5s` | dispatcher tick (also hard-coded `@Scheduled(every = "5s")`) |
 | `openbank.sdd.expiry-cron` | `0 15 3 * * ?` | idle-expiry sweep schedule |
-| `openbank.sdd.expiry.enabled` | `false` | **idle-expiry sweep is OFF by default** |
+| `openbank.sdd.expiry.enabled` | `false` | idle-expiry kill switch; code default `false`, enabled per environment by `OPENBANK_SDD_EXPIRY_ENABLED` in the GitOps manifest |
 
 The placeholders are dev-only; production must inject real secrets via Vault (ADR-0017). Logs are JSON in the default profile.
 
@@ -89,7 +89,12 @@ Symptom: `409 Conflict`, body `Illegal mandate transition`. Cause: the caller at
 
 ### Idle-expiry sweep
 
-The `MandateExpiryScheduler` cron is **disabled by default** (`openbank.sdd.expiry.enabled=false`). To enable, set the flag and the cron (`openbank.sdd.expiry-cron`); the sweep marks `ACTIVE`/`SUSPENDED` mandates idle for ≥36 months as `EXPIRED`. The pure date arithmetic (`MandateLifecycle.isIdle`) is unit-tested independently of the cron.
+The `MandateExpiryScheduler` sweep marks `ACTIVE`/`SUSPENDED` mandates idle for ≥36 months as `EXPIRED` on `openbank.sdd.expiry-cron`. The code default of `openbank.sdd.expiry.enabled` is `false`; each environment turns it on with `OPENBANK_SDD_EXPIRY_ENABLED: "true"` in `openbank-infra/gitops/components/sdd/sdd-service.yaml`. **Kill switch:** set that env var to `"false"` (a manifest change, no code revert); mandates already expired stay `EXPIRED`.
+
+- Each mandate is expired in its own transaction, and that transaction also writes an `sdd.mandate.expired.v1` event (same envelope as the other `sdd.mandate.*.v1` events) to the outbox, so downstream consumers learn of every expiry.
+- One failing mandate is logged and counted, and the sweep goes on with the rest; that mandate stays live and is retried on the next run.
+- Metrics: `openbank.sdd.mandate.expiry.expired` and `openbank.sdd.mandate.expiry.failed` (counters), plus workflow liveness `sdd-mandate-expiry`. Alert on a non-zero `failed` rate.
+- The pure date arithmetic (`MandateLifecycle.isIdle`) is unit-tested independently of the cron; `MandateExpirySchedulerVertxContextIT` drives the real cron.
 
 ## Deploy / release
 
