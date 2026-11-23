@@ -440,9 +440,10 @@ The two service clients remain disabled on import, and this template adds no rou
 The Keycloak extension registers the customer MCP read grant. It starts disabled. The local
 sandbox configuration must supply all of the following before enabling it:
 
-- `MCP_READ_GRANT_ENABLED=true`
+- `MCP_READ_GRANT_ENABLED=true` and `MCP_READ_CONNECTION_BINDING_ENABLED=true`
 - The HTTPS `MCP_READ_CUSTOMER_ISSUER_URL`, `MCP_READ_RESOURCE_URL` and
   `MCP_READ_DELEGATION_ORIGIN`
+- The canonical `MCP_READ_RESOURCE_URL` is `https://mcp.open-bank.tech/customer/mcp` for the customer route.
 - The HTTPS `MCP_READ_ISSUER_TOKEN_URL` and `MCP_READ_ISSUER_CLIENT_SECRET` for the dedicated
   `openbank-mcp-read-issuer` service account
 - Separate base64url-encoded `MCP_READ_NONCE_KEY` and `MCP_READ_PROOF_KEY` values of at least 32

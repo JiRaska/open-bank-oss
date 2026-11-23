@@ -38,6 +38,7 @@ import json
 import pathlib
 import re
 import secrets
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -58,7 +59,7 @@ USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11c"
 COUNTER = itertools.count(int(time.time()))
 YOUNG_USER, YOUNG_PARTY = "mcp-it-young@example.test", "22222222-2222-4222-8222-222222222222"
 YOUNG_USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11d"
-RESOURCE = "https://api.open-bank.tech/mcp"
+RESOURCE = "https://mcp.open-bank.tech/customer/mcp"
 WEAK_L = "it-mcp-tier-l-weakened"
 # The withheld-code session lifespan configured for THIS disposable server. The extension caps it
 # at 300 s (ADR-0385 D3.6, unit-tested in ExtensionTests); a short value lets the expiry case run
@@ -190,7 +191,7 @@ class ScaStub:
     approved 400, party / approvalRequestId / payloadSha256 compared at consume, a bearer token
     required. `approve()` stands in for the customer's device approval."""
 
-    def __init__(self):
+    def __init__(self, authority=None, trust_certificate=None):
         self.lock = threading.Lock()
         self.challenges = {}  # id -> dict
         self.token = secrets.token_urlsafe(24)
@@ -217,6 +218,8 @@ class ScaStub:
                 if self.headers.get("Authorization") != f"Bearer {stub.token}":
                     return self.reply(401, {})
                 body = json.loads(raw or b"{}")
+                if authority and self.path.startswith(ConnectAuthority.PATH):
+                    return self.reply(*authority.answer(self.path, body))
                 if self.path == "/api/v1/sca/challenges":
                     return self.reply(*stub.initiate(body, self.headers.get("Idempotency-Key")))
                 m = re.fullmatch(r"/api/v1/sca/challenges/([0-9a-f-]+)/consume", self.path)
@@ -225,6 +228,10 @@ class ScaStub:
                 return self.reply(404, {})
 
         self.server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        if trust_certificate:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(str(trust_certificate), str(trust_certificate.with_suffix(".key")))
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
@@ -267,8 +274,9 @@ class ScaStub:
                 done["consumedAt"] = None
             return 200, done
 
-    def for_request(self, request_uri):
-        want = "mcp-connect:" + request_uri.split("urn:ietf:params:oauth:request_uri:", 1)[1]
+    def for_request(self, request_uri, v2=False):
+        suffix = hashlib.sha256(request_uri.encode()).hexdigest() if v2 else request_uri.split("urn:ietf:params:oauth:request_uri:", 1)[1]
+        want = "mcp-connect:" + suffix
         with self.lock:
             found = [c for c in self.challenges.values() if c["approvalRequestId"] == want]
         return found[0] if found else None
@@ -280,15 +288,72 @@ class ScaStub:
             c["denied"] = True
         return c
 
-    def approve(self, request_uri, corrupt=False):
-        c = self.for_request(request_uri)
+    def approve(self, request_uri, corrupt=False, v2=False):
+        c = self.for_request(request_uri, v2=v2)
         assert c is not None, "no challenge was initiated for this request"
         with self.lock:
             c["approved"], c["corrupt"] = True, corrupt
         return c
 
 
+class ConnectAuthority:
+    """One disposable V2 connection, using Delegation's OpenAPI wire fields and state order."""
+
+    PATH = "/api/v1/delegations/mcp-connect/requests"
+    ACCOUNT = "11111111-0000-4000-8000-111111111111"
+
+    def __init__(self):
+        self.connection = str(uuid.uuid4())
+        self.request = None
+        self.challenge = None
+        self.code = None
+        self.family = None
+        self.revoked = False
+        self.checks = []
+
+    def answer(self, path, body):
+        if path == self.PATH:
+            assert body["partyId"] == PARTY and body["clientId"] == L
+            assert body["resource"] == RESOURCE and body["scopes"] == ["openid"]
+            self.request = body
+            return 200, {**body, "status": "PENDING_SELECTION"}
+        identity = {k: self.request[k] for k in ("partyId", "clientId", "parJkt")}
+        assert all(body.get(k) == v for k, v in identity.items())
+        ref = self.request["requestRef"]
+        operation = path.removeprefix(self.PATH)
+        if operation == f"/{ref}/selection":
+            return 200, {**self.request, "status": "SELECTED", "accounts": [
+                {"accountId": self.ACCOUNT, "capabilities": ["ACCOUNT_READ_BALANCES"]}]}
+        if operation == f"/{ref}/challenge":
+            assert body["approvalRequestId"] == "mcp-connect:" + ref
+            assert re.fullmatch(r"[0-9a-f]{64}", body["contextSha256"])
+            self.challenge = body
+            return 200, {**self.request, **self.challenge, "status": "CHALLENGE_BOUND"}
+        if operation == f"/{ref}/stage":
+            assert all(body.get(k) == v for k, v in self.challenge.items())
+            assert re.fullmatch(r"[0-9a-f]{64}", body["codeBindingRef"])
+            self.code = body["codeBindingRef"]
+        if operation in (f"/{ref}/stage", "/staged", f"/{ref}/activate"):
+            assert body["codeBindingRef"] == self.code and self.family is None
+            state = {**self.request, **self.challenge, "codeBindingRef": self.code}
+            if operation == f"/{ref}/activate":
+                assert all(body.get(k) == v for k, v in self.challenge.items())
+                assert re.fullmatch(r"[0-9a-f]{64}", body["refreshFamilyRef"])
+                self.family = body["refreshFamilyRef"]
+                return 200, {**state, "status": "ACTIVE", "refreshFamilyRef": self.family, "connectionId": self.connection}
+            return 200, {**state, "status": "APPROVED_AWAITING_FAMILY"}
+        if operation == "/family-status":
+            assert body["refreshFamilyRef"] == self.family
+            self.checks.append(not self.revoked)
+            if self.revoked:
+                return 404, {}
+            return 200, {**body, "status": "ACTIVE", "connectionId": self.connection}
+        return 404, {}
+
+
 class McpClientAdmission(unittest.TestCase):
+    V2 = False
+
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory(prefix="ob-mcp-admission-test-")
@@ -297,7 +362,15 @@ class McpClientAdmission(unittest.TestCase):
         cls.hkey, cls.passkey, cls.dpop = EcKey(work / "h.pem"), EcKey(work / "p.pem"), EcKey(work / "d.pem")
         cls.cred_id = secrets.token_bytes(32)
         cls.young_passkey, cls.young_cred_id = EcKey(work / "y.pem"), secrets.token_bytes(32)
-        cls.sca = ScaStub()
+        trust_certificate = None
+        cls.authority = ConnectAuthority() if cls.V2 else None
+        if cls.V2:
+            trust_certificate = work / "authority.crt"
+            run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+                "-subj", "/CN=host.docker.internal", "-addext", "subjectAltName=DNS:host.docker.internal",
+                "-keyout", str(trust_certificate.with_suffix(".key")), "-out", str(trust_certificate))
+            trust_certificate.chmod(0o644)
+        cls.sca = ScaStub(cls.authority, trust_certificate)
         cls.addClassCleanup(cls.sca.server.shutdown)
 
         text = (KC / "customers-realm-template.json").read_text()
@@ -391,16 +464,22 @@ class McpClientAdmission(unittest.TestCase):
         cls.admin_password = secrets.token_urlsafe(18)
         cls.container = "ob-mcp-admission-test-" + secrets.token_hex(6)
         cls.addClassCleanup(lambda: run("docker", "rm", "-f", cls.container))
-        sca = f"http://host.docker.internal:{cls.sca.port}"
+        sca = f"{'https' if cls.V2 else 'http'}://host.docker.internal:{cls.sca.port}"
         spi = "--spi-authenticator--openbank-mcp-withheld-code--"
+        test_mode = [f"{spi}allow-legacy-v1=true"]
+        docker_tls = []
+        if cls.V2:
+            test_mode = [f"{spi}connect-v2-enabled=true", f"{spi}connect-authority-url={sca}"]
+            docker_tls = ["-v", f"{trust_certificate}:/fixture-authority.crt:ro",
+                          "-e", "KC_TRUSTSTORE_PATHS=/fixture-authority.crt"]
         run("docker", "run", "--detach", "--name", cls.container, "--memory=1g",
             "--add-host=host.docker.internal:host-gateway",
             "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2", "-p", "127.0.0.1::8080",
             "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=it-admin", "-e", f"KC_BOOTSTRAP_ADMIN_PASSWORD={cls.admin_password}",
-            "-v", f"{realm_file}:/opt/keycloak/data/import/realm.json:ro",
-            "-v", f"{providers}:/opt/keycloak/providers:ro", image,
+            "-v", f"{realm_file}:/opt/keycloak/data/import/openbank-customers-realm.json:ro",
+            "-v", f"{providers}:/opt/keycloak/providers:ro", *docker_tls, image,
             "start-dev", "--import-realm", f"--features={features}",
-            f"{spi}allow-legacy-v1=true",
+            *test_mode,
             f"{spi}sca-url={sca}", f"{spi}token-url={sca}/token", f"{spi}client-id=openbank-keycloak-mcp",
             f"{spi}client-secret={secrets.token_urlsafe(16)}", f"{spi}session-lifespan-seconds={SESSION_LIFESPAN_S}")
         port = run("docker", "port", cls.container, "8080/tcp").decode().strip().splitlines()[0].rsplit(":", 1)[1]
@@ -444,7 +523,8 @@ class McpClientAdmission(unittest.TestCase):
         if client == H and authenticate:
             data.update(self.client_auth())
         data.update(extra)
-        return self.post(self.par_url, data), verifier
+        headers = {"DPoP": self.proof(htu=self.par_url)} if self.V2 else None
+        return self.post(self.par_url, data, headers), verifier
 
     def request_uri(self, client, redirect, **extra):
         resp, verifier = self.par(client, redirect, **extra)
@@ -941,6 +1021,58 @@ class McpClientAdmission(unittest.TestCase):
         self.assertNotIn("code", resp.query())
         self.assertFalse(self.is_waiting_page(resp), "a passkey younger than 72 h must not reach the SCA step")
         self.assertIsNone(self.sca.for_request(uri), "no challenge is raised for a young passkey")
+
+class McpV2Admission(McpClientAdmission):
+    V2 = True
+
+    def test_v2_code_and_refresh_family(self):
+        browser, waiting, uri, verifier = self.connect(L, L_CB, scope="openid", resource=RESOURCE,
+                                                       dpop_jkt=self.dpop.thumbprint())
+        approval = self.poll(browser, waiting)
+        self.assertTrue(self.is_waiting_page(approval))
+        self.assertNotIn("code", approval.query())
+        self.sca.approve(uri, v2=True)
+        time.sleep(2.1)
+        callback = self.poll(browser, approval)
+        self.assertIn("code", callback.query())
+        self.assertEqual(self.sca.for_request(uri, v2=True)["spent"], 1)
+        self.assertIsNotNone(self.authority.code)
+        self.assertIsNone(self.authority.family)
+
+        def grant(**values):
+            return self.post(self.token_url, {"client_id": L, **values}, {"DPoP": self.proof()})
+
+        def bound(response):
+            self.assertEqual(response.status, 200)
+            tokens = response.json()
+            access, refresh = claims(tokens["access_token"]), claims(tokens["refresh_token"])
+            self.assertEqual(access["iss"], self.iss)
+            self.assertEqual(access["openbank_mcp_connection_id"], self.authority.connection)
+            self.assertEqual(access["cnf"]["jkt"], self.dpop.thumbprint())
+            self.assertEqual(refresh["cnf"]["jkt"], self.dpop.thumbprint())
+            return tokens["refresh_token"], refresh["reuse_id"]
+
+        first, family = bound(grant(grant_type="authorization_code", code=callback.query()["code"][0],
+                                    code_verifier=verifier, redirect_uri=L_CB))
+        self.assertIsNotNone(self.authority.family)
+        rotated, same_family = bound(grant(grant_type="refresh_token", refresh_token=first))
+        self.assertEqual(family, same_family)
+        self.assertNotEqual(first, rotated)
+        self.authority.revoked = True
+        denied = grant(grant_type="refresh_token", refresh_token=rotated)
+        self.assertEqual(denied.status, 400)
+        self.assertEqual(denied.json(), {
+            "error": "invalid_grant", "error_description": "MCP connection authority did not authorize token issuance",
+        })
+        self.assertEqual(self.authority.checks, [True, False])
+
+
+def load_tests(loader, _suite, _pattern):
+    return unittest.TestSuite((
+        loader.loadTestsFromTestCase(McpClientAdmission),
+        McpV2Admission("test_v2_code_and_refresh_family"),
+    ))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
