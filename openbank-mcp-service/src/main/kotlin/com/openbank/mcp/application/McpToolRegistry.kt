@@ -16,6 +16,7 @@ import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolDefinition
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 
 /**
  * The curated MCP tool set (ADR-0181): consent-scoped reads plus a single HITL payment proposal.
@@ -25,7 +26,7 @@ import jakarta.enterprise.context.ApplicationScoped
  * `AI_AGENT` principal (see McpEndpoint's @Authorize bridge).
  */
 @ApplicationScoped
-class McpToolRegistry(
+class McpToolRegistry @Inject constructor(
     private val accounts: AccountReadPort,
     private val statements: StatementReadPort,
     private val paymentConfirmations: PaymentConfirmationReadPort,
@@ -33,6 +34,9 @@ class McpToolRegistry(
     private val marketingReach: MarketingReachPort,
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
+    // Last and defaulted so hand-built registries in unit tests keep their shape; CDI always injects
+    // the configured key (AccountRefKeyConfig), never the ephemeral default.
+    private val accountRefs: McpAccountRefs = McpAccountRefs.ephemeral(),
 ) {
 
     /** tool name -> the OPA charter capability the PDP gates the call on. Absent = refused. */
@@ -56,7 +60,8 @@ class McpToolRegistry(
     val tools: List<ToolDefinition> = listOf(
         ToolDefinition(
             name = "list_accounts",
-            description = "List the accounts the presented PSD2 consent grants access to.",
+            description = "List the accounts the presented PSD2 consent grants access to. IBANs come back " +
+                "masked; pass each account's `accountRef` to get_balance, list_transactions or get_statement.",
             inputSchema = obj(mapOf<String, Any>(), required = emptyList()),
             service = "openbank-account-service",
         ),
@@ -64,8 +69,8 @@ class McpToolRegistry(
             name = "get_balance",
             description = "Get the balance of a granted account.",
             inputSchema = obj(
-                mapOf("accountId" to ibanProp()),
-                listOf("accountId"),
+                accountProps(),
+                emptyList(),
             ),
             service = "openbank-balance-service",
         ),
@@ -73,8 +78,7 @@ class McpToolRegistry(
             name = "list_transactions",
             description = "List recent transactions of a granted account.",
             inputSchema = obj(
-                mapOf(
-                    "accountId" to ibanProp(),
+                accountProps() + mapOf(
                     "limit" to mapOf(
                         "type" to "integer",
                         "minimum" to 1,
@@ -82,7 +86,7 @@ class McpToolRegistry(
                         "description" to "Max rows (default ${McpInputBounds.DEFAULT_TX_LIMIT})",
                     ),
                 ),
-                listOf("accountId"),
+                emptyList(),
             ),
             service = "openbank-transaction-service",
         ),
@@ -107,13 +111,12 @@ class McpToolRegistry(
                 "are kept) — amounts, dates, currency and category are not, and are enough to explain " +
                 "the statement.",
             inputSchema = obj(
-                mapOf(
-                    "accountId" to ibanProp(),
+                accountProps() + mapOf(
                     "currency" to strProp("ISO 4217 pocket currency; required together with legalSequence"),
                     "legalSequence" to
                         mapOf("type" to "integer", "description" to "Exact statement sequence; omit for the latest"),
                 ),
-                listOf("accountId"),
+                emptyList(),
             ),
             service = "openbank-statement-service",
         ),
@@ -183,17 +186,17 @@ class McpToolRegistry(
     fun call(toolName: String, arguments: JsonNode, ctx: ConsentContext): ToolCallResult {
         val result: JsonNode = when (toolName) {
             "list_accounts" -> accounts.listAccounts(ctx)
-            "get_balance" -> accounts.getBalance(ctx, arguments.reqText("accountId"))
+            "get_balance" -> accounts.getBalance(ctx, accountArg(arguments, ctx))
             "list_transactions" ->
                 accounts.listTransactions(
                     ctx,
-                    arguments.reqText("accountId"),
+                    accountArg(arguments, ctx),
                     McpInputBounds.transactionLimit(arguments.path("limit")),
                 )
             "list_consents" -> accounts.listConsents(ctx)
             "get_statement" -> statements.getStatementSummary(
                 ctx,
-                arguments.reqText("accountId"),
+                accountArg(arguments, ctx),
                 arguments.path("currency").takeIf { it.isTextual }?.asText(),
                 arguments.path("legalSequence").takeIf { it.isIntegralNumber }?.asLong(),
             )
@@ -231,17 +234,50 @@ class McpToolRegistry(
         //             and whole values) and BEFORE wrap. See McpToolResultSanitiser.
         // Order matters only in that wrapping must come last: it must enclose the final bytes, or
         // a later step could re-introduce text outside the markers.
-        val masked = mapper.writeValueAsString(McpToolResultSanitiser.sanitise(masker.mask(result)))
+        //   accountRef — #16678: AFTER mask + sanitise, every object whose RAW record has an `iban`
+        //             gains the server's caller-scoped handle. Attaching last means the sanitiser needs
+        //             no exemption, and an upstream `accountRef` is sanitised like any other field.
+        val shaped = McpToolResultSanitiser.sanitise(masker.mask(result))
+        val masked = mapper.writeValueAsString(accountRefs.attach(ctx, result, shaped))
         return ToolCallResult(listOf(ToolContent(text = McpUntrustedData.wrap(masked))))
+    }
+
+    /**
+     * The account a tool call names, as an IBAN for the read port. Prefers `accountRef` (#16678);
+     * `accountId` (a raw IBAN) is still accepted, since ADR-0383 D7 minimises what the bank SENDS, and
+     * a raw IBAN in still meets the consent gate in the port. A ref is resolved only against the
+     * caller's own consent-scoped account list, for the caller's own scope — never decoded.
+     */
+    private fun accountArg(arguments: JsonNode, ctx: ConsentContext): String {
+        val ref = arguments.path(McpAccountRefs.REF_FIELD).takeIf { it.isTextual }?.asText()
+            ?: return arguments.reqText("accountId")
+        require(arguments.path("accountId").isMissingNode) { "pass accountRef or accountId, not both" }
+        val callerIbans = mutableListOf<String>()
+        accounts.listAccounts(ctx).findValues(McpAccountRefs.IBAN_FIELD)
+            .filter { it.isTextual }
+            .forEach { callerIbans.add(it.asText()) }
+        return requireNotNull(accountRefs.resolve(ctx, ref, callerIbans)) {
+            "accountRef is not valid for this caller"
+        }
     }
 
     private fun JsonNode.reqText(field: String): String = path(field).takeIf { it.isTextual }?.asText()
         ?: throw IllegalArgumentException("missing or non-string argument: $field")
 
-    private fun ibanProp() = mapOf(
-        "type" to "string",
-        "pattern" to McpInputBounds.IBAN_PATTERN,
-        "description" to "IBAN (uppercase, no spaces; must be within the consent)",
+    /** One of the two is required (enforced in [accountArg]); `accountRef` is the one to chain. */
+    private fun accountProps(): Map<String, Any> = mapOf(
+        McpAccountRefs.REF_FIELD to mapOf(
+            "type" to "string",
+            "pattern" to "^acr_[A-Za-z0-9_-]{43}$",
+            "description" to "Preferred. The opaque accountRef a previous tool result returned for this account " +
+                "(valid only for you, in this session)",
+        ),
+        "accountId" to mapOf(
+            "type" to "string",
+            "pattern" to McpInputBounds.IBAN_PATTERN,
+            "description" to
+                "Alternative to accountRef: the full IBAN (uppercase, no spaces; must be within the consent)",
+        ),
     )
 
     private fun strProp(desc: String) = mapOf("type" to "string", "description" to desc)

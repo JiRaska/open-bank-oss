@@ -3,7 +3,7 @@
     "type": "function",
     "function": {
       "name": "list_accounts",
-      "description": "List the accounts the presented PSD2 consent grants access to.",
+      "description": "List the accounts the presented PSD2 consent grants access to. IBANs come back masked; pass each account's `accountRef` to get_balance, list_transactions or get_statement.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -18,15 +18,17 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "accountRef": {
+            "type": "string",
+            "pattern": "^acr_[A-Za-z0-9_-]{43}$",
+            "description": "Preferred. The opaque accountRef a previous tool result returned for this account (valid only for you, in this session)"
+          },
           "accountId": {
             "type": "string",
             "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$",
-            "description": "IBAN (uppercase, no spaces; must be within the consent)"
+            "description": "Alternative to accountRef: the full IBAN (uppercase, no spaces; must be within the consent)"
           }
-        },
-        "required": [
-          "accountId"
-        ]
+        }
       }
     }
   },
@@ -38,10 +40,15 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "accountRef": {
+            "type": "string",
+            "pattern": "^acr_[A-Za-z0-9_-]{43}$",
+            "description": "Preferred. The opaque accountRef a previous tool result returned for this account (valid only for you, in this session)"
+          },
           "accountId": {
             "type": "string",
             "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$",
-            "description": "IBAN (uppercase, no spaces; must be within the consent)"
+            "description": "Alternative to accountRef: the full IBAN (uppercase, no spaces; must be within the consent)"
           },
           "limit": {
             "type": "integer",
@@ -49,10 +56,7 @@
             "maximum": 200,
             "description": "Max rows (default 50)"
           }
-        },
-        "required": [
-          "accountId"
-        ]
+        }
       }
     }
   },
@@ -75,10 +79,15 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "accountRef": {
+            "type": "string",
+            "pattern": "^acr_[A-Za-z0-9_-]{43}$",
+            "description": "Preferred. The opaque accountRef a previous tool result returned for this account (valid only for you, in this session)"
+          },
           "accountId": {
             "type": "string",
             "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$",
-            "description": "IBAN (uppercase, no spaces; must be within the consent)"
+            "description": "Alternative to accountRef: the full IBAN (uppercase, no spaces; must be within the consent)"
           },
           "currency": {
             "type": "string",
@@ -88,10 +97,7 @@
             "type": "integer",
             "description": "Exact statement sequence; omit for the latest"
           }
-        },
-        "required": [
-          "accountId"
-        ]
+        }
       }
     }
   },
