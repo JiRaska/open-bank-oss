@@ -129,3 +129,5 @@ VaR mají omezenou velikost. Treasury čte seznam snímků a ocenění pod vlast
 Risk Engine uchovává každou odlišnou přijatou revizi treasury cash flow a fixingu. Stávající čtení nadále vrací poslední stav. Historie začíná stavem zachyceným při migraci.
 
 Záznam vstupů plánování spojuje odsouhlasený snímek Risk Engine se sadou křivek stejného data a původu a s konkrétními revizemi treasury cash flow. Pozdější fixing je dostupný jako samostatná revize.
+
+Oprávnění pracovníci mohou uložit návrh vstupů přes `POST /api/v1/risk/planning/input-captures` zadáním ID snímku, sady křivek a revizí Treasury.
