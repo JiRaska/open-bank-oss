@@ -1,16 +1,14 @@
 # Kafka mTLS identity + cert projection for openbank-pid-service (ADR-0137 #2665 Tier 2c).
 #
-# PID publishes outbox-drained events to two topics:
-#   - party.events       (channel party-events-out)
-#   - openbank.pid.events (channel pid-events-out)
+# PID publishes domain events to party.events (channel party-events-out).
 #
 # This user originally carried no ACLs at all: at the time, only payment.scheme-accepted was
 # ACL-guarded and everything else inherited allow.everyone.if.no.acl.found=true, so the
 # KafkaUser existed solely to mint a tls:9093 client certificate. That premise died with
 # #2794, which flipped the gate to `false` cluster-wide (components/kafka/kafka.yaml) —
 # deny-by-default now applies to EVERY resource, so an authenticated principal with no ACLs
-# is denied on its own domain-event topics. Both Write grants below are therefore required
-# for pid's outbox dispatcher to publish at all; without them party.events stays empty and
+# is denied on its own domain-event topic. The Write grant below allows PID to publish to
+# party.events. Without it, party.events stays empty and
 # customer-edge's ADR-0072 onboarding auto-resume never fires even once its own ACLs land
 # (kafka-customer-edge-mtls.yaml).
 #
@@ -40,18 +38,11 @@ spec:
   authorization:
     type: simple
     acls:
-      # Outbox dispatcher -> party.events (PartyEventPublisher, channel party-events-out).
+      # PID publishes to party.events (PartyEventPublisher, channel party-events-out).
       # Consumed by customer-edge's OnboardingResumeService.
       - resource:
           type: topic
           name: party.events
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
-      # Outbox dispatcher -> openbank.pid.events (PidOutboxDispatcher, channel pid-events-out).
-      - resource:
-          type: topic
-          name: openbank.pid.events
           patternType: literal
         operations: [Write, Describe]
         host: "*"

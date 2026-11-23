@@ -69,7 +69,7 @@ readinessProbe:
 
 ## Workload tier (ADR-0057)
 
-pid-service is **not money-path** and identity reads/writes are bursty rather than constant. It is a candidate for a **scale-to-zero / scale-from-zero tier** under the FinOps workload classifier (ADR-0057). Caveat: the outbox `@Scheduled(every = "5s")` dispatcher needs at least one running replica to drain `pid_outbox`, so a scale-to-zero policy must keep a warm replica (or move dispatch to a KEDA cron/Kafka-lag trigger). Tier classification is TBD — confirm against the deployed manifest.
+pid-service is **not money-path** and identity reads/writes are bursty rather than constant. It is a candidate for a **scale-to-zero / scale-from-zero tier** under the FinOps workload classifier (ADR-0057). Tier classification is TBD — confirm against the deployed manifest.
 
 ## SLO
 
@@ -81,16 +81,9 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 | Availability | 99.9% | Prometheus `up{service="pid-service"}` |
 | Latency p95 GET `/parties/{id}` | < 100 ms | `http_server_requests_seconds{quantile=0.95}` |
 | Latency p95 POST `/parties` | < 300 ms | includes DB write + event publish |
-| Outbox lag | < 10 s | age of oldest `pid_outbox` row with `status != SENT` (poll interval is 5 s) |
 | Error rate | < 0.1% 5xx | `http_server_requests_seconds_count{status=~"5.."}` |
 
 ## Runbooks
-
-### Outbox lag growing
-1. Count stuck rows: `SELECT count(*) FROM pid_outbox WHERE status <> 'SENT';`
-2. Inspect failures: `SELECT event_id, attempt_count, last_error FROM pid_outbox WHERE status='FAILED' ORDER BY updated_at DESC LIMIT 20;`
-3. Check the circuit breaker — repeated `@Timeout`/Kafka errors open it for ~5 s. Verify broker reachability.
-4. Check the dispatcher is running on ≥ 1 replica (`@Scheduled` only fires on a live pod).
 
 ### Duplicate-identity / 409 on create
 Symptom: `409 CONFLICT` "Party with bankID sub … already exists" or external-id unique violation. Cause: the bankID `sub` (or another `(id_type,id_value)`) is already mapped. Action: resolve the existing party via `GET /by-external-id?type=BANKID_SUB&value=…` and reuse it — do not force a second party (one-person = one-party invariant).

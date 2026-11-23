@@ -28,9 +28,8 @@ import org.junit.jupiter.api.Test
  * wiring, config and migrations survive a real boot. Mirrors clearing/interest/sdd's per-job
  * Testcontainers IT (issue #578).
  *
- * pid wires TWO outgoing Kafka emitters — `@Channel("party-events-out")` and the outbox dispatcher's
- * `@Channel("pid-events-out")` — both swapped to the in-memory connector so no broker is needed and
- * the readiness probe carries no Kafka health check.
+ * The in-memory connector replaces the Kafka producer on `party-events-out` so the boot
+ * smoke test needs no broker.
  */
 @QuarkusTest
 @QuarkusTestResource(PidBootSmokeIT.InMemoryKafkaResource::class)
@@ -39,7 +38,7 @@ class PidBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out", "pid-events-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

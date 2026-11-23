@@ -1,22 +1,3 @@
-# Domain event topics produced by pid-service. Declared explicitly (the broker does not
-# auto-create topics — kafka.yaml) so the Strimzi topic operator manages them and the
-# outbox producer has a destination. Write/Describe for both is granted by the service's
-# KafkaUser (kafka-pid-mtls.yaml). Single partition + RF 1 for the single-broker sandbox;
-# prod should raise partitions for parallelism and RF to 3.
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: openbank.pid.events
-  namespace: messaging
-  labels:
-    strimzi.io/cluster: openbank-cluster
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 604800000
-    cleanup.policy: delete
----
 # Unprefixed name is deliberate: it is what pid-service's party-events-out channel publishes
 # and what customer-edge's party-events-in consumes (ADR-0072 onboarding auto-resume). Not to
 # be confused with party-service's separate `openbank.party.events`. This topic never existed
