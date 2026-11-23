@@ -327,7 +327,8 @@ class McpConnectIssuerResource(
                 requireNotNull(scope) { "scopes[$index] must not be null" }
             }.toSet()
             require(
-                requestedScopes.isNotEmpty() && requestedScopes.all(SCOPE::matches) &&
+                requestedScopes.isNotEmpty() &&
+                    requestedScopes.all(SCOPE::matches) &&
                     "offline_access" !in requestedScopes,
             ) {
                 "invalid scopes"
