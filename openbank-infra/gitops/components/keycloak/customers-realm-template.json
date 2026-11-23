@@ -143,6 +143,7 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
+      "optionalClientScopes": ["kc-admin-api"],
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
@@ -160,6 +161,7 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
+      "optionalClientScopes": ["offline_access", "kc-admin-api"],
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
@@ -540,6 +542,28 @@
     }
   ],
   "clientScopes": [
+    {
+      "name": "kc-admin-api",
+      "description": "OpenID Connect built-in scope for the Admin REST API",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "Admin API Audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-admin-api-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "true"
+          }
+        }
+      ]
+    },
     {
       "name": "email",
       "description": "OpenID Connect built-in scope: email",

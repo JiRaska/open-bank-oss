@@ -62,3 +62,9 @@ atribut uživatelského profilu, který smí zobrazit a měnit jen administráto
 ## Logování
 
 Selhání transportu se logují s upstream URL a třídou/zprávou výjimky (`UpstreamClient`), ne s těly zákazníka. Obsah tokenu se nikdy neloguje. Vyhněte se logování syrových těl requestů/odpovědí, která mohou nést IBANy nebo jména.
+
+## Přihlašovací údaje pro Keycloak Admin REST
+
+Oba servisní účty Customer Edge při vydání tokenu pro Keycloak Admin REST žádají o rozsah
+`kc-admin-api`. Ten přidá cílové API daného realmu, které vyžaduje Keycloak 26.8.2. Role
+servisních účtů zůstávají stejné. Nativní výměna tokenu WebAuthn samostatně žádá o `offline_access`.
