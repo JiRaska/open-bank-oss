@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Strict canary analysis for future, separately reviewed real-traffic migrations (#16630).
+# Installed without consumers. The existing shared template stays active and unchanged.
+# Do not attach this template until real canary traffic, telemetry and abort/recovery are proven.
+#
+# Usage (Phase 2+ Rollout spec):
+#   analysis:
+#     templates:
+#       - clusterScope: true
+#         templateName: openbank-money-path-canary-strict
+#     args:
+#       - name: namespace
+#         valueFrom:
+#           fieldRef:
+#             fieldPath: metadata.namespace
+#       - name: canary-hash
+#         valueFrom:
+#           podTemplateHashValue: Latest
+#
+# Gate: both metrics must pass for the analysis to succeed. If either fails the
+# Rollout is automatically aborted and traffic is sent back to the stable replica set.
+# Empty/idle data is inconclusive: it cannot establish latency or error-rate health.
+#
+# Prometheus label note: kube-prometheus-stack PodMonitor relabeling propagates
+# the rollouts-pod-template-hash pod label onto the scraped time series so the
+# Prometheus queries can filter to canary pods only.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterAnalysisTemplate
+metadata:
+  name: openbank-money-path-canary-strict
+  labels:
+    app.kubernetes.io/part-of: argo-rollouts
+    open-bank.tech/plane: platform
+spec:
+  args:
+    - name: namespace
+    - name: canary-hash
+  metrics:
+    - name: error-rate
+      # Wait 2 minutes after analysis start before the first measurement. This
+      # gives canary pods time to warm up (JVM/Quarkus lazy init, JDBC pool
+      # stabilisation) and lets at least some real traffic accumulate so the
+      # rate() window is non-empty. Without this the first measurement window
+      # can return NaN. This remains inconclusive until request data can support a verdict.
+      initialDelay: 2m
+      interval: 30s
+      # Missing traffic or metric coverage is inconclusive, never a successful measurement.
+      successCondition: "len(result) == 1 && !isNaN(result[0]) && !isInf(result[0]) && result[0] >= 0 && result[0] < 0.01"
+      failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 0.05"
+      count: 5
+      failureLimit: 1
+      # A query that cannot reach Prometheus is an Error, retried every 10s, and errors do not
+      # count toward `count`. The default limit (4) aborted kyc, ledger and lending on a
+      # Prometheus restart on 2026-11-06. 60 rides out ~10 min of monitoring outage; a real
+      # failureCondition still aborts on the first failed measurement.
+      consecutiveErrorLimit: 60
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          # An absent 5xx series is zero only when the same canary has request traffic.
+          # Filtering the denominator excludes idle/missing counters instead of fabricating a rate.
+          query: |
+            (
+              sum(rate(http_server_requests_seconds_count{namespace="{{ args.namespace }}", rollouts_pod_template_hash="{{ args.canary-hash }}", rollouts_pod_template_hash!="", status=~"5.."}[2m]))
+              or
+              (0 * sum(rate(http_server_requests_seconds_count{namespace="{{ args.namespace }}", rollouts_pod_template_hash="{{ args.canary-hash }}", rollouts_pod_template_hash!=""}[2m])))
+            )
+            /
+            (sum(rate(http_server_requests_seconds_count{namespace="{{ args.namespace }}", rollouts_pod_template_hash="{{ args.canary-hash }}", rollouts_pod_template_hash!=""}[2m])) > 0)
+    - name: p95-latency
+      initialDelay: 2m
+      interval: 30s
+      # 500 ms p95 gate — money-path SLO (ADR-0061).
+      successCondition: "len(result) == 1 && !isNaN(result[0]) && !isInf(result[0]) && result[0] >= 0 && result[0] < 0.5"
+      failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 1.0"
+      count: 5
+      failureLimit: 1
+      # A query that cannot reach Prometheus is an Error, retried every 10s, and errors do not
+      # count toward `count`. The default limit (4) aborted kyc, ledger and lending on a
+      # Prometheus restart on 2026-11-06. 60 rides out ~10 min of monitoring outage; a real
+      # failureCondition still aborts on the first failed measurement.
+      consecutiveErrorLimit: 60
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          query: |
+            histogram_quantile(
+              0.95,
+              sum(
+                rate(
+                  http_server_requests_seconds_bucket{
+                    namespace="{{ args.namespace }}",
+                    rollouts_pod_template_hash="{{ args.canary-hash }}",
+                    rollouts_pod_template_hash!=""
+                  }[2m]
+                )
+              ) by (le)
+            )

@@ -45,6 +45,15 @@ id = "rod-cislo"
 description = "Possible Czech birth number (rodné číslo)"
 regex = '''\b\d{2}(?:0[1-9]|1[0-2]|2[1-9]|3[0-2]|5[1-9]|6[0-2]|7[1-9]|8[0-2])\d{2}/?\d{3,4}\b'''
 
+# Public Temurin release asset ID in the checksum-verified download fallback.
+[[rules.allowlists]]
+description = "Temurin 25 GitHub release asset ID"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^\.clusterfuzzlite/Dockerfile$''']
+regexes = ['''^665812068$''']
+
+
 # --- Allowlist ---
 
 [allowlist]

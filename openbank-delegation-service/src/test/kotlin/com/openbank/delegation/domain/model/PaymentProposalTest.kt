@@ -145,6 +145,16 @@ class PaymentProposalTest {
     }
 
     @Test
+    fun `proposal preserves the creditor IBAN shape contract`() {
+        val shapedButInvalidChecksum = "CZ6508000000192000145398"
+        assertThat(vectorPayload().copy(creditorIban = shapedButInvalidChecksum).creditorIban)
+            .isEqualTo(shapedButInvalidChecksum)
+        assertThatThrownBy { vectorPayload().copy(creditorIban = "CZ65 08000000192000145399") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("creditorIban must be an uppercase IBAN without spaces")
+    }
+
+    @Test
     fun `dedupe requires every instruction field to match, amount numerically`() {
         assertThat(vectorPayload().sameInstructionAs(vectorPayload(amount = "1250.5"))).isTrue()
         assertThat(vectorPayload().sameInstructionAs(vectorPayload(amount = "1250.51"))).isFalse()

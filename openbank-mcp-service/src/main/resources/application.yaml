@@ -222,12 +222,21 @@ openbank:
       anonymous-calls-per-minute: ${MCP_RATE_LIMIT_ANON_PER_MINUTE:10}
       # Concurrent in-flight tool calls per caller.
       max-in-flight: ${MCP_RATE_LIMIT_MAX_IN_FLIGHT:4}
+    # account-ref.secret (#16678): HMAC key for caller-scoped account handles. Deliberately NOT
+    # defined here for prod: it comes from env OPENBANK_MCP_ACCOUNT_REF_SECRET (gitops ExternalSecret),
+    # AccountRefKeyConfig falls back to a per-process key when absent and refuses boot when it is set
+    # but shorter than 32 bytes. Only the
+    # dev/test profiles below carry a fixed, non-secret value.
 
 "%dev":
   quarkus:
     oidc-client:
       tls:
         verification: none
+  openbank:
+    mcp:
+      account-ref:
+        secret: dev-only-account-ref-key-not-a-secret-0001
 
 "%test":
   quarkus:
@@ -236,6 +245,10 @@ openbank:
       tenant-enabled: false
     oidc-client:
       enabled: false
+  openbank:
+    mcp:
+      account-ref:
+        secret: test-only-account-ref-key-not-a-secret-001
 
 "%prod":
   quarkus:
