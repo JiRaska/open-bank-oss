@@ -28,6 +28,53 @@
       "response": {
         "status": 204
       }
+    },
+    {
+      "description": "recheck an account outside the authorized grant",
+      "providerStates": [
+        {
+          "name": "an active MCP balance grant matches the requested binding"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "b4b4b4b4-0000-4000-8000-000000000006",
+          "clientId": "mcp-local-reference",
+          "connectionId": "b4b4b4b4-0000-4000-8000-000000000005",
+          "grantId": "b4b4b4b4-0000-4000-8000-000000000001",
+          "partyId": "b4b4b4b4-0000-4000-8000-000000000002"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "b4b4b4b4-0000-4000-8000-000000000001"
+        },
+        "method": "POST",
+        "path": "/api/v1/delegations/mcp-client/check-balance-grant"
+      },
+      "response": {
+        "status": 403
+      }
+    },
+    {
+      "description": "recheck without authenticated Balance credentials",
+      "request": {
+        "body": {
+          "accountId": "b4b4b4b4-0000-4000-8000-000000000007",
+          "clientId": "mcp-local-reference",
+          "connectionId": "b4b4b4b4-0000-4000-8000-000000000005",
+          "grantId": "b4b4b4b4-0000-4000-8000-000000000001",
+          "partyId": "b4b4b4b4-0000-4000-8000-000000000002"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "b4b4b4b4-0000-4000-8000-000000000001"
+        },
+        "method": "POST",
+        "path": "/api/v1/delegations/mcp-client/check-balance-grant"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {
