@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.domain.model
 
+import com.openbank.libs.domain.account.Iban
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.nio.charset.StandardCharsets
@@ -58,7 +59,7 @@ data class PaymentProposalPayload(
     val reference: String? = null,
 ) {
     init {
-        require(creditorIban.matches(IBAN_SHAPE)) { "creditorIban must be an uppercase IBAN without spaces" }
+        require(Iban.hasCanonicalShape(creditorIban)) { "creditorIban must be an uppercase IBAN without spaces" }
         require(creditorName.isNotBlank() && creditorName.length <= MAX_NAME) {
             "creditorName must be 1..$MAX_NAME characters"
         }
@@ -100,7 +101,6 @@ data class PaymentProposalPayload(
         const val MAX_NAME = 70
         const val MAX_REFERENCE = 140
         val MAX_AMOUNT: BigDecimal = BigDecimal("1000000.00")
-        private val IBAN_SHAPE = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
 
         /**
          * ADR-0383 D7: model-composed free text is length-capped and may carry no control
