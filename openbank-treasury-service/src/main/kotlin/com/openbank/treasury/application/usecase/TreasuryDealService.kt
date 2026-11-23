@@ -25,6 +25,10 @@ import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.ExposureGuard
+import com.openbank.treasury.application.port.out.FundingExceededException
+import com.openbank.treasury.application.port.out.FundingGuard
+import com.openbank.treasury.application.port.out.FundingMeter
+import com.openbank.treasury.application.port.out.FundingPort
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LateJournalMeter
@@ -52,6 +56,7 @@ import com.openbank.treasury.domain.model.DealMatured
 import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.Funding
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.MatrixPostings
@@ -147,6 +152,14 @@ class TreasuryDealService(
     private val grace: Duration = Duration.ofMinutes(DEFAULT_GRACE_MINUTES),
     /** How many intents one reconciler pass claims. */
     private val claimBatch: Int = DEFAULT_CLAIM_BATCH,
+    /**
+     * #12115: verified funding on the contra account, consulted at booking. Null only in unit tests
+     * of the lifecycle alone and where `openbank.treasury.funding-check.enabled` is false; the CDI
+     * producer wires it everywhere else, so a booking never skips the check silently.
+     */
+    private val funding: FundingPort? = null,
+    /** #12115: counts bookings refused on funding. */
+    private val fundingMeter: FundingMeter = FundingMeter.NONE,
 ) : TreasuryDealUseCase {
 
     private val log = System.getLogger(TreasuryDealService::class.java.name)
@@ -318,7 +331,42 @@ class TreasuryDealService(
         val guard = check.takeIf {
             booked.consumesLimit
         }?.let { ExposureGuard.of(it, booked.limitOverride?.coversExposureUpTo) }
-        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId), limitGuard = guard)
+        val fundingGuard = fundingGuard(booked)
+        return try {
+            deals.save(
+                booked,
+                event = event,
+                command = cmd(key, APPROVE, dealId),
+                limitGuard = guard,
+                fundingGuard = fundingGuard,
+            )
+        } catch (e: FundingExceededException) {
+            // The locked re-measure found a concurrent booking committed in between (#12115).
+            fundingMeter.exceeded(booked.currency)
+            throw e
+        }
+    }
+
+    /**
+     * #12115: a placement is booked only against money the contra (nostro) account verifiably holds:
+     * the ledger's balance net of every other committed, unsettled outflow, whatever its value date.
+     * Checked here (fail fast, 422 FUNDING_EXCEEDED) and re-measured under the funding line lock in
+     * the save's transaction, so two concurrent bookings cannot jointly overdraw. The check is a
+     * gate at BOOKING: settlement moves what booking already funded, and the TreasuryFundingExceeded
+     * alert backstops flows that bypass the check. Null when the deal consumes no funding (a
+     * borrowing brings cash in) or no funding port is wired (unit tests, a disabled deployment).
+     */
+    private suspend fun fundingGuard(deal: Deal): FundingGuard? {
+        val port = funding ?: return null
+        if (!Funding.consumes(deal)) return null
+        val balance = port.balance(deal.currency, bankToday())
+        val guard = FundingGuard(deal.currency, balance, deal.principal)
+        val pending = deals.pendingOutflows(guard.currency, deal.id)
+        if (!guard.fits(pending)) {
+            fundingMeter.exceeded(deal.currency)
+            throw FundingExceededException(guard.describe(pending))
+        }
+        return guard
     }
 
     override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {

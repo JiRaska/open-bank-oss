@@ -34,7 +34,75 @@ internal class McpAudienceRefusal(private val throttle: McpThrottleSupport, priv
             .build()
     }
 
+    /**
+     * #16590: the 401 for a customer credential on the STAFF root — refused whatever the channel
+     * state, so no staff dispatch path ever runs for it. Counted on the customer-rejected series
+     * (`layer="token"`) and, for `tools/call`, audited as DENIED like the audience refusal.
+     */
+    fun respondCustomerOnStaffRoot(
+        method: String,
+        params: JsonNode,
+        reason: McpMetricsPort.CustomerRejectReason,
+        client: String?,
+    ): Response {
+        log.warnf(
+            "rejected %s on the staff root: customer credential (%s)",
+            McpInputBounds.logSafe(method),
+            reason.name.lowercase(),
+        )
+        metrics.customerRejected(reason, client, synthetic = false)
+        // The credential is unverified here (a junk `DPoP x` reaches this line), so the audit write is
+        // bounded by the shared anonymous bucket FIRST: beyond it, only the throttle's once-per-window
+        // row is written, never one per request (review of #17086).
+        if (method == "tools/call" && !McpInputBounds.containsNul(params)) {
+            val tool = McpInputBounds.echo(params.path("name").asText(""))
+            val keys = McpInputBounds.auditKeys(params.path("arguments"))
+            if (throttle.anonymousCallRefusal(tool, keys) == null) {
+                throttle.auditAnonymousCall(tool, keys, "customer credential on the staff root")
+            }
+        }
+        return Response.status(Response.Status.UNAUTHORIZED)
+            .header("WWW-Authenticate", CUSTOMER_CHALLENGE)
+            .build()
+    }
+
+    /** More than one `Authorization` header: which credential the OIDC layer validated is ambiguous. */
+    fun respondAmbiguousCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: more than one Authorization header", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", AMBIGUOUS_CHALLENGE)
+            .build()
+    }
+
+    /** The `Authorization` header could not be read: refused, never served as anonymous (fail closed). */
+    fun respondUnreadableCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: Authorization header unreadable", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", UNREADABLE_CHALLENGE)
+            .build()
+    }
+
+    /** An `Authorization` value outside the staff root's `Bearer <b64token>` allowlist. */
+    fun respondMalformedCredential(method: String): Response {
+        log.warnf("rejected %s on the staff root: malformed Authorization header", McpInputBounds.logSafe(method))
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        return Response.status(Response.Status.BAD_REQUEST)
+            .header("WWW-Authenticate", MALFORMED_CHALLENGE)
+            .build()
+    }
+
     private companion object {
+        const val MALFORMED_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"Authorization must be one Bearer b64token\""
+        const val UNREADABLE_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"the Authorization header could not be read\""
+        const val AMBIGUOUS_CHALLENGE =
+            "Bearer error=\"invalid_request\", error_description=\"exactly one Authorization header is allowed\""
+        const val CUSTOMER_CHALLENGE =
+            "Bearer error=\"invalid_token\", error_description=\"customer credentials are accepted only at " +
+                McpEndpoint.CUSTOMER_ROOT + "\""
         const val CHALLENGE =
             "Bearer error=\"invalid_token\", error_description=\"token audience does not include this server\""
     }

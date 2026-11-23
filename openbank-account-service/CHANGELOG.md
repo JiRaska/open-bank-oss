@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.40.0...account-service-v0.41.0) (2026-11-23)
+
+
+### Features
+
+* **account,product-catalog:** pin immutable account booking context from passport receipts ([#16679](https://github.com/JiRaska/open-bank-oss/issues/16679)) ([35b4d0d](https://github.com/JiRaska/open-bank-oss/commit/35b4d0d5a2cc058bdb05182b2328a5786109b844))
+
 ## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.39.1...account-service-v0.40.0) (2026-11-22)
 
 

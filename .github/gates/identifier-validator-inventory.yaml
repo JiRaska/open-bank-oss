@@ -27,9 +27,6 @@
 - file: openbank-communication-service/src/main/kotlin/com/openbank/communication/domain/CommStyleLinter.kt
   class: masking
   reason: flags IBAN-shaped text in outbound copy for a style warning; not an account check.
-- file: openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpPiiMasker.kt
-  class: masking
-  reason: masks IBAN-shaped values in MCP responses; over-matching is the safe direction.
 - file: openbank-notification-service/src/main/kotlin/com/openbank/notification/application/OversightWebhook.kt
   class: masking
   reason: redacts IBAN-shaped text before an oversight webhook leaves the bank.

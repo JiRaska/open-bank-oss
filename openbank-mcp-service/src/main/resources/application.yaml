@@ -17,6 +17,15 @@ quarkus:
     enabled: true
     port: 8085
     host: 0.0.0.0
+  # ADR-0383 P4 (#16590): the Valkey client exists only for the customer channel's shared store
+  # (mcp.customer.shared-store=valkey). No Dev Services container for every test/dev boot, and no
+  # readiness check: the staff path must not go unready because the customer store is down — the
+  # customer channel fails closed (503) on its own.
+  redis:
+    devservices:
+      enabled: false
+    health:
+      enabled: false
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
     # ADR-0195 step 4: resource-server mode enabled. Quarkus now validates any presented Bearer
@@ -107,6 +116,16 @@ quarkus:
       url: http://localhost:8116
       connect-timeout: 2000
       read-timeout: 5000
+    # ADR-0383 D3: the customer's MCP_CLIENT grant lookup (mcp-service's own m2m identity).
+    delegation-service:
+      url: http://localhost:8126
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0383 D4: the customers-realm token endpoint for the RFC 8693 exchange.
+    customer-token-exchange:
+      url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      connect-timeout: 2000
+      read-timeout: 3000
   smallrye-openapi:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
@@ -164,6 +183,26 @@ mcp:
     enabled: ${MCP_CUSTOMER_ENABLED:false}
     issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
     allowlist: ${MCP_CUSTOMER_ALLOWLIST:classpath:mcp-client-allowlist.yaml}
+    # ADR-0383 P4 (#16590): where DPoP replay claims and the D5.3 budgets live — `valkey` (shared by
+    # every replica) or `memory` (one pod; tests/dev). Unset while the channel is on refuses to boot,
+    # and a production launch refuses anything but `valkey`. The Valkey itself is quarkus.redis.hosts
+    # (QUARKUS_REDIS_HOSTS), supplied by the deployment; no host is defaulted here.
+    shared-store: ${MCP_CUSTOMER_SHARED_STORE:}
+    # 1..2000; a slower store is a down store (503).
+    shared-store-timeout-ms: ${MCP_CUSTOMER_SHARED_STORE_TIMEOUT_MS:250}
+    # Deployment secret (>= 32 bytes) that HMACs the customer subject and proof key in Valkey key
+    # names, so no key names a customer in clear. Required with shared-store=valkey; never defaulted.
+    key-hmac-secret: ${MCP_CUSTOMER_KEY_HMAC_SECRET:}
+    # ADR-0383 D3: positive grant lookups are cached at most this long (capped at PT30S in code), so
+    # a revoked MCP_CLIENT grant stops working within this bound. "No grant" and lookup failures are
+    # never cached.
+    grant-cache-ttl: ${MCP_CUSTOMER_GRANT_CACHE_TTL:PT15S}
+    # ADR-0383 D4: the customers-realm client that performs the RFC 8693 exchange (derived into the
+    # realm by gen-mcp-realm-clients.py). Its secret is read ONLY from the environment
+    # (MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET, OpenBao keycloak/mcp-service-customer-exchange); with
+    # none set, every customer read is refused rather than falling back to another credential.
+    exchange:
+      client-id: ${MCP_CUSTOMER_EXCHANGE_CLIENT_ID:openbank-mcp-service}
 
 # Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`

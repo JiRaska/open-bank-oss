@@ -443,6 +443,50 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-11-22 (#16590 follow-up, #17099)** — Staff-root `Authorization` parsing is an ALLOWLIST.
+  - *Spoofing / tenant confusion.* The DPoP check was a denylist (`startsWith("DPoP ")`), so
+    `DPoP<TAB>x`, a bare `DPoP`, `DPoP<NBSP>x`, or a comma list such as `Bearer a, DPoP b` was not
+    recognised as a customer credential and reached the anonymous path. On `/mcp` an `Authorization`
+    header, when present, must now be exactly ONE header whose whole value is `Bearer <b64token>`
+    (RFC 6750 §2.1: scheme case-insensitive, one SP, `[A-Za-z0-9-._~+/]+=*`, nothing else). A value
+    starting with the DPoP scheme after any whitespace (Unicode included), or a valid Bearer from the
+    customers realm, gets the 401 that points at `/customer/mcp`. Every other shape (comma lists,
+    tabs, double or leading/trailing spaces, non-ASCII whitespace, `Basic` and other schemes) is
+    400 `invalid_request`. Staff JWTs are base64url with dots, so they are inside the allowlist.
+  - *Fail open on a read error or missing request.* An `Authorization` header that throws on read,
+    and a hand-built endpoint with no injected request, are refused 400 instead of reading as
+    "no credential". `httpRequest` is CDI-`@Inject`ed on every served request.
+  - *Tests.* `McpStaffRootCredentialParsingTest` (each shape above, legit JWT and `bearer` controls)
+    and two real-HTTP cases in `McpStaffRootCustomerCredentialIT` (`DPoP<TAB>x` → 401,
+    `Bearer a, DPoP b` → 400). Each guard was sabotaged (missing request read as no header, b64token
+    loosened to `.*`, DPoP match ASCII-only) and its tests went red.
+- **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
+  - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
+    on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
+    check ran there, and a customer token carries this server's audience, so the request was
+    dispatched — and served as ANONYMOUS, because `CallerContextResolver` never resolves a
+    customers-realm token (empty `tools/list`, `tools/call` denied before the PDP). Not
+    exploitable, but the only barrier was one `null` return deep in the resolver. `McpEndpoint`
+    now refuses on the staff root any token whose `iss` is the customers realm, and any
+    `Authorization: DPoP` credential, with 401 pointing the client at `/customer/mcp`, regardless
+    of channel state (reasons `customer_channel_off` / `customer_root_required`, layer `token`).
+  - *Repudiation / audit flooding.* The credential is unverified at that point, so a refused
+    `tools/call` spends the shared anonymous bucket before its audit row; beyond the budget only
+    the throttle's once-per-window row is written. A request with more than one `Authorization`
+    header is refused 400 (`invalid_request`), and a DPoP scheme in ANY of them counts.
+  - *Tests.* `McpStaffRootCustomerCredentialIT` (channel off, shipped `mcp.customer.issuer`, two
+    `Authorization` headers in both orders, metric, audit budget), `McpCustomerChannelIT` (channel on,
+    both schemes, list and call), `McpCustomerTenantResolutionIT` (a token signed by the real
+    customers-realm key on `/mcp`). With the refusal removed the first two went red (200, served
+    anonymous); the third stays green either way, because the OIDC layer already refuses it (the
+    customers tenant is path-bound to `/customer/mcp`, and the staff tenant rejects its `iss`).
+
+- **2026-11-21 (ADR-0383 D4) — residual: the exchanged token's `act` claim is not asserted.**
+  `KeycloakCustomerTokenExchange.validated` checks `sub` (the customer), `aud` (one downstream),
+  `azp` (mcp-service's exchange client), the scope set and the lifetime, but not an RFC 8693 `act`
+  claim naming mcp-service as the actor. Keycloak's standard token exchange (V2) does not emit `act`,
+  so requiring it would refuse every real exchange; `azp` is today's actor binding. Revisit if the
+  realm gains actor-token support or a downstream starts reading `act`.
 - **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
   IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
   - *Spoofing (forwarded headers).* `ProxyForwardingGuard` now refuses to boot with ANY
@@ -513,6 +557,149 @@ a stub (T-T2/T-D2).
     client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
     NetworkPolicy on `:8150` to the gateway and known callers.
 
+- **2026-11-18 (ADR-0383 D3/D4, #16590) — customer grant lookup, exchanged downstream tokens, read
+  tools. Still behind `mcp.customer.enabled` (off).** An admitted customer now sees only the read
+  tools its active `MCP_CLIENT` grants allow, and every read runs on the customer's own exchanged
+  token.
+  - *Spoofing / confused deputy.* The grant is found from `(party_id of the verified token, admitted
+    azp, verified cnf.jkt)` — `CustomerGrantCache` -> `DelegationGrantSource` ->
+    delegation-service `POST /api/v1/delegations/mcp-client/resolve`. Nothing a client sends is a
+    lookup key, and the party is part of the key, so another customer's grant to the same client
+    never matches (unit + IT `a foreign party's grant ...`). A token with no UUID `party_id` is
+    refused before any lookup.
+  - *Elevation of privilege.* `CustomerReadTools` offers `list_accounts` / `get_balance` /
+    `list_transactions` only for capabilities a grant carries, and checks the ONE named account
+    against the grant carrying that tool's capability before anything else happens; a balance grant
+    cannot list transactions or reach another account, and no write tool exists on this channel
+    (`propose_payment` refused). The exchanged token asks the customers realm for ONE audience and ONE
+    read scope (`DownstreamAudience`), and its answer is checked: lifetime <= 60 s, `sub` == the
+    customer, `aud` contains the requested service. The customer-path REST clients
+    (`CustomerDownstream.kt`) carry no OIDC client filter, so mcp-service's own credential cannot
+    ride on them. The grant LOOKUP uses mcp-service's own `m2m` identity, which delegation-service
+    admits for that one action only (rego reason `mcp-client-grant-resolve` + an in-code client-id
+    check); it reads no account data.
+  - *Policy (D4.1).* After the grant check and before any exchange, every customer call is
+    evaluated by mcp-service's own PDP as principal HUMAN (id = customer `sub`, not a service
+    account, no roles) with `channel = mcp-customer`, `client = azp`, the tool and the grant's
+    server-resolved capabilities. `mcp_rest_ext.rego` admits only the three read tools under their
+    own action and matching capability, and VETOES every other action on the channel, so no base
+    reason (e.g. `operator-read-any`) can widen it. Deny or PDP error is a refusal. Proven by
+    `opa test` (10/10; veto and grant check each removed went red) and by `opa eval` against the
+    regenerated `mcp-opa-bundle` (must-ALLOW balance read; must-DENY scope escalation,
+    propose_payment, operator on the channel; control operator read off-channel ALLOW).
+  - *Unbound exchanged token (accepted, ADR-0383 D4).* The downstream token is a plain bearer, not
+    DPoP-bound, and it DOES leave mcp-service: it is sent as `Authorization: Bearer` to exactly one
+    downstream service over in-cluster HTTP. It never leaves the cluster and is never returned to the
+    MCP client. D4 accepts the missing sender binding on that basis ("in-cluster only ... does not
+    need to be sender-constrained"). The protections are: lifetime `expires_in` <= 60 s (refused
+    otherwise); a single audience, the one service it is sent to; a single read scope; `azp` = the
+    exchange client (each verified on the answer, any failure refuses); and the downstream PDP's
+    read-only rule. A capture from pod memory, from the receiving service, or from in-cluster traffic
+    therefore yields at most 60 s of reads of that one service for one customer. Residual: the
+    in-cluster hop is plain HTTP unless the mesh/mTLS posture of the target namespace encrypts it.
+  - *Fail-closed.* Lookup error, empty grant set, exchange failure (including an unconfigured
+    exchange secret), a downstream 401/403 and a downstream 5xx/timeout are all refusals, audited `DENIED`
+    (`UNAVAILABLE` for lookup/exchange outages). Only positive lookups are cached, at most
+    `mcp.customer.grant-cache-ttl` (default 15 s, capped at 30 s in code) and never past a grant's
+    `validTo`; a downstream 401/403 or 5xx/timeout drops the entry. With the channel OFF, a customers-realm token (and any `DPoP`-scheme credential) is refused 401 `invalid_token` and never served on the anonymous path. At the cache cap the oldest stored entry is evicted (insertion order, O(1)); storing a key already held evicts nothing; expired entries are dropped when next read. A lookup in flight across an invalidation does not re-cache its answer. Results pass `McpPiiMasker` then
+    `McpUntrustedData.wrap`, as on the staff path.
+  - **Residual, and why the channel stays off:** (1) downstream services validate only the STAFF
+    realm today, so an exchanged customers-realm token is refused by balance/transaction-service until
+    they accept that issuer and enforce party ownership on it (ADR-0383 P5) — the path fails closed
+    until then; (2) Keycloak standard exchange of a DPoP-bound subject token has not been run against
+    a live Keycloak of the deployed version (realm template checked statically only); (3) a revoked
+    grant stays usable for up to the cache TTL; (4) no deployed route, netpol or env wiring for
+    delegation-service / the token endpoint is added; the exchange secret must be provisioned in
+    OpenBao (`keycloak/mcp-service-customer-exchange`) before the channel can work.
+    Rollback: revert the commit; nothing is persisted.
+- **2026-11-18 (ADR-0383 P4 / D5.3, #16590)** — Shared, fail-closed customer-channel state. Still
+  **off by default**; this closes the first residual of the entry below.
+  - *Replay across replicas / pod rolls.* `mcp.customer.shared-store=valkey` puts the DPoP `jti`
+    claim in Valkey (`SET key 1 NX PX <proof window>`), so a proof admitted by one replica is
+    REPLAYED on every other one and a roll does not reopen the window. The non-mutating peek is a
+    real `EXISTS` (not the interface's `false` default), so the "refuse a replay before spending the
+    victim's budget" ordering holds across pods too. Proven by `ValkeyCustomerStoresIT` with two
+    independent clients against a real Valkey: cross-pod replay refused, 50 concurrent claims of one
+    `jti` across two pods admit exactly one.
+  - *Budget multiplication (D5.3).* The proof-key, per-client and per-(subject, client) windows move
+    to shared Valkey counters (one Lua `INCR` + first-hit `PEXPIRE`, so no counter is left without a
+    TTL); N replicas no longer give a caller N budgets. Same IT: the limit holds for the sum of two pods.
+  - *Fail closed.* Any store failure (refused, timeout after `shared-store-timeout-ms`, odd reply) on
+    the peek, the claim or a budget is a **503** and never an admission; there is no per-pod fallback.
+    The Valkey client has no readiness check, so the outage is contained to the customer channel.
+  - *Boot gate.* With the channel on, `shared-store` must be set; in a production launch
+    (`LaunchMode.NORMAL`) anything but `valkey`, or `valkey` with no Redis client, refuses to boot.
+    `memory` remains for tests and dev.
+  - *Review hardening (#16791).* A malformed reply is parsed inside the same guard, so it is a 503, not
+    a 500; the boot gate checks `quarkus.redis.hosts` itself (not only that a client bean resolves) and
+    is proved on the built fast-jar in `LaunchMode.NORMAL` (`CustomerChannelBootGuardIT`, with a
+    positive control that must boot); a hung Valkey (container paused) answers 503 within the bounded
+    command timeout, capped at 2000 ms; subject, proof key and client id are HMAC-SHA-256'd with a
+    deployment secret in every key name (required with `valkey`, boot refused otherwise).
+  - *Operational requirement.* The replay Valkey MUST run `maxmemory-policy noeviction`: an evicting
+    policy silently drops live `jti` entries and reopens their replay window with no error anywhere.
+  - *Store hardening (#16791, GitOps).* `mcp-valkey` (namespace `platform`) runs with `requirepass`
+    from the `mcp-customer-store-valkey` Secret. It and the key HMAC secret
+    (`mcp-customer-store-hmac`) are generated in-cluster by two independent ESO `Password`
+    generators (`CreatedOnce`, 48 letters/digits each; no OpenBao copy, no human holder). The ref is
+    required: without the Secret the pod does not start, so it never runs unauthenticated, `--maxmemory 128mb` under a 192Mi limit and an explicit
+    `--maxmemory-policy noeviction`; its ingress admits only `app.kubernetes.io/name: mcp-service`
+    (`open-bank.tech/same-namespace-ingress-from`, derived by `gen-network-policies.py`), not every
+    co-tenant of the shared namespace. mcp-service refuses to boot with `valkey` and no password.
+  - **Residual — store restart or OOM-kill.** The store is ephemeral (no RDB/AOF). A restart, a
+    reschedule or an OOM-kill empties it: every proof still inside its window (up to 365 s) can be
+    replayed once more, and every D5.3 budget restarts from zero. `noeviction` and the maxmemory
+    margin make OOM unlikely but not impossible. Prod needs an operator-managed HA store with
+    persistence; until then this is accepted for the sandbox and called out in 05-operations.
+  - *Password handling (#16791 reviews).* The Valkey container gets its two passwords as FILES from
+    the Secrets (secret volumes are tmpfs, mode 0440 to the pod's fsGroup), never as env vars or argv —
+    both of which land in the OCI runtime spec (`crictl inspect`). A POSIX-sh wrapper reads the files,
+    refuses to start unless each is non-empty and `[A-Za-z0-9]+`, writes the config into a
+    memory-medium emptyDir and `exec`s `valkey-server`. Measured on the digest-pinned 9.1.3 image:
+    `/proc/1/cmdline` = `valkey-server *:6379`; no password in `/proc/1/environ` or the container's
+    configured env; unauthenticated `PING` → `NOAUTH`; a password with `"` or a space → refuses (exit 1).
+  - **Residual:** the exporter's `metrics` password is still an env var in ITS container spec:
+    redis_exporter's `--redis.password-file` only feeds the multi-target `/scrape` map (measured: a
+    plain file is rejected as non-JSON; a JSON map leaves the main target `NOAUTH`), and the URI form
+    would put it in argv. That user can run only introspection commands (no data, no `CONFIG GET`),
+    and the slowlog is off. mcp-service's `QUARKUS_REDIS_PASSWORD` and HMAC secret are env vars in its
+    own pod spec, like the fleet's other Quarkus secrets.
+  - *Images* are pinned by tag and digest (valkey `9.1.3-alpine@sha256:bf09d58e…`, redis_exporter
+    `v1.92.1@sha256:7fbc93d3…`). The Password generators and ExternalSecrets sync at wave `-1`, before
+    the workloads that mount them.
+  - *Exporter hardening (#16791 security review).* The `redis_exporter` sidecar never holds the
+    store password. It logs in as a dedicated `metrics` ACL user with its own generated password
+    (`mcp-customer-store-metrics`), allowed only `PING`, `INFO`, `CLIENT SETNAME`, `SLOWLOG
+    GET|LEN`, `LATENCY LATEST|HISTOGRAM`, `COMMAND INFO` and `COMMANDLOG LEN`, with no key or channel access
+    (measured: with exactly that set, `ACL LOG` stays empty across scrapes; without the last two it
+    records a denial on every scrape and those metrics silently go missing). Its multi-target
+    `/scrape?target=` endpoint is disabled (`--disable-scrape-endpoint`), so reaching :9121 cannot point
+    the exporter and its credential at another host. `CONFIG GET` is deliberately NOT granted, and the
+    exporter runs `--config-command=-`: measured on 9.1.3, `CONFIG GET requirepass` returns the
+    default user's password in clear to any user allowed `config|get`. Measured as `metrics`: `GET`,
+    `SET`, `DEL`, `FLUSHALL`, `KEYS`, `EVAL`, `CONFIG GET|SET` and `ACL LIST` all answer `NOPERM`,
+    while `redis_up 1` and `redis_memory_max_bytes` are still exported and `/scrape` answers 404.
+    Port 6379 admits only mcp-service pods, and only on 6379; port 9121 admits only the observability Prometheus pods (`open-bank.tech/metrics-ingress-prometheus-only`,
+    derived by `gen-network-policies.py`), not admin-ui. The same exporter pattern on `copilot-redis`
+    is a fleet follow-up.
+  - *Slowlog disabled.* The store runs `slowlog-log-slower-than -1`, so no command — and none of its
+    arguments (`jti`, HMAC'd key names) — is ever recorded. Measured: after a deliberately slow `EVAL`
+    returning a marker string, `SLOWLOG LEN` is 0 and the `metrics` user's `SLOWLOG GET` contains no
+    marker; with slowlog enabled the same run logs it and the marker is readable. `slowlog|get` stays
+    granted only because redis_exporter v1.92.1 calls it on every scrape with no flag to stop it
+    (dropping it fills `ACL LOG` with a denial per scrape); it now reads an empty log. `CLIENT LIST`
+    is not granted (the exporter only calls it with `--export-client-list`, which stays off).
+  - *Detection.* `MCPValkeyMemoryNearMax` / `MCPValkeyMemoryFull` (redis_exporter sidecar,
+    promtool-tested including the cold value) warn before `noeviction` turns a full store into a
+    channel-wide 503.
+  - **Residual:** replication is asynchronous: if the primary
+    acknowledges a `SET NX` and fails over before the replica has it, the promoted replica has no
+    entry and that one proof can be accepted once more (a single replayed proof, still within its
+    `iat` window and still bound to the token's key). `PX` is relative, so clock OFFSET between pods
+    and Valkey does not matter; only clock RATE drift does, and the entry's 365 s life against the
+    verifier's 360 s acceptance span (`maxAge` 300 s + `futureSkew` 60 s) leaves a 5 s margin that
+    any realistic drift stays far inside. No per-key replay quota in Valkey (memory is bounded by the
+    proof-key bucket that runs first).
 - **2026-11-18 (ADR-0383 D1/D2, ADR-0385 D1, #16590)** — Customer-channel admission, **off by
   default** (`mcp.customer.enabled`). What it adds, and what it deliberately does not:
   - *Spoofing / tenant confusion.* The customers realm is a separate OIDC tenant selected by `iss`
@@ -549,8 +736,9 @@ a stub (T-T2/T-D2).
     checks — with the issuer check off (`token.issuer=any`) a third-issuer token signed by the staff
     key is accepted. Production relies on the discovered issuer for that check.
   - **Residual, and why the channel must stay off:** the replay store is the single-pod
-    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window); no server nonce; the
-    D5.3 windows are the in-process limiter, not the shared Valkey bucket; the per-client cap is shared
+    in-memory one (ADR-0383 P4 — a pod roll reopens the replay window; superseded by the shared
+    Valkey store above when `shared-store=valkey`); no server nonce; the
+    D5.3 windows are the in-process limiter, not the shared Valkey bucket (likewise superseded); the per-client cap is shared
     by all of a client's customers and is spent only by proofs signed by a key some token of that
     client is bound to, so exhausting it needs many valid tokens (a coarse cap by design, sized well
     above one customer's budget); the tenant-level DPoP check compares `htu` with the request URL,

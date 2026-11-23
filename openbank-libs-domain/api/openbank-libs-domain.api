@@ -1065,6 +1065,7 @@ public final class com/openbank/libs/domain/account/Iban {
 }
 
 public final class com/openbank/libs/domain/account/Iban$Companion {
+	public final fun hasCanonicalShape (Ljava/lang/String;)Z
 	public final fun isValid (Ljava/lang/String;)Z
 	public final fun of (Ljava/lang/String;)Lcom/openbank/libs/domain/account/Iban;
 }

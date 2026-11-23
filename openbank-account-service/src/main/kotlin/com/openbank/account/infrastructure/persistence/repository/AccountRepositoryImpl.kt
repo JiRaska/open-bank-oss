@@ -21,6 +21,7 @@ import com.openbank.account.infrastructure.persistence.entity.AccountIdempotency
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -179,6 +180,7 @@ class AccountRepositoryImpl(
         eventType = event.eventType,
         payload = objectMapper.writeValueAsString(event),
         createdAt = clock.instant(),
+        synthetic = SyntheticTaintKafkaRail.currentlyTainted(),
     )
 
     /**
@@ -200,10 +202,20 @@ class AccountRepositoryImpl(
         return findById(accountId)
     }
 
-    override suspend fun update(account: Account): Account {
+    override suspend fun update(account: Account, committedEvent: ((Account) -> DomainEvent)?): Account {
         val entity = account.toEntity()
         return try {
-            versionMatchedUpdate(entity).awaitSuspending().toDomain()
+            versionMatchedUpdate(entity) { existing ->
+                if (committedEvent == null) {
+                    io.smallrye.mutiny.Uni.createFrom().item(existing)
+                } else {
+                    Panache.getSession().flatMap { it.flush() }
+                        .flatMap {
+                            outboxRepository.persistInTransaction(outboxMessage(committedEvent(existing.toDomain())))
+                        }
+                        .replaceWith(existing)
+                }
+            }.awaitSuspending().toDomain()
         } catch (e: jakarta.persistence.OptimisticLockException) {
             // Truly simultaneous writers both pass the version-matched read (in
             // versionMatchedUpdate) before either commits; the loser's flush then fails
@@ -238,7 +250,10 @@ class AccountRepositoryImpl(
 
 // File-scope extension (pure Uni assembly for update() above): keeps AccountRepositoryImpl
 // within detekt's per-class function budget, same pattern as the entity<->domain mappers below.
-private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = Panache.withTransaction {
+private fun AccountRepositoryImpl.versionMatchedUpdate(
+    entity: AccountEntity,
+    finish: (AccountEntity) -> io.smallrye.mutiny.Uni<AccountEntity>,
+) = Panache.withTransaction {
     // Optimistic guard (#465): match on the version the caller's domain object was READ
     // at, not just the id. The previous re-read-and-copy silently applied stale domain
     // state over a row another transaction had just changed (Hibernate's @Version check
@@ -269,12 +284,15 @@ private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = 
         // renameAccount in AccountService actually changes this.
         existing.nickname = entity.nickname
         // Travels with status: set by a freeze, cleared by an unfreeze (chk_accounts_freeze_origin).
+        check(existing.bookingContextOrNull() == entity.bookingContextOrNull()) {
+            "account booking context is immutable"
+        }
         existing.freezeOrigin = entity.freezeOrigin
         // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
         // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
         // DEFAULT since Hibernate writes every insertable/updatable column explicitly.
         existing.updatedAt = clock.instant()
-        io.smallrye.mutiny.Uni.createFrom().item(existing)
+        finish(existing)
     }
 }
 
@@ -304,6 +322,7 @@ private fun AccountEntity.toDomain() = Account(
     termsEffectiveFrom = termsEffectiveFrom,
     productRevisionPin = productRevisionPinOrNull(),
     freezeOrigin = freezeOrigin?.let(FreezeOrigin::valueOf),
+    bookingContext = bookingContextOrNull(),
 )
 
 // Whole or absent, as chk_accounts_product_revision_pin_whole guarantees for the row.
@@ -341,6 +360,10 @@ private fun Account.toEntity() = AccountEntity().also {
     it.goalTargetDate = goalTargetDate
     it.nickname = nickname
     it.freezeOrigin = freezeOrigin?.name
+    it.bookingBankId = bookingContext?.bankId
+    it.bookingEstablishmentId = bookingContext?.establishmentId
+    it.bookingHostCountry = bookingContext?.hostCountry
+    it.bookingMode = bookingContext?.mode
     it.termsVersion = termsVersion
     it.termsUrl = termsUrl
     it.termsEffectiveFrom = termsEffectiveFrom
@@ -354,4 +377,13 @@ private fun Account.toEntity() = AccountEntity().also {
         it.productRevisionIrVersion = pin.irVersion
         it.productRevisionPinnedAt = pin.pinnedAt
     }
+}
+
+private fun AccountEntity.bookingContextOrNull() = bookingBankId?.let { bank ->
+    com.openbank.libs.market.BookingContext(
+        bank,
+        checkNotNull(bookingEstablishmentId),
+        checkNotNull(bookingHostCountry),
+        checkNotNull(bookingMode),
+    )
 }

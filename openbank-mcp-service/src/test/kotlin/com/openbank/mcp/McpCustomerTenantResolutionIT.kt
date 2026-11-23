@@ -51,6 +51,7 @@ class McpCustomerTenantResolutionIT {
             "quarkus.oidc.customers.tenant-enabled" to "true",
             "quarkus.oidc.customers.public-key" to OidcItKeys.publicKeyConfig("customers"),
             "mcp.customer.enabled" to "true",
+            "mcp.customer.shared-store" to "memory",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
         ) + GatewayTls.listener()
@@ -129,6 +130,47 @@ class McpCustomerTenantResolutionIT {
             .extract().header("WWW-Authenticate")
         // Only the customer branch emits resource_metadata; a tenant-level rejection would not.
         assertThat(challenge).startsWith("DPoP").contains("invalid_dpop_proof").contains("resource_metadata=")
+    }
+
+    @Test
+    fun `a validly signed customers-realm token sent as Bearer to the staff root executes no tool`() {
+        // Signature and issuer are both genuine for the customers tenant, and the subject is shaped
+        // like an agent token with consent_id and the MCP audience: everything the staff agent path
+        // reads. Measured: this stays green with CallerContextResolver's issuer check removed, so the
+        // refusal comes from the OIDC layer before the resolver runs (the customers tenant takes only
+        // `DPoP`). The resolver check is defence in depth that this input cannot reach; this case
+        // pins the outcome at the staff root, not that particular guard.
+        val token = sign(OidcItKeys.pair("customers").private, CUSTOMERS)
+        val resp = given().contentType(ContentType.JSON)
+            .header("Authorization", "Bearer $token")
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_consents","arguments":{}}}""")
+            .post("/mcp").then().extract()
+        val body = resp.body().asString()
+        if (resp.statusCode() != 401) {
+            assertThat(resp.statusCode()).`as`(body).isEqualTo(200)
+            val path = resp.jsonPath()
+            val refused = path.get<Any?>("error") != null || path.getBoolean("result.isError")
+            assertThat(refused).`as`("customers-realm Bearer must not execute a staff tool: %s", body).isTrue()
+            assertThat(body).doesNotContain("agent:test-agent")
+        }
+    }
+
+    @Test
+    fun `a genuine customers-realm token on the staff root never reaches the staff tools`() {
+        // #16590: signed by the REAL customers key, so the tenant layer may accept it; whatever the
+        // tenant does, the staff root must refuse it with 401 and never list a staff tool.
+        val dpopKey = DpopTestProofs.newKey()
+        val token = sign(
+            OidcItKeys.pair("customers").private,
+            CUSTOMERS,
+            cnfJkt = DpopTestProofs.jkt(dpopKey),
+        )
+        list(token).statusCode(401)
+        given().contentType(ContentType.JSON)
+            .header("Authorization", "DPoP $token")
+            .header("DPoP", DpopTestProofs.proof(dpopKey, htu = "http://localhost/mcp", token = token))
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+            .post("/mcp").then().statusCode(401)
     }
 
     // The ADMITTED-end-to-end case needs the published https URL, which only the mTLS listener

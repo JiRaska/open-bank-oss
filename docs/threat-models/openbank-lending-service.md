@@ -1147,3 +1147,35 @@ Residual: a malformed catalogue country code (like any other malformed catalogue
 catalogue-unavailable refusal. It fails closed: no application is persisted. Only the status code
 misattributes the fault to the caller. Lending has no catalogue-unavailable outcome yet, and adding
 one belongs with the other `toProfile` validation errors, not with this check alone.
+
+### Durable catalogue-backed signature (ADR-0380)
+
+The signature endpoint records an intent for the authenticated signer against the application's
+pinned product revision. Taking over work from PostgreSQL never reconstructs actor, artefact or
+product evidence from a new caller. A row lock serializes the signature transition with other
+origination state changes. The signature, outbox and completion marker commit together.
+The scheduler restores the stored synthetic taint before publishing evidence.
+
+### Passport loan authorization
+
+Application clients can supply a grant selector. The catalogue returns the verified route only for
+the party and exact published revision. Lending persists the verified mode and establishment atomically. Each staged action has a
+distinct catalogue operation and checks permission before writing the signature or loan.
+The application database blocks concurrent withdrawal or expiry while a matching commitment can
+still succeed. Recovery keeps the operation ID, audit actor, destination and economic date.
+The catalogue preserves exact refusals and the ledger and borrower credit use stable references.
+
+A FOS receipt cannot authorize a BRANCH commitment. Catalogue checks the approved mode and exact
+establishment under the grant lock before admitting an action or returning the matching receipt.
+Until B2 routes the loan and cash entries to branch books, normal runtime refuses branch origination
+and branch commitment execution, including replay. Synthetic integration tests exercise the shared
+recovery path, the revocation race and refusal before any loan or borrower credit is created.
+
+Residual (durable signature recovery): a `lending_signature_intent` row whose application has left
+`AWAITING_SIGNATURE` without the intent's signature being applied (withdrawn, expired or declined)
+stays pending. `finishSignatureIntent` refuses it on every claim, and `SignatureRecoveryScheduler`
+reclaims it each lease, logging a warning. An intent whose signature is already recorded is left
+pending in the same way. Neither path writes a signature or emits a transition, so this fails
+closed; the cost is retry noise and a pending backlog. Closing an intent as abandoned needs its own
+terminal state. `completed_at` means the signature was applied and is evidence, so it must not be
+reused for that. Tracked as #16993.
