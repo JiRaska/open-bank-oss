@@ -1,0 +1,131 @@
+{
+  "_comment": "ADR-0385 D3 canonical MCP connect context. SHARED fixture: read by the Keycloak extension's McpConnectContextTest AND sca-service's McpConnectContextTest; the expected values were computed by a third, independent implementation. Change the canonical form only by changing this file, both implementations and the format version together.",
+  "version": "openbank-mcp-connect-context/v1",
+  "cases": [
+    {
+      "name": "tier H hosted redirect",
+      "input": {
+        "client_id": "mcp-hosted-reference",
+        "redirect_uri": "https://MCP-Client.example/oauth/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "expires_at": 1795000000
+      },
+      "expect": {
+        "redirect_host": "mcp-client.example",
+        "scopes": "offline_access openid",
+        "request_uri_sha256": "e2ce102439a5a55571d388df0f409343fa1f3761fd4309854f1bb7eaadd7e5f8",
+        "approval_request_id": "mcp-connect:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "canonical": "openbank-mcp-connect-context/v1\nclient_id=mcp-hosted-reference\nredirect_host=mcp-client.example\nresource=https://api.open-bank.tech/mcp\nscopes=offline_access openid\nrequest_uri_sha256=e2ce102439a5a55571d388df0f409343fa1f3761fd4309854f1bb7eaadd7e5f8\nexpires_at=1795000000",
+        "payload_sha256": "821e1cc6d8fde7eee2e0f60280a0a28163a06ef3e335e7edc366c8370ddefe59"
+      }
+    },
+    {
+      "name": "tier L IPv6 loopback, unsorted duplicate scopes",
+      "input": {
+        "client_id": "mcp-local-reference",
+        "redirect_uri": "http://[::1]:53682/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "offline_access  openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:AbC-123_x.y~z",
+        "expires_at": 1795000300
+      },
+      "expect": {
+        "redirect_host": "[::1]",
+        "scopes": "offline_access openid",
+        "request_uri_sha256": "a0b3a9a774889e27ee041e666fd9267622733526efa3d1c56082ef61ac1f77ad",
+        "approval_request_id": "mcp-connect:AbC-123_x.y~z",
+        "canonical": "openbank-mcp-connect-context/v1\nclient_id=mcp-local-reference\nredirect_host=[::1]\nresource=https://api.open-bank.tech/mcp\nscopes=offline_access openid\nrequest_uri_sha256=a0b3a9a774889e27ee041e666fd9267622733526efa3d1c56082ef61ac1f77ad\nexpires_at=1795000300",
+        "payload_sha256": "cb98e14c4494d6c67bb2775d942943796988f2f89df9686d418d32bcd247e08f"
+      }
+    },
+    {
+      "name": "non-ASCII display-irrelevant client id is hashed as UTF-8",
+      "input": {
+        "client_id": "mcp-ref-český",
+        "redirect_uri": "http://127.0.0.1:61001/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:x",
+        "expires_at": 1
+      },
+      "expect": {
+        "redirect_host": "127.0.0.1",
+        "scopes": "offline_access",
+        "request_uri_sha256": "44f92f2aff1d3d279411d68bbe208a2c06b579d74df4703519991d227284b9b5",
+        "approval_request_id": "mcp-connect:x",
+        "canonical": "openbank-mcp-connect-context/v1\nclient_id=mcp-ref-český\nredirect_host=127.0.0.1\nresource=https://api.open-bank.tech/mcp\nscopes=offline_access\nrequest_uri_sha256=44f92f2aff1d3d279411d68bbe208a2c06b579d74df4703519991d227284b9b5\nexpires_at=1",
+        "payload_sha256": "dd56fe1277816192c59775eb5abdac8c8184ee18e8c0593a314cc85992924021"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "client_id with LF forges a line",
+      "input": {
+        "client_id": "mcp-hosted-reference\nresource=https://evil.example",
+        "redirect_uri": "https://MCP-Client.example/oauth/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "expires_at": 1795000000
+      }
+    },
+    {
+      "name": "resource with CR",
+      "input": {
+        "client_id": "mcp-hosted-reference",
+        "redirect_uri": "https://MCP-Client.example/oauth/callback",
+        "resource": "https://api.open-bank.tech/mcp\r",
+        "scope": "openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "expires_at": 1795000000
+      }
+    },
+    {
+      "name": "empty scope",
+      "input": {
+        "client_id": "mcp-hosted-reference",
+        "redirect_uri": "https://MCP-Client.example/oauth/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "  ",
+        "request_uri": "urn:ietf:params:oauth:request_uri:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "expires_at": 1795000000
+      }
+    },
+    {
+      "name": "not a PAR request_uri",
+      "input": {
+        "client_id": "mcp-hosted-reference",
+        "redirect_uri": "https://MCP-Client.example/oauth/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "openid offline_access",
+        "request_uri": "https://evil.example/req",
+        "expires_at": 1795000000
+      }
+    },
+    {
+      "name": "redirect without host",
+      "input": {
+        "client_id": "mcp-hosted-reference",
+        "redirect_uri": "urn:x",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "expires_at": 1795000000
+      }
+    },
+    {
+      "name": "expiry not positive",
+      "input": {
+        "client_id": "mcp-hosted-reference",
+        "redirect_uri": "https://MCP-Client.example/oauth/callback",
+        "resource": "https://api.open-bank.tech/mcp",
+        "scope": "openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+        "expires_at": 0
+      }
+    }
+  ]
+}

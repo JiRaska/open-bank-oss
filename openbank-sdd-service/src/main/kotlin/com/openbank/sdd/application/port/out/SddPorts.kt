@@ -13,6 +13,9 @@ import java.util.UUID
 interface SddMandateRepository {
     fun save(mandate: SddMandate): Uni<SddMandate>
     fun findById(id: UUID): Uni<SddMandate?>
+
+    /** Refresh the row and hold its write lock in the caller's transaction. */
+    fun findByIdForUpdate(id: UUID): Uni<SddMandate?>
     fun findByReference(creditorIdentifier: String, umr: String): Uni<SddMandate?>
     fun listForAccount(accountId: UUID): Uni<List<SddMandate>>
 

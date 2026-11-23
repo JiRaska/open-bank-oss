@@ -126,13 +126,13 @@ test_finance_may_read_snapshots_and_curve_sets if {
 }
 
 test_risk_may_create_snapshot_and_upload_curve_set if {
-	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
+	every action in ["risk.snapshot.create", "risk.curve-set.create", "risk.planning.capture.create"] {
 		rest.allow with input as {"principal": risk_user, "action": action}
 	}
 }
 
 test_finance_is_denied_risk_writes if {
-	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
+	every action in ["risk.snapshot.create", "risk.curve-set.create", "risk.planning.capture.create"] {
 		not rest.allow with input as {"principal": finance_user, "action": action}
 			with data.rules as dept_rules
 	}
@@ -140,7 +140,7 @@ test_finance_is_denied_risk_writes if {
 
 # A service account holding ROLE_RISK must still be refused every write.
 test_service_account_with_risk_role_is_denied_writes if {
-	every action in ["risk.snapshot.create", "risk.curve-set.create"] {
+	every action in ["risk.snapshot.create", "risk.curve-set.create", "risk.planning.capture.create"] {
 		not rest.allow with input as {
 			"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_RISK"]},
 			"action": action,

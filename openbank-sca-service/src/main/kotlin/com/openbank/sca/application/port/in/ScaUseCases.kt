@@ -15,6 +15,12 @@ data class InitiateScaCommand(
     val redirectUrl: String?,
     /** The entity the human acts for, recorded as context on the challenge (#10281 item 3). */
     val onBehalfOfPartyId: UUID? = null,
+    /**
+     * The caller's consumer scope (ADR-0335 D1). A scoped consumer may initiate ONLY challenges of
+     * its own namespace (ADR-0385 D3: the authorization server raises connect challenges and
+     * nothing else); a general caller is unrestricted here, as before.
+     */
+    val scope: ConsumerScope = ConsumerScope.General,
 )
 
 data class VerifyScaCommand(val challengeId: UUID, val partyId: UUID, val otp: String?)

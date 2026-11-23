@@ -24,6 +24,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.security.Principal
 import java.time.OffsetDateTime
@@ -41,11 +42,40 @@ class ScaResourceConsumeAuditTest {
     private val party = UUID.randomUUID()
     private val challengeId = UUID.randomUUID()
 
-    private fun resource(principal: String) = ScaResource(
+    /** A verified service-account token: azp bound to `service-account-<azp>` (ServiceAccountIdentity). */
+    private fun machine(principal: String): Principal = mockk<JsonWebToken>(relaxed = true) {
+        every { name } returns principal
+        every { subject } returns "sub-$principal"
+        every { getClaim<Any?>("azp") } returns principal.removePrefix("service-account-")
+        every { getClaim<Any?>("preferred_username") } returns principal
+    }
+
+    private fun resource(principal: String, token: Principal = machine(principal)) = ScaResource(
         mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), consume, mockk(), mockk(),
     ).also { r ->
-        r.identity = mockk<SecurityIdentity>().also { every { it.principal } returns Principal { principal } }
+        r.identity = mockk<SecurityIdentity>().also { every { it.principal } returns token }
         r.auditPublisher = audit
+    }
+
+    /**
+     * Review of #16672: the reservation follows the VERIFIED machine identity, not the display name.
+     * A plain principal (no JWT) and a person's token that merely carries the name are General.
+     */
+    @Test
+    fun `a principal merely NAMED like a scoped consumer gets no reservation`(): Unit = runBlocking {
+        val command = slot<ConsumeScaCommand>()
+        coEvery { consume.consume(capture(command)) } returns spent()
+        val name = "service-account-openbank-pension"
+        val person = mockk<JsonWebToken>(relaxed = true) {
+            every { this@mockk.name } returns name
+            every { subject } returns "a-person"
+            every { getClaim<Any?>("azp") } returns "openbank-app"
+            every { getClaim<Any?>("preferred_username") } returns "alice"
+        }
+        listOf(Principal { name }, person).forEach { token ->
+            resource(name, token).consume(challengeId, ConsumeScaRequest(partyId = party))
+            assertThat(command.captured.scope).isEqualTo(ConsumerScope.General)
+        }
     }
 
     @Test
