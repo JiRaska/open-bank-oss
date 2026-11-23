@@ -79,6 +79,50 @@ The red-team pack (`src/test/resources/redteam/`) measures these properties, and
 lists what is still open. Today that is one item: a natural-person name inside free text, which has
 no shape to match on.
 
+## Account handles for tool chaining (#16678)
+
+Tool results mask every IBAN to its last four characters (ADR-0383 D7), so a model cannot pass an
+IBAN from `list_accounts` back as `accountId`. Every result object with an `iban` therefore also
+carries `accountRef`: `acr_` followed by an unpadded base64url HMAC-SHA256 over the caller scope
+(`agentId`, `consentId`, session `sid`) and the IBAN. The ref is attached after the masker and
+sanitiser have run, so it needs no sanitiser exemption, and an upstream field named `accountRef`
+is sanitised like any other (a ref-shaped string can carry an IBAN after a `-`).
+
+A caller whose token has no `sid` gets no `accountRef` at all, and every ref it presents is refused.
+Without a session the scope would be one agent under one consent, shared by all its sessions, so
+the service fails closed rather than issue a weaker handle. Such a caller can still pass the full
+IBAN as `accountId`. Each withheld or refused handle increments
+`openbank_mcp_account_ref_unavailable_total{reason="no_session",op="issue"|"resolve"}`, so callers
+that lose chaining this way are visible. `issue` counts only results that carried an account.
+
+Which callers have a session id today: the staff OBO path sets it to the exchanged token's `jti`,
+which is bound to a live `agent_session` row (ADR-0224), so OBO callers always get refs. Neither realm
+template in this repo issues the `agent:` subject or the `consent_id` claim that the agent path
+requires, so no agent token from them reaches this path yet. Whoever issues those tokens must also
+emit `sid`, or those callers fall back to full IBANs and the counter above shows it. `get_balance`, `list_transactions` and
+`get_statement` take `accountRef` (preferred) or a full `accountId` IBAN, but not both.
+
+A ref is never decoded. The server reads the caller's own consent-scoped `list_accounts`, computes
+the ref of each IBAN for the caller's own scope and compares them in constant time. A ref from
+another agent, consent or session, or a tampered one, matches nothing and is refused with JSON-RPC
+`-32602` (`accountRef is not valid for this caller`) before the read port is called. Resolving a ref
+costs one extra `list_accounts` read.
+
+The key is `openbank.mcp.account-ref.secret` (env `OPENBANK_MCP_ACCOUNT_REF_SECRET`, from the
+`mcp-service-account-ref` ExternalSecret, `secretKeyRef` optional). Every replica must share it, and
+the value is never logged. A value that is set but shorter than 32 bytes refuses boot. When it is
+absent the service generates a per-process random key, logs one WARN and reports
+`openbank_mcp_account_ref_ephemeral_key` = 1. Refs then stop working across a restart or between
+pods, and a ref that does not resolve is refused, so the only cost is an extra `list_accounts`.
+
+Nobody seeds the key. An ESO `Password` generator (`mcp-service-account-ref-key`, 48 characters,
+`refreshPolicy: CreatedOnce`) draws it in-cluster, and it is declared under `generated:` in
+`.github/config-inventory.yaml`. After the first sync, restart the pods and confirm the gauge reads
+0; alert `McpAccountRefEphemeralKey` (warning) fires when a pod reports 1 for 15m. Rotation: delete Secret `platform/mcp-service-account-ref` (ESO regenerates it) and restart the
+pods; outstanding refs are then refused and a model re-reads `list_accounts`. Only the `%dev` and
+`%test` profiles carry a fixed non-secret value. Rotating the key invalidates every outstanding ref,
+and a model recovers by calling `list_accounts` again.
+
 ## Conformance and fuzz test layers
 
 The module carries two test layers for the MCP surface (issue #16617). Protocol

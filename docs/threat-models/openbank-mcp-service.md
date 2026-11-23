@@ -841,3 +841,22 @@ a stub (T-T2/T-D2).
   dependency was added for it), so a look-alike outside the subset still passes. IBAN detection deliberately skips mod-97: an RF
   reference passes it and a mistyped IBAN fails it. Rollback: revert the commit. The red-team
   ratchet then fails until `known-gaps.json` is restored.
+- **2026-11-19** — **Caller-scoped account handles (#16678, refs #16590).** Since #16644 the read
+  tools took the account IBAN as `accountId`, while the masker returns it as `****1234`, so a model
+  could not chain `list_accounts` into `get_balance`. Results now carry `accountRef`, an HMAC-SHA256
+  under a server key over (agentId, consentId, session id, IBAN), and the tools accept it.
+  **STRIDE-I:** the IBAN stays masked towards the model (D7), and the ref names no account outside
+  MCP. **STRIDE-S/E:** a ref is never decoded. It is resolved only by recomputing the refs of the
+  caller's own consent-validated `list_accounts` for the caller's own scope. A token without a
+  session `sid` gets no ref and has every ref refused, so the sessions of one agent cannot share refs.
+  Each such case is counted (`openbank_mcp_account_ref_unavailable_total{reason="no_session"}`).
+  A ref replayed by
+  another agent, under another consent or in another session, or a tampered one, is refused with
+  `-32602` before any read port is called. The consent gate in the port still applies to the
+  resolved IBAN. The ref is attached after masking and sanitising, so no field is exempt from the
+  sanitiser: an upstream `accountRef` carrying an IBAN is masked like any other value. **Key:** `openbank.mcp.account-ref.secret`, generated in-cluster by an ESO `Password` generator (48 characters, `CreatedOnce`, no holder outside the cluster), at least 32 bytes,
+  checked at boot (`@Startup`); a set-but-short value refuses boot, an absent one falls back to a per-process random key (WARN + gauge `openbank_mcp_account_ref_ephemeral_key`), under which refs fail closed across pods/restarts (alert `McpAccountRefEphemeralKey`, warning, after 15m); never logged. A raw IBAN
+  `accountId` is still accepted, because D7 minimises what the bank sends, not what the caller
+  already holds. **Residual:** a leaked key lets someone forge a ref, but only for an IBAN they
+  already know and only usable by that same caller, whose consent still bounds the read. Rotation
+  invalidates all refs. Rollback: revert the commit (chaining breaks again, nothing else changes).
