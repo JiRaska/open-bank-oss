@@ -126,7 +126,9 @@ def evaluator_command() -> list[str]:
     if _EVALUATOR_COMMAND is None:
         directory = tempfile.TemporaryDirectory(prefix="openbank-canary-evaluator-")
         binary = Path(directory.name) / "evaluate"
-        run = subprocess.run(["go", "build", "-mod=readonly", "-o", str(binary), "."],
+        # The temporary evaluator does not use VCS metadata. Disable stamping so Go
+        # does not consult repository-wide Git attributes and ignore rules.
+        run = subprocess.run(["go", "build", "-mod=readonly", "-buildvcs=false", "-o", str(binary), "."],
                              cwd=HERE, capture_output=True, text=True)
         if run.returncode:
             directory.cleanup()
