@@ -62,3 +62,10 @@ declared user-profile attribute that only an admin may view or edit: the edge's 
 ## Logging
 
 Transport failures are logged with the upstream URL and exception class/message (`UpstreamClient`), not with customer bodies. Token contents are never logged. Avoid logging raw request/response bodies that may carry IBANs or names.
+
+## Keycloak Admin REST credentials
+
+The two Customer Edge service accounts request `kc-admin-api` when minting a token for
+Keycloak Admin REST. The scope adds the realm's Admin REST audience required by Keycloak 26.8.2.
+The service accounts retain their existing roles. Native WebAuthn token exchange continues to
+request `offline_access` separately.

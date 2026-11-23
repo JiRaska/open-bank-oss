@@ -420,7 +420,8 @@ class McpClientAdmission(unittest.TestCase):
         realm["clients"].append({"clientId": "it-edge-admin", "publicClient": False, "enabled": True,
                                  "clientAuthenticatorType": "client-secret", "secret": cls.edge_admin_secret,
                                  "serviceAccountsEnabled": True, "standardFlowEnabled": False,
-                                 "directAccessGrantsEnabled": False, "protocol": "openid-connect"})
+                                 "directAccessGrantsEnabled": False, "protocol": "openid-connect",
+                                 "optionalClientScopes": clients["customer-edge-admin"]["optionalClientScopes"]})
         realm.setdefault("users", []).append({
             "username": "service-account-it-edge-admin", "enabled": True, "serviceAccountClientId": "it-edge-admin",
             "clientRoles": {"realm-management": ["manage-users", "view-users"]}})
@@ -456,7 +457,7 @@ class McpClientAdmission(unittest.TestCase):
 
         dockerfile = (ROOT / "openbank-infra/docker/keycloak/Dockerfile").read_text()
         image = re.search(r"FROM (quay\.io/keycloak/keycloak:\$\{KEYCLOAK_VERSION\}@sha256:[a-f0-9]+)", dockerfile).group(1)
-        version = re.search(r"ARG KEYCLOAK_VERSION=([0-9.]+)", dockerfile).group(1)
+        version = re.search(r"^ARG KEYCLOAK_VERSION=([A-Za-z0-9._-]+)$", dockerfile, re.MULTILINE).group(1)
         features = re.search(r"ENV KC_FEATURES=(\S+)", dockerfile).group(1)
         image = image.replace("${KEYCLOAK_VERSION}", version)
         # The extension, from the committed Dockerfile (compiled and unit-tested in that stage).
@@ -980,7 +981,7 @@ class McpClientAdmission(unittest.TestCase):
         # profile fields with party_id merged, as a service account with manage-users. The admin-only
         # profile (edit: ["admin"]) must keep admitting that write.
         sa = self.post(self.token_url, {"grant_type": "client_credentials", "client_id": "it-edge-admin",
-                                         "client_secret": self.edge_admin_secret}).json()["access_token"]
+                                         "client_secret": self.edge_admin_secret, "scope": "kc-admin-api"}).json()["access_token"]
         auth = {"Authorization": f"Bearer {sa}"}
         users = json.loads(urllib.request.urlopen(urllib.request.Request(
             f"{self.origin}/admin/realms/openbank-customers/users?username={urllib.parse.quote(YOUNG_USER)}&exact=true",

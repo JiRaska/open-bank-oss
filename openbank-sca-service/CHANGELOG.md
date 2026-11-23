@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.23.0...sca-service-v0.23.1) (2026-11-23)
+
+
+### Security
+
+* **sca:** Keycloak MCP extension - withheld code, 72 h passkey floor, no token exchange (ADR-0385 C, [#16667](https://github.com/JiRaska/open-bank-oss/issues/16667)) ([#16672](https://github.com/JiRaska/open-bank-oss/issues/16672)) ([699eaf9](https://github.com/JiRaska/open-bank-oss/commit/699eaf9e7e0b3d2b0604d964d35497ab774367aa))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.22.1...sca-service-v0.23.0) (2026-11-18)
 
 

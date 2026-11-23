@@ -33,9 +33,9 @@
 # (a failing test fails the image build). The provider must be in /opt/keycloak/providers BEFORE
 # `kc.sh build`, which is why it is copied into the builder below.
 
-ARG KEYCLOAK_VERSION=26.8.1
+ARG KEYCLOAK_VERSION=26.8.2-3
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b AS keycloak-libs
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3 AS keycloak-libs
 
 # The repo's pinned JDK (also standalone-service.Dockerfile). Bytecode is architecture-neutral, so
 # this stage runs on the build host's platform; --release 21 matches the image's Java 21 runtime.
@@ -61,7 +61,7 @@ RUN set -eu; cd /src; \
 FROM scratch AS extension-jar
 COPY --from=extension /out/openbank-keycloak-mcp.jar /
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b AS builder
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3 AS builder
 COPY --from=extension /out/openbank-keycloak-mcp.jar /opt/keycloak/providers/openbank-keycloak-mcp.jar
 ENV KC_DB=postgres
 ENV KC_HEALTH_ENABLED=true
@@ -70,7 +70,7 @@ ENV KC_CACHE=local
 ENV KC_FEATURES=token-exchange,admin-fine-grained-authz:v1
 RUN /opt/keycloak/bin/kc.sh build
 
-FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
+FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
 # The augmented server (and its baked persisted-config) is the whole /opt/keycloak
 # tree — copy it wholesale, the approach Keycloak's own optimized-image docs use.
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
