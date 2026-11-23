@@ -4,20 +4,20 @@ package com.openbank.mcp
 
 import io.mockk.every
 import io.mockk.mockk
+import io.vertx.core.MultiMap
 import io.vertx.core.http.HttpServerRequest
-import io.vertx.core.http.impl.headers.HeadersMultiMap
 
 /**
- * A stand-in for the CDI-injected request on a hand-built McpEndpoint: the staff root refuses a
- * missing request (fail closed), so every direct-call test supplies one.
+ * A request carrying the given headers (none by default), for unit tests that build [McpEndpoint]
+ * by hand. The endpoint refuses a request whose headers it cannot read (fail closed), so every such
+ * test must supply one.
  */
 object TestHttpRequests {
     fun withHeaders(vararg headers: Pair<String, String>): HttpServerRequest {
-        val map = HeadersMultiMap.httpHeaders()
-        headers.forEach { (k, v) -> map.add(k, v) }
+        val map = MultiMap.caseInsensitiveMultiMap().apply { headers.forEach { add(it.first, it.second) } }
         return mockk(relaxed = true) {
-            every { headers() } returns map
             every { getHeader(any<String>()) } answers { map.get(firstArg<String>()) }
+            every { headers() } returns map
         }
     }
 }
