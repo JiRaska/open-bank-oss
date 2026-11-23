@@ -55,6 +55,32 @@ class IbanTest {
     }
 
     @Nested
+    inner class CanonicalShape {
+        @Test
+        fun `checks length boundaries without validating country or checksum`() {
+            assertThat(Iban.hasCanonicalShape("XX00" + "A".repeat(10))).isFalse()
+            assertThat(Iban.hasCanonicalShape("XX00" + "A".repeat(11))).isTrue()
+            assertThat(Iban.hasCanonicalShape("XX00" + "A".repeat(30))).isTrue()
+            assertThat(Iban.hasCanonicalShape("XX00" + "A".repeat(31))).isFalse()
+            assertThat(Iban.isValid("XX00" + "A".repeat(11))).isFalse()
+        }
+
+        @ParameterizedTest
+        @ValueSource(
+            strings = [
+                "cz6508000000192000145399",
+                "CZ65 08000000192000145399",
+                "C26508000000192000145399",
+                "CZAA08000000192000145399",
+                "CZ650800000019200014539!",
+            ],
+        )
+        fun `rejects noncanonical input without normalization`(input: String) {
+            assertThat(Iban.hasCanonicalShape(input)).isFalse()
+        }
+    }
+
+    @Nested
     inner class Creation {
 
         @Test

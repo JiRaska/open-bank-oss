@@ -117,3 +117,9 @@ one-way status: `PENDING → APPROVED | REJECTED | EXPIRED`, `APPROVED → EXECU
 A trigger pins the instruction columns and the state graph; DELETE raises. Proposals expire after
 24 h; at most 10 are open and 20 created per customer per 24 h. Lifecycle events go to
 `openbank.delegation.payment-proposal-events` (no payee IBAN, name or reference on the wire).
+
+The proposal store checks the payee IBAN's uppercase, unspaced form with
+`Iban.hasCanonicalShape` and retains that canonical value in the hashed instruction. The shape check
+does not validate the country, account structure or checksum. After customer approval, the
+customer edge submits the stored instruction through the usual payment initiation path, where
+the selected rail applies its own account validation.

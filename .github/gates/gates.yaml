@@ -8789,3 +8789,41 @@ gates:
     selftest_inputs: [".github/scripts/check-demo-only-flags.py"]
     run: |
       python3 .github/scripts/check-demo-only-flags.py --root .
+
+  # #16748. RodneCislo had 100% line coverage and a 68.8M-input fuzz run and still accepted
+  # never-issued birth-number classes, because every test was written from the same model as the
+  # code. The shared validators are now held to spec vectors + a python-stdnum differential test;
+  # a hand-rolled copy in a service is held to neither, and keeps the old bug when the shared one
+  # is fixed. This ratchet forbids NEW ad-hoc mod-97 / IBAN-regex / `[A-Z]{3}` currency checks
+  # outside openbank-libs-domain; the existing copies are baselined per file.
+  - id: identifier-validator-ratchet
+    name: "no new ad-hoc mod-97 / IBAN / currency validators outside libs-domain (#16748, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A copied identifier validator never sees the spec vectors or the stdnum differential test, so it can wrong-accept with full coverage; new copies must use the shared validator or java.util.Currency."
+    review_after: "2027-05-18"
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-identifier-validator-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-identifier-validator-ratchet.py"]
+    min_subjects: 2000   # 3563 Kotlin main sources scanned 2026-11-18
+    run: |
+      python3 .github/scripts/check-identifier-validator-ratchet.py
+
+  # #16748. The validator inventory is DERIVED from code: a source shaped like an identifier check
+  # (mod-97/mod-11/Luhn, IBAN/ISIN/currency regex, Currency.getInstance) must be a spec-vectored
+  # implementation, a shrink-only-baselined ad-hoc copy, or classified with a reason. A new
+  # validator without vectors fails here; so does a stale classification.
+  - id: identifier-validator-inventory
+    name: "every identifier validator has spec vectors or a stated reason (#16748, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "Spec vectors only protect the validators they name; deriving the inventory from code means a new validator cannot exist outside the conformance matrix while the matrix reads complete."
+    review_after: "2027-05-18"
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-identifier-validator-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-identifier-validator-inventory.py"]
+    min_subjects: 40   # 64 candidate sources derived 2026-11-18
+    run: |
+      python3 .github/scripts/check-identifier-validator-inventory.py

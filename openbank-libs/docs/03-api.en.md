@@ -78,6 +78,11 @@ person use `parse(raw, clock)` (and `isValid(raw, clock)`), passing their inject
 "today" in `Europe/Prague` itself, because a birth number is a Czech civil date, and returns
 `Invalid("birthdate is in the future")` for a later birthdate.
 
+`parse(raw)` is structure only: it does not reject a birthdate in the future. Callers that accept a
+person use `parse(raw, clock)` (and `isValid(raw, clock)`), passing their injected `Clock`: libs computes
+"today" in `Europe/Prague` itself, because a birth number is a Czech civil date, and returns
+`Invalid("birthdate is in the future")` for a later birthdate.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin
