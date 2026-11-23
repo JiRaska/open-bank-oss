@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.2...customer-edge-v1.13.3) (2026-11-23)
+
+
+### Security
+
+* **customer-edge:** adopt the patched Keycloak runtime and Admin API scope ([#17180](https://github.com/JiRaska/open-bank-oss/issues/17180)) ([af6e356](https://github.com/JiRaska/open-bank-oss/commit/af6e3560e8f14fb62089a00868f690f97555f0de))
+
 ## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.1...customer-edge-v1.13.2) (2026-11-23)
 
 
