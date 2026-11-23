@@ -37,7 +37,7 @@
 schema_version: 1
 
 # RFC 8707 resource / RFC 9728 protected resource. Access tokens carry aud = `audience`.
-resource: https://mcp.open-bank.tech/customer/mcp
+resource: https://api.open-bank.tech/mcp
 audience: openbank-mcp-service
 
 # The dedicated browser-flow override every MCP client is bound to (ADR-0385 D2.2): a fresh

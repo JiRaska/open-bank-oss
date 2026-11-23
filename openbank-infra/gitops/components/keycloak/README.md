@@ -443,7 +443,10 @@ sandbox configuration must supply all of the following before enabling it:
 - `MCP_READ_GRANT_ENABLED=true` and `MCP_READ_CONNECTION_BINDING_ENABLED=true`
 - The HTTPS `MCP_READ_CUSTOMER_ISSUER_URL`, `MCP_READ_RESOURCE_URL` and
   `MCP_READ_DELEGATION_ORIGIN`
-- The canonical `MCP_READ_RESOURCE_URL` is `https://mcp.open-bank.tech/customer/mcp` for the customer route.
+- Match `MCP_READ_RESOURCE_URL` to the canonical resource in the MCP client allowlist.
+  The customer route change (#16996) aligns that allowlist and the generated customer realm
+  with the external route. Keep customer admission and the read grant disabled until the route,
+  allowlist and deployed realm agree.
 - The HTTPS `MCP_READ_ISSUER_TOKEN_URL` and `MCP_READ_ISSUER_CLIENT_SECRET` for the dedicated
   `openbank-mcp-read-issuer` service account
 - Separate base64url-encoded `MCP_READ_NONCE_KEY` and `MCP_READ_PROOF_KEY` values of at least 32

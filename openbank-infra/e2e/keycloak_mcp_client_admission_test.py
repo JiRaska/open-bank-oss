@@ -59,7 +59,7 @@ USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11c"
 COUNTER = itertools.count(int(time.time()))
 YOUNG_USER, YOUNG_PARTY = "mcp-it-young@example.test", "22222222-2222-4222-8222-222222222222"
 YOUNG_USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11d"
-RESOURCE = "https://mcp.open-bank.tech/customer/mcp"
+RESOURCE = re.search(r"^resource: +([^\s#]+)", ALLOWLIST.read_text(), re.MULTILINE).group(1)
 WEAK_L = "it-mcp-tier-l-weakened"
 # The withheld-code session lifespan configured for THIS disposable server. The extension caps it
 # at 300 s (ADR-0385 D3.6, unit-tested in ExtensionTests); a short value lets the expiry case run
