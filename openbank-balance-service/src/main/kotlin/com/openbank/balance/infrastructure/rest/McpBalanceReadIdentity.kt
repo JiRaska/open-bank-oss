@@ -53,13 +53,12 @@ internal object McpBalanceReadIdentity {
         return Binding(party, grant, client, connection)
     }
 
-    private fun matchesTokenIdentity(jwt: JsonWebToken, issuer: String): Boolean =
-        issuer.isNotBlank() &&
-            jwt.issuer == issuer &&
-            jwt.audience == setOf(AUDIENCE) &&
-            !jwt.subject.isNullOrBlank() &&
-            jwt.getClaim<String>("scope") == SCOPE &&
-            jwt.getClaim<String>("azp") == ACTOR
+    private fun matchesTokenIdentity(jwt: JsonWebToken, issuer: String): Boolean = issuer.isNotBlank() &&
+        jwt.issuer == issuer &&
+        jwt.audience == setOf(AUDIENCE) &&
+        !jwt.subject.isNullOrBlank() &&
+        jwt.getClaim<String>("scope") == SCOPE &&
+        jwt.getClaim<String>("azp") == ACTOR
 
     private fun matchesCertificate(jwt: JsonWebToken, request: HttpServerRequest): Boolean {
         if (!request.isSSL) return false
