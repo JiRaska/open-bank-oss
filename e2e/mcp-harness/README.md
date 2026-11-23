@@ -95,6 +95,13 @@ short-lived access token remains in memory for Customer Edge.
 For a shared sandbox, also set `MCP_HARNESS_APP_COUNTER_FILE` to an owner-only state file on a
 writable persistent volume. Launch scheduled and manual shared runs through
 `sh run-sandbox-journey.sh --read-only --verify-revocation` (or pass `--verify-proposal`).
+When the private sandbox uses a dedicated CA, mount the single public root
+certificate read-only and set its absolute path in `MCP_HARNESS_PRIVATE_CA_FILE`.
+The image wrapper imports it into a fresh Chromium NSS store under the
+container's existing `/home/pwuser` and passes the same root to Node. Give
+each job a fresh writable home. Hostname and certificate verification are
+required throughout. Mount the public certificate alone.
+
 The Linux runner needs util-linux `flock`. The wrapper holds a nonblocking exclusive file lock
 for the entire Node process and releases it on process exit or crash. Use the same durable
 mount and path for each run. Use a single-pod write mount, or otherwise guarantee equivalent
