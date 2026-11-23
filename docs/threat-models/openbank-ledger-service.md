@@ -973,3 +973,31 @@ one of the postings queue behind it. The DDL now runs under a transaction-local 
 caller, endpoint, data or privilege. Residual risk: a lock held longer than the next tick means
 repeated failed passes; no success is recorded, so the existing liveness alert fires. Rollback:
 revert the change.
+
+### Branch lending journal
+
+Ledger resolves the optional establishment against its branch book register. Only the named Lending
+client can supply the dimension for a disbursement. The journal and both lines commit with the
+idempotency receipt. A replay with a different book or different financial terms conflicts, and a
+reversal retains the book. Uncategorized historical entries retain their original attribution.
+
+### ADR-0380 B2 projection evidence
+
+The branch dimension in emitted/replayed events is derived from the immutable journal, never the caller's next
+request or a mutable profile. The read-only branch snapshot uses the existing ledger.read authorization and
+refuses an ambiguous multi-bank legacy scope. Branch register identity is immutable. This control detects wrong
+allocation together with the independent account-context projection, including when the bank total balances.
+
+## ADR-0380 B2: attributed cash and inter-branch clearing
+
+The downstream Transaction writer (PR #17055) pins the authoritative account contexts before starting its payment workflow. A known branch cannot be paired with an unknown account or another bank. The new Account reader uses the named Transaction M2M client; its OPA grant is read-only and the adapter exposes only the id and booking context. Recovered activities use the stored route. Branch FX and transfers to unattributed legacy/home accounts fail closed pending their own route evidence.
+
+Only the named Transaction principal can call the Ledger branch-payment endpoint. A durable key binds the bank, both account/book legs, dates, currency, amount, actor and synthetic origin. A row lock serialises competing retries; both journals, booked events and receipt commit in one transaction. A failed second book leaves neither money nor receipt. Receipt bindings and final journal ids are immutable. Ledger book registration rejects another bank. Existing journal reversals preserve book provenance; a historical one-sided clearing reversal recorded below the protected API creates a detectable reconciliation break.
+
+Independent reconciliation checks every book and bank, native-currency clearing positions and each payment pair's elimination; opposite corrupt pairs cannot hide in the bank net. Synthetic journals are excluded from BUSINESS controls. Reader/schema deployment precedes writers, no historic attribution is inferred, existing projection and branch launch restrictions remain. Rollback stops new writers and retains contexts, receipts, journals and evidence.
+
+The downstream branch workflow (PR #17055) is a new Temporal type: dispatch is asynchronous and recoverable from a persisted pending row. Its holds do not expire during an uncertain posting; hold/post/complete retries remain durable. This deliberately retains the reservation while operational stuck-saga controls report an unresolved operation, rather than returning funds that Ledger may already have booked.
+
+The deployed synthetic-origin allowlist retains the existing ledger-seed principal and adds only the named Transaction principal. Its dedicated branch endpoint refuses an absent trust decision, both carriers are independently exercised, and the receipt digest binds the origin. A different ROLE_API caller cannot use this grant.
+
+ADR-0380 B2 clearing control traverses the full reversal chain of each receipt journal at the requested entry-date cutoff. It cannot net a broken payment against another operation. The generic journal reversal refuses either leg on the inter-branch clearing GL with HTTP 409 before any journal or outbox write. The downstream Transaction corrections (PR #17055) post both counterpayment legs through the original atomic receipt mechanism. PostgreSQL reconciliation tests seed historical one-sided reversals below the protected API to verify pair elimination and date cutoffs.

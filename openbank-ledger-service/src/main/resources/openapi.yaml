@@ -21,7 +21,7 @@ info:
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
   # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
-  version: 1.35.0
+  version: 1.37.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -36,6 +36,71 @@ tags:
   - name: ClosedPeriod
 
 paths:
+  /api/v1/journals/branch-payments:
+    post:
+      operationId: postBranchPayment
+      summary: Atomically post an attributed branch payment and its inter-branch clearing
+      description: Named Transaction service only. Both journals, booked events and the bank-bound receipt commit together. Exact replay returns the original journal ids; changed facts conflict. No FX conversion is performed.
+      tags: [Ledger]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BranchPaymentRequest' }
+      responses:
+        '200':
+          description: Durable original receipt (also on replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchPaymentReceipt' }
+        '400': { description: Invalid payment shape }
+        '401': { description: Authentication required }
+        '403': { description: Caller is not the Transaction service }
+        '409': { description: Changed replay facts or wrong bank/book }
+        '422': { description: Accounting controls refuse the payment }
+        '500': { description: Transaction rolled back; retry the same key }
+  /api/v1/journals/branch-payments/synthetic:
+    post:
+      operationId: postSyntheticBranchPayment
+      summary: Post a branch payment requiring authenticated synthetic origin
+      description: Named Transaction service only. Both journals, booked events and the bank-bound receipt commit together. Exact replay returns the original journal ids; changed facts conflict. No FX conversion is performed.
+      tags: [Ledger]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BranchPaymentRequest' }
+      responses:
+        '200':
+          description: Durable original receipt (also on replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchPaymentReceipt' }
+        '400': { description: Invalid payment shape }
+        '401': { description: Authentication required }
+        '403': { description: Caller is not Transaction or trusted synthetic origin is absent }
+        '409': { description: Changed replay facts or wrong bank/book }
+        '422': { description: Accounting controls refuse the payment }
+        '500': { description: Transaction rolled back; retry the same key }
+  /api/v1/journals/branch-books:
+    get:
+      tags: [Ledger]
+      operationId: getBranchBookSnapshot
+      summary: Coherent native-currency deposit totals and base-currency trial balances by immutable book
+      parameters:
+        - { name: bankId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Bank and book source snapshot; null book is explicitly unattributed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BranchLedgerSnapshot' }
+        '400': { description: Invalid or absent bank/date }
+        '401': { description: Authentication required }
+        '403': { description: Access denied }
   /api/v1/ledger/pension-accounting/identity:
     get:
       summary: Inspect the configured identity of this segregated ledger book
@@ -423,7 +488,7 @@ paths:
 
   /api/v1/journals/synthetic/transactions/{transactionId}:
     get:
-      tags: [Journals]
+      tags: [Ledger]
       operationId: proveSyntheticTransferJournal
       summary: Prove the configured fixture has exactly one posted synthetic transfer journal
       description: >-
@@ -494,6 +559,7 @@ paths:
         number. Fails closed with 409 when the original is already reversed (or otherwise not
         reversible) or when its entry date falls in an ATTESTED (locked) fiscal period —
         corrections to a closed year must be booked as an adjustment in the open period.
+        Inter-branch clearing requires a paired Transaction reversal.
       operationId: reverseJournal
       parameters:
         - name: journalId
@@ -1713,6 +1779,55 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    BranchPaymentRequest:
+      type: object
+      required: [idempotencyKey, transactionId, bankId, amount, currency, entryDate, valueDate, createdBy]
+      properties:
+        idempotencyKey: { type: string, minLength: 1, maxLength: 255, description: 'payment:{transactionId}' }
+        transactionId: { type: string, format: uuid }
+        bankId: { type: string, format: uuid }
+        sourceAccountId: { type: string, format: uuid, nullable: true }
+        targetAccountId: { type: string, format: uuid, nullable: true }
+        sourceBookId: { type: string, format: uuid, nullable: true }
+        targetBookId: { type: string, format: uuid, nullable: true }
+        amount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string, enum: [CZK, EUR, USD, GBP] }
+        entryDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        createdBy: { type: string, format: uuid }
+    BranchPaymentReceipt:
+      type: object
+      required: [transactionId, bankId, journalIds]
+      properties:
+        transactionId: { type: string, format: uuid }
+        bankId: { type: string, format: uuid }
+        journalIds:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    BranchLedgerLine:
+      type: object
+      required: [currency, baseCurrency, debit, credit, deposits]
+      properties:
+        branchBookId: { type: string, format: uuid, nullable: true }
+        currency: { type: string }
+        baseCurrency: { type: string }
+        debit: { type: number }
+        credit: { type: number }
+        deposits: { type: number }
+        clearing: { type: number, description: Signed native-currency inter-branch asset position }
+    BranchLedgerSnapshot:
+      type: object
+      required: [bankId, asOf, lines]
+      properties:
+        clearingBalanced: { type: boolean, description: Every individual branch payment clearing pair eliminates by currency }
+        bankId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/BranchLedgerLine' }
     PensionBookIdentity:
       type: object
       required: [kind, bookId]
@@ -2210,6 +2325,11 @@ components:
     JournalEntryResponse:
       type: object
       properties:
+        branchBookId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Establishment of the branch book. Null for journals with no branch attribution.
         id:
           type: string
           format: uuid
@@ -2380,6 +2500,11 @@ components:
       type: object
       required: [idempotencyKey, transactionId, entryDate, valueDate, createdBy, lines]
       properties:
+        branchBookId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Registered branch establishment. Only the named Lending service may set it for loan disbursements.
         origin:
           $ref: '#/components/schemas/JournalOriginInput'
         idempotencyKey:
