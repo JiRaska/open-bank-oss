@@ -1,12 +1,12 @@
 # -----------------------------------------------------------------------------
-# External public-feed watch (issue #2204).
+# External public-feed watch. Standing finding lane: issue #12177.
 #
 # WHY THIS EXISTS
 #   `openbank-fx-service`'s ČNB fixing URL was a 404 for the whole life of the
 #   service — one path segment short — and no layer of the stack could say so. A
 #   404 is a valid HTTP response, so the rest-client succeeded, the circuit
 #   breaker stayed closed, and the scheduler's catch turned the parse failure
-#   into one ERROR line. The only evidence was a table that stopped growing.
+#   into one ERROR line. The only evidence was a table that stopped growing (#2204).
 #
 #   No test in this repo can catch that by construction: a unit test stubs the
 #   client, an IT serves a local fixture, and a consumer pact answers whatever
@@ -21,7 +21,7 @@
 #
 #   LIVENESS is a property of the internet at this moment. It never blocks a
 #   merge: a third-party outage must not wedge the repo. It escalates instead —
-#   a red scheduled run is addressed to nobody, so a dead feed posts on #2204.
+#   a failed feed probe refreshes the marked report on #12177, reopening it if closed.
 #
 # WHY IT IS NOT A REQUIRED CHECK
 #   `paths:`-filtered workflows cannot be required contexts (a required context
@@ -109,7 +109,7 @@ jobs:
             0) echo "Every declared feed is live and correctly shaped." ;;
             1) echo "::error::Declaration drift on the default branch — reconcile the script with the YAMLs."
                exit 1 ;;
-            2) echo "::warning::A declared external feed is dead, misshapen or undeterminable — escalating to #2204." ;;
+            2) echo "::warning::A declared external feed is dead, misshapen or undeterminable — reporting to the standing feed-watch issue." ;;
             3) echo "::error::NO feed could be reached. That points at this runner's network, not"
                echo "::error::at the feeds — and it is NOT a 'feeds are fine' verdict."
                exit 3 ;;
@@ -117,7 +117,7 @@ jobs:
                exit "$code" ;;
           esac
 
-      - name: Escalate a dead feed on its issue
+      - name: Report a feed problem on the standing issue
         if: ${{ github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -125,7 +125,7 @@ jobs:
             const fs = require('fs')
             const report = fs.readFileSync('/tmp/feeds.txt', 'utf8')
             const MARKER = '<!-- external-feed-watch -->'
-            const issue_number = 2204
+            const issue_number = 12177
             const body = [
               MARKER,
               '## External feed watch — a declared feed is dead, misshapen or undeterminable',
@@ -138,18 +138,17 @@ jobs:
               report.trim(),
               '```',
               '',
-              'A dead feed here is silent in the service: the rest-client succeeds, the',
-              'circuit breaker stays closed, and the scheduler logs one ERROR line. Fix',
-              'the URL in the service\'s `application.yaml` (the probe reads it from',
-              'there, so the fix and the check can never disagree).',
+              'Track each feed-specific repair in its own issue or PR. The probe reads',
+              "the configured URL from the service's `application.yaml`.",
               '',
-              'This is the OUTSIDE-IN canary (issue #2204) — it can fire before anything is',
-              'deployed. For the live/authoritative verdict once the fix ships, check the',
-              'in-cluster fetch-outcome contract instead of re-deriving health from this run',
-              '(issue #4743, ADR-0237 point 2): `openbank_feed_fetch_total{outcome!="FETCHED"}`',
-              'for which outcome the deployed service is actually hitting, and the',
-              '`WorkflowLivenessStale` alert for `workflow=~"feed-.*"` for how long it has been',
-              'since the feed last delivered anything usable.',
+              'The external probe can report problems before deployment. Check the deployed',
+              'fetch-outcome contract (issue #4743, ADR-0237 point 2) for the live verdict.',
+              'Check `openbank_feed_fetch_total{outcome!="FETCHED"}` for unsuccessful',
+              'outcomes and `WorkflowLivenessStale` for `workflow=~"feed-.*"` to see',
+              'whether the service has gone too long without fetching usable data.',
+              '',
+              'Close this issue only after checking the current feed problem and the',
+              'deployed fetch-outcome evidence.',
               '',
               `_Automated: \`${context.workflow}\` run ${context.runId}._`,
             ].join('\n')
