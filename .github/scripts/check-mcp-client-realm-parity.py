@@ -45,6 +45,8 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
+EXCHANGE_ATTR = "openbank.mcp.exchange"
+EXCHANGE_MAX_LIFESPAN_S = 60
 MAX_EXCEPTION_DAYS = 183
 EXPECTED_MAPPERS = ("sub", "party-id", "mcp-service-audience")
 LOOPBACK_PREFIXES = ("http://127.0.0.1/", "http://[::1]/")
@@ -250,9 +252,109 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
     return f
 
 
+def check_exchange(decl: dict, realm: dict) -> list[str]:
+    """ADR-0383 D4: the exchange requester, its audiences and their scopes are exactly as declared."""
+    f: list[str] = []
+    ex = decl.get("exchange")
+    marked = [c for c in realm.get("clients") or [] if EXCHANGE_ATTR in (c.get("attributes") or {})]
+    marked_scopes = [s for s in realm.get("clientScopes") or [] if EXCHANGE_ATTR in (s.get("attributes") or {})]
+    if not ex:
+        if marked or marked_scopes:
+            f.append(f"realm carries {EXCHANGE_ATTR} entries but the allowlist declares no `exchange`")
+        return f
+    req = ex.get("requester") or {}
+    rid = req.get("client_id")
+    auds = {a.get("client_id"): a.get("scope") for a in ex.get("audiences") or []}
+    if rid != decl.get("audience"):
+        f.append(f"exchange: requester `{rid}` must equal the MCP audience `{decl.get('audience')}` - Keycloak only "
+                 f"exchanges a subject token whose aud names the requester")
+    if not auds or any(not k or not v for k, v in auds.items()):
+        f.append("exchange: every audience needs a client_id and a scope")
+    declared_ids = {rid} | set(auds)
+    for c in marked:
+        if c.get("clientId") not in declared_ids:
+            f.append(f"realm client `{c.get('clientId')}` carries {EXCHANGE_ATTR} but is not declared under `exchange`")
+    for s in marked_scopes:
+        if s.get("name") not in set(auds.values()):
+            f.append(f"realm client scope `{s.get('name')}` carries {EXCHANGE_ATTR} but is not declared")
+    clients = {c.get("clientId"): c for c in realm.get("clients") or []}
+    mapped = {m.get("client") for m in realm.get("scopeMappings") or []}
+
+    def no_flow(c: dict, p: str) -> None:
+        for key in ("standardFlowEnabled", "implicitFlowEnabled", "directAccessGrantsEnabled", "serviceAccountsEnabled"):
+            if c.get(key) is not False:
+                f.append(f"{p}: {key} must be false - it obtains tokens only by exchange")
+        if c.get("publicClient") is True:
+            f.append(f"{p}: publicClient must not be true")
+        if c.get("fullScopeAllowed") is not False:
+            f.append(f"{p}: fullScopeAllowed must be false - no realm role may ride along")
+        if c.get("defaultClientScopes") != []:
+            f.append(f"{p}: defaultClientScopes must be exactly []")
+        if c.get("redirectUris"):
+            f.append(f"{p}: must declare no redirect URIs")
+        if c.get("clientId") in mapped:
+            f.append(f"{p}: must have no scopeMappings (no realm role)")
+
+    r = clients.get(rid)
+    if r is None:
+        f.append(f"exchange requester `{rid}` absent from the realm - run gen-mcp-realm-clients.py")
+    else:
+        p = f"exchange requester `{rid}`"
+        a = r.get("attributes") or {}
+        if a.get(EXCHANGE_ATTR) != "requester":
+            f.append(f"{p}: {EXCHANGE_ATTR} must be `requester`")
+        no_flow(r, p)
+        if not _true(a.get("standard.token.exchange.enabled")):
+            f.append(f"{p}: standard.token.exchange.enabled must be true")
+        if r.get("publicClient") is not False:
+            f.append(f"{p}: publicClient must be false - the requester authenticates")
+        if r.get("clientAuthenticatorType") != "client-secret" or r.get("secret") != req.get("secret_placeholder") \
+                or not str(r.get("secret", "")).startswith("__"):
+            f.append(f"{p}: must authenticate with the declared secret PLACEHOLDER, never a literal secret")
+        try:
+            life = int(a.get("access.token.lifespan"))
+        except (TypeError, ValueError):
+            life = 0
+        if not 0 < life <= EXCHANGE_MAX_LIFESPAN_S:
+            f.append(f"{p}: access.token.lifespan must be set and <= {EXCHANGE_MAX_LIFESPAN_S} s (ADR-0383 D4)")
+        if sorted(r.get("optionalClientScopes") or []) != sorted(auds.values()):
+            f.append(f"{p}: optionalClientScopes must be exactly the declared read scopes {sorted(auds.values())}")
+        if r.get("protocolMappers"):
+            f.append(f"{p}: must carry no protocol mappers of its own")
+    scopes = {s.get("name"): s for s in realm.get("clientScopes") or []}
+    for cid, scope in auds.items():
+        c = clients.get(cid)
+        p = f"exchange audience `{cid}`"
+        if c is None:
+            f.append(f"{p}: absent from the realm")
+        else:
+            a = c.get("attributes") or {}
+            if a.get(EXCHANGE_ATTR) != "audience":
+                f.append(f"{p}: {EXCHANGE_ATTR} must be `audience`")
+            no_flow(c, p)
+            if _true(a.get("standard.token.exchange.enabled")):
+                f.append(f"{p}: an audience must not itself exchange")
+            if c.get("optionalClientScopes"):
+                f.append(f"{p}: optionalClientScopes must be empty")
+            if c.get("bearerOnly") is not True:
+                f.append(f"{p}: must be bearerOnly - an audience holds no credential")
+        sc = scopes.get(scope)
+        if sc is None:
+            f.append(f"{p}: scope `{scope}` absent from the realm")
+            continue
+        mappers = sc.get("protocolMappers") or []
+        targets = [(m.get("protocolMapper"), (m.get("config") or {}).get("included.client.audience")) for m in mappers]
+        if targets != [("oidc-audience-mapper", cid)]:
+            f.append(f"scope `{scope}`: must carry exactly one audience mapper for `{cid}`, got {targets}")
+    for cid, c in clients.items():
+        if cid != rid and cid in auds and _true((c.get("attributes") or {}).get("standard.token.exchange.enabled")):
+            f.append(f"`{cid}`: exchange enabled outside the declared requester")
+    return f
+
+
 def check(decl: dict, realm: dict, base: Path, today: dt.date) -> list[str]:
     f, jwks = check_allowlist(decl, base, today)
-    return f + check_realm(decl, realm, jwks)
+    return f + check_realm(decl, realm, jwks) + check_exchange(decl, realm)
 
 
 def self_test() -> int:
@@ -371,6 +473,54 @@ def self_test() -> int:
     run("client secret without an exception flagged",
         mutate_decl=lambda d: next(c for c in d["clients"] if c["tier"] == "H").update(auth={"method": "client_secret"}),
         mutate_realm=secret_realm, needle="exception only")
+
+    RID = decl0["exchange"]["requester"]["client_id"]
+    AUD = decl0["exchange"]["audiences"][0]["client_id"]
+    SCOPE = decl0["exchange"]["audiences"][0]["scope"]
+
+    def scope_of(r, name):
+        return next(s for s in r["clientScopes"] if s["name"] == name)
+
+    run("exchange requester missing flagged",
+        mutate_realm=lambda r: r.update(clients=[c for c in r["clients"] if c["clientId"] != RID]), needle="requester")
+    run("exchange requester with a direct grant flagged",
+        mutate_realm=lambda r: client(r, RID).update(directAccessGrantsEnabled=True), needle="directAccessGrantsEnabled")
+    run("exchange requester with a service account flagged",
+        mutate_realm=lambda r: client(r, RID).update(serviceAccountsEnabled=True), needle="serviceAccountsEnabled")
+    run("exchange requester lifespan 300 flagged",
+        mutate_realm=lambda r: client(r, RID)["attributes"].update({"access.token.lifespan": "300"}), needle="lifespan")
+    run("exchange requester extra scope (scope escalation) flagged",
+        mutate_realm=lambda r: client(r, RID)["optionalClientScopes"].append("accounts:read"), needle="optionalClientScopes")
+    run("exchange requester default scope flagged",
+        mutate_realm=lambda r: client(r, RID).update(defaultClientScopes=["profile"]), needle="defaultClientScopes")
+    run("exchange requester full scope flagged",
+        mutate_realm=lambda r: client(r, RID).update(fullScopeAllowed=True), needle="fullScopeAllowed")
+    run("exchange requester literal secret flagged",
+        mutate_realm=lambda r: client(r, RID).update(secret="s3cr3t"), needle="PLACEHOLDER")
+    run("exchange disabled on requester flagged",
+        mutate_realm=lambda r: client(r, RID)["attributes"].update({"standard.token.exchange.enabled": "false"}),
+        needle="standard.token.exchange.enabled")
+    run("exchange requester not the MCP audience flagged",
+        mutate_decl=lambda d: d["exchange"]["requester"].update(client_id="other"), needle="must equal the MCP audience")
+    run("exchange audience that can itself exchange flagged",
+        mutate_realm=lambda r: client(r, AUD)["attributes"].update({"standard.token.exchange.enabled": "true"}), needle="exchange")
+    run("exchange audience not bearer-only flagged",
+        mutate_realm=lambda r: client(r, AUD).update(bearerOnly=False), needle="bearerOnly")
+    run("exchange requester made public flagged",
+        mutate_realm=lambda r: client(r, RID).update(publicClient=True), needle="publicClient")
+    run("exchange audience with a standard flow flagged",
+        mutate_realm=lambda r: client(r, AUD).update(standardFlowEnabled=True), needle="standardFlowEnabled")
+    run("scope audience mapper retargeted flagged",
+        mutate_realm=lambda r: scope_of(r, SCOPE)["protocolMappers"][0]["config"].update(
+            {"included.client.audience": "openbank-ledger-service"}), needle="exactly one audience mapper")
+    run("scope with a second audience mapper flagged",
+        mutate_realm=lambda r: scope_of(r, SCOPE)["protocolMappers"].append(copy.deepcopy(scope_of(r, SCOPE)["protocolMappers"][0])),
+        needle="exactly one audience mapper")
+    run("undeclared exchange-marked client flagged",
+        mutate_realm=lambda r: r["clients"].append({**copy.deepcopy(client(r, AUD)), "clientId": "openbank-ledger-service"}),
+        needle="not declared under `exchange`")
+    run("exchange entries without a declaration flagged",
+        mutate_decl=lambda d: d.pop("exchange"), needle="declares no `exchange`")
 
     failed = [n for n, ok in cases if not ok]
     print(f"self-test: {len(cases) - len(failed)}/{len(cases)} passed")

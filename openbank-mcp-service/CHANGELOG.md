@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.4...mcp-service-v0.18.5) (2026-11-23)
+
+
+### Security
+
+* **mcp-service:** read customer accounts only under an active MCP_CLIENT grant ([#16800](https://github.com/JiRaska/open-bank-oss/issues/16800)) ([0a30252](https://github.com/JiRaska/open-bank-oss/commit/0a302528fcb2bb609ba297218b978d841335d001))
+
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.3...mcp-service-v0.18.4) (2026-11-22)
+
+
+### Security
+
+* **mcp-service:** shared fail-closed Valkey DPoP replay store and budgets ([#16791](https://github.com/JiRaska/open-bank-oss/issues/16791)) ([49b0b6c](https://github.com/JiRaska/open-bank-oss/commit/49b0b6cb70d888ef9cd468d203fb309f676b8789))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.2...mcp-service-v0.18.3) (2026-11-22)
 
 

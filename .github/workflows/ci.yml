@@ -266,11 +266,15 @@ jobs:
       # so the job was ABSENT rather than skipped and the aggregate check read green.
       # `pretest` still regenerates governance.json for the suite below.
 
-      - name: Test (unit + integration)
-        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
-        # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
-        # health-route integration tests all run here via Vitest.
-        # Coverage floors are enforced by the parallel `ui-coverage` job (ADR-0370 U3).
+      # The unit + integration suite no longer runs here: `ui-coverage` runs the SAME `vitest run`
+      # with --coverage and with the junit reporter, so a second pass in this job was ~80 s of
+      # duplicate work on the critical path. A failing test still reddens the required `Admin UI`
+      # verdict through `ui-coverage` (test-ci-ui-verdict.py). What the suite's `pretest` hook did
+      # as a side effect is NOT optional, though: it bakes governance.json / catalog.json / the
+      # graphs that `next build` and the browser suite import (all gitignored), and lint and
+      # type-check above run before it. So bake explicitly instead of via `npm run test`.
+      - name: Bake generated artifacts (pretest hook)
+        run: npm run pretest
 
       # ADR-0370 U5: mutation testing on the decision-module files this PR changed. Coverage says
       # a line ran; a surviving mutant says no test would notice if it were wrong. ADVISORY while
@@ -290,6 +294,7 @@ jobs:
           bash scripts/mutation-changed.sh
 
       - name: Build
+        id: build
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
@@ -314,33 +319,14 @@ jobs:
 
       # check-admin-ui-a11y-route-coverage.py is declared in gates.yaml (admin-ui-a11y-route-coverage),
       # not here: this job is conditional, so a gate inside it silently narrows (#3629).
-
-      - name: E2E tests (Playwright)
-        id: browser_e2e
-        run: npm run test:e2e
-        # ADR-0076 Phase 2: Playwright E2E for /services docs-coverage page.
-        # Mocks all BFF endpoints via page.route() — no live services required.
-        # Enforced (issue #653): this job runs solely on hosted ubuntu-latest (a single,
-        # uniform pool member — no ARC/self-hosted split for Admin UI build), the deps
-        # step above installs cleanly every run, and #646 fixed the suite from silently
-        # testing /auth/login (every route redirected there, no Keycloak in CI) to
-        # actually exercising /services via a minted session cookie. Verified stable:
-        # 5/5 passing across 3 consecutive main-branch runs, locally with --repeat-each=3.
-        env:
-          CI: "true"
-          NEXTAUTH_URL: "http://localhost:3001"
-          NEXTAUTH_SECRET: "ci-e2e-secret"
-          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
-          OPENBANK_E2E_SERVER: "production"
-          OPENBANK_E2E_PREBUILT: "true"
-          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
-          # ADR-0370 U7: every checked /api/svc mock, replayed by the version-skew step below.
-          OPENBANK_CONTRACT_CAPTURE: "${{ github.workspace }}/openbank-admin-ui/build/test-results/e2e/contract-capture.jsonl"
+      #
+      # The GATING Playwright run lives in `ui-e2e` (sharded). What stays below is the non-gating
+      # lanes that need this job's production build.
 
       # ADR-0370 U2: quarantined tests (e2e/flaky-quarantine.json) are excluded from the gating
       # run above and run here, non-gating, so a fix can be seen before the entry expires.
       - name: Quarantined E2E tests (non-gating)
-        if: always() && steps.browser_e2e.outcome != 'skipped'
+        if: always() && steps.build.outcome == 'success'
         continue-on-error: true
         run: npx playwright test --pass-with-no-tests
         env:
@@ -357,7 +343,7 @@ jobs:
       # measured in the browser on the production build already served above. ADVISORY until ten
       # consecutive runs show the numbers are stable (the ADR-0359 graduation rule).
       - name: Route performance measurement (non-gating)
-        if: always() && steps.browser_e2e.outcome != 'skipped'
+        if: always() && steps.build.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 10
         run: npx playwright test --workers 1
@@ -371,23 +357,6 @@ jobs:
           OPENBANK_E2E_PERF: "only"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-perf/playwright.xml"
 
-      # ADR-0370 U7: replay the captured mocks against each service's openapi.yaml at its latest
-      # release tag. A mock valid on this branch but not against the released spec means the UI
-      # depends on a shape the deployed service does not serve yet. Non-gating until it has a
-      # run history; it needs one ls-remote and one shallow tag fetch.
-      - name: Contract version skew (non-gating)
-        if: always() && steps.browser_e2e.outcome != 'skipped'
-        continue-on-error: true
-        timeout-minutes: 5
-        run: node scripts/contract-version-skew.ts build/test-results/e2e/contract-capture.jsonl
-
-      # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
-      # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
-      - name: E2E flake report
-        if: always() && steps.browser_e2e.outcome != 'skipped'
-        working-directory: ${{ github.workspace }}
-        run: python3 .github/scripts/report-admin-ui-e2e-flake.py openbank-admin-ui/build/test-results/e2e/playwright.xml
-
       # ADR-0359 visual regression lane: the key operator pages, light and dark, mocked APIs and a
       # frozen clock, compared against baselines committed under e2e-visual/__screenshots__. It
       # renders inside the pinned Playwright image (scripts/visual.sh), the environment the
@@ -396,7 +365,7 @@ jobs:
       # while the envelope below still records a failed `visual` verdict for Test Intelligence.
       - name: Visual regression (Playwright baselines)
         id: visual
-        if: always() && steps.browser_e2e.outcome != 'skipped'
+        if: always() && steps.build.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 15
         run: bash scripts/visual.sh
@@ -413,57 +382,128 @@ jobs:
             openbank-admin-ui/build/visual-results/report/
           retention-days: 14
 
-      - name: Build Admin UI Test Intelligence envelope
+      # The Test Intelligence envelope is built once, by `ui-evidence`, from the results of every
+      # producer job (this one, the E2E shards, coverage). Hand over what this job measured.
+      - name: Hand over build-job results (quarantine, perf, visual)
         if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-results-build
+          path: openbank-admin-ui/build/test-results
+          retention-days: 1
+          if-no-files-found: ignore
+      - name: Hand over visual report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-results-visual
+          path: openbank-admin-ui/build/visual-results/visual.xml
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # ADR-0076 Phase 2 gating Playwright run, sharded (`--shard=i/N`). It was one ~350 s serial step
+  # at the tail of `ui-build` (p50 10.2 / p90 12.4 min job). Each shard builds for itself rather
+  # than waiting for `ui-build` to hand over `.next`: the build is ~70 s and starts at t=0 beside
+  # the lint/type-check work, where an artifact hand-off would serialise behind all of it.
+  # EVERY shard must pass: the `Admin UI` verdict and `Validate manifests` read this matrix's
+  # aggregate `needs.ui-e2e.result`, which is failure if any shard failed, cancelled if any was
+  # cancelled and skipped if the job did not run — and the verdict accepts only `success`.
+  ui-e2e:
+    name: Admin UI E2E (shard ${{ matrix.shard }}/3)
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - name: Cache Next build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: openbank-admin-ui/.next/cache
+          key: next-build-${{ runner.os }}-${{ hashFiles('openbank-admin-ui/package-lock.json', 'openbank-admin-ui/next.config.mjs') }}-${{ github.sha }}
+          restore-keys: |
+            next-build-${{ runner.os }}-${{ hashFiles('openbank-admin-ui/package-lock.json', 'openbank-admin-ui/next.config.mjs') }}-
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      # `next build` and the browser suite import the artifacts `pretest` bakes (gitignored).
+      - name: Bake generated artifacts (pretest hook)
+        run: npm run pretest
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+      - name: Install Playwright system dependencies
+        # Linux-only and best-effort, exactly as in `ui-build` (sudo without NOPASSWD would hang).
+        if: runner.os == 'Linux'
+        run: sudo npx playwright install-deps chromium
+        timeout-minutes: 5
         continue-on-error: true
-        run: |
-          DIAGNOSTIC_ARGS=()
-          if [[ "${{ steps.browser_e2e.outcome }}" == "failure" ]]; then
-            DIAGNOSTIC_ARGS+=(--browser-report-dir playwright-report)
-          fi
-          if [[ "${{ steps.visual.outcome }}" == "success" || "${{ steps.visual.outcome }}" == "failure" ]]; then
-            DIAGNOSTIC_ARGS+=(--visual-report build/visual-results/visual.xml
-              --visual-diff-artifact "visual-diff-${{ github.run_id }}-a${{ github.run_attempt }}")
-          fi
-          python3 ../.github/scripts/collect-test-run-evidence.py \
-            --service . --component openbank-admin-ui --out build/test-intelligence/run.json \
-            "${DIAGNOSTIC_ARGS[@]}"
 
-      - name: Retain Admin UI test evidence
+      - name: E2E tests (Playwright, shard ${{ matrix.shard }}/3)
+        id: browser_e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
+        # Mocks all BFF endpoints via page.route() — no live services required (issue #653, #646).
+        # Quarantined tests are excluded by playwright.config.ts's grepInvert before sharding.
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright-shard-${{ matrix.shard }}.xml"
+          # ADR-0370 U7: every checked /api/svc mock, replayed by the version-skew step below.
+          OPENBANK_CONTRACT_CAPTURE: "${{ github.workspace }}/openbank-admin-ui/build/test-results/e2e/contract-capture-shard-${{ matrix.shard }}.jsonl"
+
+      # ADR-0370 U7: replay the captured mocks against each service's openapi.yaml at its latest
+      # release tag. A mock valid on this branch but not against the released spec means the UI
+      # depends on a shape the deployed service does not serve yet. Non-gating until it has a
+      # run history; it needs one ls-remote and one shallow tag fetch.
+      - name: Contract version skew (non-gating)
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: node scripts/contract-version-skew.ts build/test-results/e2e/contract-capture-shard-${{ matrix.shard }}.jsonl
+
+      # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
+      # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
+      - name: E2E flake report
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        working-directory: ${{ github.workspace }}
+        run: python3 .github/scripts/report-admin-ui-e2e-flake.py openbank-admin-ui/build/test-results/e2e/playwright-shard-${{ matrix.shard }}.xml
+
+      - name: Hand over shard results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-intelligence-run-openbank-admin-ui-${{ github.run_id }}-a${{ github.run_attempt }}
-          path: openbank-admin-ui/build/test-intelligence/run.json
-          retention-days: 30
-
-      - name: Publish latest Admin UI test evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-intelligence-openbank-admin-ui
-          path: |
-            openbank-admin-ui/build/test-intelligence/run.json
-            openbank-admin-ui/build/test-results/**/*.xml
-            openbank-admin-ui/build/test-results/e2e/sidebar-navigation-*.json
-          retention-days: 14
-          overwrite: true
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        # `always() &&` is load-bearing. A step `if:` that names no status-check function is
-        # implicitly ANDed with success(), so `browser_e2e.outcome == 'failure'` could never hold:
-        # the E2E step has no continue-on-error, so its failure puts the job in a failed state and
-        # every later plain-`if:` step is skipped. Measured on five main runs (21590f0e8, bebbfc4fd,
-        # 8713dc4ba, 8db73dbbd, d57a02b6f): e2e=failure, the always() envelope step beside this one
-        # ran, and this upload was skipped — so the report existed for exactly the runs that did not
-        # need it. The three sibling `outcome == 'failure'` guards in dependency-review.yml and
-        # security.yml are correct as written because those steps DO set continue-on-error.
+          name: ui-results-e2e-${{ matrix.shard }}
+          path: openbank-admin-ui/build/test-results
+          retention-days: 1
+          if-no-files-found: ignore
+      - name: Hand over Playwright report (failed shard only)
+        # `always() &&` is load-bearing: without a status function the `if:` is ANDed with
+        # success(), so an outcome == 'failure' guard could never hold (see the history of the
+        # report upload this replaces). The HTML report is written on every run, so gate on failure.
         if: always() && steps.browser_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: ui-report-e2e-${{ matrix.shard }}
           path: openbank-admin-ui/playwright-report/
-          retention-days: 7
+          retention-days: 1
 
   # Gate job — always runs, maps to the "Admin UI" required check name.
   # Passes when ui-build succeeded or was skipped (no UI changes); fails when
@@ -510,12 +550,104 @@ jobs:
           cache-dependency-path: openbank-admin-ui/package-lock.json
       - name: Install
         run: npm ci --no-audit --no-fund
+      # The ONLY unit + integration pass (ui-build no longer repeats it), so it also writes the
+      # junit report the Test Intelligence envelope reads.
       - name: Test with coverage floors
-        run: npm run test -- --coverage --coverage.reporter=text-summary
+        run: npm run test -- --coverage --coverage.reporter=text-summary --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
+      - name: Hand over unit results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-results-unit
+          path: openbank-admin-ui/build/test-results
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # Test Intelligence envelope for the Admin UI, built once from every producer's results. It used
+  # to be the tail of `ui-build`, where the unit, E2E and visual reports all lived. Advisory by
+  # construction (continue-on-error on every step): a missing observation must never gate the
+  # suite it observes, so this job is deliberately NOT in the `Admin UI` verdict's needs.
+  ui-evidence:
+    name: Admin UI test evidence
+    needs: [changes-ui, ui-build, ui-e2e, ui-coverage]
+    if: always() && needs.changes-ui.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Collect producer results
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-results-*
+          path: ${{ runner.temp }}/ui-results
+      - name: Collect failed-shard Playwright reports
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-report-e2e-*
+          merge-multiple: true
+          path: openbank-admin-ui/playwright-report
+      - name: Assemble results where the collector looks
+        continue-on-error: true
+        run: |
+          mkdir -p openbank-admin-ui/build/test-results openbank-admin-ui/build/visual-results
+          for d in "$RUNNER_TEMP"/ui-results/ui-results-*; do
+            [ -d "$d" ] || continue
+            case "$d" in
+              */ui-results-visual) cp -R "$d"/. openbank-admin-ui/build/visual-results/ ;;
+              *) cp -R "$d"/. openbank-admin-ui/build/test-results/ ;;
+            esac
+          done
+          find openbank-admin-ui/build -type f | sort
+      - name: Build Admin UI Test Intelligence envelope
+        continue-on-error: true
+        working-directory: openbank-admin-ui
+        run: |
+          DIAGNOSTIC_ARGS=()
+          if [ -d playwright-report ] && [ -n "$(ls -A playwright-report)" ]; then
+            DIAGNOSTIC_ARGS+=(--browser-report-dir playwright-report)
+          fi
+          if [ -f build/visual-results/visual.xml ]; then
+            DIAGNOSTIC_ARGS+=(--visual-report build/visual-results/visual.xml
+              --visual-diff-artifact "visual-diff-${{ github.run_id }}-a${{ github.run_attempt }}")
+          fi
+          python3 ../.github/scripts/collect-test-run-evidence.py \
+            --service . --component openbank-admin-ui --out build/test-intelligence/run.json \
+            "${DIAGNOSTIC_ARGS[@]}"
+      - name: Retain failed-shard Playwright report under the name the envelope cites
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Retain Admin UI test evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-run-openbank-admin-ui-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run.json
+          retention-days: 30
+      - name: Publish latest Admin UI test evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-openbank-admin-ui
+          path: |
+            openbank-admin-ui/build/test-intelligence/run.json
+            openbank-admin-ui/build/test-results/**/*.xml
+            openbank-admin-ui/build/test-results/e2e/sidebar-navigation-*.json
+          retention-days: 14
+          overwrite: true
 
   ui:
     name: Admin UI
-    needs: [changes-ui, ui-build, ui-coverage, ui-rbac-contract]
+    needs: [changes-ui, ui-build, ui-e2e, ui-coverage, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-slim
     timeout-minutes: 2
@@ -525,6 +657,7 @@ jobs:
         env:
           RESULT: ${{ needs.ui-build.result }}
           COVERAGE_RESULT: ${{ needs.ui-coverage.result }}
+          E2E_RESULT: ${{ needs.ui-e2e.result }}
           DETECTION_RESULT: ${{ needs.changes-ui.result }}
           UI_CHANGED: ${{ needs.changes-ui.outputs.changed }}
           RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
@@ -565,11 +698,22 @@ jobs:
             echo "::error::Admin UI changed but its build did not succeed ($RESULT)."
             exit 1
           fi
+          # Every E2E shard must pass. `needs.ui-e2e.result` is the matrix aggregate, so one failed,
+          # cancelled or never-started shard cannot read as success; `skipped` while the UI changed
+          # means the job was removed upstream and fails closed like the build does.
+          if [ "$UI_CHANGED" = "true" ] && [ "$E2E_RESULT" != "success" ]; then
+            if [ "$E2E_RESULT" = "cancelled" ] && [ "$EVENT" = "push" ]; then
+              echo "::warning::Admin UI E2E shards were CANCELLED by a newer push to this ref (#2185)."
+            else
+              echo "::error::Admin UI changed but its E2E shards did not all pass ($E2E_RESULT)."
+              exit 1
+            fi
+          fi
           if [ "$UI_CHANGED" = "true" ] && [ "$COVERAGE_RESULT" != "success" ]; then
             if [ "$COVERAGE_RESULT" = "cancelled" ] && [ "$EVENT" = "push" ]; then
               echo "::warning::Admin UI coverage was CANCELLED by a newer push to this ref (#2185)."
             else
-              echo "::error::Admin UI changed but its coverage floors did not pass ($COVERAGE_RESULT, ADR-0370 U3)."
+              echo "::error::Admin UI changed but its unit tests or coverage floors did not pass ($COVERAGE_RESULT, ADR-0370 U3)."
               exit 1
             fi
           fi
@@ -628,12 +772,16 @@ jobs:
       actions: read       # readiness R8 verifies the exact api-fuzz run artifact
       contents: read
       pull-requests: read
-    needs: [agent-admission, ruleset-evidence]
-    # Missing evidence must produce NOT_EVALUATED in the gate report while the
-    # independent governance checks still run. Admission refusal still blocks all.
-    if: always() && needs.agent-admission.outputs.proceed == 'true'
+    # Shards start beside `ruleset-evidence`, not after it (#11442): only one gate
+    # (ruleset-bypass-actors, lint shard) reads the snapshot, and that shard receives it
+    # itself just before `Run gates`. Admission stays a hard dependency: a refused or
+    # failed admission skips every shard, and `validate` turns that skip into a red.
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The lint shard may now wait on the trusted producer inside the job (the receiver's own
+    # deadline is 30 min, the step below caps it at 32), so it gets that wait on top of 15.
+    timeout-minutes: ${{ matrix.slug == 'lint-supplychain-security' && 47 || 15 }}
     strategy:
       # Never fail-fast: one red shard must not hide the state of the other seven, or a PR
       # gets a one-gate-at-a-time debugging loop instead of the whole picture in one run.
@@ -682,7 +830,6 @@ jobs:
       # Dependabot cannot read Actions secrets; the reviewed public id remains available.
       # Missing or incorrect ids still fail the guard; retain the legacy secret fallback.
       GITOPS_APP_ID: ${{ vars.GITOPS_APP_ID || secrets.GITOPS_APP_ID }}
-      RULESET_BYPASS_SNAPSHOT: ${{ needs.ruleset-evidence.outputs.snapshot }}
       # run-gates.py traces every self-test it runs and fails one that reads a repo file its
       # `selftest_inputs` does not declare (selftest_input_trace.py). `require`: an untraceable
       # runner fails loudly instead of silently checking nothing.
@@ -693,14 +840,6 @@ jobs:
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
-
-      # A failed-job rerun preserves successful dependency outputs. Its snapshot
-      # belongs to the previous attempt and must never be relabelled or accepted.
-      # Only the consuming shard receives the new attempt's trusted artifact;
-      # the other shards and the privileged collector remain unchanged.
-      - uses: ./.github/actions/receive-ruleset-evidence
-        id: current-evidence
-        if: github.run_attempt > 1 && matrix.slug == 'lint-supplychain-security'
 
       - name: Install strace (self-test input tracing)
         run: |
@@ -867,9 +1006,20 @@ jobs:
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
         run: bash .github/scripts/install-promtool.sh
 
+      # Only the consuming shard receives the trusted artifact, bound to THIS run attempt (a
+      # rerun gets the new attempt's evidence, never a relabelled earlier one). It runs last
+      # before the gates so the setup above overlaps the producer. Missing evidence must yield
+      # NOT_EVALUATED for ruleset-bypass-actors while the independent gates still run, hence
+      # the `Run gates` condition; `validate` separately requires `ruleset-evidence` success.
+      - uses: ./.github/actions/receive-ruleset-evidence
+        id: current-evidence
+        if: matrix.slug == 'lint-supplychain-security'
+        timeout-minutes: 32
+
       - name: Run gates
+        if: ${{ !cancelled() && (success() || steps.current-evidence.outcome == 'failure') }}
         env:
-          RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}
+          RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot }}
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
           # ADR-0389: scales SAFE gates' budget/timeout; run-gates.py validates it (1.0..4.0, else 1.0).
           GATE_BUDGET_MULTIPLIER: ${{ vars.GATE_BUDGET_MULTIPLIER }}
@@ -915,7 +1065,7 @@ jobs:
   # Detection, cross-package guards and the golden-path suite remain merge-blocking.
   validate:
     name: Validate manifests
-    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]
+    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-e2e, ui-coverage, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-slim
     timeout-minutes: 2

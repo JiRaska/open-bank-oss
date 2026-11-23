@@ -46,6 +46,27 @@ flow:
   alias: openbank-mcp-fresh-passkey
   id: 6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001
 
+# ADR-0383 D4: the RFC 8693 exchange mcp-service performs for every customer read. DERIVED into the
+# realm by gen-mcp-realm-clients.py and asserted by the parity gate:
+#   * `requester` is mcp-service's confidential customers-realm client. Its client_id MUST equal
+#     `audience` above: Keycloak's standard exchange only accepts a subject token whose `aud` names
+#     the requesting client, and every MCP client's tokens carry exactly that audience. Exchange is
+#     enabled on THIS client only (every MCP client keeps it explicitly false), it has no flow and
+#     no service account, and its tokens live at most 60 s.
+#   * each `audiences` entry is one downstream service and the ONE read scope that adds it to the
+#     exchanged token's `aud`. mcp-service's `DownstreamAudience` enum must name the same pairs
+#     (McpExchangeAllowlistParityTest).
+exchange:
+  requester:
+    client_id: openbank-mcp-service
+    secret_placeholder: __MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET__
+    access_token_lifespan: 60
+  audiences:
+    - client_id: openbank-balance-service
+      scope: mcp-customer-balance-read
+    - client_id: openbank-transaction-service
+      scope: mcp-customer-transaction-read
+
 clients:
   - client_id: mcp-hosted-reference
     tier: H

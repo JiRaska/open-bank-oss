@@ -108,6 +108,22 @@ The only caller in the tree today is admin-ui's OBO route, which exchanges for `
 
 If the OIDC issuer cannot be reached, Quarkus OIDC fails a presented token with HTTP 500 rather than 401. That is fail-closed (nothing reaches the endpoint) and is left as is here.
 
+## Staff-root Authorization allowlist (#16590, #17099)
+
+On the staff root `/mcp`, an `Authorization` header is optional, but if it is present it must be exactly
+**one** header whose whole value is `Bearer <b64token>` (RFC 6750 §2.1). The scheme is case-insensitive,
+followed by a single space and `[A-Za-z0-9-._~+/]+=*`, with nothing else. Staff Keycloak JWTs fit this.
+
+| Request | Answer |
+|---|---|
+| No `Authorization` header, or one valid `Bearer <b64token>` | Normal handling (audience check, then dispatch) |
+| A value starting with the `DPoP` scheme (any case, any whitespace), or a valid Bearer issued by the customers realm | 401 `invalid_token`, pointing the client at `/customer/mcp` |
+| Anything else: comma lists, tabs, extra or non-ASCII spaces, other schemes such as `Basic`, an empty token | 400 `invalid_request` |
+| More than one `Authorization` header, an unreadable header, or no injected request | 400 `invalid_request` (fail closed) |
+
+The check runs before the audience check and the rate limiter. A 400 here means the client sent a malformed
+credential, not that the token was rejected.
+
 ## Throttling and request bounds (ADR-0383)
 
 `McpRateLimiter` runs BEFORE the policy decision, so a flood of calls that would be denied anyway costs no PDP round trip.
@@ -141,6 +157,15 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 `authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
+
+## Customer reads: grant lookup and token exchange (ADR-0383 D3/D4)
+
+With the customer channel on, an admitted customer sees only the read tools its active `MCP_CLIENT` grants allow: `list_accounts` (accounts shared with this client), `get_balance` (`ACCOUNT_READ_BALANCES`) and `list_transactions` (`ACCOUNT_READ_TRANSACTIONS`). There are no write tools on this channel.
+
+- **Grant lookup.** On every `tools/list` and `tools/call`, mcp-service asks delegation-service `POST /api/v1/delegations/mcp-client/resolve` for the grants of the triple (the token's `party_id`, its `azp`, its `cnf.jkt`), on its own `m2m` identity. Only positive answers are cached, for `mcp.customer.grant-cache-ttl` (`MCP_CUSTOMER_GRANT_CACHE_TTL`, default `PT15S`, at most `PT30S`), so a revoked grant stops working within that bound. A lookup failure is a refusal (`Authorization unavailable`), never a stale or empty answer reused.
+- **Token exchange.** Each read exchanges the customer's own token at the customers realm (RFC 8693) for a token with one audience (`openbank-balance-service` or `openbank-transaction-service`) and one read scope, living at most 60 s. The requester client is `mcp.customer.exchange.client-id` (default `openbank-mcp-service`); its secret is read only from `MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET` (OpenBao `keycloak/mcp-service-customer-exchange`). With no secret set, every customer read is refused. The realm side (requester, audience clients, scopes) is derived from the allowlist's `exchange:` block by `gen-mcp-realm-clients.py` and held to it by the `mcp-client-realm-parity` gate.
+- **Audit.** Every customer call is audited under the customer's subject; an allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 drops the cached grant.
+- **Not yet working end to end:** the downstream services accept only the staff realm today, so exchanged customer tokens are refused there until ADR-0383 P5 lands. Every failure on this path is a refusal.
 
 ## Customer-channel Valkey (`mcp-valkey`)
 
@@ -244,3 +269,13 @@ from a peer header.
 through the `McpMetricsPort`; the staff channel's counters are unchanged. The admin UI
 reads the same series through the delegations MCP-channel view. Alert thresholds for the
 channel live with the fleet alerting rules, not in this service.
+
+### Why a tool call failed: `openbank_mcp_tool_call_failures_total`
+
+The tool-call counter records `result="FAILURE"` without a reason, so a client's bad arguments
+and a downstream fault look the same there. Every failed `tools/call` (and a PDP outage,
+`decision=UNAVAILABLE`) also increments `openbank_mcp_tool_call_failures_total{tool,kind}`,
+where `kind` is a closed set: `invalid_params` (client error), `unavailable` (an advertised tool
+with nothing behind it yet) and `error` (a server-side fault, also the default for any unmapped
+reason, and what a PDP outage maps to). The customer-channel availability SLO
+(`pyrra-slo-mcp-customer.yaml`) counts `kind="error"` only.

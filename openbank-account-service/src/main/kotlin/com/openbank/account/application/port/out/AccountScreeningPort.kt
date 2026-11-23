@@ -31,6 +31,8 @@ data class SanctionsScreenResult(val status: String, val matchScore: Double, val
     }
 }
 
+enum class SanctionsEntityType { INDIVIDUAL, ORGANIZATION }
+
 /**
  * Outbound port to the sanctions service synchronous screen endpoint.
  * Fails closed: if the service is unreachable, [AccountScreeningUnavailableException] is thrown
@@ -41,5 +43,10 @@ interface AccountSanctionsScreeningPort {
      * Screen [name] against global sanctions lists. [idempotencyKey] identifies this attempt;
      * [subjectId] binds any compliance clearance to the party independently of that key.
      */
-    suspend fun screen(name: String, idempotencyKey: String, subjectId: String): SanctionsScreenResult
+    suspend fun screen(
+        name: String,
+        idempotencyKey: String,
+        subjectId: String,
+        entityType: SanctionsEntityType = SanctionsEntityType.INDIVIDUAL,
+    ): SanctionsScreenResult
 }

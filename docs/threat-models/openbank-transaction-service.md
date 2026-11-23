@@ -710,3 +710,13 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-22 - Bounded lock wait in partition DDL (follow-up to #17101)
+
+STRIDE-D (availability): partition roll-forward DDL needs ACCESS EXCLUSIVE on `transactions`; with no
+`lock_timeout` a long transaction holding any lock on the parent made the DDL queue and every
+one of the bookings queue behind it. The DDL now runs under a transaction-local `lock_timeout`
+(`openbank.transaction.partition.lock-timeout`, default 5s, must be > 0) and fails instead of waiting. No new
+caller, endpoint, data or privilege. Residual risk: a lock held longer than the next tick means
+repeated failed passes; no success is recorded, so the existing liveness alert fires. Rollback:
+revert the change.

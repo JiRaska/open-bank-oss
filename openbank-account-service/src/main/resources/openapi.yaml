@@ -22,7 +22,7 @@ info:
   # 1.23 -> 1.24 (ADR-0341 D1, #668): additive — the Account response exposes the optional
   # productRevision pin (absent on accounts opened before it existed); open-account documents
   # 422 PRODUCT_REVISION_NOT_PUBLISHED and 503 PRODUCT_CATALOG_UNAVAILABLE (fail-closed on the pin).
-  version: 1.28.0
+  version: 1.30.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -1215,6 +1215,14 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    AccountBookingContext:
+      type: object
+      required: [bankId, establishmentId, hostCountry, mode]
+      properties:
+        bankId: { type: string, format: uuid }
+        establishmentId: { type: string, format: uuid }
+        hostCountry: { type: string, pattern: '^[A-Z]{2}$' }
+        mode: { type: string, enum: [FOS, BRANCH] }
     OwnershipVerificationRequest:
       type: object
       required: [iban, partyId]
@@ -1509,6 +1517,12 @@ components:
       type: object
       required: [partyId, productId, accountType, currencyCode, legalName]
       properties:
+        passportGrantId:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Optional grant reference. Catalogue requires independent verified subject evidence.
+            Passport accounts open in PENDING_ACTIVATION and require a separate admission to activate.
         partyId:
           type: string
           format: uuid
@@ -1603,6 +1617,8 @@ components:
           type: string
           format: date
           nullable: true
+        bookingContext:
+          $ref: '#/components/schemas/AccountBookingContext'
         productRevision:
           $ref: '#/components/schemas/ProductRevisionPin'
         standing:

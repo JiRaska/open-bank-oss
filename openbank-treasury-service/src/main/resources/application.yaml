@@ -397,6 +397,12 @@ authz:
         enabled: false
       accrual:
         enabled: false
+      funding-check:
+        # Tests stub the ledger read surface per case; a test that exercises the funding guard
+        # enables it in its own profile (FundingLineRaceIT).
+        enabled: false
+      funding-monitor:
+        enabled: false
       posting-intent:
         # Tests drive reconcilePostingIntents directly; the cron never fires.
         reconcile-cron: "0 0 0 1 1 ? 2099"

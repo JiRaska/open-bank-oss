@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.22.1...treasury-service-v0.23.0) (2026-11-23)
+
+
+### Features
+
+* **treasury:** pre-booking funding check and TreasuryFundingExceeded alert ([#16827](https://github.com/JiRaska/open-bank-oss/issues/16827)) ([6a3cc97](https://github.com/JiRaska/open-bank-oss/commit/6a3cc970dd2be8560003c4b6af8f0e671fa9a1aa))
+
 ## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.22.0...treasury-service-v0.22.1) (2026-11-16)
 
 

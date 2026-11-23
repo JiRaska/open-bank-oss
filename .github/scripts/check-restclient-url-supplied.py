@@ -35,6 +35,9 @@ import yaml
 REPO = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = pathlib.Path(__file__).with_name("restclient-url-supplied-baseline.txt")
 LOCAL_FALLBACK = re.compile(r"^\$\{([A-Z0-9_]+):https?://(localhost|127\.0\.0\.1)[:/]")
+# A bare literal (`url: http://localhost:8126`) is the same defect with no named env var: only the
+# direct SmallRye mapping QUARKUS_REST_CLIENT_<KEY>_URL can override it.
+LOCAL_LITERAL = re.compile(r"^https?://(localhost|127\.0\.0\.1)[:/]")
 
 
 def _clients(doc) -> dict:
@@ -54,9 +57,12 @@ def local_url_envs(app_yaml: pathlib.Path) -> dict[str, str]:
             continue
         if isinstance(prod.get(key), dict) and prod[key].get("url"):
             continue
-        m = LOCAL_FALLBACK.match(str(cfg.get("url", "")))
+        url = str(cfg.get("url", ""))
+        m = LOCAL_FALLBACK.match(url)
         if m:
             out[str(key)] = m.group(1)
+        elif LOCAL_LITERAL.match(url):
+            out[str(key)] = direct_env(str(key))
     return out
 
 
@@ -133,6 +139,15 @@ def self_test() -> int:
         good = scan(root) == []
         ok &= good
         print(f"  [{'ok' if good else 'FAIL'}] the env set on the service's own container clears it")
+        (res / "application.yaml").write_text("quarkus:\n  rest-client:\n    c-svc:\n      url: http://localhost:2\n")
+        literal = scan(root) == [
+            "openbank-demo-service: quarkus.rest-client.c-svc.url falls back to localhost and gitops never sets "
+            "QUARKUS_REST_CLIENT_C_SVC_URL"
+        ]
+        manifest.write_text(dep.format(env="            - name: QUARKUS_REST_CLIENT_C_SVC_URL\n              value: http://c\n"))
+        literal &= scan(root) == []
+        ok &= literal
+        print(f"  [{'ok' if literal else 'FAIL'}] a literal localhost URL is flagged until QUARKUS_REST_CLIENT_<KEY>_URL is set")
         manifest.unlink()
         gone = scan(root) == []
         ok &= gone
