@@ -47,7 +47,9 @@ interface McpBalanceGrantRestClient {
 @ApplicationScoped
 class McpBalanceGrantClient(@RestClient private val client: McpBalanceGrantRestClient) {
     suspend fun isActive(request: McpBalanceGrantRequest): Boolean = try {
-        client.check(request.grantId.toString(), request).awaitSuspending().use { it.status == Response.Status.NO_CONTENT.statusCode }
+        client.check(request.grantId.toString(), request).awaitSuspending().use {
+            it.status == Response.Status.NO_CONTENT.statusCode
+        }
     } catch (e: WebApplicationException) {
         if (e.response?.status != Response.Status.FORBIDDEN.statusCode) throw e
         e.response.close()
