@@ -162,7 +162,11 @@ class DelegationGrantResolvePactConsumerTest {
                 // Value, not type: the tool refuses any state but PENDING.
                 o.stringValue("status", "PENDING")
                 o.booleanValue("deduplicated", false)
-                o.datetime("expiresAt", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+                o.stringMatcher(
+                    "expiresAt",
+                    """\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})""",
+                    "2026-11-20T10:00:00Z",
+                )
                 o.stringType("summary", "Proposed 125.50 CZK")
             }.build(),
         )

@@ -26,10 +26,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * ADR-0383 D1, customer channel OFF: any customer credential is refused 401 before dispatch, and
- * the check FAILS CLOSED — a request whose headers cannot be read is refused, never admitted.
+ * #16590 staff root: the DPoP scheme is detected per RFC 7235 (case-insensitive, ended by SP, HTAB or
+ * end of value) and refused 401; an `Authorization` header that cannot be read is refused 400 — FAIL
+ * CLOSED, never served as anonymous. Ported from #16800's McpStaffRootCredentialParsingTest.
  */
-class McpEndpointCustomerCredentialTest {
+class McpStaffRootCredentialParsingTest {
     private val mapper = jacksonObjectMapper()
 
     private fun endpoint(request: HttpServerRequest?): McpEndpoint {
@@ -74,37 +75,84 @@ class McpEndpointCustomerCredentialTest {
 
     private val call = rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>()))
 
+    private fun request(vararg authorization: String) =
+        TestHttpRequests.withHeaders(*authorization.map { "Authorization" to it }.toTypedArray())
+
+    private fun status(vararg authorization: String) =
+        endpoint(request(*authorization)).handle(rpc("tools/list")).status
+
     @Test
-    fun `control - a request with no customer credential is dispatched`() {
-        assertThat(endpoint(TestHttpRequests.withHeaders()).handle(rpc("tools/list")).status).isEqualTo(200)
+    fun `control - no Authorization header is dispatched`() {
+        assertThat(status()).isEqualTo(200)
     }
 
     @Test
-    fun `a request whose headers cannot be read is refused 401, never admitted (fail closed)`() {
-        assertThat(endpoint(request = null).handle(call).status).isEqualTo(401)
+    fun `a legitimate Bearer JWT passes, the scheme case-insensitively`() {
+        listOf("Bearer $JWT", "bearer $JWT", "BEARER $JWT", "Bearer abc+/~-._=", "Bearer abc==").forEach {
+            assertThat(status(it)).describedAs(it).isEqualTo(200)
+        }
     }
 
     @Test
-    fun `an Authorization header that throws on read is refused, never admitted`() {
+    fun `with no HTTP request in scope the staff root refuses 400 (fail closed)`() {
+        assertThat(endpoint(request = null).handle(rpc("tools/list")).status).isEqualTo(400)
+    }
+
+    @Test
+    fun `an Authorization header that throws on read is refused 400, never admitted`() {
         val throwing = mockk<HttpServerRequest>(relaxed = true) {
+            every { headers() } throws IllegalStateException("broken request")
             every { getHeader(any<String>()) } throws IllegalStateException("broken request")
         }
-        assertThat(endpoint(throwing).handle(call).status).isEqualTo(401)
+        listOf(call, rpc("tools/list")).forEach { body ->
+            assertThat(endpoint(throwing).handle(body).status).isEqualTo(400)
+        }
     }
 
     @Test
-    fun `the DPoP scheme is refused case-insensitively with any RFC 7235 whitespace`() {
-        listOf("DPoP token", "DPoP\ttoken", "dpop token", "  DPOP\ttoken").forEach { header ->
-            val status = endpoint(
-                TestHttpRequests.withHeaders("Authorization" to header),
-            ).handle(rpc("tools/list")).status
-            assertThat(status).describedAs(header).isEqualTo(401)
-        }
-        val bearer = endpoint(TestHttpRequests.withHeaders("Authorization" to "Bearer x")).handle(rpc("tools/list"))
-        assertThat(bearer.status).isEqualTo(200)
+    fun `the DPoP scheme in any case and after any whitespace is the customer refusal 401`() {
+        listOf(
+            "DPoP token",
+            "DPoP\ttoken",
+            "dpop token",
+            "  DPOP\ttoken",
+            "DPoP",
+            "dPoP ",
+            "DPoP\u00A0x",
+            "DPoP\u2003x",
+        )
+            .forEach { assertThat(status(it)).describedAs(it).isEqualTo(401) }
+    }
+
+    @Test
+    fun `every shape outside Bearer b64token is malformed 400`() {
+        listOf(
+            "Bearer a, DPoP b",
+            "Bearer x, Bearer y",
+            "Bearer\u00A0$JWT",
+            "Bearer\u2003$JWT",
+            "Bearer\t$JWT",
+            "Bearer  $JWT",
+            " Bearer $JWT",
+            "Bearer $JWT ",
+            "Bearer ",
+            "Bearer a=b",
+            "Basic dXNlcjpwYXNz",
+            "DPoPx token",
+            "Token x",
+        ).forEach { assertThat(status(it)).describedAs(it).isEqualTo(400) }
+    }
+
+    @Test
+    fun `two Authorization headers are refused 400`() {
+        assertThat(status("Bearer a", "Bearer b")).isEqualTo(400)
     }
 
     private object NoSessions : AgentSessionRepository() {
         override suspend fun findActiveByJti(jti: String, asOf: java.time.Instant): AgentSessionEntity? = null
+    }
+
+    private companion object {
+        const val JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZ2VudDp0ZXN0In0.c2lnbmF0dXJlLXZhbHVl-_"
     }
 }

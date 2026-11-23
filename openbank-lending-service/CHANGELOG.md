@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.52.0...lending-service-v0.53.0) (2026-11-22)
+
+
+### Features
+
+* **lending,product-catalog:** fence and recover branch loan commitments ([#16587](https://github.com/JiRaska/open-bank-oss/issues/16587)) ([504a164](https://github.com/JiRaska/open-bank-oss/commit/504a16408662f92403944fcc5015ffb5a07b18f2))
+
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.51.0...lending-service-v0.52.0) (2026-11-22)
+
+
+### Features
+
+* **lending,product-catalog:** recover FOS signing and disbursement ([#16539](https://github.com/JiRaska/open-bank-oss/issues/16539)) ([491fd26](https://github.com/JiRaska/open-bank-oss/commit/491fd26e456954b41a0959306b8bd031f35626d5))
+
 ## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.50.0...lending-service-v0.51.0) (2026-11-22)
 
 

@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   report:
+    if: github.event_name != 'schedule' || (vars.ALERT_NOISE_WEEKLY_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: Report flapping alert rules
     runs-on: ubuntu-latest
     timeout-minutes: 10

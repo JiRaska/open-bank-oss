@@ -83,7 +83,11 @@ class ProductCatalogPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        withCatalogPactConsumerIdentity(testIdentityAssociation, context?.consumer?.name) {
+        withCatalogPactConsumerIdentity(
+            testIdentityAssociation,
+            context?.consumer?.name,
+            context?.interaction?.description,
+        ) {
             context?.verifyInteraction()
         }
     }
@@ -202,4 +206,13 @@ class ProductCatalogPactProviderVerificationTest {
 
     @State("a published pension-savings revision with a 0.80 percent management fee exists")
     fun publishedPensionFundFeeRevisionExists() = catalogFixtures.publishedPensionFundFeeRevisionExists()
+
+    @State("a consumed account-opening passport permit exists")
+    fun consumedAccountPassportPermitExists() = catalogFixtures.consumedAccountPassportPermitExists()
+
+    @State("an approved FOS passport grant with live subject evidence exists")
+    fun approvedPassportGrantWithEvidenceExists() = catalogFixtures.consumedAccountPassportPermitExists()
+
+    @State("no consumed passport permit exists for the operation")
+    fun noConsumedPassportPermitExists() = catalogFixtures.noConsumedPassportPermitExists()
 }

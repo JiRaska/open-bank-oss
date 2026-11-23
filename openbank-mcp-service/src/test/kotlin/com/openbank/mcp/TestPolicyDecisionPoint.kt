@@ -22,9 +22,8 @@ import jakarta.enterprise.inject.Alternative
 @Alternative
 @Priority(1)
 class TestPolicyDecisionPoint : PolicyDecisionPoint {
-    override suspend fun allow(query: AuthzQuery): AuthzDecision {
-        if (query.attributes["channel"] == CUSTOMER_CHANNEL) return customer(query)
-        return staff(query)
+    override suspend fun allow(query: AuthzQuery): AuthzDecision = queryCount.incrementAndGet().let {
+        if (query.attributes["channel"] == CUSTOMER_CHANNEL) customer(query) else staff(query)
     }
 
     /**
@@ -83,5 +82,8 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
          */
         @Volatile
         var allowEverything: Boolean = false
+
+        /** Every PDP query this JVM made; a test proving "never dispatched" reads the delta. */
+        val queryCount = java.util.concurrent.atomic.AtomicInteger()
     }
 }

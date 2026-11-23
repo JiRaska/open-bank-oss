@@ -98,6 +98,10 @@ class TreasuryServiceProducer {
         intentGrace: java.time.Duration,
         @ConfigProperty(name = "openbank.treasury.posting-intent.claim-batch", defaultValue = "100")
         claimBatch: Int,
+        fundingPort: com.openbank.treasury.application.port.out.FundingPort,
+        // #12115: on by default — a placement is booked only against a verified contra balance.
+        @ConfigProperty(name = "openbank.treasury.funding-check.enabled", defaultValue = "true")
+        fundingCheckEnabled: Boolean,
     ): TreasuryDealUseCase {
         // The grace's bound against the ledger timeouts is checked at BOOT by PostingIntentGraceCheck.
         return TreasuryDealService(
@@ -125,6 +129,10 @@ class TreasuryServiceProducer {
             maxResumeAge,
             intentGrace,
             claimBatch,
+            fundingPort.takeIf { fundingCheckEnabled },
+            com.openbank.treasury.application.port.out.FundingMeter { ccy ->
+                meters.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
+            },
         )
     }
 

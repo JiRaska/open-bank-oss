@@ -153,7 +153,15 @@ class McpEndpoint(
             return@lazy null
         }
         customerChannel.admission?.let { admission ->
-            McpCustomerBranch(admission, auditor, metrics, rateLimiter, customerGrants, customerTools) {
+            McpCustomerBranch(
+                admission,
+                auditor,
+                metrics,
+                rateLimiter,
+                customerGrants,
+                customerTools,
+                shared = customerChannel.sharedThrottles,
+            ) {
                 if (::clientAddress.isInitialized) clientAddress.key(httpRequest) else ClientAddressKey.UNKNOWN
             }
         }
@@ -184,42 +192,56 @@ class McpEndpoint(
                 ) ?: branch.refuseNonCustomerToken()
             } ?: Response.status(Response.Status.NOT_FOUND).build()
         } else {
-            // ADR-0383 D1: with the channel OFF no branch admits a customers-realm token, and it must
-            // never fall through to the anonymous path either: refused 401 invalid_token. That covers
-            // a `DPoP`-scheme credential too: the staff tenant only reads `Bearer`, so such a request
-            // reaches here with NO identity and would otherwise be served as anonymous.
-            audienceRefusal.takeIf { customerBranch == null && presentsCustomerCredential }
-                ?.respond(method, params, McpAudienceRefusal.Reason.CUSTOMER_CHANNEL_OFF, refusalSource)
-                ?: audienceRefusal.takeIf { callerResolver.presentsForeignAudience() }?.respond(method, params)
+            staffPreDispatch(method, params)
         }
 
     /**
-     * True when the request presents a customer credential: a customers-realm token, or any
-     * `DPoP`-scheme Authorization header (RFC 7235: the scheme is case-insensitive and followed by
-     * whitespace). FAIL CLOSED: a request whose headers cannot be read counts as presenting one.
+     * #16590 defence in depth, as an ALLOWLIST (review of #17099). On the staff root an
+     * `Authorization` header, when present, must be exactly ONE header whose whole value is
+     * `Bearer <b64token>` (RFC 6750 §2.1: scheme case-insensitive, one SP, b64token, nothing else).
+     * Anything else is refused before the audience check: a DPoP-looking credential (or a
+     * customers-realm `iss` on a valid Bearer) gets the 401 that points at the customer root; every
+     * other shape (comma lists, tabs, double spaces, non-ASCII whitespace, other schemes, several
+     * headers, an unreadable header) is malformed, 400 `invalid_request`. FAIL CLOSED throughout.
+     */
+    private fun staffPreDispatch(method: String, params: JsonNode): Response? {
+        val authorization = authorizationHeaders() ?: return audienceRefusal.respondUnreadableCredential(method)
+        if (authorization.size > 1) return audienceRefusal.respondAmbiguousCredential(method)
+        val value = authorization.firstOrNull()
+        val customerCredential = callerResolver.presentsCustomerRealmToken() ||
+            (value != null && DPOP_LOOKING.containsMatchIn(value))
+        return when {
+            customerCredential -> audienceRefusal.respondCustomerOnStaffRoot(
+                method,
+                params,
+                if (customerBranch == null) {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
+                } else {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
+                },
+                callerResolver.token.getClaim<String?>("azp"),
+            )
+            value != null && !STAFF_BEARER.matches(value) -> audienceRefusal.respondMalformedCredential(method)
+            callerResolver.presentsForeignAudience() -> audienceRefusal.respond(method, params)
+            else -> null
+        }
+    }
+
+    /**
+     * Every `Authorization` header value, or null — refused by the caller (fail closed) — when the
+     * request is absent or reading it THROWS. `httpRequest` is CDI-injected on every served request
+     * (`@Inject` below the class header); only a hand-built instance lacks it.
      */
     @Suppress("TooGenericExceptionCaught") // any failure to read the header must refuse, never admit
-    private val presentsCustomerCredential: Boolean
-        get() {
-            if (callerResolver.presentsCustomerRealmToken()) return true
-            if (!::httpRequest.isInitialized) return true
-            val authorization = try {
-                httpRequest.getHeader(AUTHORIZATION_HEADER)
-            } catch (e: Exception) {
-                log.warnf("refusing: Authorization header unreadable (%s)", e.javaClass.simpleName)
-                return true
-            } ?: return false
-            return DPOP_SCHEME.containsMatchIn(authorization)
+    private fun authorizationHeaders(): List<String>? {
+        if (!::httpRequest.isInitialized) return null
+        return try {
+            httpRequest.headers().getAll(AUTHORIZATION_HEADER).orEmpty()
+        } catch (e: Exception) {
+            log.warnf("refusing: Authorization header unreadable (%s)", e.javaClass.simpleName)
+            null
         }
-
-    /**
-     * The channel-off audit window key: the token subject if any, else the client NETWORK key
-     * ([tokenlessRefusalSource]: [ClientAddressKey] over the address [ClientAddressResolver] picks,
-     * so an IPv6 /64 shares one window and a forwarded header from an untrusted peer moves nothing).
-     */
-    private val refusalSource: String
-        get() = callerResolver.token.subject?.let { "sub:" + sha256(it) }
-            ?: tokenlessRefusalSource { clientAddress.key(httpRequest) }
+    }
 
     /** The staff root. Never runs the customer branch, whatever the request path says. */
     @POST
@@ -407,6 +429,15 @@ class McpEndpoint(
                 // ADR-0384 D1: the channel the resolver's admitting branch recorded, never a claim.
                 McpMetricsPort.ChannelTags(ctx.channel),
             )
+            // A PDP outage is DENIED + UNAVAILABLE: the platform failed to answer, so it is a server fault
+            // for an availability indicator even though no tool ran.
+            if (result == AuditResult.FAILURE || decision == McpCallAuditor.Decision.UNAVAILABLE) {
+                metrics.toolCallFailed(
+                    toolTag,
+                    McpMetricsPort.ToolFailureKind.of(reason, decision),
+                    McpMetricsPort.ChannelTags(ctx.channel),
+                )
+            }
         }
 
         // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
@@ -578,15 +609,17 @@ class McpEndpoint(
         /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
         private const val RATE_LIMITED = -32029
 
-        const val DPOP_HEADER = "DPoP"
-        const val AUTHORIZATION_HEADER = "Authorization"
-        val DPOP_SCHEME = Regex("^\\s*DPoP\\s", RegexOption.IGNORE_CASE)
+        private const val DPOP_HEADER = "DPoP"
+        private const val AUTHORIZATION_HEADER = "Authorization"
 
-        private fun sha256(value: String): String = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray(Charsets.UTF_8)).take(SOURCE_HASH_BYTES)
-            .joinToString("") { "%02x".format(it) }
+        /** RFC 6750 §2.1 `Bearer` credentials, whole value: one SP, b64token, nothing else. */
+        private val STAFF_BEARER = Regex("^[Bb][Ee][Aa][Rr][Ee][Rr] [A-Za-z0-9\\-._~+/]+=*$")
 
-        private const val SOURCE_HASH_BYTES = 8
+        /**
+         * A value that STARTS with the DPoP scheme under any whitespace (Unicode included): the
+         * customer refusal (401). Other non-allowlisted values — comma lists among them — are 400.
+         */
+        private val DPOP_LOOKING = Regex("^[\\s\\p{Z}]*DPoP([\\s\\p{Z},]|$)", RegexOption.IGNORE_CASE)
 
         private const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
 

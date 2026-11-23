@@ -213,7 +213,7 @@ class CustomerReadTools @Inject constructor(
             principal = Principal(id = caller.subject, type = HUMAN, roles = emptyList(), serviceAccount = false),
             action = tool.action,
             attributes = mapOf(
-                "channel" to PDP_CHANNEL,
+                "channel" to CustomerChannelAdmission.PDP_CHANNEL,
                 "client" to caller.clientId,
                 "tool" to tool.definition.name,
                 "grantedCapabilities" to granted.sorted(),
@@ -317,12 +317,6 @@ class CustomerReadTools @Inject constructor(
         /** The staff registry's action name for the same tool (`McpToolRegistry`), on this channel too. */
         const val PROPOSE_ACTION = "propose.payment"
 
-        /**
-         * The PDP's channel attribute, matched LITERALLY by `mcp_rest_ext.rego`. Deliberately not the
-         * metrics enum (`McpChannel.CUSTOMER`): that one serialises as `CUSTOMER`, which the policy
-         * never matches, so the channel's allow rules and its veto would both stop applying.
-         */
-        const val PDP_CHANNEL = "mcp-customer"
         private const val ACCOUNT_ID = "accountId"
         const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     }

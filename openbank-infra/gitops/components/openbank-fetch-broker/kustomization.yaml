@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - fetch-broker.yaml
+  - fetch-broker-opa-bundle.yaml
+  - browser-run-externalsecret.yaml
+  - networkpolicy-fetch-broker-egress.yaml
+  - network-policies.yaml

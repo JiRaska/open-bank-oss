@@ -56,6 +56,8 @@ internal class McpCustomerBranch(
     private val limiter: McpRateLimiter,
     private val grantCache: CustomerGrantCache,
     private val tools: CustomerReadTools,
+    /** The shared (Valkey) D5.3 budgets when configured; null = the in-process [limiter]. */
+    private val shared: CustomerChannelAdmission.Throttles? = null,
     /** The subject-less window key for this request ([ClientAddressResolver]). */
     private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
 ) {
@@ -91,26 +93,44 @@ internal class McpCustomerBranch(
             .build()
     }
 
-    /** ADR-0383 D5.3 budgets on the shared limiter; which run before the DPoP check is decided in admission. */
+    /**
+     * ADR-0383 D5.3 budgets — the shared Valkey windows when configured, else the in-process
+     * limiter; which run before the DPoP check is decided in admission. Every refusal is metered.
+     */
     private val throttles = object : CustomerChannelAdmission.Throttles {
-        override fun proofKey(thumbprint: String) =
-            refusal(limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
+        // With a shared store configured the local limiter is never consulted, not even as a fallback:
+        // a shared-store failure throws (503), it does not degrade to per-pod budgets.
+        override suspend fun proofKey(thumbprint: String) = metered(
+            if (shared != null) {
+                shared.proofKey(thumbprint)
+            } else {
+                reason(limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
+            },
+        )
 
-        override fun client(clientId: String) =
-            refusal(limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
+        override suspend fun client(clientId: String) = metered(
+            if (shared != null) {
+                shared.client(clientId)
+            } else {
+                reason(limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
+            },
+        )
 
-        override fun subject(subject: String, clientId: String) =
-            refusal(limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
+        override suspend fun subject(subject: String, clientId: String) = metered(
+            if (shared != null) {
+                shared.subject(subject, clientId)
+            } else {
+                reason(limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
+            },
+        )
     }
 
-    private fun refusal(outcome: McpRateLimiter.Outcome): String? =
-        outcome.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let {
-            metrics.requestThrottled(
-                McpMetricsPort.ThrottleSurface.TOOLS_CALL,
-                McpMetricsPort.ThrottleCaller.AUTHENTICATED,
-            )
-            it.reason ?: "rate limit exceeded"
-        }
+    private fun metered(reason: String?): String? = reason?.also {
+        metrics.requestThrottled(
+            McpMetricsPort.ThrottleSurface.TOOLS_CALL,
+            McpMetricsPort.ThrottleCaller.AUTHENTICATED,
+        )
+    }
 
     /**
      * A refusal writes at most ONE audit row per subject per minute (the same window the staff path
@@ -177,15 +197,7 @@ internal class McpCustomerBranch(
         val tool = McpInputBounds.echo(params.path("name").asText(""))
         val args = params.path("arguments")
         val known = grants as? Grants.Known ?: run {
-            audit(
-                ctx.agentId,
-                tool,
-                params,
-                (grants as Grants.Unknown).reason,
-                ctx.actChain,
-                decision = UNAVAILABLE,
-                startedAt = startedAt,
-            )
+            audit(ctx.agentId, tool, params, (grants as Grants.Unknown).reason, ctx.actChain, decision = UNAVAILABLE)
             return toolError(id, AUTHZ_UNAVAILABLE)
         }
         // The subject token of the D4 exchange is the customer's own token — the one admission just
@@ -198,7 +210,16 @@ internal class McpCustomerBranch(
             grantKey = known.key,
             sessionId = sessionOf(jwt),
         )
-        return respond(tools.call(tool, args, caller, known.grants), known.key, ctx, tool, params, id, startedAt)
+        val result = tools.call(tool, args, caller, known.grants)
+        val decision = result.auditDecision()
+        metrics.toolCallCompleted(
+            tool.takeIf { tools.capabilityOf(it) != null } ?: McpMetricsPort.UNMAPPED_TOOL,
+            decision,
+            if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED,
+            Duration.ofNanos(System.nanoTime() - startedAt),
+            McpMetricsPort.ChannelTags(McpMetricsPort.McpChannel.CUSTOMER, outcome.client.clientId),
+        )
+        return respond(result, known.key, ctx, tool, params, id)
     }
 
     @Suppress("LongParameterList")
@@ -209,7 +230,6 @@ internal class McpCustomerBranch(
         tool: String,
         params: JsonNode,
         id: JsonNode,
-        startedAt: Long,
     ): Response = when (result) {
         is CustomerReadTools.Outcome.Allowed -> {
             audit(
@@ -221,23 +241,13 @@ internal class McpCustomerBranch(
                 decision = McpCallAuditor.Decision.ALLOW,
                 capability = result.capability,
                 consentId = result.grantId?.let { DELEGATION_PREFIX + it } ?: DELEGATION_PREFIX.trimEnd(':'),
-                startedAt = startedAt,
             )
             Response.ok(McpResponse(id = id, result = result.result)).build()
         }
         is CustomerReadTools.Outcome.Refused -> {
             if (result.invalidateGrant) grantCache.invalidate(key)
-            val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
-            audit(
-                ctx.agentId,
-                tool,
-                params,
-                result.reason,
-                ctx.actChain,
-                decision,
-                result.capability,
-                startedAt = startedAt,
-            )
+            val decision = result.auditDecision()
+            audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
             toolError(id, result.message ?: if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
         }
         is CustomerReadTools.Outcome.DownstreamRejected -> {
@@ -251,7 +261,6 @@ internal class McpCustomerBranch(
                 ctx.actChain,
                 McpCallAuditor.Decision.DENY,
                 result.capability,
-                startedAt = startedAt,
             )
             toolError(id, NOT_PERMITTED)
         }
@@ -294,13 +303,7 @@ internal class McpCustomerBranch(
         decision: McpCallAuditor.Decision = McpCallAuditor.Decision.DENY,
         capability: String? = null,
         consentId: String = NO_CONSENT,
-        startedAt: Long = System.nanoTime(),
     ) = runBlocking {
-        val result = if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED
-        // Same series and labels as the staff path (openbank_mcp_tool_calls): an unknown tool name is
-        // the single UNMAPPED value, never itself — the audit row keeps the exact name.
-        val toolTag = if (tools.capabilityOf(tool) != null) tool else McpMetricsPort.UNMAPPED_TOOL
-        metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
         auditor.toolCallCompleted(
             McpCallAuditor.ToolCall(
                 agentId = agentId,
@@ -308,7 +311,7 @@ internal class McpCustomerBranch(
                 tool = tool,
                 capability = capability,
                 decision = decision,
-                result = result,
+                result = if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED,
                 reason = reason,
                 argumentKeys = McpInputBounds.auditKeys(params.path("arguments")),
                 actChain = actChain,
@@ -355,18 +358,28 @@ internal fun customerRefusalWindowKey(subject: String?, clientKey: () -> String)
 internal fun tokenlessRefusalSource(clientKey: () -> String): String =
     runCatching(clientKey).getOrDefault(ClientAddressKey.UNKNOWN)
 
-private const val CLAIM_SESSION_ID = "sid"
+/** The refusal reason of an in-process [McpRateLimiter] outcome; null when the call is allowed. */
+private fun reason(outcome: McpRateLimiter.Outcome): String? =
+    outcome.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let { it.reason ?: "rate limit exceeded" }
+
+private fun CustomerReadTools.Outcome.auditDecision(): McpCallAuditor.Decision = when (this) {
+    is CustomerReadTools.Outcome.Allowed -> McpCallAuditor.Decision.ALLOW
+    is CustomerReadTools.Outcome.Refused -> if (unavailable) {
+        McpCallAuditor.Decision.UNAVAILABLE
+    } else {
+        McpCallAuditor.Decision.DENY
+    }
+    is CustomerReadTools.Outcome.DownstreamRejected -> McpCallAuditor.Decision.DENY
+}
+
 private val SESSION_SHAPE = Regex("^[A-Za-z0-9._:-]{1,128}$")
 
-/**
- * The token's session (`sid`), one input of a proposal's derived Idempotency-Key. Bounded and
- * shape-checked; anything else reads as "no session", which only narrows replay to the key triple.
- */
+/** Only a bounded, verified token session may identify a proposal retry. */
 private fun sessionOf(jwt: JsonWebToken): String? {
-    val raw = when (val claim = jwt.getClaim<Any?>(CLAIM_SESSION_ID)) {
+    val session = when (val claim = jwt.getClaim<Any?>("sid")) {
         is String -> claim
         is JsonString -> claim.string
         else -> null
     }
-    return raw?.takeIf { SESSION_SHAPE.matches(it) }
+    return session?.takeIf(SESSION_SHAPE::matches)
 }
