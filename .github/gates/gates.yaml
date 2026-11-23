@@ -1501,13 +1501,14 @@ gates:
   # sentinel guard removed because promtool's `time()` starts at the unix epoch and `time() - 0`
   # is therefore minutes, not the ~56 years a real never-backed-up cluster produces. ENFORCED.
   - id: promql-alert-unit-tests
-    name: "alert rules are unit-tested for what they PREVENT (enforced)"
+    name: "PromQL alert and canary controls are tested for their actual verdicts (enforced)"
     group: gitops
     mode: enforced
     rationale: >-
       A green promtool `check rules` proves a rule is well-formed, which is exactly the signal
       that was already green throughout every alerting defect recorded here -- #5736's rule was
       loaded, health=ok and promtool-clean for the whole 8h40m it failed to fire.
+      Strict canary queries distinguish missing coverage from health; existing active guards remain unchanged.
     review_after: "2027-02-28"
     min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
     # `install-promtool.sh` installs promtool at the version and sha256 pinned in
@@ -1521,6 +1522,13 @@ gates:
       - ".github/scripts/fetch-artifact.py"
       - "ci/artifacts.lock"
       - "openbank-infra/tests/promtool/run.sh"
+      - "openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml"
+      - "openbank-infra/gitops/components/argo-rollouts/strict-analysis-template.yaml"
+      - "openbank-infra/tests/canary/check.py"
+      - "openbank-infra/tests/canary/legacy-analysis-baseline.yaml"
+      - "openbank-infra/tests/canary/evaluate.go"
+      - "openbank-infra/tests/canary/go.mod"
+      - "openbank-infra/tests/canary/go.sum"
     selftest: |
       bash .github/scripts/install-promtool.sh
       # Prove the harness can FAIL: a test asserting an alert no rule defines must go red.
@@ -1542,12 +1550,14 @@ gates:
         exit 1
       fi
       echo "SELF-TEST PASS"
+      python3 openbank-infra/tests/canary/check.py --self-test
     run: |
       bash .github/scripts/install-promtool.sh
       n=$(find openbank-infra/tests/promtool -name '*_test.yaml' | wc -l)
       test "$n" -ge 2 || { echo "expected >=2 promtool test files, found $n"; exit 1; }
       echo "SUBJECTS=$n  # promtool test files"
       bash openbank-infra/tests/promtool/run.sh
+      python3 openbank-infra/tests/canary/check.py
 
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
@@ -8780,3 +8790,41 @@ gates:
     selftest_inputs: [".github/scripts/check-demo-only-flags.py"]
     run: |
       python3 .github/scripts/check-demo-only-flags.py --root .
+
+  # #16748. RodneCislo had 100% line coverage and a 68.8M-input fuzz run and still accepted
+  # never-issued birth-number classes, because every test was written from the same model as the
+  # code. The shared validators are now held to spec vectors + a python-stdnum differential test;
+  # a hand-rolled copy in a service is held to neither, and keeps the old bug when the shared one
+  # is fixed. This ratchet forbids NEW ad-hoc mod-97 / IBAN-regex / `[A-Z]{3}` currency checks
+  # outside openbank-libs-domain; the existing copies are baselined per file.
+  - id: identifier-validator-ratchet
+    name: "no new ad-hoc mod-97 / IBAN / currency validators outside libs-domain (#16748, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A copied identifier validator never sees the spec vectors or the stdnum differential test, so it can wrong-accept with full coverage; new copies must use the shared validator or java.util.Currency."
+    review_after: "2027-05-18"
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-identifier-validator-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-identifier-validator-ratchet.py"]
+    min_subjects: 2000   # 3563 Kotlin main sources scanned 2026-11-18
+    run: |
+      python3 .github/scripts/check-identifier-validator-ratchet.py
+
+  # #16748. The validator inventory is DERIVED from code: a source shaped like an identifier check
+  # (mod-97/mod-11/Luhn, IBAN/ISIN/currency regex, Currency.getInstance) must be a spec-vectored
+  # implementation, a shrink-only-baselined ad-hoc copy, or classified with a reason. A new
+  # validator without vectors fails here; so does a stale classification.
+  - id: identifier-validator-inventory
+    name: "every identifier validator has spec vectors or a stated reason (#16748, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "Spec vectors only protect the validators they name; deriving the inventory from code means a new validator cannot exist outside the conformance matrix while the matrix reads complete."
+    review_after: "2027-05-18"
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-identifier-validator-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-identifier-validator-inventory.py"]
+    min_subjects: 40   # 64 candidate sources derived 2026-11-18
+    run: |
+      python3 .github/scripts/check-identifier-validator-inventory.py

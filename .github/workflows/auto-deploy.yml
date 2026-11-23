@@ -1528,7 +1528,7 @@ jobs:
             pruned=0
             : > "${PLACEHOLDER_FILE}.new"
             while IFS= read -r line || [ -n "$line" ]; do
-              if printf '%s' "$line" | grep -qE '^[[:space:]]*(#|$)' \
+              if printf '%s\n' "$line" | grep -qE '^[[:space:]]*(#|$)' \
                  || printf '%s\n' "$declared" | grep -qxF "$line"; then
                 printf '%s\n' "$line" >> "${PLACEHOLDER_FILE}.new"
               else

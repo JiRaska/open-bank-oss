@@ -35,16 +35,22 @@ def libsPitestConfig = [
             'com.openbank.libs.domain.money.*',
             'com.openbank.libs.audit.*',
             'com.openbank.libs.persistence.outbox.*',
+            'com.openbank.libs.identity.*',
+            'com.openbank.libs.domain.account.*',
         ],
         tests: [
             'com.openbank.libs.domain.money.*',
             'com.openbank.libs.audit.*',
             'com.openbank.libs.persistence.outbox.*',
+            'com.openbank.libs.identity.*',
+            'com.openbank.libs.domain.account.*',
         ],
         excluded: [
             'com.openbank.libs.domain.money.*Kt',
             'com.openbank.libs.audit.*Kt',
             'com.openbank.libs.persistence.outbox.*Kt',
+            'com.openbank.libs.identity.*Kt',
+            'com.openbank.libs.domain.account.*Kt',
         ],
     ],
     'openbank-libs-runtime': [

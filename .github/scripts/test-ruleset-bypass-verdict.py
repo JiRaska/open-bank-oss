@@ -224,7 +224,7 @@ print(json.dumps(value))
                          "${{ !cancelled() && (success() || steps.current-evidence.outcome == 'failure') }}")
         self.assertNotIn('continue-on-error', json.dumps(rerun))
         self.assertEqual(workflow['jobs']['gates']['timeout-minutes'],
-                         "${{ matrix.slug == 'lint-supplychain-security' && 47 || 15 }}")
+                         "${{ matrix.slug == 'lint-supplychain-security' && 57 || 25 }}")
         self.assertEqual(download['with']['artifact-ids'], '${{ steps.locate.outputs.artifact-id }}')
         self.assertEqual(download['with']['run-id'], '${{ steps.locate.outputs.run-id }}')
         harness = r'''
