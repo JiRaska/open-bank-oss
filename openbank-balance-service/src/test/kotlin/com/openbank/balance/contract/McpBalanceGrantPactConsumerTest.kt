@@ -29,7 +29,10 @@ class McpBalanceGrantPactConsumerTest {
         .path(PATH)
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json", "Idempotency-Key" to GRANT))
-        .body("""{"grantId":"$GRANT","partyId":"$PARTY","clientId":"$CLIENT","accountId":"$ACCOUNT"}""")
+        .body(
+            """{"grantId":"$GRANT","partyId":"$PARTY","clientId":"$CLIENT","accountId":"$ACCOUNT",
+                "connectionId":"$CONNECTION"}""",
+        )
         .willRespondWith()
         .status(204)
         .toPact()
@@ -42,6 +45,7 @@ class McpBalanceGrantPactConsumerTest {
             UUID.fromString(PARTY),
             CLIENT,
             UUID.fromString(ACCOUNT),
+            UUID.fromString(CONNECTION),
         )
         given()
             .baseUri(mockServer.getUrl())
@@ -58,6 +62,7 @@ class McpBalanceGrantPactConsumerTest {
         const val GRANT = "b4b4b4b4-0000-4000-8000-000000000001"
         const val PARTY = "b4b4b4b4-0000-4000-8000-000000000002"
         const val ACCOUNT = "b4b4b4b4-0000-4000-8000-000000000003"
+        const val CONNECTION = "b4b4b4b4-0000-4000-8000-000000000005"
         const val CLIENT = "mcp-local-reference"
     }
 }
