@@ -425,6 +425,7 @@ class PaymentProposalApiIT {
         val other = seedProposal(grant = seedGrant(seedConnection()))
         val path = "/api/v1/delegations/mcp-connect/customer/connections/$connection/revoke"
         fun revoke(asParty: UUID) = given().contentType(ContentType.JSON).header(HDR, asParty)
+            .header("Idempotency-Key", connection.toString())
             .body("{}").post(path).then()
         revoke(UUID.randomUUID()).statusCode(404)
         revoke(party).statusCode(204)
