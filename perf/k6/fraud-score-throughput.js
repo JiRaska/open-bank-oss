@@ -170,19 +170,44 @@ export function setup() {
   };
 }
 
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+// Buffer entropy per VU so random sampling does not add a Web Crypto call to every request.
+const randomWords = new Uint32Array(256);
+const UINT32_RANGE = 0x100000000;
+let randomOffset = randomWords.length;
+
+function randomWord() {
+  if (randomOffset === randomWords.length) {
+    crypto.getRandomValues(randomWords);
+    randomOffset = 0;
+  }
+  return randomWords[randomOffset++];
+}
+
+function randomUnit() {
+  return randomWord() / UINT32_RANGE;
+}
+
+function pick(pool) {
+  // Reject the incomplete final bucket so every account has the same probability.
+  const limit = Math.floor(UINT32_RANGE / pool.length) * pool.length;
+  let word;
+  do {
+    word = randomWord();
+  } while (word >= limit);
+  return pool[word % pool.length];
+}
 
 function currency() {
-  const r = Math.random();
+  const r = randomUnit();
   if (r < 0.8) return "CZK";
   if (r < 0.97) return "EUR";
   return "USD"; // always REVIEW today — visible in fraud_verdict_review
 }
 
 function amount(cur) {
-  const large = Math.random() < LARGE_SHARE;
+  const large = randomUnit() < LARGE_SHARE;
   const threshold = cur === "CZK" ? 500000 : 20000;
-  const value = large ? threshold * (1 + Math.random()) : 1 + Math.random() * (threshold / 50);
+  const value = large ? threshold * (1 + randomUnit()) : 1 + randomUnit() * (threshold / 50);
   return value.toFixed(2);
 }
 

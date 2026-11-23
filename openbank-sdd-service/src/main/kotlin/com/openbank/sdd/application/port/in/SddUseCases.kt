@@ -47,6 +47,15 @@ interface ManageMandateUseCase {
     fun cancel(mandateId: UUID): Uni<SddMandate>
 }
 
+/**
+ * Idle-expiry (ADR-0036 §B). Expires [mandate] if it has been idle for 36 months as of [today]
+ * and emits `sdd.mandate.expired.v1` through the outbox in the same unit of work as the status
+ * change. Returns true when the mandate was expired, false when it was still live.
+ */
+interface ExpireIdleMandateUseCase {
+    fun expireIfIdle(mandate: SddMandate, today: LocalDate): Uni<Boolean>
+}
+
 interface AmendMandateUseCase {
     fun amend(mandateId: UUID, command: AmendMandateCommand): Uni<SddMandate>
 }

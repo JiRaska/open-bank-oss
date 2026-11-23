@@ -44,7 +44,7 @@ Runtime je reaktivní (`io.smallrye.mutiny.Uni`), nikoli Kotlin `suspend`.
 | Kafka topic (`sdd-events-out`) | `openbank.sdd.event` | cíl publish outboxu |
 | `openbank.outbox.poll-interval` | `5s` | tik dispatcheru (rovněž natvrdo `@Scheduled(every = "5s")`) |
 | `openbank.sdd.expiry-cron` | `0 15 3 * * ?` | rozvrh sweepu idle-expiry |
-| `openbank.sdd.expiry.enabled` | `false` | **sweep idle-expiry je defaultně VYPNUTÝ** |
+| `openbank.sdd.expiry.enabled` | `false` | vypínač sweepu idle-expiry; v kódu `false`, zapíná se per prostředí přes `OPENBANK_SDD_EXPIRY_ENABLED` v GitOps manifestu |
 
 Placeholdery jsou jen pro dev; produkce musí vstříknout reálné secrety přes Vault (ADR-0017). Logy jsou v defaultním profilu JSON.
 
@@ -89,7 +89,12 @@ Symptom: `409 Conflict`, tělo `Illegal mandate transition`. Příčina: volají
 
 ### Sweep idle-expiry
 
-Cron `MandateExpiryScheduler` je **defaultně vypnutý** (`openbank.sdd.expiry.enabled=false`). Pro zapnutí nastav flag a cron (`openbank.sdd.expiry-cron`); sweep označí mandáty `ACTIVE`/`SUSPENDED` nečinné ≥36 měsíců jako `EXPIRED`. Čistá datová aritmetika (`MandateLifecycle.isIdle`) je jednotkově testovaná nezávisle na cronu.
+Sweep `MandateExpiryScheduler` označí mandáty `ACTIVE`/`SUSPENDED` nečinné ≥36 měsíců jako `EXPIRED` podle `openbank.sdd.expiry-cron`. Výchozí hodnota `openbank.sdd.expiry.enabled` v kódu je `false`; každé prostředí ho zapíná přes `OPENBANK_SDD_EXPIRY_ENABLED: "true"` v `openbank-infra/gitops/components/sdd/sdd-service.yaml`. **Vypínač:** nastav tuto proměnnou na `"false"` (změna manifestu, bez revertu kódu); již expirované mandáty zůstanou `EXPIRED`.
+
+- Každý mandát se expiruje ve vlastní transakci, která zároveň zapíše do outboxu událost `sdd.mandate.expired.v1` (stejná obálka jako ostatní události `sdd.mandate.*.v1`), takže downstream konzumenti se o každé expiraci dozvědí.
+- Jeden selhávající mandát se zaloguje a započítá a sweep pokračuje se zbytkem; mandát zůstane živý a zkusí se znovu při dalším běhu.
+- Metriky: `openbank.sdd.mandate.expiry.expired` a `openbank.sdd.mandate.expiry.failed` (čítače) plus workflow liveness `sdd-mandate-expiry`. Alertuj na nenulový podíl `failed`.
+- Čistá datová aritmetika (`MandateLifecycle.isIdle`) je jednotkově testovaná nezávisle na cronu; `MandateExpirySchedulerVertxContextIT` spouští skutečný cron.
 
 ## Deploy / release
 
