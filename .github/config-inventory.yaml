@@ -286,6 +286,10 @@ openbao:
     - pricing-service
     - temporal/db
   unprovisioned:
+    - names: [keycloak/keycloak-mcp]
+      reason: "client secret of openbank-keycloak-mcp (ADR-0385 D3) is written by the owner when the client is created in the live realm; Keycloak's secret ref is optional and the MCP authenticator refuses every connect until then"
+      issue: 16667
+      review_by: 2027-01-31
     - kind: openbao
       names: [fetch-broker/browser-run]
       reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"

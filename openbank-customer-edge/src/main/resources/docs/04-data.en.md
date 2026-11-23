@@ -48,6 +48,17 @@ The edge is a **processor pass-through**, not a controller of stored records. PI
 
 Because nothing is stored, the edge has **no retention obligation** (`retentionPolicy: N/A`, `evidenceExported: false` in `governance.yaml`). The GDPR right-to-erasure and retention duties fall on the upstream controllers (account, party, etc.).
 
+## Writing `party_id` to Keycloak
+
+`KeycloakAdminClient.setPartyIdAttribute` (best effort) links a customer's Keycloak user to their
+party. Keycloak 26 validates an admin PUT against the realm's user profile and treats an omitted
+root attribute as removed, so a body carrying only `attributes.party_id` is refused 400
+(`error-user-attribute-required`, email). The client therefore reads the user and writes back its
+own representation with `party_id` merged in (`withPartyId`). In the customers realm `party_id` is a
+declared user-profile attribute that only an admin may view or edit: the edge's service account
+(realm-management `manage-users`) can set it, the customer cannot (live IT
+`keycloak_mcp_client_admission_test.py`).
+
 ## Logging
 
 Transport failures are logged with the upstream URL and exception class/message (`UpstreamClient`), not with customer bodies. Token contents are never logged. Avoid logging raw request/response bodies that may carry IBANs or names.

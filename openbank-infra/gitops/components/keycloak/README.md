@@ -361,6 +361,47 @@ audience (impersonation + a token-exchange fine-grained-authz permission on
 `openbank-app`). Kept separate from `customer-edge-admin`, whose blast radius is
 deliberately narrower (`party_id` attribute writes only).
 
+## MCP connect (ADR-0385 D3, #16672) — REQUIRED owner apply step
+
+Nothing in this section is live until an owner does it: realm import runs on cold start
+only, and there is no in-repo job that applies a realm change to a running Keycloak (by
+design — the admin API is 403 at the edge and reached only through a port-forward). Until
+every step is done the MCP connect fails CLOSED: the authenticator refuses every connect.
+Do them in this order; each is idempotent.
+
+1. **Image.** Build and push the Keycloak image that carries the extension
+   (`openbank-infra/scripts/build-push-keycloak.sh`), then bump the `openbank-keycloak` tag in
+   `keycloak.yaml` in a PR. The `KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__*` env in
+   `keycloak.yaml` is runtime config read by that extension at boot.
+2. **Client + secret (`openbank` realm).** Create client `openbank-keycloak-mcp` from
+   `realm-template.json` **without** its `secret` (Keycloak generates it), give
+   `service-account-openbank-keycloak-mcp` the realm role `ROLE_API` and nothing else, and write
+   the generated secret to OpenBao `openbank/keycloak/keycloak-mcp`, property `client_secret`,
+   with the narrow SSO writer role (runbook 0027 — never the root token).
+   `provision-synthetic-customer.sh` is the worked example of this exact sequence. External Secrets
+   then fills `iam/keycloak-mcp-sca-client` within the hour (`refreshInterval: 1h`); the
+   Keycloak pod reads it at boot, so **restart the Deployment** after the Secret exists
+   (`kubectl -n iam rollout restart deploy/keycloak`). Then move `keycloak/keycloak-mcp` from
+   `openbao.unprovisioned` to `openbao.keys` in `.github/config-inventory.yaml`.
+3. **Customers realm (`openbank-customers`).** Over `kubectl -n iam port-forward svc/keycloak 8080:8080`,
+   apply from `customers-realm-template.json`, in this order (a policy naming a missing profile,
+   or a client override naming a missing flow, is refused):
+   - the user profile (`PUT /admin/realms/openbank-customers/users/profile`) — `party_id`
+     admin-view/admin-edit only;
+   - the flow `openbank-mcp-fresh-passkey` and its executions;
+   - client profiles, then client policies (`PUT .../client-policies/profiles`, then
+     `PUT .../client-policies/policies`) — profiles `openbank-mcp-oauth-hardening`,
+     `openbank-mcp-dpop`, `openbank-mcp`; policies `openbank-mcp-tier-h`, `openbank-mcp-tier-l`,
+     `openbank-mcp`; these PUTs REPLACE the realm's whole list, so send the template's full list;
+   - the MCP clients and their `offline_access` scope mappings (they ship `enabled: false`).
+   Rehearse the exact calls against a local Keycloak first (recipe at the top of this file);
+   `openbank-infra/e2e/keycloak_mcp_client_admission_test.py` is the end-to-end check of the result.
+4. **Import artifact.** Add the same client (with its real secret) and the customers-realm
+   changes to the OpenBao realm-import blobs (runbook 0009), so a cold start keeps them.
+
+Verify: the Keycloak boot log carries **no** `openbank-mcp-withheld-code is NOT configured`
+WARN, and an MCP connect against the live realm reaches the in-app approval.
+
 ## What this does NOT fix
 
 The committed templates feed **nothing** today. Keycloak reads the Secrets
@@ -382,3 +423,37 @@ scopes = the declared read scopes, secret `__MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET
 and one client scope per downstream carrying exactly one audience mapper. Adding the requester to the
 OpenBao import artifact is an operator step (runbook 0009). The exchange of a DPoP-bound subject token
 has not yet been run against a live Keycloak of the deployed version.
+
+### Customer MCP certificate-bound read grant
+
+The staff realm template declares two disabled confidential service accounts. Both have only
+`ROLE_API`, with browser, implicit and password flows disabled. `openbank-mcp-read-issuer`
+requests a balance-read permit from delegation-service. `openbank-balance-mcp-reader` rechecks
+the live grant there. The delegation policy limits each to its own action.
+
+For a separate, owner-approved sandbox rollout, provision their credentials at the OpenBao
+sources declared in `keycloak-realm-import-secret-sources.yaml`. Configure the issuer's
+`MCP_READ_ISSUER_TOKEN_URL` and the reader's `BALANCE_MCP_SERVICE_OIDC_URL` against the staff
+realm. The customer access and certificate-bound balance tokens still use the customers realm.
+The two service clients remain disabled on import, and this template adds no route.
+
+The Keycloak extension registers the customer MCP read grant. It starts disabled. The local
+sandbox configuration must supply all of the following before enabling it:
+
+- `MCP_READ_GRANT_ENABLED=true` and `MCP_READ_CONNECTION_BINDING_ENABLED=true`
+- The HTTPS `MCP_READ_CUSTOMER_ISSUER_URL`, `MCP_READ_RESOURCE_URL` and
+  `MCP_READ_DELEGATION_ORIGIN`
+- Match `MCP_READ_RESOURCE_URL` to the canonical resource in the MCP client allowlist.
+  The customer route change (#16996) aligns that allowlist and the generated customer realm
+  with the external route. Keep customer admission and the read grant disabled until the route,
+  allowlist and deployed realm agree.
+- The HTTPS `MCP_READ_ISSUER_TOKEN_URL` and `MCP_READ_ISSUER_CLIENT_SECRET` for the dedicated
+  `openbank-mcp-read-issuer` service account
+- Separate base64url-encoded `MCP_READ_NONCE_KEY` and `MCP_READ_PROOF_KEY` values of at least 32
+  bytes, and a unique `MCP_READ_DEPLOYMENT` namespace
+
+The requester uses the dedicated confidential X.509 client. The issuer verifies the original
+proof and the resource nonce. The resource nonce authenticates version, exact resource URI,
+DPoP key thumbprint, expiry and random challenge. PostgreSQL independently enforces first use of
+the original proof via a reference derived with the separate proof key. The nonce key is shared
+between the MCP resource and Keycloak. Both services must use the same key and resource URI.

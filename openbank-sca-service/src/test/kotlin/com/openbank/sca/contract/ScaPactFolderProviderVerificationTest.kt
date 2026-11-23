@@ -18,7 +18,6 @@ import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
-import io.quarkus.security.runtime.QuarkusPrincipal
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -98,7 +97,16 @@ class ScaPactFolderProviderVerificationTest {
         const val PENSION_PAYLOAD_SHA256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         const val PENSION_APPROVAL_REQUEST_ID = "pension-exit:$PENSION_PAYLOAD_SHA256"
         val PENSION_IDENTITY: QuarkusSecurityIdentity = QuarkusSecurityIdentity.builder()
-            .setPrincipal(QuarkusPrincipal("service-account-openbank-pension"))
+            // A verified service-account token (azp bound to preferred_username): the reservation
+            // follows ServiceAccountIdentity.verifiedPrincipalName, never a bare principal name.
+            .setPrincipal(
+                io.mockk.mockk<org.eclipse.microprofile.jwt.JsonWebToken>(relaxed = true) {
+                    io.mockk.every { name } returns "service-account-openbank-pension"
+                    io.mockk.every { subject } returns "pension-sa"
+                    io.mockk.every { getClaim<Any?>("azp") } returns "openbank-pension"
+                    io.mockk.every { getClaim<Any?>("preferred_username") } returns "service-account-openbank-pension"
+                },
+            )
             .addRole("ROLE_API")
             .build()
         private val CHALLENGE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999")

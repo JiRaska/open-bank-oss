@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-11-22T18:59:16.000Z",
-  "inputFingerprint": "sha256:c4e1cb10c0fd3c880ca53311d2e14a175403fbc74bb05cb2e05168a54f100d56",
+  "generatedAt": "2026-11-23T11:38:03.000Z",
+  "inputFingerprint": "sha256:5d1f9fe72a2e53afbfa02952bce9c0aef60dbb3c8c320a186c499d9d0bd712d3",
   "counts": {
     "namespaces": 87,
     "networkPolicies": 152,
-    "externalSecrets": 249,
+    "externalSecrets": 250,
     "clusterPolicies": 0
   },
   "groups": [
@@ -986,12 +986,12 @@
         "en": "A time-locked vault — passwords never sit in the code."
       },
       "summary": {
-        "cs": "OpenBao drží tajemství; 249 ExternalSecret je sype do k8s. Žádný secret v gitu.",
-        "en": "OpenBao holds the secrets; 249 ExternalSecrets feed them into k8s. No secret in git."
+        "cs": "OpenBao drží tajemství; 250 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+        "en": "OpenBao holds the secrets; 250 ExternalSecrets feed them into k8s. No secret in git."
       },
       "controls": [
         "OpenBao",
-        "External Secrets (249)",
+        "External Secrets (250)",
         "KMS unseal"
       ],
       "adr": [
@@ -1178,8 +1178,8 @@
         "en": "OpenBao + ESO, nothing in git"
       },
       "reality": {
-        "cs": "249 ExternalSecret",
-        "en": "249 ExternalSecrets"
+        "cs": "250 ExternalSecret",
+        "en": "250 ExternalSecrets"
       },
       "status": "live"
     },
