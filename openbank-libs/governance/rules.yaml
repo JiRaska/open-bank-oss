@@ -4925,6 +4925,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/account/application/usecase/SavingsProposalService.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/BalanceServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/PartyDirectoryClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ProductCatalogClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/SanctionsServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ScaChallengeClient.kt"
@@ -4935,6 +4936,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
     cardholder: []
   openbank-balance-service:
     auth_crypto_payment:

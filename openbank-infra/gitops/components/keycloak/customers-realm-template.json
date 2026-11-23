@@ -421,6 +421,94 @@
         "standard.token.exchange.enabled": "false",
         "use.refresh.tokens": "true"
       }
+    },
+    {
+      "clientId": "openbank-mcp-service",
+      "name": "openbank-mcp-service",
+      "description": "ADR-0383 D4 mcp-service RFC 8693 requester: customer token to one downstream read. DERIVED - do not hand-edit.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [],
+      "optionalClientScopes": [
+        "mcp-customer-balance-read",
+        "mcp-customer-transaction-read"
+      ],
+      "protocolMappers": [],
+      "attributes": {
+        "access.token.lifespan": "60",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.exchange": "requester",
+        "standard.token.exchange.enabled": "true",
+        "use.refresh.tokens": "false"
+      },
+      "clientAuthenticatorType": "client-secret",
+      "secret": "__MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-balance-service",
+      "name": "openbank-balance-service",
+      "description": "ADR-0383 D4 audience of exchanged customer tokens; obtains no token itself. DERIVED - do not hand-edit.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "protocolMappers": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.exchange": "audience",
+        "standard.token.exchange.enabled": "false"
+      },
+      "bearerOnly": true
+    },
+    {
+      "clientId": "openbank-transaction-service",
+      "name": "openbank-transaction-service",
+      "description": "ADR-0383 D4 audience of exchanged customer tokens; obtains no token itself. DERIVED - do not hand-edit.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "protocolMappers": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.exchange": "audience",
+        "standard.token.exchange.enabled": "false"
+      },
+      "bearerOnly": true
     }
   ],
   "clientScopes": [
@@ -553,6 +641,54 @@
             "included.client.audience": "openbank-rum",
             "id.token.claim": "false",
             "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mcp-customer-balance-read",
+      "description": "ADR-0383 D4 customer read for openbank-balance-service. DERIVED - do not hand-edit.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "openbank.mcp.exchange": "scope",
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "openbank-balance-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openbank-balance-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mcp-customer-transaction-read",
+      "description": "ADR-0383 D4 customer read for openbank-transaction-service. DERIVED - do not hand-edit.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "openbank.mcp.exchange": "scope",
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "openbank-transaction-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openbank-transaction-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
           }
         }
       ]

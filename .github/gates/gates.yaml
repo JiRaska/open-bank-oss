@@ -3828,7 +3828,7 @@ gates:
     review_after: "2027-05-22"
     budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
     timeout_seconds: 750
-    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    min_subjects: 100   # 152 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 1/4
     selftest_expect: pass
@@ -3859,7 +3859,7 @@ gates:
     review_after: "2027-05-22"
     budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
     timeout_seconds: 750
-    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    min_subjects: 100   # 152 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 2/4
     selftest_expect: pass
@@ -3890,7 +3890,7 @@ gates:
     review_after: "2027-05-22"
     budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
     timeout_seconds: 750
-    min_subjects: 100   # 151 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    min_subjects: 100   # 152 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
     selftest: |
       python3 .github/scripts/merge-train.py --self-test-shard 3/4
     selftest_expect: pass

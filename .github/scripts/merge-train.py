@@ -836,6 +836,7 @@ class Member:
     created_at: str
     ref: str = ""
     files: list[str] = field(default_factory=list)
+    author: str = ""
 
 
 def parse_extra_gates(text: str) -> dict[str, str] | None:
@@ -3600,20 +3601,12 @@ class GitHub:
                                    for j in jobs):
                     return False
                 receiver_name = "Receive trusted ruleset evidence"
-                receivers = [j for j in jobs if j["name"] == receiver_name]
-                if len(receivers) > 1:
+                if sum(j["name"] == receiver_name for j in jobs) > 1:
                     return False
-                failed = [j for j in jobs if j["conclusion"] not in {"success", "skipped", "neutral"}]
-                descendants_only = all(j["name"] in {receiver_name, GATE_AGGREGATE_JOB}
-                                       or GATE_SHARD_JOB_RE.fullmatch(j["name"]) for j in failed)
-                if receivers and receivers[0]["run_attempt"] == attempt and descendants_only:
-                    # GitHub reruns this job AND its dependents in one attempt. Never retry a gate
-                    # first and then the receiver: that creates yet another attempt boundary.
-                    retry = f"/repos/{self.repo}/actions/jobs/{receivers[0]['id']}/rerun"
-                else:
-                    # Full CI is necessary when the receiver is inherited or another failed job
-                    # is outside its dependency closure. The separate Services CI is untouched.
-                    retry = path + "/rerun"
+                # #11442: no gate shard consumes the receiver JOB's output any more; the one
+                # consuming shard receives evidence bound to its OWN attempt. So an inherited
+                # receiver authorizes nothing and failed-only (the default above) is exact: one
+                # attempt reruns every failed job, the receiver included when it failed.
             plans.append(retry)
         # Finish every read before the first mutation. api() never retries an uncertain POST;
         # no failed-only/full-run fallback is permitted after a refused receiver request either.
@@ -4235,11 +4228,60 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
                 red.append((view, failing))
         if ok:
             out.append(Member(n, view["title"], view["body"], fetched, view["head_ref"], view["created_at"],
-                              ref=fetched, files=files))
+                              ref=fetched, files=files, author=view.get("author") or ""))
             apps[n] = app
         if len(out) >= limit and red is None:
             break
     return out, apps
+
+
+# Bot moves (#17108): release-please, auto-deploy and admin-ui deploy PRs are opened by the App after
+# nearly every merge and ride train carriers (82 of 341 first-parent commits on main 2026-11-15..22, all
+# PRs, none pushed). A carrier built from ONLY those, under a running strict reservation, spends the
+# holder's one deferral and moves main under it: its full CI restarts for a version bump. Such a carrier
+# is not built while a reservation runs; it is built in the train's turn right after the reservation ends.
+# Scheduling only: no verdict changes, every merge is still of a head verified over the main it lands on.
+# Paths derived from `git log --first-parent --author=openbank-gitops-bot --name-only` over those 7 days.
+BOT_MOVE_PATH_RE = re.compile(
+    r"\.release-please-manifest\.json"
+    r"|openbank-[a-z0-9-]+(?:/[a-z0-9-]+)*/(?:version\.txt|CHANGELOG\.md)"
+    r"|openbank-admin-ui/package\.json"
+    r"|openbank-infra/gitops/components/[a-z0-9-]+/[a-z0-9-]+\.yaml")
+
+
+def bot_move(m: Member) -> bool:
+    """An App-authored PR whose every path is bot-owned (BOT_MOVE_PATH_RE). Unknown author/files = not."""
+    return m.author == BOT_LOGIN and bool(m.files) and all(BOT_MOVE_PATH_RE.fullmatch(f) for f in m.files)
+
+
+def bot_moves_only(waiting: list) -> bool:
+    """Every waiting train candidate is a bot move, so a deferral carrier would carry nothing else."""
+    return bool(waiting) and all(isinstance(m, Member) and bot_move(m) for m in waiting)
+
+
+BOT_HOLD_CONTEXT = "merge-train/bot-move-held"   # App marker on a bot-move head: "held for #<n> since <epoch>"
+BOT_HOLD_RE = re.compile(r"held for #([0-9]+) since ([0-9]+)")
+
+
+def bot_hold_release(gh, waiting: list, who: int, now: float, shadow: bool) -> str | None:
+    """Why the bot moves must NOT be held for reservation `who`, or None (hold; each unmarked head is
+    marked). Review of #17112: a reservation that ends WITHOUT a merge never gets the train's turn, so
+    an unbounded hold could re-hold the same moves for every next reservation. Bounded twice: a head is
+    held for ONE reservation only (the marker names it), and never longer than RESERVATION_CEILING_S."""
+    marks = []
+    for m in waiting:
+        desc = gh.app_statuses(m.head_sha).get(BOT_HOLD_CONTEXT, ("", ""))[1] or ""
+        got = BOT_HOLD_RE.fullmatch(desc)
+        if got and int(got.group(1)) != who:
+            return f"#{m.number} was already held for reservation #{got.group(1)}"
+        if got and now - int(got.group(2)) >= RESERVATION_CEILING_S:
+            return f"#{m.number} has been held {int(now) - int(got.group(2))}s (ceiling {RESERVATION_CEILING_S}s)"
+        if not got:
+            marks.append(m)
+    if not shadow:
+        for m in marks:
+            gh.post_status(m.head_sha, "success", f"held for #{who} since {int(now)}", context=BOT_HOLD_CONTEXT)
+    return None
 
 
 def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tuple[list[Member], list[Member]]:
@@ -5320,6 +5362,19 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         log(f"strict-lane #{holder} CI running on {stack_head[:12]}: the train carrier may be stacked over it")
         summary["in_flight"] = False
         summary["stack_window"] = (holder, stack_head)
+    elif (not carrier_in_flight and not summary["strict"] and bot_moves_only(train_waiting) and not main_red
+            and not any_carrier_open(gh, repo)
+            and ((holder is not None and not summary["updated"] and holder_may_yield(gh, git, strict, holder, urgent, base))
+                 or (holder is None and len(summary["updated"]) == 1 and summary["updated"][0] not in urgent
+                     and update_opens_deferral(gh, git, strict, summary["updated"][0], base)))
+            and bot_hold_release(gh, train_waiting, holder if holder is not None else summary["updated"][0],
+                                 time.time(), shadow) is None):
+        # Bot moves (#17108): only where a deferral carrier WOULD open, no carrier of version bumps and image
+        # pins under the reservation; bounded to one reservation and RESERVATION_CEILING_S (bot_hold_release).
+        who = holder if holder is not None else summary["updated"][0]
+        log(f"strict-lane #{who} reserved: {len(train_waiting)} bot move(s) "
+            f"{', '.join(f'#{m.number}' for m in train_waiting)} held until the reservation ends")
+        summary["bot_moves_held"] = sorted(m.number for m in train_waiting)
     elif (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any_carrier_open(gh, repo)
             and holder_may_yield(gh, git, strict, holder, urgent, base)):
@@ -9265,6 +9320,7 @@ def _synthetic_origin(root: str) -> None:
     pr("pM", {SYN_MAIN_GATE_CODE: "member\n"})   # modifies a check script main already has
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
+    pr("pBot", {"openbank-infra/gitops/components/x/x-service.yaml": "image: x@sha256:1\n"})   # an auto-deploy pin
     pr("pT", {SYN_BASELINE: "loosened\n"})
     # Review 6: a generator whose NAME carries a newline, and a module shadowing `yaml` next to the
     # heredoc script. Each leaves a marker if it is ever executed.
@@ -9512,8 +9568,7 @@ def retry_planner_self_test(check) -> None:
     jobs = [job(500, "Receive trusted ruleset evidence"), job(501, "gates (data)", "failure"),
             job(502, "Validate manifests", "failure"), job(503, "UI build", attempt=1)]
     saved = (_http_open, _api_sleep, os.environ.get("GH_TOKEN"), _api_slept[0], dict(_GET_MEMO))
-    receiver_post, full_post, failed_post = (f"{prefix}/jobs/500/rerun", f"{prefix}/runs/123/rerun",
-                                            f"{prefix}/runs/123/rerun-failed-jobs")
+    failed_post = f"{prefix}/runs/123/rerun-failed-jobs"
 
     def exercise(label, *, metadata=None, listing=None, check_runs=None, want=None,
                  read_error=None, post_error=None, extra_run=False):
@@ -9572,18 +9627,19 @@ def retry_planner_self_test(check) -> None:
         return calls
 
     try:
-        exercise("current receiver refreshes its descendants once", want=receiver_post)
+        # #11442: shards bind their own attempt's evidence, so CI retries failed-only in every shape.
+        exercise("failed shard with a current receiver retries failed-only once", want=failed_post)
         inherited = copy.deepcopy(jobs)
         inherited[0]["run_attempt"] = 1
-        exercise("old successful receiver requires one full CI run", listing=inherited, want=full_post)
-        exercise("absent current receiver requires one full CI run", listing=jobs[1:], want=full_post)
+        exercise("inherited receiver no longer forces full CI", listing=inherited, want=failed_post)
+        exercise("absent receiver retries failed-only", listing=jobs[1:], want=failed_post)
         outside = copy.deepcopy(jobs)
         outside[-1].update(conclusion="cancelled", run_attempt=2)
-        exercise("cancelled job outside receiver descendants requires full CI", listing=outside, want=full_post)
+        exercise("cancelled job outside the gates retries failed-only", listing=outside, want=failed_post)
         exercise("unrelated workflow keeps failed-only", metadata={**run, "path": ".github/workflows/security.yml"},
                  want=failed_post)
         exercise("workflow ref suffix still identifies actual CI", metadata={**run, "path": run["path"] + "@refs/pull/1/merge"},
-                 want=receiver_post)
+                 want=failed_post)
         for label, metadata in [("missing metadata", {}), ("wrong source", {**run, "head_sha": "b" * 40}),
                                 ("nonterminal run", {**run, "status": "in_progress"}),
                                 ("invalid attempt", {**run, "run_attempt": 0}),
@@ -9600,9 +9656,10 @@ def retry_planner_self_test(check) -> None:
         exercise("attempt advanced during read", listing=future)
         exercise("unreadable later run causes no earlier write", extra_run=True)
         for code in (403, 500):
-            exercise(f"receiver POST {code} never falls back to another write", want=receiver_post, post_error=code)
+            exercise(f"failed-only POST {code} never falls back to another write", want=failed_post, post_error=code)
         paged = [job(1000 + n, f"green-{n}") for n in range(100)] + jobs
-        calls = exercise("receiver on second page is found", listing=paged, want=receiver_post)
+        calls = exercise("receiver on second page is still read", listing=paged, want=failed_post)
+        exercise("ambiguous receiver across pages", listing=paged + [job(601, "Receive trusted ruleset evidence")])
         check("retry planner: jobs fully paginated", any(path.endswith("/jobs") and query.get("page") == ["2"]
                                                        for _, path, query in calls), str(calls))
     finally:
@@ -9665,7 +9722,7 @@ SELF_TEST_SPAWN_CEILING = 25500
 # each scenario exactly as the full run does. Ownership is a pure function of the index, so
 # the shards partition the scenarios by construction; self_test_shard_plan() asserts it, and
 # every run asserts it saw exactly the scenarios 0..SELF_TEST_SCENARIOS-1, each once, in order.
-SELF_TEST_SCENARIOS = 151
+SELF_TEST_SCENARIOS = 152
 SELF_TEST_SHARDS = 4   # gates.yaml: merge-train-declaration runs 0/4, merge-train-selftest-shard-{1,2,3}
 
 
@@ -10405,10 +10462,13 @@ def real_tree_self_test(check) -> None:
           str(branch_updater_spread_errors(workflow_texts())))
     ci_wf = pathlib.Path(".github/workflows/ci.yml")
     workflow = ci_wf.read_text() if ci_wf.is_file() else ""
-    check("retry planner: current CI declares the selected receiver and direct gate dependency",
+    # failed-only is exact only while no shard consumes the receiver JOB (#11442): a shard that
+    # needs it again would inherit an old attempt's snapshot on a failed-only rerun.
+    check("retry planner: current CI declares the receiver, and gate shards bind their own evidence",
           "name: Receive trusted ruleset evidence" in workflow
-          and "needs: [agent-admission, ruleset-evidence]" in workflow
-          and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
+          and "needs.ruleset-evidence.outputs" not in workflow
+          and "RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot }}" in workflow
+          and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-e2e, ui-coverage, ui-rbac-contract]" in workflow)
     real_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     real_mods = shareable_modules(Git(real_root), "HEAD")
     check("shareable_modules: on the real tree the libs, detekt rules and consumed services are NOT shareable; "
@@ -10836,6 +10896,21 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
               not any(glob_match(g, "openbank-infra/gitops/components/ledger/ledger-service.yaml") for g in outs))
         frags = regen_inventory_fragments(real)
         check("fast lane: disjoint service file qualifies", fast_lane_eligible(["svc/a.kt"], ["other/x"], [], frags)[0])
+        bm = lambda files, author=BOT_LOGIN: Member(1, "", "", "a" * 40, "", "", files=files, author=author)  # noqa: E731
+        for fs in (["openbank-ledger-service/version.txt", "openbank-ledger-service/CHANGELOG.md",
+                    ".release-please-manifest.json"], ["openbank-admin-ui/package.json"],
+                   ["openbank-infra/gitops/components/payments/payments-services.yaml"]):
+            check(f"bot moves: App-authored {fs[0]} is a bot move", bot_move(bm(fs)))
+        for why, m in (("a human author", bm(["openbank-x/version.txt"], "JiRaska")),
+                       ("another App", bm(["openbank-x/version.txt"], "dependabot[bot]")),
+                       ("no files read", bm([])),
+                       ("one source file beside the bump", bm(["openbank-x/version.txt", "openbank-x/src/main/A.kt"])),
+                       ("a workflow", bm([".github/workflows/auto-deploy.yml"])),
+                       ("a gitops kustomization outside components/<c>/", bm(["openbank-infra/gitops/apps/x.yaml"]))):
+            check(f"bot moves: {why} is NOT a bot move", not bot_move(m))
+        check("bot moves: a mixed waiting train is not bot-only",
+              not bot_moves_only([bm([".release-please-manifest.json"]), bm(["svc/a.kt"], "JiRaska")]))
+        check("bot moves: an empty waiting train is not bot-only", not bot_moves_only([]))
         for f in ("docs/adr/0343-x.md", "openbank-fx-service/src/main/resources/openapi.yaml", ".github/x.yml",
                   "build-logic/x.kts", "prompts/registry.yaml"):
             check(f"fast lane: {f} does NOT qualify", not fast_lane_eligible([f], [], [], frags)[0])
@@ -11155,7 +11230,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                        "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
                        "pE1": 93, "pE2": 94, "pE3": 95, "pGP": 96,
                        "pCO": 71, "pJbad": 72, "pO1": 73, "pO2": 74, "pS1": 75, "pS2": 76, "pRelax": 77, "pTight": 78,
-                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9, "pPinT": 10, "pPinR": 13, "pWT": 14, "pWR": 15, "pAddR": 16, "pAddP": 17, "pAddI": 18}
+                       "pCA": 79, "pCB": 80, "pDet": 5, "pMoney": 6, "pTM": 7, "pCompA": 8, "pCompB": 9, "pPinT": 10, "pPinR": 13, "pWT": 14, "pWR": 15, "pAddR": 16, "pAddP": 17, "pAddI": 18, "pBot": 19}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -14148,6 +14223,53 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 reset()
             _sc = _scenario(111)
             if _sc:
+                # Bot moves (#17108): under a running reservation, a waiting train made ONLY of App-authored
+                # bot-path PRs (an auto-deploy pin) opens no deferral window — the holder keeps main and its
+                # one deferral; the same PR authored by anyone else opens the window as before (control).
+                def bot_state(login):
+                    open_only("pW")
+                    gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+                    open_only("pBot")
+                    gh.prs[19]["user"] = {"login": login}
+                s = (bot_state(BOT_LOGIN), mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False))[1]
+                check("bot moves: a bot-only train under a running holder opens no deferral, the moves are held",
+                      "deferral_window" not in s and s.get("bot_moves_held") == [19] and s["in_flight"], f"{s}")
+                gh.head_checks.clear()
+                reset()
+                s = (bot_state("someone"), mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False))[1]
+                check("bot moves (control): the same PR by a human author opens the bounded deferral as before",
+                      s.get("deferral_window") == 35 and "bot_moves_held" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+                # Review of #17112: held for ONE reservation only. A marker naming another reservation (A went red,
+                # B was updated the same tick) releases the move: the deferral opens as for any candidate.
+                bot_state(BOT_LOGIN)
+                bh = gh.prs[19]["head"]["sha"]
+                gh.post_status(bh, "success", f"held for #36 since {int(time.time())}", context=BOT_HOLD_CONTEXT)
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+                check("bot moves: a move already held for another reservation is released (no re-hold)",
+                      s.get("deferral_window") == 35 and "bot_moves_held" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+                bot_state(BOT_LOGIN)
+                bh = gh.prs[19]["head"]["sha"]
+                gh.post_status(bh, "success", f"held for #35 since {int(time.time()) - RESERVATION_CEILING_S - 1}",
+                               context=BOT_HOLD_CONTEXT)
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+                check("bot moves: a move held longer than RESERVATION_CEILING_S is released",
+                      s.get("deferral_window") == 35 and "bot_moves_held" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+                # Only where a deferral would open: a holder that already yielded holds nothing for the moves.
+                bot_state(BOT_LOGIN)
+                gh.post_status(gh.prs[35]["head"]["sha"], "success", "yielded", context=DEFER_CONTEXT)
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+                check("bot moves: no hold where no deferral would open (holder already yielded)",
+                      "bot_moves_held" not in s and "deferral_window" not in s, f"{s}")
+                gh.head_checks.clear()
+                reset()
+            _sc = _scenario(112)
+            if _sc:
 
                 # #15827 (b): the disjoint fast path never releases a PR while a train carrier is in flight.
                 # Measured 2026-11-12: #15817 was posted "fast lane: disjoint from main ... and the batch" at
@@ -14169,7 +14291,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 s = settle_now()
                 check("#15827 (b): with no carrier open the fast-lane PR is released", 34 in s["fast"], str(s))
                 reset()
-            _sc = _scenario(112)
+            _sc = _scenario(113)
             if _sc:
 
                 # #15827 (c): a strict holder GREEN on an up-to-date head that did not merge this tick (here: the
@@ -14191,7 +14313,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       gh.merged[:1] == [35] and gh.updates == [] and gh.prs[35]["head"]["sha"] == pw_head,
                       f"{s} st={st} merged={gh.merged} updates={gh.updates}")
                 reset()
-            _sc = _scenario(113)
+            _sc = _scenario(114)
             if _sc:
                 # Bounded: a holder that still cannot merge holds the fast lane ONCE per head, never twice.
                 open_only("pW")
@@ -14203,7 +14325,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       st == "published" and "strict_ready_hold" not in s, f"{s} st={st}")
                 gh.refuse_merge.discard(35)
                 reset()
-            _sc = _scenario(114)
+            _sc = _scenario(115)
 
             # BOUNDED STRICT DEFERRAL (#13400): a strict reservation whose CI is still running yields
             # ONCE per strict head to a carrier built from green candidates DURING that CI. The deferral
@@ -14227,7 +14349,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       and deferral(pw_a) == "success" and gh.merged == [], f"{s} st={st} defer={deferral(pw_a)!r}")
                 gh.head_checks.clear()
                 reset()
-            _sc = _scenario(115)
+            _sc = _scenario(116)
             if _sc:
 
                 # (2) a deferral already recorded for this strict head: held, no carrier.
@@ -14239,7 +14361,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       f"{s} st={st}")
                 gh.head_checks.clear()
                 reset()
-            _sc = _scenario(116)
+            _sc = _scenario(117)
             if _sc:
 
                 # (3) GRANTED DEFERRAL IS HONOURED (2026-11-05): the strict head and the carrier built under
@@ -14268,7 +14390,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       yielded(pw_head) != "success", f"yielded={yielded(pw_head)!r}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(117)
+            _sc = _scenario(118)
             if _sc:
 
                 # (3-nd) GREEN HOLDER FIRST, only for a holder that did NOT defer (#14191/#14338, #14183/#14327):
@@ -14294,7 +14416,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       f"{s} yielded={yielded(pw_head)!r}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(118)
+            _sc = _scenario(119)
             if _sc:
 
                 # (3-nm) The same two green heads, but the carrier has TWO members. Yielding would void it
@@ -14318,7 +14440,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       deferral(pw_head) == "success", f"defer={deferral(pw_head)!r}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(119)
+            _sc = _scenario(120)
             if _sc:
 
                 # (3a) BOUNDED WAIT, and the old green-carrier-first case restored: the holder is green but
@@ -14345,7 +14467,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 gh.refuse_merge = set()
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(120)
+            _sc = _scenario(121)
             if _sc:
 
                 # (3b) THE ONE-YIELD BOUND under the granted deferral: the carrier merged past the holder that
@@ -14374,7 +14496,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       f"st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(121)
+            _sc = _scenario(122)
             if _sc:
 
                 # (3c) shadow mode never reaches the yield: nothing merges, no marker is posted.
@@ -14388,7 +14510,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       yielded(pw_head) == "" and gh.merged == [], f"yielded={yielded(pw_head)!r} merged={gh.merged}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(122)
+            _sc = _scenario(123)
 
             # (3b) UNVERIFIED carrier vs a green strict PR past its deferral: the strict PR waits for
             # the running carrier while it is younger than CARRIER_PRIORITY_S (it would void ~1 h of
@@ -14411,14 +14533,14 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       f"{s} merged={gh.merged}")
                 gh.pending_shas.clear()
                 reset()
-            _sc = _scenario(123)
+            _sc = _scenario(124)
             if _sc:
                 s = running_carrier_and_green_strict(CARRIER_PRIORITY_S + 60)
                 check("carrier priority: bounded - a carrier older than CARRIER_PRIORITY_S no longer holds the strict PR",
                       gh.merged == [35], f"{s} merged={gh.merged}")
                 gh.pending_shas.clear()
                 reset()
-            _sc = _scenario(124)
+            _sc = _scenario(125)
             if _sc:
 
                 # (4) bounded: the carrier merges past the running head A (the one deferral); A is
@@ -14447,7 +14569,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 gh.head_checks.clear()
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(125)
+            _sc = _scenario(126)
             if _sc:
 
                 # OVERLAP FROM THE UPDATE TICK (#13400), rebuilt from 2026-10-26 16:06-17:14Z: carrier #13939
@@ -14540,7 +14662,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 gh.head_checks.clear()
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(126)
+            _sc = _scenario(127)
             if _sc:
 
                 # LANE FAIRNESS (ADR-0343, 2026-10-21): the strict queue never empties, so before the fix
@@ -14566,7 +14688,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       gh.updates == [36], f"{s} updates={gh.updates}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(127)
+            _sc = _scenario(128)
             if _sc:
 
                 open_only("pW", "pW2")
@@ -14589,7 +14711,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                     TRAIN_TURN_S = saved_turn
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(128)
+            _sc = _scenario(129)
             if _sc:
 
                 # FAST LANE'S TURN (ADR-0360), rebuilt from 2026-11-02 18:27Z-23:59Z: strict #14595 and #14607
@@ -14705,35 +14827,35 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 check("reservation: slow but progressing CI (90 min, last job 2 min ago) keeps main reserved",
                       s["in_flight"] and s["fast"] == [] and not s.get("timed_out"), str(s))
                 reset()
-            _sc = _scenario(129)
+            _sc = _scenario(130)
             if _sc:
                 # (b) stalled: 20 min in, nothing started or finished since the update-branch.
                 s = reservation_at(RESERVATION_STALL_S + 5 * 60)
                 check("reservation: stalled CI (nothing started or completed in the stall window) times out",
                       34 in s["fast"] and s.get("timed_out") == [35], str(s))
                 reset()
-            _sc = _scenario(130)
+            _sc = _scenario(131)
             if _sc:
                 # (b') stalled after progress: jobs ran, then nothing for longer than the window.
                 s = reservation_at(40 * 60, RESERVATION_STALL_S + 60)
                 check("reservation: CI that progressed and then stalled times out",
                       34 in s["fast"] and s.get("timed_out") == [35], str(s))
                 reset()
-            _sc = _scenario(131)
+            _sc = _scenario(132)
             if _sc:
                 # (c) the hard ceiling bounds a CI that keeps trickling forever.
                 s = reservation_at(RESERVATION_CEILING_S + 60, 60)
                 check("reservation: past the hard ceiling the reservation times out even while CI progresses",
                       34 in s["fast"] and s.get("timed_out") == [35], str(s))
                 reset()
-            _sc = _scenario(132)
+            _sc = _scenario(133)
             if _sc:
                 # (d) a future-dated head still holds nothing, even with live CI activity (#13485).
                 s = reservation_at(-3600, -3600 - 60)
                 check("reservation: a head committed in the future times out even with live CI activity",
                       34 in s["fast"] and s.get("timed_out") == [35], str(s))
                 reset()
-            _sc = _scenario(133)
+            _sc = _scenario(134)
             if _sc:
                 # The pin is live: a fresh fixture head carries exactly the pinned instant, so the default
                 # clock sees it as age 0 whatever the suite's real duration. If git ignored the pinned date
@@ -14744,7 +14866,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 check("clock pin: a fixture head is stamped with the pinned instant (age 0 on the default clock)",
                       ct_pin == int(time.time()), f"head ct={ct_pin} time.time={time.time():.0f}")
                 reset()
-            _sc = _scenario(134)
+            _sc = _scenario(135)
             if _sc:
 
                 # GREEN IS DONE, NOT STALLED: #13608 went green ~05:50Z, nothing ran after it, and the next tick
@@ -14756,7 +14878,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       gh.merged == [35] and not s.get("timed_out"), f"{s} merged={gh.merged}")
                 gh.merged.clear()
                 reset()
-            _sc = _scenario(135)
+            _sc = _scenario(136)
             if _sc:
                 # GREEN PAST THE CEILING (#14624, 2026-11-03): starved ticks carried a fully green, up-to-date
                 # holder past the ceiling and it was released instead of merged. Green is checked first.
@@ -14767,14 +14889,14 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       gh.merged == [35] and not s.get("timed_out"), f"{s} merged={gh.merged}")
                 gh.merged.clear()
                 reset()
-            _sc = _scenario(136)
+            _sc = _scenario(137)
             if _sc:
                 # (e3) NOT green (pending) past the ceiling: still released.
                 s = reservation_at(RESERVATION_CEILING_S + 60, 60)
                 check("reservation: a PENDING holder past the ceiling is still released",
                       s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
                 reset()
-            _sc = _scenario(137)
+            _sc = _scenario(138)
             if _sc:
                 # (e4) green but BEHIND main, past the ceiling: never merged from there (it is updated instead).
                 open_only("pW", "pF")
@@ -14796,7 +14918,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       35 not in gh.merged, f"{s} merged={gh.merged}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(138)
+            _sc = _scenario(139)
             if _sc:
                 # (d) green, merge refused every tick, past the hard cap: released (bounded escape).
                 open_only("pW", "pF")
@@ -14806,28 +14928,28 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
                 gh.refuse_merge.clear()
                 reset()
-            _sc = _scenario(139)
+            _sc = _scenario(140)
             if _sc:
                 # (f) pending, no activity for 20 min: still a stall.
                 s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60)
                 check("reservation: a PENDING holder idle past the stall window is released (stall)",
                       s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
                 reset()
-            _sc = _scenario(140)
+            _sc = _scenario(141)
             if _sc:
                 # (g) pending with recent activity: kept.
                 s = reservation_at(30 * 60, 60)
                 check("reservation: a PENDING holder with recent activity keeps main reserved",
                       s["in_flight"] and not s.get("timed_out") and 35 not in gh.merged, str(s))
                 reset()
-            _sc = _scenario(141)
+            _sc = _scenario(142)
             if _sc:
                 # (h) red: the failure path, never reported as a stall and never holding main.
                 s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60, checks={"gates (data)": "failure"})
                 check("reservation: a RED holder takes the failure path, not the stall path",
                       not s.get("timed_out") and 35 not in gh.merged and 34 in s["fast"], f"{s} merged={gh.merged}")
                 reset()
-            _sc = _scenario(142)
+            _sc = _scenario(143)
             if _sc:
                 # #14302 COOLDOWN: a head whose reservation timed out does not reserve main again when its CI
                 # resumes. #14187 timed out at 13:33Z and was re-reserved as soon as a job started, so the
@@ -14839,7 +14961,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       s1.get("timed_out") == [35] and marked and not s2["in_flight"] and 34 in s2["fast"]
                       and s2.get("timed_out") == [35], f"marked={marked} s1={s1} s2={s2}")
                 reset()
-            _sc = _scenario(143)
+            _sc = _scenario(144)
             if _sc:
 
                 # #14302 QUEUED CI IS CI: nested reusable-workflow contexts register no check run until their
@@ -14880,7 +15002,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       s["in_flight"] and s["fast"] == [], str(s))
                 gh.head_checks.clear()
                 reset()
-            _sc = _scenario(144)
+            _sc = _scenario(145)
 
             # (b) the committer time is the author's: a head dated in the future holds nothing.
             real_time = time.time
@@ -14896,7 +15018,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                 check("reservation timeout: a head committed in the future holds no reservation",
                       34 in s["fast"] and s.get("timed_out") == [35], str(s))
                 reset()
-            _sc = _scenario(145)
+            _sc = _scenario(146)
             if _sc:
 
                 # ---- main-red awareness: the strict lane never deadlocks behind a PR red only because main is ----
@@ -15312,7 +15434,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       "#     1 skip      auto-merge not armed" in buf.getvalue() and "#     2 skip      draft" in buf.getvalue(),
                       buf.getvalue()[-400:])
                 reset()
-            _sc = _scenario(146)
+            _sc = _scenario(147)
             if _sc:
 
                 # ---- stale-red refresh: PRs left red by a red MAIN get one update-branch once main is green ----
@@ -15608,7 +15730,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                     extra_done()
                 # ---- notices (#13400): conflict-with-main drops and refused update-branch, once per head ----
                 reset()
-            _sc = _scenario(147)
+            _sc = _scenario(148)
             if _sc:
                 gh.updates.clear()
                 gh.g("checkout", "-q", "-f", "main")
@@ -15646,7 +15768,7 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       f"merged={gh.merged} {gh.comments}")
                 gh.g("branch", "-q", "-D", "pA-fixed")
                 reset()
-            _sc = _scenario(148)
+            _sc = _scenario(149)
             if _sc:
 
                 # Strict lane: a green manual-lane PR behind main whose update-branch GitHub refuses.
@@ -15749,14 +15871,14 @@ def self_test(shard: tuple[int, int] | None = None) -> int:
                       len(told) == 1 and f"`{both}`" in told[0], f"{gh.comments[-1:]}")
                 gh.updates.clear()
                 reset()
-            _sc = _scenario(149)
+            _sc = _scenario(150)
             if _sc:
                 # ---- GitHub API (#13400): transient failures never kill a tick's carrier; quota is not burnt ----
                 # The REAL GitHub class and api() over HttpFixture (urllib.request.urlopen patched). Rebuilt
                 # from 2026-10-26: publish died on a check-runs GET 503 at 16:33Z, build on the installation's
                 # primary quota (403) at 16:39Z — each a lost carrier and a red run, no member at fault.
                 reset()
-            _sc = _scenario(150)
+            _sc = _scenario(151)
             if _sc:
                 gh.updates.clear()
                 saved_http = (urllib.request.urlopen, globals()["_api_sleep"], os.environ.get("GITOPS_APP_ID"))

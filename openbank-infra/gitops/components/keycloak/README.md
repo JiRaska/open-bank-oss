@@ -410,3 +410,16 @@ from Vault KV, and those are a strict stale ancestor of these files (measured in
 4 roles / 2 clients against 14 / 10). Making the templates importable is the precondition
 for the reconcile, not the reconcile itself — that is an owner-gated `vault kv put`,
 runbook 0009.
+
+## Customers realm: MCP clients and the MCP token exchange (ADR-0385 D1, ADR-0383 D4)
+
+Every `customers-realm-template.json` entry carrying the `openbank.mcp.tier` or `openbank.mcp.exchange`
+attribute is DERIVED from `openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml` by
+`.github/scripts/gen-mcp-realm-clients.py`; never hand-edit them, and the `mcp-client-realm-parity`
+gate fails on any drift. The exchange entries are: `openbank-mcp-service`, the confidential RFC 8693
+requester (no flow, no service account, exchange enabled on this client only, 60 s tokens, optional
+scopes = the declared read scopes, secret `__MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET__` from OpenBao
+`keycloak/mcp-service-customer-exchange`); one bearer-only audience client per downstream service;
+and one client scope per downstream carrying exactly one audience mapper. Adding the requester to the
+OpenBao import artifact is an operator step (runbook 0009). The exchange of a DPoP-bound subject token
+has not yet been run against a live Keycloak of the deployed version.

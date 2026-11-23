@@ -229,3 +229,12 @@ database remains authoritative for new commitments.
 Account-service can check an already-consumed permit with
 `POST /api/v2/internal/passport-account-admissions/receipt`. The same bound request used for
 admission returns 204 for an exact receipt and 404 otherwise. The lookup never creates a permit.
+
+### Consumed account booking context (ADR-0380 B2)
+
+POST `/api/v2/internal/passport-account-admissions/context` is restricted to the named account-service principal.
+The exact grant, operation, operation ID, party, revision and digest must match a consumed permit, otherwise 404.
+It returns bankId, establishmentId, hostCountry and mode; no customer identity evidence is exposed. Scope cannot
+be edited after creation, so a consumed receipt remains stable after revocation. OPEN and ACTIVATE share the
+revocation fence for FOS and BRANCH. The served branch admission path remains TEST-only until launch approval.
+Deploy prerequisite Catalogue V19–V21 before the new V22 receipt-context function; retain evidence on rollback.

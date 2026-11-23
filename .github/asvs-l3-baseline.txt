@@ -119,6 +119,9 @@ V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:68: plaintext http://
 V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:70: plaintext http:// env value http://balance-service.balances.svc:8103
 V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:72: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:74: plaintext http:// env value http://consent-service.consent.svc:8106
+# plaintext mcp->delegation hop (ADR-0383 D3 grant lookup, #16800); delegation-service has no mTLS
+# listener yet; retires with fleet mTLS (baseline Layer 1).
+V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:136: plaintext http:// env value http://delegation-service.delegation.svc:8126
 V9.1 openbank-infra/gitops/components/observability/holmes-rca.yaml:183: plaintext http:// env value http://holmesgpt-holmes.observability.svc:80
 V9.1 openbank-infra/gitops/components/observability/holmes-rca.yaml:185: plaintext http:// env value http://loki.observability.svc:3100
 V9.1 openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml:146: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
