@@ -3353,8 +3353,17 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.mcp-connect.read")
     @Blocking
     fun getMcpConnectRequestV2(@PathParam("requestRef") requestRef: String): Response =
-        withMcpConnectRequest(requestRef, includeHosted = true) { url, party ->
-            mcpConnectReviewResult(upstream.get(url, party.toString()), party, requestRef)
+        withMcpConnectCustomer { party ->
+            if (!MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
+                return@withMcpConnectCustomer badRequest("Invalid MCP connect request reference")
+            }
+            val response = upstream.getToService(
+                delegationServiceUrl,
+                "${mcpConnectRequestsPath(includeHosted = true)}/$requestRef",
+                emptyMap(),
+                party.toString(),
+            )
+            mcpConnectReviewResult(response, party, requestRef)
         }
 
     @POST
@@ -3432,9 +3441,12 @@ class CustomerEdgeResource(
         }
     }
 
-    private fun mcpConnectRequestsUrl(includeHosted: Boolean = false): String {
+    private fun mcpConnectRequestsUrl(includeHosted: Boolean = false): String =
+        "$delegationServiceUrl${mcpConnectRequestsPath(includeHosted)}"
+
+    private fun mcpConnectRequestsPath(includeHosted: Boolean): String {
         val requests = if (includeHosted) "requests-v2" else "requests"
-        return "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/$requests"
+        return "/api/v1/delegations/mcp-connect/customer/$requests"
     }
 
     private fun mcpConnectReviewResult(response: Response, party: UUID, requestRef: String): Response =
