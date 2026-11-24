@@ -40,6 +40,7 @@ class McpConnectProxyTest {
         azp: String = "openbank-app",
         act: Boolean = false,
         tokenAudience: Set<String> = setOf("openbank-edge"),
+        enabled: Boolean = true,
     ) = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
@@ -58,7 +59,7 @@ class McpConnectProxyTest {
         objectMapper = mapper
         partyMergeResolver = mockk { every { resolve(caller) } returns mergedParty }
         delegationServiceUrl = "http://delegation"
-        mcpConnectEnabled = true
+        configureMcpConnect(enabled)
     }
 
     private fun reviewJson(party: UUID = mergedParty) = """
@@ -115,9 +116,28 @@ class McpConnectProxyTest {
     }
 
     @Test
+    fun `null account and capability elements return 400 without forwarding`() {
+        val upstream = mockk<UpstreamClient>()
+        val edge = edge(upstream)
+        val inputs = mapOf(
+            """{"accounts":[null]}""" to "accounts[0]",
+            """{"accounts":[{"accountId":"$account","capabilities":[null]}]}""" to "accounts[0].capabilities[0]",
+        )
+
+        inputs.forEach { (payload, expectedIndex) ->
+            val selection = mapper.readValue(payload, CustomerMcpConnectSelection::class.java)
+            val reply = edge.selectMcpConnectAccounts(requestRef, selection)
+            assertThat(reply.status).isEqualTo(400)
+            assertThat(reply.entity.toString()).contains(expectedIndex)
+            assertThat(reply.getHeaderString(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store")
+        }
+        verify { upstream wasNot Called }
+    }
+
+    @Test
     fun `disabled wrong identity and malformed references do not reach the owner`() {
         val upstream = mockk<UpstreamClient>()
-        assertThat(edge(upstream).apply { mcpConnectEnabled = false }.listMcpConnectRequests().status).isEqualTo(404)
+        assertThat(edge(upstream, enabled = false).listMcpConnectRequests().status).isEqualTo(404)
         assertThat(edge(upstream, azp = "synthetic-assistant").listMcpConnectRequests().status).isEqualTo(403)
         assertThat(edge(upstream, act = true).listMcpConnectRequests().status).isEqualTo(403)
         assertThat(edge(upstream, tokenAudience = setOf("mcp-service")).listMcpConnectRequests().status).isEqualTo(403)
@@ -170,7 +190,7 @@ class McpConnectProxyTest {
         assertThat(edge.revokeMcpConnection(connectionId).status).isEqualTo(503)
         assertThat(edge.revokeMcpConnection(connectionId).status).isEqualTo(404)
         assertThat(edge(upstream, act = true).revokeMcpConnection(connectionId).status).isEqualTo(403)
-        assertThat(edge(upstream).apply { mcpConnectEnabled = false }.revokeMcpConnection(connectionId).status)
+        assertThat(edge(upstream, enabled = false).revokeMcpConnection(connectionId).status)
             .isEqualTo(404)
         verify(exactly = 3) { upstream.post(url, mergedParty.toString(), "", idempotencyKey = connectionId.toString()) }
     }

@@ -8,10 +8,19 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
 import java.util.UUID
 
-data class CustomerMcpConnectSelection(val accounts: List<CustomerMcpConnectAccountScope>)
+data class CustomerMcpConnectSelection(val accounts: List<CustomerMcpConnectAccountScope?>) {
+    internal fun validateElements() {
+        accounts.forEachIndexed { accountIndex, account ->
+            val scope = requireNotNull(account) { "accounts[$accountIndex] is required" }
+            scope.capabilities.forEachIndexed { capabilityIndex, capability ->
+                requireNotNull(capability) { "accounts[$accountIndex].capabilities[$capabilityIndex] is required" }
+            }
+        }
+    }
+}
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class CustomerMcpConnectAccountScope(val accountId: UUID, val capabilities: List<String>)
+data class CustomerMcpConnectAccountScope(val accountId: UUID, val capabilities: List<String?>)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class CustomerMcpConnectRequests(val requests: List<CustomerMcpConnectReview>)

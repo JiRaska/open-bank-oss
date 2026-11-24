@@ -239,8 +239,14 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.identity-resume-enabled", defaultValue = "false")
     var identityResumeEnabled: Boolean = false
 
-    @ConfigProperty(name = "openbank.edge.mcp-connect-enabled", defaultValue = "false")
-    var mcpConnectEnabled: Boolean = false
+    private var mcpConnectEnabled = false
+
+    @Inject
+    fun configureMcpConnect(
+        @ConfigProperty(name = "openbank.edge.mcp-connect-enabled", defaultValue = "false") enabled: Boolean,
+    ) {
+        mcpConnectEnabled = enabled
+    }
 
     // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created
     // through domestic-payment's reservation-bound route and its reservation is settled by the
@@ -3321,6 +3327,11 @@ class CustomerEdgeResource(
         if (selection == null) {
             badRequest("Account selection is required")
         } else {
+            try {
+                selection.validateElements()
+            } catch (e: IllegalArgumentException) {
+                return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
+            }
             val response = upstream.put("$url/selection", party.toString(), objectMapper.writeValueAsString(selection))
             mcpConnectReviewResult(response, party, requestRef)
         }
