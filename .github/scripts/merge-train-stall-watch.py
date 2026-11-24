@@ -276,6 +276,17 @@ class Api:
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 b = r.read()
+        except urllib.error.HTTPError as e:
+            headers = e.headers or {}
+
+            reason = "request rejected"
+            if e.code in (403, 429) and headers.get("X-RateLimit-Remaining") == "0":
+                reason = "primary rate limit exhausted"
+            elif e.code == 429 or (e.code == 403 and headers.get("Retry-After")):
+                reason = "throttled"
+            elif e.code == 403:
+                reason = "forbidden, cause unclassified"
+            raise CouldNotLook(f"{method} {path}: HTTP {e.code} ({reason})") from e
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise CouldNotLook(f"{method} {path}: {e}") from e
         return b.decode("utf-8", "replace") if raw else (json.loads(b) if b else None)
@@ -534,6 +545,30 @@ def self_test() -> int:
         nonlocal fails
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
         fails += 0 if ok else 1
+
+    from email.message import Message
+    from unittest.mock import patch
+
+    for code, fields, expected in (
+        (403, {"X-RateLimit-Remaining": "0"}, "primary rate limit exhausted"),
+        (403, {"Retry-After": "30"}, "throttled"),
+        (429, {}, "throttled"),
+        (403, None, "forbidden, cause unclassified"),
+    ):
+        headers = None
+        if fields is not None:
+            headers = Message()
+            for key, value in fields.items():
+                headers[key] = value
+        error = urllib.error.HTTPError("https://example.invalid", code, "opaque", headers, None)
+        with patch.object(urllib.request, "urlopen", side_effect=error) as request:
+            try:
+                Api("owner/repo", "fixture").get("/fixture")
+            except CouldNotLook as failure:
+                check(f"HTTP {code}: {expected}", str(failure).endswith(f"HTTP {code} ({expected})")
+                      and failure.__cause__ is error and request.call_count == 1)
+            else:
+                check(f"HTTP {code} stays unreadable", False)
 
     T = STALL_MINUTES * 60
     # threshold boundary
