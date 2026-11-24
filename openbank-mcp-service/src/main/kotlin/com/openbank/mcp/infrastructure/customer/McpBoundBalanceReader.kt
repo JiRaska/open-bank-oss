@@ -5,6 +5,7 @@
 
 package com.openbank.mcp.infrastructure.customer
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -41,21 +42,10 @@ interface McpBoundBalanceIssuer {
         @FormParam("grant_type") grantType: String,
         @FormParam("client_id") clientId: String,
         @FormParam("subject_token") subjectToken: String,
-        @FormParam("resource_dpop_proof") resourceProof: String,
+        @FormParam("resource_dpop_proof") resourceProof: String?,
         @FormParam("account_id") accountId: UUID,
         @FormParam("connection_id") connectionId: UUID?,
-    ): JsonNode
-
-    @POST
-    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
-    @Produces(MediaType.APPLICATION_JSON)
-    fun issueHosted(
-        @FormParam("grant_type") grantType: String,
-        @FormParam("client_id") clientId: String,
-        @FormParam("subject_token") subjectToken: String,
-        @FormParam("hosted_read_id") readId: UUID,
-        @FormParam("account_id") accountId: UUID,
-        @FormParam("connection_id") connectionId: UUID,
+        @FormParam("hosted_read_id") hostedReadId: UUID? = null,
     ): JsonNode
 }
 
@@ -96,7 +86,7 @@ class McpBoundBalanceReader(
         val answer = if (key != null && key.keyThumbprint == null) {
             refuseUnless(caller.resourceProof == null, "hosted balance request cannot carry a DPoP proof")
             val boundConnection = connectionId ?: throw TokenExchangeRefused("hosted connection binding is unavailable")
-            issuer.issueHosted(GRANT_TYPE, CLIENT, caller.rawToken, UUID.randomUUID(), grant.accountId, boundConnection)
+            issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, null, grant.accountId, boundConnection, Ids.randomId())
         } else {
             val proof = caller.resourceProof ?: throw TokenExchangeRefused("verified resource proof is unavailable")
             issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId)

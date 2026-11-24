@@ -35,7 +35,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
-@Path("/api/v1/delegations/mcp-connect/requests")
+@Path("/api/v1/delegations/mcp-connect")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API")
@@ -61,13 +61,33 @@ class McpConnectIssuerResource(
     }
 
     @POST
+    @Path("/requests")
     @Authorize(action = "delegation.mcp-connect.issuer.register")
     suspend fun register(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: Registration?,
+    ): Map<String, Any?> =
+        registerImpl(idempotencyKey, customerParty, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2")
+    @Authorize(action = "delegation.mcp-connect.issuer.register")
+    suspend fun registerV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        body: Registration?,
+    ): Map<String, Any?> =
+        registerImpl(idempotencyKey, customerParty, body, includeHosted = true)
+
+    private suspend fun registerImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        body: Registration?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         val request = requireNotNull(body) { "registration is required" }.toRequest()
         requireMcpConnectIdempotencyKey(idempotencyKey, request.requestRef)
         if (!store.register(request)) throw conflict()
@@ -79,15 +99,36 @@ class McpConnectIssuerResource(
     }
 
     @POST
-    @Path("/{requestRef}/selection")
+    @Path("/requests/{requestRef}/selection")
     @Authorize(action = "delegation.mcp-connect.issuer.selection")
     suspend fun selection(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: McpConnectRequestStore.Binding?,
+    ): Map<String, Any?> =
+        selectionImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2/{requestRef}/selection")
+    @Authorize(action = "delegation.mcp-connect.issuer.selection")
+    suspend fun selectionV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        @PathParam("requestRef") requestRef: String,
+        body: McpConnectRequestStore.Binding?,
+    ): Map<String, Any?> =
+        selectionImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+
+    private suspend fun selectionImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        requestRef: String,
+        body: McpConnectRequestStore.Binding?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val review = find(requestRef, requireNotNull(body) { "binding is required" })
         val status = if (review.accounts.isEmpty()) "PENDING_SELECTION" else "SELECTED"
@@ -95,15 +136,36 @@ class McpConnectIssuerResource(
     }
 
     @POST
-    @Path("/{requestRef}/challenge")
+    @Path("/requests/{requestRef}/challenge")
     @Authorize(action = "delegation.mcp-connect.issuer.challenge")
     suspend fun challenge(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: ChallengeBinding?,
+    ): Map<String, Any?> =
+        challengeImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2/{requestRef}/challenge")
+    @Authorize(action = "delegation.mcp-connect.issuer.challenge")
+    suspend fun challengeV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        @PathParam("requestRef") requestRef: String,
+        body: ChallengeBinding?,
+    ): Map<String, Any?> =
+        challengeImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+
+    private suspend fun challengeImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        requestRef: String,
+        body: ChallengeBinding?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "challenge binding is required" }
         val binding = McpConnectRequestStore.Binding(link.partyId, link.clientId, link.parJkt)
@@ -125,15 +187,36 @@ class McpConnectIssuerResource(
     }
 
     @POST
-    @Path("/{requestRef}/stage")
+    @Path("/requests/{requestRef}/stage")
     @Authorize(action = "delegation.mcp-connect.issuer.stage")
     suspend fun stage(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
+    ): Map<String, Any?> =
+        stageImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2/{requestRef}/stage")
+    @Authorize(action = "delegation.mcp-connect.issuer.stage")
+    suspend fun stageV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        @PathParam("requestRef") requestRef: String,
+        body: StagedRequest?,
+    ): Map<String, Any?> =
+        stageImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+
+    private suspend fun stageImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        requestRef: String,
+        body: StagedRequest?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "code binding is required" }
         val review = find(requestRef, link.binding())
@@ -143,14 +226,33 @@ class McpConnectIssuerResource(
     }
 
     @POST
-    @Path("/staged")
+    @Path("/requests/staged")
     @Authorize(action = "delegation.mcp-connect.issuer.staged")
     suspend fun staged(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: CodeLookup?,
+    ): Map<String, Any?> =
+        stagedImpl(idempotencyKey, customerParty, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2/staged")
+    @Authorize(action = "delegation.mcp-connect.issuer.staged")
+    suspend fun stagedV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        body: CodeLookup?,
+    ): Map<String, Any?> =
+        stagedImpl(idempotencyKey, customerParty, body, includeHosted = true)
+
+    private suspend fun stagedImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        body: CodeLookup?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         val lookup = requireNotNull(body) { "code binding is required" }
         requireMcpConnectIdempotencyKey(idempotencyKey, lookup.codeBindingRef)
         require(REQUEST_REF.matches(lookup.codeBindingRef)) { "invalid code binding" }
@@ -164,15 +266,36 @@ class McpConnectIssuerResource(
     }
 
     @POST
-    @Path("/{requestRef}/activate")
+    @Path("/requests/{requestRef}/activate")
     @Authorize(action = "delegation.mcp-connect.issuer.activate")
     suspend fun activate(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
+    ): Map<String, Any?> =
+        activateImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2/{requestRef}/activate")
+    @Authorize(action = "delegation.mcp-connect.issuer.activate")
+    suspend fun activateV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        @PathParam("requestRef") requestRef: String,
+        body: StagedRequest?,
+    ): Map<String, Any?> =
+        activateImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+
+    private suspend fun activateImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        requestRef: String,
+        body: StagedRequest?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "refresh family is required" }
         val family = requireNotNull(link.refreshFamilyRef) { "refresh family is required" }
@@ -192,14 +315,33 @@ class McpConnectIssuerResource(
     }
 
     @POST
-    @Path("/family-status")
+    @Path("/requests/family-status")
     @Authorize(action = "delegation.mcp-connect.issuer.family-status")
     suspend fun familyStatus(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: FamilyLookup?,
+    ): Map<String, Any?> =
+        familyStatusImpl(idempotencyKey, customerParty, body, includeHosted = false)
+
+    @POST
+    @Path("/requests-v2/family-status")
+    @Authorize(action = "delegation.mcp-connect.issuer.family-status")
+    suspend fun familyStatusV2(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
+        body: FamilyLookup?,
+    ): Map<String, Any?> =
+        familyStatusImpl(idempotencyKey, customerParty, body, includeHosted = true)
+
+    private suspend fun familyStatusImpl(
+        idempotencyKey: String?,
+        customerParty: String?,
+        body: FamilyLookup?,
+        includeHosted: Boolean,
     ): Map<String, Any?> {
         requireIssuer(customerParty)
+        require(includeHosted || body?.parJkt != null) { "legacy MCP issuer requests require DPoP" }
         val lookup = requireNotNull(body) { "refresh family is required" }
         requireMcpConnectIdempotencyKey(idempotencyKey, lookup.refreshFamilyRef)
         require(REQUEST_REF.matches(lookup.refreshFamilyRef)) { "invalid refresh family" }

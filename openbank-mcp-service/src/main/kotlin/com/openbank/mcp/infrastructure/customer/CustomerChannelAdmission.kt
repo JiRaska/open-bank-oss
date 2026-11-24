@@ -84,13 +84,14 @@ class CustomerChannelAdmission internal constructor(
     /** True when [jwt]'s `iss` is the customers realm — the ONLY selector of this path (ADR-0383 D1.1). */
     fun isCustomerToken(jwt: JsonWebToken): Boolean = jwt.issuer != null && jwt.issuer == issuer
 
+    fun supportsHostedBearer(): Boolean = requireConnection && allowlist.clients.values.any {
+        it.enabled && it.tier == McpClientAllowlist.Tier.H
+    }
+
     /** The 401 for a request that carries no token at all (RFC 9728 §5.1, RFC 6750 §3.1: no error code). */
     fun missingTokenChallenge(): String {
         val dpop = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
-        val hostedEnabled = requireConnection && allowlist.clients.values.any {
-            it.enabled && it.tier == McpClientAllowlist.Tier.H
-        }
-        return if (hostedEnabled) "Bearer resource_metadata=\"$resourceMetadataUrl\", $dpop" else dpop
+        return if (supportsHostedBearer()) "Bearer resource_metadata=\"$resourceMetadataUrl\", $dpop" else dpop
     }
 
     /**

@@ -99,7 +99,7 @@ final class McpConnectAuthorityClient {
     }
 
     void register(Request request) throws IOException {
-        JsonNode response = post(REQUESTS, request.reference(), request.registration(), 200, 201);
+        JsonNode response = post(requestsPath(request.parJkt()), request.reference(), request.registration(), 200, 201);
         requireIdentity(request, response);
         if (!textIs(response, "status", "PENDING_SELECTION")
                 || !textIs(response, "redirectHost", request.base().redirectHost())
@@ -139,7 +139,7 @@ final class McpConnectAuthorityClient {
     Stage staged(String partyId, String clientId, String jkt, String codeBindingRef) throws IOException {
         var body = bindingIdentity(partyId, clientId, jkt);
         body.put("codeBindingRef", codeBindingRef);
-        JsonNode response = post(REQUESTS + "/staged", codeBindingRef, body, 200);
+        JsonNode response = post(requestsPath(jkt) + "/staged", codeBindingRef, body, 200);
         // The bank authority binds the same immutable registered context to the verified code reference.
         var base = new McpConnectContext(clientId, response.path("redirectHost").textValue(),
                 response.path("resource").textValue(), canonicalScopes(response),
@@ -157,7 +157,7 @@ final class McpConnectAuthorityClient {
     UUID activeFamily(String partyId, String clientId, String jkt, FamilyReference family) throws IOException {
         var body = bindingIdentity(partyId, clientId, jkt);
         body.put("refreshFamilyRef", family.value());
-        JsonNode response = post(REQUESTS + "/family-status", family.value(), body, 200);
+        JsonNode response = post(requestsPath(jkt) + "/family-status", family.value(), body, 200);
         UUID connection = canonicalUuid(response.path("connectionId").textValue());
         if (!textIs(response, "status", "ACTIVE") || !textIs(response, "partyId", partyId)
                 || !textIs(response, "clientId", clientId) || !bindingIs(response, jkt)
@@ -296,8 +296,12 @@ final class McpConnectAuthorityClient {
         return expected.equals(response.path(name).textValue());
     }
 
+    private static String requestsPath(String jkt) {
+        return jkt == null ? REQUESTS + "-v2" : REQUESTS;
+    }
+
     private static String path(Request request, String suffix) {
-        return REQUESTS + "/" + request.reference() + suffix;
+        return requestsPath(request.parJkt()) + "/" + request.reference() + suffix;
     }
 
     private JsonNode post(String path, String idempotencyKey, Object body, int... successStatuses) throws IOException {

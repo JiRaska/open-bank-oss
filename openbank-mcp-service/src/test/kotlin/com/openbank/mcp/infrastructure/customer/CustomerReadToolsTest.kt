@@ -189,11 +189,11 @@ class CustomerReadToolsTest {
             .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
         val hostedCaller = scopedCaller.copy(grantKey = scopedKey.copy(keyThumbprint = null), resourceProof = null)
         every {
-            issuer.issueHosted(any(), any(), "customer-token", any(), account, connectionId)
+            issuer.issue(any(), any(), "customer-token", null, account, connectionId, any())
         } answers { boundPermit(claims) }
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, hostedCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
-        verify(exactly = 1) { issuer.issueHosted(any(), any(), "customer-token", any(), account, connectionId) }
+        verify(exactly = 1) { issuer.issue(any(), any(), "customer-token", null, account, connectionId, any()) }
 
         claims.put(connectionClaim, UUID.randomUUID().toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))

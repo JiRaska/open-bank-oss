@@ -45,6 +45,12 @@ class McpConnectCustomerResource(
     @Path("/requests")
     @Authorize(action = "delegation.mcp-connect.customer.read")
     suspend fun list(@HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?): Reviews =
+        Reviews(store.listForParty(requireCustomer(customerPartyId)).filter { it.request.parJkt != null }.map(Review::from))
+
+    @GET
+    @Path("/requests-v2")
+    @Authorize(action = "delegation.mcp-connect.customer.read")
+    suspend fun listWithHosted(@HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?): Reviews =
         Reviews(store.listForParty(requireCustomer(customerPartyId)).map(Review::from))
 
     @GET
@@ -53,7 +59,15 @@ class McpConnectCustomerResource(
     suspend fun get(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
         @PathParam("requestRef") requestRef: String,
-    ): Review = Review.from(find(requireCustomer(customerPartyId), requestRef))
+    ): Review = Review.from(find(requireCustomer(customerPartyId), requestRef, includeHosted = false))
+
+    @GET
+    @Path("/requests-v2/{requestRef}")
+    @Authorize(action = "delegation.mcp-connect.customer.read")
+    suspend fun getWithHosted(
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @PathParam("requestRef") requestRef: String,
+    ): Review = Review.from(find(requireCustomer(customerPartyId), requestRef, includeHosted = true))
 
     @PUT
     @Path("/requests/{requestRef}/selection")
@@ -62,9 +76,19 @@ class McpConnectCustomerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
         @PathParam("requestRef") requestRef: String,
         selection: Selection?,
-    ): Review {
-        val party = requireCustomer(customerPartyId)
-        find(party, requestRef)
+    ): Review = select(requireCustomer(customerPartyId), requestRef, selection, includeHosted = false)
+
+    @PUT
+    @Path("/requests-v2/{requestRef}/selection")
+    @Authorize(action = "delegation.mcp-connect.customer.select")
+    suspend fun selectWithHosted(
+        @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @PathParam("requestRef") requestRef: String,
+        selection: Selection?,
+    ): Review = select(requireCustomer(customerPartyId), requestRef, selection, includeHosted = true)
+
+    private suspend fun select(party: UUID, requestRef: String, selection: Selection?, includeHosted: Boolean): Review {
+        find(party, requestRef, includeHosted)
         val accounts = requireNotNull(selection) { "selection is required" }.accounts.mapIndexed { index, account ->
             requireNotNull(account) { "accounts[$index] must not be null" }
         }
@@ -83,7 +107,7 @@ class McpConnectCustomerResource(
         if (!store.select(party, requestRef, accounts)) {
             throw ClientErrorException("selection is unavailable", Response.Status.CONFLICT)
         }
-        return Review.from(find(party, requestRef))
+        return Review.from(find(party, requestRef, includeHosted))
     }
 
     @GET
@@ -107,9 +131,11 @@ class McpConnectCustomerResource(
         return Response.noContent().build()
     }
 
-    private suspend fun find(party: UUID, requestRef: String): McpConnectRequestStore.Review {
+    private suspend fun find(party: UUID, requestRef: String, includeHosted: Boolean): McpConnectRequestStore.Review {
         if (!REQUEST_REF.matches(requestRef)) throw NotFoundException()
-        return store.findForParty(party, requestRef) ?: throw NotFoundException()
+        val review = store.findForParty(party, requestRef) ?: throw NotFoundException()
+        if (!includeHosted && review.request.parJkt == null) throw NotFoundException()
+        return review
     }
 
     private fun requireCustomer(customerPartyId: UUID?): UUID {
@@ -137,6 +163,7 @@ class McpConnectCustomerResource(
         val challengeId: UUID?,
         val approvalRequestId: String?,
         val contextSha256: String?,
+        val parBinding: String? = null,
     ) {
         companion object {
             fun from(review: McpConnectRequestStore.Review): Review = with(review) {
@@ -159,6 +186,7 @@ class McpConnectCustomerResource(
                     challengeId,
                     challengeId?.let { "mcp-connect:${request.requestRef}" },
                     contextSha256,
+                    parBinding = if (request.parJkt == null) "confidential_client" else null,
                 )
             }
         }
