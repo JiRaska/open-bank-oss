@@ -35,9 +35,9 @@ Indexy: `family_name`, `birthdate`, `email`, `status`, `kyc_level`, částečné
 
 `id` (UUID PK), `party_id` (FK, cascade), `role` ∈ {CUSTOMER, EMPLOYEE, ADMIN, AGENT, GUARANTOR, AUTHORIZED_PERSON}, `status` ∈ {ACTIVE, SUSPENDED, TERMINATED}, `onboarded_at`, `onboarding_channel`, `terminated_at`, `termination_reason`. Unikátní `(party_id, role, status)` (deferrable) — jedna aktivní instance každé role.
 
-### `pid_outbox` (V2) — transakční outbox
+### `pid_outbox` (V2)
 
-`id` (BIGSERIAL PK), `event_id` (UUID, UNIQUE), `aggregate_id` (UUID), `event_type`, `payload` (TEXT), `status`, `attempt_count`, `sent_at`, `last_error`, `created_at`, `updated_at`. Indexy na `(status, created_at ASC)` (poll dispatcheru) a `aggregate_id`.
+Historická tabulka zůstává ve schématu Flyway. Aplikace ji nemapuje ani do ní nezapisuje.
 
 ## Flyway migrace
 
@@ -46,7 +46,7 @@ Indexy: `family_name`, `birthdate`, `email`, `status`, `kyc_level`, částečné
 | V1 | `V1__init_pid.sql` | extenze `uuid-ossp`, `pgcrypto`; tabulky `parties`, `party_external_ids`, `party_id_documents`, `party_relationships` + indexy | `DROP TABLE` (opačné pořadí FK); drop extenzí |
 | V2 | `V2__create_pid_outbox.sql` | `pid_outbox` + dva indexy | `DROP TABLE pid_outbox` |
 | V3 | `V3__add_pid_case_lifecycle.sql` | přidá sloupce `case_*` + check constrainty + 2 indexy k `parties` | `ALTER TABLE parties DROP COLUMN case_*`; drop obou indexů |
-| V4 | `V4__hibernate_sequences.sql` | `CREATE SEQUENCE pid_outbox_seq INCREMENT BY 50` (alokace id Panache) | `DROP SEQUENCE pid_outbox_seq` |
+| V4 | `V4__hibernate_sequences.sql` | `CREATE SEQUENCE pid_outbox_seq INCREMENT BY 50` | `DROP SEQUENCE pid_outbox_seq` |
 
 > **Nikdy nepřepisuj aplikovanou migraci** (pravidlo projektu — checksum mismatch shodí Flyway při startu). Nové změny jdou do nové `Vn__*.sql`.
 
@@ -72,7 +72,6 @@ Dle `governance.yaml`: `dataClassification: restricted`, `retentionPolicy: 10 le
 | Party s aktivním vztahem | trvale |
 | `status = TERMINATED` / `DECEASED` | drženo 10 let (AMLD 6 čl. 40) |
 | Party vymazaná událostí `PARTY_ERASED` | osobní sloupce anonymizovány **okamžitě**; anonymizovaný zbytek řádku zůstává s razítkem `erased_at` (viz Výmaz) |
-| řádek `pid_outbox` `status = SENT` | prune po potvrzení odeslání (provozní; ne zákonný důkaz) |
 | Audit důkazy (události) | drží `audit-service` po zákonnou dobu |
 
 ## Výmaz (GDPR čl. 17, ADR-0118)
@@ -108,7 +107,7 @@ Zápisy do vymazané party jsou odmítnuty s 409 (`PartyErasedException`). Úpra
 - Případ `RN:`, který byl při výmazu otevřený nebo čekající a později je rozhodnut REJECT, nedostane přetrvávající blokaci (překlíčují se jen případy již rozhodnuté REJECT).
 - **Žádné automatické mazání ponechaného klíče blokace podvodu.** Klíč `RNX:` i rozhodnutí REJECT, které nese, musí být smazány, jakmile skončí příslušná doba uchování podle AML (`06-compliance`, Ponechaný klíč blokace podvodu); zatím je nic nemaže. Navazující úkol.
 - `register-identity` neprovádí resolution, takže číslo vymazané osoby lze znovu registrovat k novému party id; ponechaný REJECT se pak uplatní až při příštím resolve tohoto čísla.
-- Krátkodobé tabulky EUDI nabídek/prezentací jsou klíčované jednorázovými kódy, ne party id, a samy expirují; `pid_outbox` nemá v kódu zapisovatele.
+- Krátkodobé tabulky EUDI nabídek/prezentací jsou klíčované jednorázovými kódy, ne party id, a samy expirují.
 - Plánované fyzické smazání zbytků po retenční době (jako retenční scheduler kyc-service) je navazující úkol; zbytek neobsahuje osobní údaje.
 
 ## Lineage (`governance.yaml`)

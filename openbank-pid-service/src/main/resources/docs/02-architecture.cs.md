@@ -22,7 +22,7 @@ graph LR
   kyc -- "PUT /kyc (push back)" --> pid
 
   pid --> db
-  pid -- "outbox + přímý publish" --> kafka
+  pid -- "publikuje události" --> kafka
   pid -. "@Authorize kontrola" .-> opa
 
   kafka --> kyc
@@ -42,8 +42,7 @@ graph TB
     uc[Application<br/>PartyService<br/>+ CaseTransitionEngine]
     dom[Domain<br/>agregát Party<br/>+ doménové události]
     persist[Persistence<br/>PartyRepositoryImpl<br/>Hibernate Reactive / Panache]
-    obx["Outbox<br/>PidOutboxDispatcher<br/>@Scheduled každých 5s"]
-    msg[Messaging<br/>KafkaPartyEventPublisher<br/>KafkaPidOutboxEventPublisher]
+    msg[Messaging<br/>KafkaPartyEventPublisher]
     authz["Authz<br/>AuthzProducer + @Authorize"]
   end
 
@@ -52,8 +51,6 @@ graph TB
   uc --> dom
   uc --> persist
   uc --> msg
-  obx --> persist
-  obx --> msg
 
   persist -.-> db[(PostgreSQL)]
   msg -.-> kafka[(Kafka)]
@@ -76,13 +73,12 @@ com.openbank.pid/
 ├── application/                ◄── orchestrace use case
 │   ├── port/in/                CreatePartyUseCase, GetPartyUseCase, UpdatePartyUseCase,
 │   │                           ManageRelationshipUseCase + command/query záznamy
-│   ├── port/out/               PartyRepositoryPort, PidOutboxPort, PartyEventPublisher
+│   ├── port/out/               PartyRepositoryPort, PartyEventPublisher
 │   └── usecase/                PartyService (implementuje všechny čtyři vstupní porty)
 │
 └── infrastructure/             ◄── adaptéry
     ├── rest/                   PartyResource (JAX-RS), dto/, ExceptionMappers
-    ├── persistence/            PartyRepositoryImpl, PidOutboxRepositoryImpl, entity/
-    ├── outbox/                 PidOutboxDispatcher (scheduled, fault-tolerant)
+    ├── persistence/            PartyRepositoryImpl, entity/
     ├── messaging/              Kafka producenti
     └── authz/                  AuthzProducer (napojení na OPA)
 ```
@@ -97,12 +93,9 @@ com.openbank.pid/
 - `externalId(type)` — rozlišení jednoho externího identifikátoru.
 - `PartyCaseLifecycle` — vkládá case z `libs.domain.case`; přechody validuje `CaseTransitionEngine`, který vrací `Applied` (nový stav + timeline událost) nebo `Rejected` (→ `InvalidPartyCaseTransitionException` → HTTP 400).
 
-## Outbox + tok událostí
+## Tok událostí
 
-V kódu existují dvě publikační cesty:
-
-1. **Přímý publish doménových událostí** — `PartyService` volá `PartyEventPublisher` (`KafkaPartyEventPublisher`), který serializuje `{eventType, aggregateId, occurredAt, payload}` a posílá do kanálu `party-events-out` (topic `party.events`), klíčováno přes `aggregateId`.
-2. **Transakční outbox** — tabulka `pid_outbox` + `PidOutboxDispatcher` (úloha `@Scheduled(every = "5s")`) čte zpracovatelné řádky a re-publikuje je přes `KafkaPidOutboxEventPublisher` (kanál `pid-events-out`) s fault-tolerance anotacemi.
+`PartyService` volá `PartyEventPublisher` (`KafkaPartyEventPublisher`), který serializuje `{eventType, aggregateId, occurredAt, payload}` a posílá do kanálu `party-events-out` (topic `party.events`), klíčováno přes `aggregateId`.
 
 ```mermaid
 sequenceDiagram
@@ -110,28 +103,14 @@ sequenceDiagram
   participant R as PartyResource
   participant S as PartyService
   participant DB as PostgreSQL
-  participant D as PidOutboxDispatcher
   participant K as Kafka (party.events)
 
   C->>R: POST /api/v1/parties
   R->>S: createParty(cmd)
-  S->>DB: INSERT party + relationship (+ outbox řádek)
+  S->>DB: INSERT party + relationship
   S->>K: publish PartyCreated / case.created / RelationshipAdded
   R-->>C: 201 Created + PartyResponse
-
-  loop každých 5s (delayed 5s, SKIP při běhu)
-    D->>DB: listProcessable(BATCH_SIZE=25)
-    D->>K: publishWithResilience(payload)
-    Note over D: @CircuitBreaker @Retry(2) @Timeout(3s) @Bulkhead(1)
-    alt úspěch
-      D->>DB: markSent(eventId)
-    else selhání
-      D->>DB: markFailed(eventId, error)
-    end
-  end
 ```
-
-**Resilience:** dispatcher obaluje každý publish přes `@CircuitBreaker(requestVolumeThreshold=10, failureRatio=0.5, delay=5000ms, successThreshold=2)`, `@Retry(maxRetries=2, delay=200ms, jitter=100ms)`, `@Timeout(3000ms)`, `@Bulkhead(1)`. Scheduler polyká výjimky, aby smyčka nikdy nespadla. Doručení je at-least-once → konzumenti musí být idempotentní (události nesou klíč `aggregateId` pro pořadí).
 
 ## Klíčové porty
 
@@ -139,9 +118,7 @@ sequenceDiagram
 |---|---|---|
 | `CreatePartyUseCase` / `GetPartyUseCase` / `UpdatePartyUseCase` / `ManageRelationshipUseCase` | vstupní | `PartyResource` → `PartyService` |
 | `PartyRepositoryPort` | výstupní | `PartyRepositoryImpl` (Hibernate Reactive / Panache) |
-| `PidOutboxPort` | výstupní | `PidOutboxRepositoryImpl` |
 | `PartyEventPublisher` | výstupní | `KafkaPartyEventPublisher` |
-| `OutboxEventPublisher` | výstupní | `KafkaPidOutboxEventPublisher` |
 
 ## Komponenty z `openbank-libs`
 

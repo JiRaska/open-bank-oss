@@ -22,7 +22,7 @@ graph LR
   kyc -- "PUT /kyc (push back)" --> pid
 
   pid --> db
-  pid -- "outbox + direct publish" --> kafka
+  pid -- "publish events" --> kafka
   pid -. "@Authorize check" .-> opa
 
   kafka --> kyc
@@ -42,8 +42,7 @@ graph TB
     uc[Application<br/>PartyService<br/>+ CaseTransitionEngine]
     dom[Domain<br/>Party aggregate<br/>+ domain events]
     persist[Persistence<br/>PartyRepositoryImpl<br/>Hibernate Reactive / Panache]
-    obx["Outbox<br/>PidOutboxDispatcher<br/>@Scheduled every 5s"]
-    msg[Messaging<br/>KafkaPartyEventPublisher<br/>KafkaPidOutboxEventPublisher]
+    msg[Messaging<br/>KafkaPartyEventPublisher]
     authz["Authz<br/>AuthzProducer + @Authorize"]
   end
 
@@ -52,8 +51,6 @@ graph TB
   uc --> dom
   uc --> persist
   uc --> msg
-  obx --> persist
-  obx --> msg
 
   persist -.-> db[(PostgreSQL)]
   msg -.-> kafka[(Kafka)]
@@ -76,13 +73,12 @@ com.openbank.pid/
 ├── application/                ◄── use-case orchestration
 │   ├── port/in/                CreatePartyUseCase, GetPartyUseCase, UpdatePartyUseCase,
 │   │                           ManageRelationshipUseCase + command/query records
-│   ├── port/out/               PartyRepositoryPort, PidOutboxPort, PartyEventPublisher
+│   ├── port/out/               PartyRepositoryPort, PartyEventPublisher
 │   └── usecase/                PartyService (implements all four inbound ports)
 │
 └── infrastructure/             ◄── adapters
     ├── rest/                   PartyResource (JAX-RS), dto/, ExceptionMappers
-    ├── persistence/            PartyRepositoryImpl, PidOutboxRepositoryImpl, entity/
-    ├── outbox/                 PidOutboxDispatcher (scheduled, fault-tolerant)
+    ├── persistence/            PartyRepositoryImpl, entity/
     ├── messaging/              Kafka producers
     └── authz/                  AuthzProducer (OPA wiring)
 ```
@@ -97,12 +93,9 @@ com.openbank.pid/
 - `externalId(type)` — resolve a single external identifier.
 - `PartyCaseLifecycle` — embeds a `libs.domain.case` case; transitions are validated by `CaseTransitionEngine` which returns `Applied` (new status + timeline event) or `Rejected` (→ `InvalidPartyCaseTransitionException` → HTTP 400).
 
-## Outbox + event flow
+## Event flow
 
-Two publication paths exist in the code:
-
-1. **Direct domain-event publish** — `PartyService` calls `PartyEventPublisher` (`KafkaPartyEventPublisher`), which serializes `{eventType, aggregateId, occurredAt, payload}` and sends to channel `party-events-out` (topic `party.events`), keyed by `aggregateId`.
-2. **Transactional outbox** — the `pid_outbox` table + `PidOutboxDispatcher` (a `@Scheduled(every = "5s")` job) reads processable rows and republishes them through `KafkaPidOutboxEventPublisher` (channel `pid-events-out`) with fault-tolerance annotations.
+`PartyService` calls `PartyEventPublisher` (`KafkaPartyEventPublisher`), which serializes `{eventType, aggregateId, occurredAt, payload}` and sends to channel `party-events-out` (topic `party.events`), keyed by `aggregateId`.
 
 ```mermaid
 sequenceDiagram
@@ -110,28 +103,14 @@ sequenceDiagram
   participant R as PartyResource
   participant S as PartyService
   participant DB as PostgreSQL
-  participant D as PidOutboxDispatcher
   participant K as Kafka (party.events)
 
   C->>R: POST /api/v1/parties
   R->>S: createParty(cmd)
-  S->>DB: INSERT party + relationship (+ outbox row)
+  S->>DB: INSERT party + relationship
   S->>K: publish PartyCreated / case.created / RelationshipAdded
   R-->>C: 201 Created + PartyResponse
-
-  loop every 5s (delayed 5s, SKIP if running)
-    D->>DB: listProcessable(BATCH_SIZE=25)
-    D->>K: publishWithResilience(payload)
-    Note over D: @CircuitBreaker @Retry(2) @Timeout(3s) @Bulkhead(1)
-    alt success
-      D->>DB: markSent(eventId)
-    else failure
-      D->>DB: markFailed(eventId, error)
-    end
-  end
 ```
-
-**Resilience:** the dispatcher wraps each publish with `@CircuitBreaker(requestVolumeThreshold=10, failureRatio=0.5, delay=5000ms, successThreshold=2)`, `@Retry(maxRetries=2, delay=200ms, jitter=100ms)`, `@Timeout(3000ms)`, `@Bulkhead(1)`. The scheduler swallows exceptions so it never crashes the loop. Delivery is at-least-once → consumers must be idempotent (events carry `aggregateId` keys for ordering).
 
 ## Key ports
 
@@ -139,9 +118,7 @@ sequenceDiagram
 |---|---|---|
 | `CreatePartyUseCase` / `GetPartyUseCase` / `UpdatePartyUseCase` / `ManageRelationshipUseCase` | inbound | `PartyResource` → `PartyService` |
 | `PartyRepositoryPort` | outbound | `PartyRepositoryImpl` (Hibernate Reactive / Panache) |
-| `PidOutboxPort` | outbound | `PidOutboxRepositoryImpl` |
 | `PartyEventPublisher` | outbound | `KafkaPartyEventPublisher` |
-| `OutboxEventPublisher` | outbound | `KafkaPidOutboxEventPublisher` |
 
 ## Components from `openbank-libs`
 
