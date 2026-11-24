@@ -34,13 +34,14 @@ data class CustomerMcpConnectReview(
     val redirectHost: String,
     val resource: String,
     val scopes: List<String>,
-    val parJkt: String,
+    val parJkt: String?,
     val expiresAtEpochSecond: Long,
     val status: String,
     val accounts: List<CustomerMcpConnectAccountScope>,
     val challengeId: UUID? = null,
     val approvalRequestId: String? = null,
     val contextSha256: String? = null,
+    val parBinding: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

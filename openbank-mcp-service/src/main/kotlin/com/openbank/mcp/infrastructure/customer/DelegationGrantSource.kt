@@ -43,7 +43,7 @@ interface DelegationGrantClient {
 data class ResolveMcpClientGrantRequest(
     val grantorPartyId: UUID,
     val clientId: String,
-    val keyThumbprint: String,
+    val keyThumbprint: String?,
     @get:JsonInclude(JsonInclude.Include.NON_NULL) val connectionId: UUID? = null,
 )
 
