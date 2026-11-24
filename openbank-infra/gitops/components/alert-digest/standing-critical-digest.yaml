@@ -18,7 +18,7 @@
 #   The envelope `{observedAt, alerts}` is written to S3 under observations/<UTC date>/ with an
 #   EKS Pod Identity role whose only grant is s3:PutObject on that prefix
 #   (aws/envs/sandbox-platform/alert-digest.tf). alert-rca-weekly.yml reads it back with a GitHub
-#   OIDC role whose only grant is List/Get on the same prefix. No long-lived credential exists on
+#   OIDC role whose only grant is Get on the same prefix. No long-lived credential exists on
 #   either side: no PAT, no GitHub App private key, no static AWS key.
 #
 # FAIL-CLOSED ORDER
@@ -89,14 +89,12 @@ spec:
                   python3 -I /app/standing-critical-digest.py --self-test
                   python3 -I /app/standing-critical-digest.py
                   day="$(date -u +%Y-%m-%d)"
-                  for f in alert-observation.json standing-critical-digest.md; do
-                    aws s3api put-object \
-                      --bucket "$DIGEST_BUCKET" \
-                      --key "observations/${day}/${f}" \
-                      --body "/tmp/out/${f}" \
-                      --server-side-encryption AES256 \
-                      --region "$AWS_REGION" >/dev/null
-                  done
+                  aws s3api put-object \
+                    --bucket "$DIGEST_BUCKET" \
+                    --key "observations/${day}/alert-observation.json" \
+                    --body /tmp/out/alert-observation.json \
+                    --server-side-encryption AES256 \
+                    --region "$AWS_REGION" >/dev/null
                   echo "envelope uploaded: observations/${day}/alert-observation.json"
                   if [ -z "${SLACK_WEBHOOK:-}" ]; then
                     echo "WARNING: digest-slack Secret absent — envelope uploaded, Slack copy NOT sent."

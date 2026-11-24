@@ -40,7 +40,7 @@ jobs:
       id-token: write # GitHub OIDC -> read-only role on the in-cluster digest's envelope store (ADR-0382)
     timeout-minutes: 15
     outputs:
-      observation_count: ${{ steps.s3.outputs.count || steps.download.outputs.count }}
+      observation_count: ${{ steps.fold.outputs.count }}
       ledger_exit: ${{ steps.fold.outputs.exit_code }}
       requires_writer: ${{ steps.decision.outputs.requires_writer }}
     steps:
@@ -56,7 +56,7 @@ jobs:
           python3 .github/scripts/check-alert-rca-handoff.py --self-test
 
       - name: Download the last 7 days of digest observations
-        id: download
+        if: vars.ALERT_DIGEST_READER_ROLE_ARN == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -70,14 +70,11 @@ jobs:
                     --status success --limit 30 \
                     --json databaseId,createdAt \
                     --jq "[.[] | select(.createdAt >= \"$since\")] | .[].databaseId")"
-          count=0
           for id in $runs; do
-            if gh run download "$id" --dir "observations/$id" 2>/dev/null; then
-              count=$((count + 1))
+            if ! gh run download "$id" --name "standing-critical-digest-$id" --dir "observations/$id"; then
+              echo "::warning::could not read the observation artifact from run $id"
             fi
           done
-          echo "downloaded $count observation run(s) since $since"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
 
       # ADR-0382 / #6432: the digest is now produced IN-CLUSTER and its envelopes land in S3.
       # Skipped until the owner provisions the reader role and sets the repository variable, so
@@ -91,39 +88,30 @@ jobs:
           unset-current-credentials: true
 
       - name: Download the last 7 days of in-cluster digest envelopes
-        id: s3
         if: vars.ALERT_DIGEST_READER_ROLE_ARN != ''
         env:
           DIGEST_BUCKET: openbank-sandbox-alert-digest
-          PRIOR_COUNT: ${{ steps.download.outputs.count }}
         run: |
           set -euo pipefail
-          count="$PRIOR_COUNT"
-          # Only a SUCCESSFUL in-cluster run uploads an envelope (the CronJob is fail-closed), so
-          # a missing day is a missing object — never an empty observation.
-          for back in 0 1 2 3 4 5 6; do
+          for back in 0 1 2 3 4 5 6 7; do
             day="$(date -u -d "$back days ago" +%Y-%m-%d)"
             key="observations/${day}/alert-observation.json"
-            if aws s3api head-object --bucket "$DIGEST_BUCKET" --key "$key" >/dev/null 2>&1; then
-              mkdir -p "observations/s3-${day}"
-              aws s3api get-object --bucket "$DIGEST_BUCKET" --key "$key" \
-                "observations/s3-${day}/alert-observation.json" >/dev/null
-              count=$((count + 1))
-            else
-              echo "::warning::no in-cluster digest envelope for ${day}"
+            dir="observations/s3-${day}"
+            mkdir -p "$dir"
+            if ! aws s3api get-object --bucket "$DIGEST_BUCKET" --key "$key" \
+              "$dir/alert-observation.json" >/dev/null; then
+              rm -f "$dir/alert-observation.json"
+              echo "::warning::could not read the in-cluster digest envelope for ${day}"
             fi
           done
-          echo "observation count including in-cluster envelopes: $count"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Fold observations into the ledger and render the RCA log
         id: fold
         run: |
           set -euo pipefail
           month="$(date -u +%Y-%m)"
-          mkdir -p docs/runbooks/alert-rca
-          # `find -print0 | xargs -0` so a path never word-splits, and the script
-          # sorts the envelopes by observedAt itself.
+          mkdir -p observations docs/runbooks/alert-rca
+          # The script validates and sorts the envelopes by observedAt.
           mapfile -t envelopes < <(find observations -name 'alert-observation.json' -type f | sort)
           observe_args=()
           if [ "${#envelopes[@]}" -gt 0 ]; then
@@ -132,14 +120,15 @@ jobs:
           # With zero envelopes the ledger is rendered UNCHANGED — the run must not
           # fold an empty observation, which observe() would read as "every open
           # critical resolved this morning".
-          # Exit 2 means "no observation covered this window" — the producer is down
-          # and this review measured nothing. That must NOT abort the step: the RCA
-          # document recording the gap is exactly the evidence worth publishing. So
-          # capture the code, keep going, and fail the JOB at the end (below).
+          # Exit 2 means the review does not have complete observation coverage. That must NOT abort the step: the RCA
+          # document recording the gap belongs in the review artifact, so upload it
+          # before failing this read-only job. An uncovered run cannot publish a PR.
           rc=0
           python3 .github/scripts/alert-rca-ledger.py \
             --ledger docs/runbooks/alert-rca/ledger.jsonl \
             "${observe_args[@]}" \
+            --current-review-window \
+            --coverage-output coverage.json \
             --granularity-seconds 86400 \
             --source alertmanager-daily-poll \
             --rca-output "docs/runbooks/alert-rca/${month}.md" \
@@ -148,17 +137,17 @@ jobs:
             echo "::error::alert-rca-ledger.py failed with exit $rc"; exit "$rc"
           fi
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq -er '.observationCount' coverage.json)" >> "$GITHUB_OUTPUT"
           cat recurrences.json
 
       - name: Decide whether a publisher is needed
         id: decision
-        env:
-          LEDGER_EXIT: ${{ steps.fold.outputs.exit_code }}
+        if: steps.fold.outputs.exit_code == '0'
         run: |
           set -euo pipefail
           count=$(jq -e 'if type == "array" then length else error("recurrences must be an array") end' recurrences.json)
           if [ -n "$(git status --porcelain -- docs/runbooks/alert-rca)" ] || \
-             [ "$count" -gt 0 ] || [ "$LEDGER_EXIT" = 2 ]; then
+             [ "$count" -gt 0 ]; then
             echo 'requires_writer=true' >> "$GITHUB_OUTPUT"
           else
             echo 'requires_writer=false' >> "$GITHUB_OUTPUT"
@@ -167,7 +156,7 @@ jobs:
         if: steps.decision.outputs.requires_writer == 'true'
         env:
           SOURCE_SHA: ${{ github.sha }}
-          OBSERVATION_COUNT: ${{ steps.s3.outputs.count || steps.download.outputs.count }}
+          OBSERVATION_COUNT: ${{ steps.fold.outputs.count }}
           LEDGER_EXIT: ${{ steps.fold.outputs.exit_code }}
         run: |
           set -euo pipefail
@@ -191,7 +180,14 @@ jobs:
           path: |
             docs/runbooks/alert-rca
             recurrences.json
+            coverage.json
           retention-days: 90
+
+      - name: Fail the review if observation coverage is incomplete
+        if: ${{ !cancelled() && steps.fold.outputs.exit_code == '2' }}
+        run: |
+          python3 .github/scripts/watch_outcome.py UNREADABLE \
+            "Standing-critical observations did not cover all seven expected days. See the review artifact and issue #16022."
 
   publish:
     needs: review
@@ -289,16 +285,3 @@ jobs:
           gh pr create --base main --head "$branch" \
             --title "chore(governance): weekly critical-alert RCA log" \
             --body-file "docs/runbooks/alert-rca/$(date -u +%Y-%m).md"
-
-      # A control that reports healthy because it structurally cannot report anything
-      # else is the defect this whole workflow exists to prevent, so the run must go
-      # RED when it measured nothing — after the evidence is published, never instead
-      # of it. Placed before the upload so the artifact still attaches (`always()`).
-      - name: Fail the review when no observation covered the window
-        if: needs.review.outputs.ledger_exit == '2'
-        run: |
-          echo "::error title=Weekly RCA review measured nothing::No standing-critical" \
-               "observation envelope covered the last 7 days. The daily digest archives" \
-               "an envelope even on a zero-alert day, so this is NOT a quiet week - the" \
-               "producer did not run. See docs/runbooks/alert-rca/ and issue #5869."
-          exit 1

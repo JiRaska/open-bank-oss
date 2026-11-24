@@ -43,12 +43,13 @@ The questions that had to be answered before deciding:
 
 We will produce the digest **in-cluster**, in its own namespace `alert-digest`, reading Alertmanager
 only through a dedicated **GET-only relay** (`observability/alertmanager-read-proxy`), and hand the
-envelope to CI through **S3**.
+envelope to CI through **S3** for the critical RCA and alert-noise reports.
 
 - **The relay** is a separate pod in `observability` (so Alertmanager's existing same-namespace rule
   admits it — no change to the Alertmanager allow-list). It never forwards the caller's method,
   path, query, headers or body: the only upstream request it can construct is a GET of one constant
-  URL (`/api/v2/alerts?filter=severity="critical"`). Every other verb is answered 405 locally
+  URL (`/api/v2/alerts?active=true&silenced=true&inhibited=true`). It returns only critical alerts,
+  Watchdog and AlertRuleFlapping. Every other verb is answered 405 locally
   without opening an upstream connection; every other path is 404. Its egress is DNS and
   Alertmanager :9093 only. Its ingress (fleet NetworkPolicy generator) admits `alert-digest`,
   `admin-ui` and same-namespace pods on :8080 — harmless, because whoever is admitted can only
@@ -56,20 +57,22 @@ envelope to CI through **S3**.
 - **The digest CronJob** runs the committed `.github/scripts/standing-critical-digest.py`, shipped
   as a ConfigMap mounted read-only (a test fails on any byte of drift from the canonical script;
   nothing is fetched at runtime), against the relay (`ALERTMANAGER_AUTH=none`, an explicit opt-out; a merely
-  missing token still fails closed). Its egress is DNS, the relay :8080, and TCP 443 to non-private
-  addresses (S3, Slack).
+  missing token still fails closed). Its egress is DNS, the relay :8080, the Pod Identity
+  credential endpoint on TCP 80, and TCP 443 to non-private addresses for S3 and Slack.
 - **Which layer prevents the write.** For the digest pod, the L4 drop: its namespace is not in
   `alertmanager-ingress-allow-list` and its own egress reaches no :9093, so a direct POST never
   arrives. The relay is the only path, and it is L7 GET-only, so a relayed POST is impossible by
   construction. The relay is a separate pod precisely because a sidecar would share the digest
   pod's network identity and could be bypassed.
 - **Hand-off.** The CronJob writes `observations/<date>/alert-observation.json` with an EKS Pod
-  Identity role granting only `s3:PutObject` on that prefix; `alert-rca-weekly.yml` reads it with a
-  GitHub OIDC role (main, that workflow only) granting only Get on that prefix (no List). The bucket is versioned, so an
+  Identity role granting only `s3:PutObject` on that prefix. The existing
+  `alert-rca-weekly.yml` and `alert-noise-weekly.yml` workflows read it with a GitHub OIDC
+  role restricted to those files on main and granted Get on that prefix. The bucket is versioned, so an
   overwrite by the writer stays recoverable. No PAT, GitHub
   App key or static AWS key exists on either side.
 - The GitHub `standing-critical-digest.yml` stays dispatch-only until the in-cluster path is proven
-  live; the weekly workflow's S3 step is inert until the reader role variable is set.
+  live. The RCA workflow stays dispatch-only until the daily handoff is proven. The scheduled
+  alert-noise workflow reports UNREADABLE until it can read the current UTC day's evidence.
 
 ## Alternatives considered
 

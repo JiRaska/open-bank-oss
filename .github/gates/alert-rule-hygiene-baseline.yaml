@@ -112,8 +112,6 @@ baseline:
   - DomesticPaymentHeldPastExpiry
   - DomesticPaymentOutboxBacklogStuck
   - DomesticPaymentRedriveExhausted
-  - DomesticPaymentStrandedBeforeClearing
-  - DomesticPaymentStuckInClearing
   - EmailChannelMockedOnly
   - EmailDeliveryRejected
   - ExpectedWorkloadAbsent

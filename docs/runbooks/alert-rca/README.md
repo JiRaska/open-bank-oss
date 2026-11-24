@@ -57,42 +57,36 @@ false positive, add a case to the existing promtool suite using the shipped rule
 Cover the reported false-positive input and a genuine failure the rule must
 still detect. Use existing observations to check the outcome after deployment.
 
-## Observation coverage — an empty week is not a clean week
+## Observation coverage
 
-The daily standing-critical digest archives an observation envelope on **every**
-day it succeeds, including a day on which zero critical alerts were firing
-(`{"observedAt": ..., "alerts": []}`). A genuinely quiet week therefore still
-produces roughly seven envelopes.
+The in-cluster standing-critical digest writes one S3 observation envelope per
+successful UTC daily poll, including when its `alerts` array is empty. The same
+envelope carries Watchdog and AlertRuleFlapping for the existing weekly
+alert-noise report. The noise report requires the current UTC day's envelope
+and a Watchdog in that observation.
 
-So **zero envelopes does not mean "nothing fired"** — it means the producer
-never ran, and the weekly review measured nothing at all. The two states are
-reported separately and never share an exit code:
+The RCA review requires a valid envelope for each of the last seven expected
+daily polls at 08:30 UTC. Duplicate observations of the same day count once.
+An incomplete review retains a diagnostic artifact and skips ledger and
+recurrence publication.
 
-| Outcome | Meaning | Exit code | Review renders |
-|---|---|---|---|
-| `OBSERVED` | envelopes covered the window; the findings describe what was measured | `0` | the normal review |
-| `NO_OBSERVATIONS` | no envelope covered the window; the producer is down | `2` | a `CAUTION` banner, and every finding reads **Unknown** rather than "none" |
+| Outcome | Meaning | Ledger exit code |
+|---|---|---|
+| `OBSERVED` | All seven daily observations were read. | `0` |
+| `INCOMPLETE` | At least one expected daily observation was unavailable. | `2` |
+| `NO_OBSERVATIONS` | No daily observation was available. | `2` |
 
-`--allow-no-observations` downgrades the second case to exit `0`. It exists for
-local and ad-hoc rendering only and is deliberately **opt-in**: the scheduled
-review never passes it, so a week with no data fails loudly instead of
-publishing a clean-looking report about nothing.
+`--allow-no-observations` remains available for ad-hoc rendering. The workflow
+requires complete daily coverage.
 
-This distinction is the reason the ledger's `--self-test` drives the real CLI in
-a subprocess and asserts on the **exit code**, not only on the rendered prose.
-Flipping `--allow-no-observations` from opt-in to the default changes no string
-in the output and survived every in-process assertion — a guard is proven by
-what it prevents, and here what it must prevent is a green run.
+Before restoring the RCA schedule, verify the existing ADR-0382 handoff using
+the repository reader role and seven current S3 envelopes. Check that the
+read-only review reports seven distinct observation days and the existing
+alert-noise run can read its daily evidence.
 
 ## Where these guards run
 
 `alert-rca-ledger.py --self-test` and `standing-critical-digest.py --self-test`
-are registered in `.github/gates/gates.yaml` (`alert-rca-ledger-guards`,
-`standing-critical-digest-guards`, shard `lint`), so they run on **every PR**.
-
-Being a step inside the scheduled workflow is not sufficient and was the
-original gap: both scheduled workflows fail at their first Alertmanager step
-while no `ALERTMANAGER_*` credential exists, so the self-tests had never
-executed on any lane. `check-gate-script-registration.py` could not catch that —
-it scopes itself to `check-*` filenames, and its own header records that it does
-not check *reachability*.
+are registered in `.github/gates/gates.yaml`. The existing Python test shard
+runs `openbank-infra/scripts/alert_digest_readonly_test.py` against the deployed
+relay configuration and the canonical digest and alert-noise scripts.

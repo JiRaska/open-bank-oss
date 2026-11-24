@@ -8,7 +8,7 @@
 #   writer — EKS Pod Identity for alert-digest/standing-critical-digest; s3:PutObject on
 #            observations/* only. No Get, no List, no Delete: it cannot read back or erase
 #            history, only add a day.
-#   reader — GitHub OIDC, main of this repo, alert-rca-weekly.yml only; Get on
+#   reader — GitHub OIDC, main of this repo, the two alert report workflows only; Get on
 #            observations/* only (no List). It cannot write, so a CI job cannot forge an observation.
 #
 # Versioned: an overwrite by the writer is recoverable for 400 days (noncurrent expiry).
@@ -139,7 +139,7 @@ resource "aws_eks_pod_identity_association" "alert_digest_writer" {
   role_arn        = aws_iam_role.alert_digest_writer.arn
 }
 
-# ─── reader: the weekly RCA workflow (GitHub OIDC) ─────────────────────────
+# ─── reader: the weekly report workflows (GitHub OIDC) ─────────────────────────
 data "aws_iam_policy_document" "alert_digest_reader_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -160,7 +160,10 @@ data "aws_iam_policy_document" "alert_digest_reader_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.ci_oidc_host}:job_workflow_ref"
-      values   = ["${local.ci_github_repo}/.github/workflows/alert-rca-weekly.yml@refs/heads/main"]
+      values = [
+        "${local.ci_github_repo}/.github/workflows/alert-rca-weekly.yml@refs/heads/main",
+        "${local.ci_github_repo}/.github/workflows/alert-noise-weekly.yml@refs/heads/main",
+      ]
     }
   }
 }
@@ -190,6 +193,6 @@ resource "aws_iam_role_policy" "alert_digest_reader" {
 }
 
 output "alert_digest_reader_role_arn" {
-  description = "Set as repository variable ALERT_DIGEST_READER_ROLE_ARN for alert-rca-weekly.yml."
+  description = "Set as repository variable ALERT_DIGEST_READER_ROLE_ARN for the alert RCA and alert-noise reports."
   value       = aws_iam_role.alert_digest_reader.arn
 }

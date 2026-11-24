@@ -30,7 +30,7 @@ def files(root: Path) -> dict[str, str]:
 
 
 def build(root: Path, source_sha: str, observation_count: int, ledger_exit: int) -> dict[str, object]:
-    if not SHA.fullmatch(source_sha) or observation_count < 0 or ledger_exit not in (0, 2):
+    if not SHA.fullmatch(source_sha) or observation_count != 7 or ledger_exit != 0:
         raise ValueError("invalid RCA source identity or outcome")
     content = json.loads((root / "recurrences.json").read_text())
     if not isinstance(content, list):
@@ -57,10 +57,10 @@ def self_test(tmp: Path) -> None:
     (root / "docs/runbooks/alert-rca/ledger.jsonl").write_text("{}\n")
     (root / "recurrences.json").write_text("[]")
     sha = "a" * 40
-    manifest = build(root, sha, 0, 2)
+    manifest = build(root, sha, 7, 0)
     (root / "handoff.json").write_text(json.dumps(manifest))
-    verify(root, sha, 0, 2)
-    for bad in (("b" * 40, 0, 2), (sha, 1, 2), (sha, 0, 0)):
+    verify(root, sha, 7, 0)
+    for bad in (("b" * 40, 7, 0), (sha, 6, 0), (sha, 0, 2), (sha, 7, 2)):
         try:
             verify(root, *bad)
         except ValueError:
@@ -69,14 +69,14 @@ def self_test(tmp: Path) -> None:
             raise AssertionError("wrong source or outcome accepted")
     (root / "docs/runbooks/alert-rca/ledger.jsonl").write_text("changed\n")
     try:
-        verify(root, sha, 0, 2)
+        verify(root, sha, 7, 0)
     except ValueError:
         pass
     else:
         raise AssertionError("changed evidence accepted")
     (root / "extra.txt").write_text("unexpected")
     try:
-        verify(root, sha, 0, 2)
+        verify(root, sha, 7, 0)
     except ValueError:
         pass
     else:
