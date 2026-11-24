@@ -101,14 +101,17 @@ class DelegationGrantMcpClientGranteeTest {
     }
 
     @Test
-    fun `requires the client id and the DPoP key thumbprint`() {
+    fun `requires the client id and either DPoP or an approved connection`() {
         val caps = setOf(DelegationCapability.ACCOUNT_READ_BALANCES)
         assertThatThrownBy { mcpGrant(caps, granteeClientId = null) }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("azp")
         assertThatThrownBy { mcpGrant(caps, granteeKeyThumbprint = null) }
-            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("cnf.jkt")
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("approved MCP connection")
         assertThatThrownBy { mcpGrant(caps, granteeKeyThumbprint = "not-a-thumbprint") }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("thumbprint")
+        val hosted = mcpGrant(caps).copy(granteeKeyThumbprint = null, mcpConnectionId = UUID.randomUUID())
+        assertThat(hosted.granteeKeyThumbprint).isNull()
+        assertThat(hosted.mcpConnectionId).isNotNull()
     }
 
     @Test

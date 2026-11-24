@@ -78,10 +78,14 @@ class McpClientGrantResource(
             "clientId is required and at most ${DelegationGrant.CLIENT_ID_MAX_LENGTH} characters"
         }
         val jkt = request.keyThumbprint
-        require(jkt != null && JKT.matches(jkt)) { "keyThumbprint must be an RFC 7638 SHA-256 thumbprint" }
-        requireMatchingMode(request.connectionId)
-        val grants = request.connectionId?.let { resolver.resolveForConnection(grantor, clientId, jkt, it) }
-            ?: resolver.resolve(grantor, clientId, jkt)
+        val connection = request.connectionId
+        require(if (jkt == null) connection != null else JKT.matches(jkt)) { "invalid MCP credential binding" }
+        requireMatchingMode(connection)
+        val grants = when {
+            jkt == null -> resolver.resolveHostedConnection(grantor, clientId, requireNotNull(connection))
+            connection == null -> resolver.resolve(grantor, clientId, jkt)
+            else -> resolver.resolveForConnection(grantor, clientId, jkt, connection)
+        }
         return ResolveMcpClientGrantResponse(grants.map(McpClientGrantDto::from))
     }
 
@@ -102,7 +106,10 @@ class McpClientGrantResource(
         require(request.clientId.isNotBlank() && request.clientId.length <= DelegationGrant.CLIENT_ID_MAX_LENGTH) {
             "invalid clientId"
         }
-        require(JKT.matches(request.keyThumbprint)) { "invalid keyThumbprint" }
+        val thumbprint = request.keyThumbprint
+        require(if (thumbprint == null) request.connectionId != null else JKT.matches(thumbprint)) {
+            "invalid MCP credential binding"
+        }
         require(PROOF_KEY.matches(request.proofKey)) { "invalid proof reference" }
         requireMcpConnectIdempotencyKey(idempotencyKey, request.proofKey)
         requireMatchingMode(request.connectionId)
