@@ -158,7 +158,13 @@ class McpClientGrantResolverTest {
         val ownership = mockk<ResourceOwnershipClient>()
         val replay = mockk<McpIssuerProofReplayStore>()
         val authorization = McpBalanceReadAuthorization(resolver, ownership, replay)
-        val request = McpBalanceReadAuthorization.VerifiedRequest(party, clientId, null, grant.resourceId, "0".repeat(64))
+        val request = McpBalanceReadAuthorization.VerifiedRequest(
+            party,
+            clientId,
+            null,
+            grant.resourceId,
+            "0".repeat(64),
+        )
         assertThat(runBlocking { authorization.authorize(request) }).isNull()
 
         coEvery { repository.findActiveHostedMcpClientGrants(party, clientId, connection) } returns listOf(grant)

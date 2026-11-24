@@ -115,7 +115,8 @@ class McpConnectCustomerResourceTest {
         coVerify(exactly = 0) { store.revoke(any(), any()) }
     }
 
-    private fun resource(client: String = "openbank-edge") = McpConnectCustomerResource(access(client), store, ownership)
+    private fun resource(client: String = "openbank-edge") =
+        McpConnectCustomerResource(access(client), store, ownership)
 
     private fun access(client: String = "openbank-edge"): McpConnectCustomerAccess {
         val token = mockk<JsonWebToken>()
