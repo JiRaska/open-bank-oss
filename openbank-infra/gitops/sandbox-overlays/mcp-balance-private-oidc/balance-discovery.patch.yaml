@@ -1,23 +1,6 @@
 - op: test
   path: /spec/template/spec/containers/0/name
   value: balance-service
-- op: test
-  path: /spec/template/spec/containers/0/env/22/name
-  value: QUARKUS_CONFIG_LOCATIONS
-- op: test
-  path: /spec/template/spec/containers/0/env/22/value
-  value: /mnt/msg-config/override.properties,/mnt/mcp-read-tls-config/runtime.properties
-- op: replace
-  path: /spec/template/spec/containers/0/env/22/value
-  value: /mnt/msg-config/override.properties,/mnt/mcp-read-tls-config/runtime.properties,/mnt/mcp-read-tls-config/private-oidc.properties
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: BALANCE_MCP_OIDC_DISCOVERY_URL
-    valueFrom:
-      configMapKeyRef:
-        name: balance-mcp-read-origins
-        key: discovery-url
 - op: add
   path: /spec/template/spec/containers/0/volumeMounts/-
   value:
@@ -31,5 +14,5 @@
     secret:
       secretName: balance-mcp-oidc-trust
       items:
-        - key: ca.crt
-          path: ca.crt
+      - key: ca.crt
+        path: ca.crt

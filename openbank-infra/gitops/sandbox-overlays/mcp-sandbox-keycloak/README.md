@@ -20,13 +20,16 @@ Supply these site-owned resources in the sandbox namespace.
 
 | Resource | Required keys or files |
 | --- | --- |
-| ConfigMap `sandbox-keycloak-settings` | `frontend-url` for the canonical HTTPS issuer origin. `jdbc-url` for the exact Service DNS name, port 5432 and database `keycloak_synthetic`, with `sslmode=verify-full&sslrootcert=/mnt/sandbox-keycloak-postgres/ca.crt`. |
+| Secret `sandbox-keycloak-settings` | `frontend-url` for the canonical HTTPS issuer origin. `jdbc-url` for the exact Service DNS name, port 5432 and database `keycloak_synthetic`, with `sslmode=verify-full&sslrootcert=/mnt/sandbox-keycloak-postgres/ca.crt`. |
 | Secret `sandbox-keycloak-postgres-credentials` | `username`, `password` for the scoped database login. |
 | Secret `sandbox-keycloak-postgres-trust` | `ca.crt` that validates the database server certificate and exact JDBC DNS name. |
-| Secret `sandbox-keycloak-realm-import` | `<realm-name>-realm.json` files for both isolated sandbox realms. Import only synthetic identities and site-owned sandbox client settings. |
+| Secret `sandbox-keycloak-realm-import` | `openbank-customers-realm.json` for the isolated customer realm. Import only synthetic identities and site-owned sandbox client settings. |
 
 Keycloak imports realms at startup only when absent. The database retains realm signing keys and
 state across pod recreation. Use an independently approved realm-update mechanism after bootstrap.
 Keep these inputs separate from shared Keycloak and supply them before scaling or adding peer
 access. Management probes use the distinct port 9000. Check readiness and realm discovery after
 the attached TLS overlay and database connection are verified.
+
+Provision the matching OpenBao properties under the `mcp-synthetic-sandbox/` path
+listed in `site-inputs.yaml`. Verify ExternalSecret readiness before enabling workloads.

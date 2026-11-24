@@ -238,7 +238,7 @@ sandbox OAuth Service.
 
 ### Customer Edge HTTPS
 
-The `customer-edge-tls` Kustomize component is optional and targets the
+The `sandbox-overlays/mcp-customer-edge-tls` Kustomize component is optional and targets the
 sandbox owner's Customer Edge Rollout and its stable Service. Provision the
 `customer-edge-mcp-sandbox-server-tls` Secret in the workload namespace
 with `tls.crt` and `tls.key`. The server leaf must include the exact DNS name
@@ -320,9 +320,9 @@ uses a different resolver, supply the exact `--dns-namespace` and
 
 ### Customer Edge private OIDC discovery
 
-Add the optional `customer-edge-private-oidc` component to the sandbox
-Customer Edge overlay alongside `customer-edge-tls`. In the Edge namespace
-provide the site-owned `customer-edge-mcp-oidc-origins` ConfigMap with two
+Add the optional `sandbox-overlays/mcp-customer-edge-private-oidc` component to the sandbox
+Customer Edge overlay alongside the TLS component. In the Edge namespace
+provision `customer-edge-mcp-oidc-origins` through the component's ExternalSecret with two
 required HTTPS realm URLs. `discovery-url` is the private Keycloak OAuth
 Service, and `issuer-url` is the exact canonical issuer signed into the
 customer JWT. Provision `customer-edge-mcp-oidc-trust` with only the

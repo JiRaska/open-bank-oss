@@ -2,16 +2,6 @@
   path: /spec/template/spec/containers/0/name
   value: mcp-service
 - op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_CONFIG_LOCATIONS
-    value: /mnt/mcp-read-tls-config/runtime.properties
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: MCP_BOUND_TLS_CONFIGURATION
-    value: mcp-bound-read
-- op: add
   path: /spec/template/spec/containers/0/volumeMounts/-
   value:
     name: mcp-bound-client

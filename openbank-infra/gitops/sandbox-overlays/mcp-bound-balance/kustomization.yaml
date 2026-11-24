@@ -1,7 +1,9 @@
+---
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 resources:
 - tls-config-and-policy.yaml
+- site-inputs.yaml
 patches:
 - path: balance-rollout.patch.yaml
   target:
@@ -28,3 +30,8 @@ patches:
     kind: Service
     namespace: delegation
     name: delegation-service
+- path: balance-rollout-env.patch.yaml
+- path: delegation-deployment-env.patch.yaml
+- path: mcp-deployment-env.patch.yaml
+openapi:
+  path: rollout-env-schema.json

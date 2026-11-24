@@ -1,7 +1,7 @@
 # Optional private MCP customer OIDC
 
 Compose this component after `mcp-bound-balance` when the private customers-realm backchannel is
-ready. Provide a site-owned `platform/mcp-customer-oidc-origins` ConfigMap with the exact private
+ready. Provide a site-owned `platform/mcp-customer-oidc-origins` Secret with the exact private
 HTTPS realm URL in `discovery-url` and a `platform/mcp-customer-oidc-trust` Secret containing the
 backchannel server CA chain in `ca.crt`. The listener certificate SAN must match the URL.
 
@@ -17,3 +17,6 @@ metadata. The staff tenant, existing public route, and activation flags are unch
 Before activation, verify that the private discovery metadata contains the canonical issuer and
 reachable private JWKS, UserInfo, and token endpoint URLs where applicable. The site backchannel
 policies must permit the exact MCP pod in `platform` to reach the Keycloak workload.
+
+Provision the matching OpenBao properties under the `mcp-synthetic-sandbox/` path
+listed in `site-inputs.yaml`. Verify ExternalSecret readiness before enabling workloads.

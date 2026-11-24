@@ -1,5 +1,8 @@
+---
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 patches:
-  - path: mcp-discovery.patch.yaml
-  - path: mcp-oidc-config.patch.yaml
+- path: mcp-discovery.patch.yaml
+- path: mcp-oidc-config.patch.yaml
+resources:
+- site-inputs.yaml

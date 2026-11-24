@@ -7,63 +7,6 @@
     name: https-native
     containerPort: 8443
 - op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
-    value: /mnt/mcp-balance-server/tls.crt
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
-    value: /mnt/mcp-balance-server/tls.key
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
-    value: 1h
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_HTTP_SSL_PORT
-    value: '8443'
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_HTTP_SSL_PROTOCOLS
-    value: TLSv1.3
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
-    value: /mnt/mcp-balance-client-trust/ca.crt
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: BALANCE_MCP_ISSUER
-    valueFrom:
-      configMapKeyRef:
-        name: balance-mcp-read-origins
-        key: issuer-url
-        optional: true
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: BALANCE_MCP_SERVICE_OIDC_URL
-    valueFrom:
-      configMapKeyRef:
-        name: balance-mcp-read-origins
-        key: staff-oidc-url
-        optional: true
-- op: add
-  path: /spec/template/spec/containers/0/env/-
-  value:
-    name: BALANCE_MCP_READER_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: balance-mcp-reader-oidc
-        key: BALANCE_MCP_READER_SECRET
-        optional: true
-- op: add
   path: /spec/template/spec/containers/0/volumeMounts/-
   value:
     name: mcp-balance-server
@@ -122,9 +65,3 @@
     name: mcp-read-tls-config
     configMap:
       name: balance-mcp-read-tls
-- op: test
-  path: /spec/template/spec/containers/0/env/22/name
-  value: QUARKUS_CONFIG_LOCATIONS
-- op: replace
-  path: /spec/template/spec/containers/0/env/22/value
-  value: /mnt/msg-config/override.properties,/mnt/mcp-read-tls-config/runtime.properties

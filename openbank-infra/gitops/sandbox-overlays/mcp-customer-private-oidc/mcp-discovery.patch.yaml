@@ -13,7 +13,7 @@ spec:
               value: /mnt/mcp-read-tls-config/runtime.properties,/mnt/mcp-read-tls-config/private-oidc.properties
             - name: MCP_CUSTOMER_OIDC_URL
               valueFrom:
-                configMapKeyRef:
+                secretKeyRef:
                   name: mcp-customer-oidc-origins
                   key: discovery-url
           volumeMounts:

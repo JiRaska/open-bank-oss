@@ -33,12 +33,12 @@ spec:
               value: "true"
             - name: KC_HOSTNAME
               valueFrom:
-                configMapKeyRef:
+                secretKeyRef:
                   name: sandbox-keycloak-settings
                   key: frontend-url
             - name: KC_DB_URL
               valueFrom:
-                configMapKeyRef:
+                secretKeyRef:
                   name: sandbox-keycloak-settings
                   key: jdbc-url
             - name: KC_DB_USERNAME

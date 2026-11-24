@@ -30,7 +30,7 @@ The client leaf issuer trust, native server issuer trust, and Gateway client tru
 purposes. Project only CA certificates into trust mounts. Serve complete leaf/intermediate chains
 through `tls.crt` and rotate certificate pairs together.
 
-The `balance-mcp-read-origins` ConfigMap in `balances` supplies `delegation-url` for the private HTTPS
+The `balance-mcp-read-origins` Secret in `balances` supplies `delegation-url` for the private HTTPS
 service, `issuer-url` for the canonical customers realm, and `staff-oidc-url` for Balance client
 credentials. Balance must reach the canonical customers realm and trust its discovery and JWKS
 endpoint through its OIDC trust chain, or use the [private discovery component](../mcp-balance-private-oidc). The `mcp-bound-read-origins` ConfigMap in `platform` supplies

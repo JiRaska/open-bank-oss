@@ -1,0 +1,25 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+spec:
+  template:
+    spec:
+      containers:
+      - name: customer-edge
+        env:
+        - name: QUARKUS_CONFIG_LOCATIONS
+          value: /mnt/msg-config/override.properties,/mnt/mcp-oidc-config/private-oidc.properties
+        - name: QUARKUS_OIDC_AUTH_SERVER_URL
+          valueFrom:
+            secretKeyRef:
+              name: customer-edge-mcp-oidc-origins
+              key: discovery-url
+          value: null
+        - name: QUARKUS_OIDC_TOKEN_ISSUER
+          valueFrom:
+            secretKeyRef:
+              name: customer-edge-mcp-oidc-origins
+              key: issuer-url

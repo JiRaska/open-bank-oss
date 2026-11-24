@@ -1,0 +1,27 @@
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: balance-mcp-read-origins
+  namespace: balances
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: balance-mcp-read-origins
+    creationPolicy: Owner
+  data:
+  - secretKey: discovery-url
+    remoteRef:
+      key: mcp-synthetic-sandbox/balance-mcp-read-origins
+      property: discovery-url
+  - secretKey: issuer-url
+    remoteRef:
+      key: mcp-synthetic-sandbox/balance-mcp-read-origins
+      property: issuer-url
+  - secretKey: staff-oidc-url
+    remoteRef:
+      key: mcp-synthetic-sandbox/balance-mcp-read-origins
+      property: staff-oidc-url
