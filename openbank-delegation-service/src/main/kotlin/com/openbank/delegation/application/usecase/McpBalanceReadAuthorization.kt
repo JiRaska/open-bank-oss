@@ -15,7 +15,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.time.OffsetDateTime
 import java.util.UUID
 
-/** The issuer calls this after authenticating the workload and independently verifying DPoP. */
+/** The issuer calls this after authenticating the workload and independently verifying the customer credential. */
 @ApplicationScoped
 class McpBalanceReadAuthorization(
     private val grants: ResolveMcpClientGrantUseCase,
@@ -25,7 +25,7 @@ class McpBalanceReadAuthorization(
     data class VerifiedRequest(
         val partyId: UUID,
         val clientId: String,
-        val keyThumbprint: String,
+        val keyThumbprint: String?,
         val accountId: UUID,
         val proofKey: String,
         val connectionId: UUID? = null,
@@ -39,9 +39,18 @@ class McpBalanceReadAuthorization(
     )
 
     suspend fun authorize(request: VerifiedRequest): Permit? {
-        val candidates = request.connectionId?.let {
-            grants.resolveForConnection(request.partyId, request.clientId, request.keyThumbprint, it)
-        } ?: grants.resolve(request.partyId, request.clientId, request.keyThumbprint)
+        val thumbprint = request.keyThumbprint
+        val connection = request.connectionId
+        val candidates = when {
+            thumbprint == null && connection == null -> return null
+            thumbprint == null -> grants.resolveHostedConnection(
+                request.partyId,
+                request.clientId,
+                requireNotNull(connection),
+            )
+            connection == null -> grants.resolve(request.partyId, request.clientId, thumbprint)
+            else -> grants.resolveForConnection(request.partyId, request.clientId, thumbprint, connection)
+        }
         val grant = candidates.singleOrNull {
             it.resourceType == DelegationResourceType.ACCOUNT &&
                 it.mcpConnectionId == request.connectionId &&

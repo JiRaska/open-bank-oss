@@ -248,4 +248,10 @@ interface ResolveMcpClientGrantUseCase {
         keyThumbprint: String,
         connectionId: UUID,
     ): List<DelegationGrant> = emptyList()
+
+    suspend fun resolveHostedConnection(
+        grantorPartyId: UUID,
+        clientId: String,
+        connectionId: UUID,
+    ): List<DelegationGrant> = emptyList()
 }

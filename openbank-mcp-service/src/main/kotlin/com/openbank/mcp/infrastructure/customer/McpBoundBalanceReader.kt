@@ -7,6 +7,7 @@ package com.openbank.mcp.infrastructure.customer
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.enterprise.context.ApplicationScoped
@@ -41,9 +42,10 @@ interface McpBoundBalanceIssuer {
         @FormParam("grant_type") grantType: String,
         @FormParam("client_id") clientId: String,
         @FormParam("subject_token") subjectToken: String,
-        @FormParam("resource_dpop_proof") resourceProof: String,
+        @FormParam("resource_dpop_proof") resourceProof: String?,
         @FormParam("account_id") accountId: UUID,
         @FormParam("connection_id") connectionId: UUID?,
+        @FormParam("hosted_read_id") hostedReadId: UUID?,
     ): JsonNode
 }
 
@@ -79,9 +81,16 @@ class McpBoundBalanceReader(
             issuerTls.isPresent && issuerTls == balanceTls,
             "bound balance delegation requires one shared client TLS configuration",
         )
-        val proof = caller.resourceProof ?: throw TokenExchangeRefused("verified resource proof is unavailable")
-        val connectionId = caller.grantKey?.connectionId
-        val answer = issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId)
+        val key = caller.grantKey
+        val connectionId = key?.connectionId
+        val answer = if (key != null && key.keyThumbprint == null) {
+            refuseUnless(caller.resourceProof == null, "hosted balance request cannot carry a DPoP proof")
+            val boundConnection = connectionId ?: throw TokenExchangeRefused("hosted connection binding is unavailable")
+            issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, null, grant.accountId, boundConnection, Ids.randomId())
+        } else {
+            val proof = caller.resourceProof ?: throw TokenExchangeRefused("verified resource proof is unavailable")
+            issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId, null)
+        }
         return readBalance(grant.accountId, validated(answer, caller.subject, grant, connectionId))
     }
 
