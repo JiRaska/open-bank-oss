@@ -529,6 +529,15 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+New entries are one file each in the openbank-mcp-service.d directory beside this document, named
+YYYY-MM-DD-slug.md and starting with a bold date. The block below is assembled from them by the
+change-log fragment generator (run the repo's regen-derived entrypoint), so never edit between the
+markers. Entries recorded before this section adopted fragments follow the block.
+
+<!-- changelog-fragments:begin (generated from openbank-mcp-service.d/ — do not edit between markers) -->
+
+<!-- changelog-fragments:end -->
+
 - **2026-11-22 (#16590 follow-up, #17099)** — Staff-root `Authorization` parsing is an ALLOWLIST.
   - *Spoofing / tenant confusion.* The DPoP check was a denylist (`startsWith("DPoP ")`), so
     `DPoP<TAB>x`, a bare `DPoP`, `DPoP<NBSP>x`, or a comma list such as `Bearer a, DPoP b` was not
