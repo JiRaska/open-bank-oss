@@ -4,9 +4,9 @@
 
 package com.openbank.delegation.contract
 
-import com.openbank.delegation.contract.DelegationMcpClientGrantPactFolderProviderVerificationTest.Companion.CLIENT
-import com.openbank.delegation.contract.DelegationMcpClientGrantPactFolderProviderVerificationTest.Companion.JKT
-import com.openbank.delegation.contract.DelegationMcpClientGrantPactFolderProviderVerificationTest.Companion.PARTY
+import com.openbank.delegation.contract.McpClientGrantProviderFixture.Companion.CLIENT
+import com.openbank.delegation.contract.McpClientGrantProviderFixture.Companion.JKT
+import com.openbank.delegation.contract.McpClientGrantProviderFixture.Companion.PARTY
 import com.openbank.delegation.integration.SpendReservationOutboxWriteIT
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test
  * the handler (the `@RolesAllowed` on the resource; without it this answered 403).
  */
 @QuarkusTest
-@TestProfile(DelegationMcpClientGrantPactFolderProviderVerificationTest.ResolverDouble::class)
+@TestProfile(McpClientGrantProviderFixture.ResolverDouble::class)
 @QuarkusTestResource(SpendReservationOutboxWriteIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 class McpClientGrantIdentityGuardIT {

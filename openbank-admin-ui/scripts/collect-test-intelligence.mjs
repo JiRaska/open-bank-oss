@@ -10,6 +10,7 @@ import { parse as parseYaml, parseDocument } from 'yaml'
 import { parseStringPromise } from 'xml2js'
 import { executionEvidenceTotals } from '../src/lib/test-intelligence-execution-evidence.mjs'
 import { createRunProjection } from '../src/lib/test-intelligence-run-projection.mjs'
+import { projectIdentifierConformance } from '../src/lib/test-intelligence-identifier-conformance.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -1122,6 +1123,16 @@ async function clientExperiences() {
   ]
 }
 
+// Staged by admin-ui-deploy.yml from the newest main `identifier-conformance` artifact
+// (identifier-differential.yml). Absent = no spec-conformance evidence, never green.
+function identifierConformance() {
+  const file = path.join(repo, 'openbank-admin-ui', 'identifier-conformance', 'identifier-conformance.json')
+  if (!exists(file)) return projectIdentifierConformance(null, freshnessAwareState)
+  const projected = projectIdentifierConformance(readJson(file) ?? {}, freshnessAwareState)
+  if (projected.state === 'invalid') warnings.push(projected.detail)
+  return projected
+}
+
 async function main() {
   const names = releasedComponents()
   const governedMutationComponents = mutationComponents()
@@ -1304,7 +1315,7 @@ async function main() {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence, performanceHistory,
     syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
-    clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities, layerCoverage,
+    clientExperiences: clientExperience, identifierConformance: identifierConformance(), requiredControls: controls, platformCapabilities: capabilities, layerCoverage,
     totals: {
       components: components.length,
       componentsWithExecutionEvidence,

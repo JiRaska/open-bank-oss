@@ -333,3 +333,11 @@ generated:
     generator: Password mcp-service-account-ref-key (refreshPolicy CreatedOnce)
     holders:
       - "none outside the cluster: only mcp-service pods read it (accountRef HMAC key, #16678); rotation = delete the Secret and restart the pods"
+  - secret: platform/copilot-redis-exporter
+    generator: Password copilot-redis-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the copilot-redis Deployment (platform), `metrics` ACL user + redis_exporter sidecar"
+  - secret: ai-platform/langfuse-valkey-exporter
+    generator: Password langfuse-valkey-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the langfuse-valkey Deployment (ai-platform), `metrics` ACL user + redis_exporter sidecar"
