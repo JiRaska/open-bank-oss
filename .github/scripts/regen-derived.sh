@@ -70,6 +70,7 @@ GENERATORS=(
   "service-alert-rules|python3 openbank-infra/scripts/gen-service-alert-rules.py|openbank-infra/gitops/components/"
   "slo-dashboard|python3 .github/scripts/gen-slo-dashboard.py|pyrra-slo-money-path.yaml slo-dashboard-base.json"
   "mcp-realm-clients|python3 .github/scripts/gen-mcp-realm-clients.py|mcp-client-allowlist.yaml mcp-clients/"
+  "changelog-fragments|python3 .github/scripts/gen-changelog-fragments.py|docs/threat-models/"
   "bundles|__BUNDLES__|openbank-libs/governance/rules.yaml openbank-libs/governance/agents.yaml .rego"
 )
 
