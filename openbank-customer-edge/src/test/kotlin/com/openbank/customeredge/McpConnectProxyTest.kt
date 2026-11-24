@@ -29,10 +29,11 @@ class McpConnectProxyTest {
     private val mergedParty = UUID.randomUUID()
     private val account = UUID.randomUUID()
     private val requestRef = "e".repeat(64)
-    private val requestsUrl = "http://delegation/api/v1/delegations/mcp-connect/customer/requests"
-    private val reviewUrl = "$requestsUrl/$requestRef"
+    private val delegationOrigin = "http://delegation-service.delegation.svc:8126"
+    private val requestsUrl = "$delegationOrigin/api/v1/delegations/mcp-connect/customer/requests"
+    private val reviewPath = "/api/v1/delegations/mcp-connect/customer/requests/$requestRef"
     private val connectionId = UUID.randomUUID()
-    private val connectionsUrl = "http://delegation/api/v1/delegations/mcp-connect/customer/connections"
+    private val connectionsUrl = "$delegationOrigin/api/v1/delegations/mcp-connect/customer/connections"
     private val mapper = jacksonObjectMapper()
 
     private fun edge(
@@ -58,7 +59,7 @@ class McpConnectProxyTest {
         }
         objectMapper = mapper
         partyMergeResolver = mockk { every { resolve(caller) } returns mergedParty }
-        delegationServiceUrl = "http://delegation"
+        delegationServiceUrl = delegationOrigin
         configureMcpConnect(enabled)
     }
 
@@ -75,7 +76,9 @@ class McpConnectProxyTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(requestsUrl, mergedParty.toString()) } returns
             Response.ok("""{"requests":[${reviewJson()}],"unexpected":"private"}""").build()
-        every { upstream.get(reviewUrl, mergedParty.toString()) } returns Response.ok(reviewJson()).build()
+        every {
+            upstream.getToService(delegationOrigin, reviewPath, emptyMap(), mergedParty.toString())
+        } returns Response.ok(reviewJson()).build()
 
         val edge = edge(upstream)
         val list = edge.listMcpConnectRequests()
@@ -97,15 +100,14 @@ class McpConnectProxyTest {
     @Test
     fun `hosted review uses the configured delegation authority and separate path`() {
         val upstream = mockk<UpstreamClient>()
-        val origin = "http://delegation-service.delegation.svc:8126"
         val path = "/api/v1/delegations/mcp-connect/customer/requests-v2/$requestRef"
         val hosted = mapper.readTree(reviewJson()).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
         hosted.remove("parJkt")
         hosted.put("parBinding", "confidential_client")
-        every { upstream.getToService(origin, path, emptyMap(), mergedParty.toString()) } returns
+        every { upstream.getToService(delegationOrigin, path, emptyMap(), mergedParty.toString()) } returns
             Response.ok(mapper.writeValueAsString(hosted)).build()
 
-        val edge = edge(upstream).apply { delegationServiceUrl = origin }
+        val edge = edge(upstream)
         assertThat(edge.getMcpConnectRequestV2("invalid/ref").status).isEqualTo(400)
         val review = edge.getMcpConnectRequestV2(requestRef)
         assertThat(review.status).isEqualTo(200)
@@ -122,18 +124,35 @@ class McpConnectProxyTest {
             listOf(CustomerMcpConnectAccountScope(account, listOf("ACCOUNT_READ_BALANCES"))),
         )
         every {
-            upstream.put("$reviewUrl/selection", mergedParty.toString(), mapper.writeValueAsString(selection))
+            upstream.putToService(
+                delegationOrigin,
+                "$reviewPath/selection",
+                mergedParty.toString(),
+                mapper.writeValueAsString(selection),
+            )
         } returns Response.ok(reviewJson()).build()
         val edge = edge(upstream)
         val reply = edge.selectMcpConnectAccounts(requestRef, selection)
         assertThat(reply.status).isEqualTo(200)
         assertThat(reply.entity).isInstanceOf(CustomerMcpConnectReview::class.java)
-        verify(exactly = 1) { upstream.put(any(), any(), any()) }
-        every { upstream.put("$reviewUrl/selection", mergedParty.toString(), any()) } returns
+        verify(exactly = 1) { upstream.putToService(any(), any(), any(), any()) }
+        every {
+            upstream.putToService(delegationOrigin, "$reviewPath/selection", mergedParty.toString(), any())
+        } returns
             Response.status(403).entity("""{"internalReason":"never forwarded"}""").build()
         val denied = edge.selectMcpConnectAccounts(requestRef, selection)
         assertThat(denied.status).isEqualTo(403)
         assertThat(denied.entity.toString()).doesNotContain("internalReason")
+
+        every {
+            upstream.putToService(
+                delegationOrigin,
+                "/api/v1/delegations/mcp-connect/customer/requests-v2/$requestRef/selection",
+                mergedParty.toString(),
+                mapper.writeValueAsString(selection),
+            )
+        } returns Response.ok(reviewJson()).build()
+        assertThat(edge.selectMcpConnectAccountsV2(requestRef, selection).status).isEqualTo(200)
     }
 
     @Test
@@ -152,7 +171,7 @@ class McpConnectProxyTest {
             assertThat(reply.entity.toString()).contains(expectedIndex)
             assertThat(reply.getHeaderString(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store")
         }
-        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+        verify(exactly = 0) { upstream.putToService(any(), any(), any(), any()) }
     }
 
     @Test
@@ -171,7 +190,8 @@ class McpConnectProxyTest {
         assertThat(edge(upstream).getMcpConnectRequest("invalid/ref").status).isEqualTo(400)
         assertThat(edge(upstream).selectMcpConnectAccounts(requestRef, null).status).isEqualTo(400)
         verify(exactly = 0) { upstream.get(any(), any()) }
-        verify(exactly = 0) { upstream.put(any(), any(), any()) }
+        verify(exactly = 0) { upstream.getToService(any(), any(), any(), any()) }
+        verify(exactly = 0) { upstream.putToService(any(), any(), any(), any()) }
     }
 
     @Test
@@ -229,11 +249,15 @@ class McpConnectProxyTest {
     @Test
     fun `owner not found remains not found and invalid owner data fails as unavailable`() {
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(reviewUrl, mergedParty.toString()) } returns Response.status(404).build()
+        every {
+            upstream.getToService(delegationOrigin, reviewPath, emptyMap(), mergedParty.toString())
+        } returns Response.status(404).build()
         every { upstream.get(requestsUrl, mergedParty.toString()) } returns Response.ok("{}").build()
         assertThat(edge(upstream).getMcpConnectRequest(requestRef).status).isEqualTo(404)
         assertThat(edge(upstream).listMcpConnectRequests().status).isEqualTo(503)
-        every { upstream.get(reviewUrl, mergedParty.toString()) } returns Response.ok(reviewJson(caller)).build()
+        every {
+            upstream.getToService(delegationOrigin, reviewPath, emptyMap(), mergedParty.toString())
+        } returns Response.ok(reviewJson(caller)).build()
         assertThat(edge(upstream).getMcpConnectRequest(requestRef).status).isEqualTo(503)
         every { upstream.get(requestsUrl, mergedParty.toString()) } returns
             Response.ok("""{"requests":[${reviewJson(caller)}]}""").build()

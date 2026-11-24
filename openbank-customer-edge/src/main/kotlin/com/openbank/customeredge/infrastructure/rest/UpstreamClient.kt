@@ -447,8 +447,24 @@ class UpstreamClient {
 
     /** PUT with a JSON body + M2M token + party header — e.g. set a savings goal (ADR-0153). */
     fun put(url: String, partyId: String, body: String): Response = try {
-        val request = upstreamRequest()
-            .uri(validatedUri(url))
+        sendPut(upstreamRequest().uri(validatedUri(url)), partyId, body)
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** Select the authority independently of a caller-derived path. */
+    fun putToService(baseUrl: String, path: String, partyId: String, body: String): Response = try {
+        sendPut(upstreamRequest().uri(structuredUri(baseUrl, path)), partyId, body)
+    } catch (e: Exception) {
+        Log.error("structured upstream PUT failed: ${e::class.qualifiedName}")
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun sendPut(builder: HttpRequest.Builder, partyId: String, body: String): Response {
+        val request = builder
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
             .header("Content-Type", "application/json")
@@ -456,11 +472,7 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .PUT(HttpRequest.BodyPublishers.ofString(body)).build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
-    } catch (e: Exception) {
-        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
-        Response.status(502).entity("""{"error":"upstream unavailable"}""")
-            .type(MediaType.APPLICATION_JSON).build()
+        return Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
     }
 
     /** PUT with the M2M operator token + party header + extra headers (e.g. X-Operator-Id). */

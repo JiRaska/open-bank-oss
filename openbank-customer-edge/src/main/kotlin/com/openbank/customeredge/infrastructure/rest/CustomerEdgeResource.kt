@@ -3312,8 +3312,9 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.mcp-connect.read")
     @Blocking
     fun getMcpConnectRequest(@PathParam("requestRef") requestRef: String): Response =
-        withMcpConnectRequest(requestRef) { url, party ->
-            mcpConnectReviewResult(upstream.get(url, party.toString()), party, requestRef)
+        withMcpConnectRequest(requestRef) { path, party ->
+            val response = upstream.getToService(delegationServiceUrl, path, emptyMap(), party.toString())
+            mcpConnectReviewResult(response, party, requestRef)
         }
 
     @POST
@@ -3323,7 +3324,7 @@ class CustomerEdgeResource(
     fun selectMcpConnectAccounts(
         @PathParam("requestRef") requestRef: String,
         selection: CustomerMcpConnectSelection?,
-    ): Response = withMcpConnectRequest(requestRef) { url, party ->
+    ): Response = withMcpConnectRequest(requestRef) { path, party ->
         if (selection == null) {
             badRequest("Account selection is required")
         } else {
@@ -3332,7 +3333,12 @@ class CustomerEdgeResource(
             } catch (e: IllegalArgumentException) {
                 return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
             }
-            val response = upstream.put("$url/selection", party.toString(), objectMapper.writeValueAsString(selection))
+            val response = upstream.putToService(
+                delegationServiceUrl,
+                "$path/selection",
+                party.toString(),
+                objectMapper.writeValueAsString(selection),
+            )
             mcpConnectReviewResult(response, party, requestRef)
         }
     }
@@ -3353,16 +3359,8 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.mcp-connect.read")
     @Blocking
     fun getMcpConnectRequestV2(@PathParam("requestRef") requestRef: String): Response =
-        withMcpConnectCustomer { party ->
-            if (!MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
-                return@withMcpConnectCustomer badRequest("Invalid MCP connect request reference")
-            }
-            val response = upstream.getToService(
-                delegationServiceUrl,
-                "${mcpConnectRequestsPath(includeHosted = true)}/$requestRef",
-                emptyMap(),
-                party.toString(),
-            )
+        withMcpConnectRequest(requestRef, includeHosted = true) { path, party ->
+            val response = upstream.getToService(delegationServiceUrl, path, emptyMap(), party.toString())
             mcpConnectReviewResult(response, party, requestRef)
         }
 
@@ -3373,7 +3371,7 @@ class CustomerEdgeResource(
     fun selectMcpConnectAccountsV2(
         @PathParam("requestRef") requestRef: String,
         selection: CustomerMcpConnectSelection?,
-    ): Response = withMcpConnectRequest(requestRef, includeHosted = true) { url, party ->
+    ): Response = withMcpConnectRequest(requestRef, includeHosted = true) { path, party ->
         if (selection == null) {
             badRequest("Account selection is required")
         } else {
@@ -3382,7 +3380,12 @@ class CustomerEdgeResource(
             } catch (e: IllegalArgumentException) {
                 return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
             }
-            val response = upstream.put("$url/selection", party.toString(), objectMapper.writeValueAsString(selection))
+            val response = upstream.putToService(
+                delegationServiceUrl,
+                "$path/selection",
+                party.toString(),
+                objectMapper.writeValueAsString(selection),
+            )
             mcpConnectReviewResult(response, party, requestRef)
         }
     }
@@ -3435,7 +3438,7 @@ class CustomerEdgeResource(
         call: (String, UUID) -> Response,
     ): Response = withMcpConnectCustomer { party ->
         if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
-            call("${mcpConnectRequestsUrl(includeHosted)}/$requestRef", party)
+            call("${mcpConnectRequestsPath(includeHosted)}/$requestRef", party)
         } else {
             badRequest("Invalid MCP connect request reference")
         }
