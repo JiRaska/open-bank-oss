@@ -40,7 +40,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @PactFolder("../pacts")
 class DelegationMcpClientGrantPactFolderProviderVerificationTest : McpClientGrantProviderFixture() {
     @BeforeEach
-    fun replayAnonymousWhenRequired(context: PactVerificationContext?) = configureTarget(context)
+    fun replayAnonymousWhenRequired(context: PactVerificationContext?) = configureTarget(context, anonymousStatus = 401)
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)

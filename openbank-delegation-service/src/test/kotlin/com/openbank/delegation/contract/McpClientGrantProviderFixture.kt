@@ -35,11 +35,11 @@ abstract class McpClientGrantProviderFixture {
     @Inject
     lateinit var redis: RedisDataSource
 
-    protected fun configureTarget(context: PactVerificationContext?) {
+    protected fun configureTarget(context: PactVerificationContext?, anonymousStatus: Int) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         // Runs after @TestSecurity installed the class identity; null delegates to the real
         // (token-derived) identity, which with no Authorization header is anonymous.
-        if (context?.interaction?.asSynchronousRequestResponse()?.response?.status == UNAUTHENTICATED) {
+        if (context?.interaction?.asSynchronousRequestResponse()?.response?.status == anonymousStatus) {
             testIdentity.setTestIdentity(null)
         }
     }
@@ -158,6 +158,5 @@ abstract class McpClientGrantProviderFixture {
         val ACCOUNT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000003")
         const val CLIENT = "mcp-local-reference"
         const val JKT = "0000000000000000000000000000000000000000000"
-        private const val UNAUTHENTICATED = 401
     }
 }

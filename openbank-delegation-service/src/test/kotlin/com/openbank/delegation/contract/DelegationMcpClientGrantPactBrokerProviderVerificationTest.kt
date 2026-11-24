@@ -44,7 +44,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class DelegationMcpClientGrantPactBrokerProviderVerificationTest : McpClientGrantProviderFixture() {
     @BeforeEach
-    fun replayAnonymousWhenRequired(context: PactVerificationContext?) = configureTarget(context)
+    fun replayAnonymousWhenRequired(context: PactVerificationContext?) = configureTarget(context, anonymousStatus = 401)
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
