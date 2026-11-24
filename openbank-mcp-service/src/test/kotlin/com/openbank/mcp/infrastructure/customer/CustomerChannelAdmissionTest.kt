@@ -210,6 +210,37 @@ class CustomerChannelAdmissionTest {
     }
 
     @Test
+    fun `hosted bearer needs the actual token and signed connection without a proof`() {
+        val boundAdmission = CustomerChannelAdmission(
+            DpopTestProofs.ISSUER,
+            allowlist,
+            DpopProofVerifier(Jose4jDpopProofParser(), InMemoryDpopReplayStore()),
+            Clock.systemUTC(),
+            requireConnection = true,
+        )
+        val connectionId = UUID.fromString("aabbccdd-0000-4000-8000-000000000001")
+        val raw = DpopTestProofs.ACCESS_TOKEN
+        val jwt = TestJsonWebToken(
+            mapOf(
+                "iss" to DpopTestProofs.ISSUER,
+                "sub" to "synthetic-customer",
+                "azp" to "mcp-hosted-test",
+                "aud" to listOf(allowlist.audience),
+                "typ" to "Bearer",
+                "raw_token" to raw,
+                CustomerChannelAdmission.CLAIM_CONNECTION_ID to connectionId.toString(),
+            ),
+        )
+        val admitted = runBlocking { boundAdmission.admit(jwt, "Bearer $raw", emptyList(), Unlimited) }
+        assertThat(admitted).isInstanceOfSatisfying(Outcome.Admitted::class.java) {
+            assertThat(it.connectionId).isEqualTo(connectionId)
+            assertThat(it.keyThumbprint).isNull()
+        }
+        refused(runBlocking { boundAdmission.admit(jwt, "Bearer wrong", emptyList(), Unlimited) })
+        refused(runBlocking { boundAdmission.admit(jwt, "Bearer $raw", listOf("unexpected-proof"), Unlimited) })
+    }
+
+    @Test
     fun `the Bearer scheme is refused`() {
         assertThat(refused(admit(authorization = "Bearer ${DpopTestProofs.ACCESS_TOKEN}")).reason)
             .isEqualTo("DPoP authorization scheme required")

@@ -95,6 +95,27 @@ class McpConnectProxyTest {
     }
 
     @Test
+    fun `hosted review uses the configured delegation authority and separate path`() {
+        val upstream = mockk<UpstreamClient>()
+        val origin = "http://delegation-service.delegation.svc:8126"
+        val path = "/api/v1/delegations/mcp-connect/customer/requests-v2/$requestRef"
+        val hosted = mapper.readTree(reviewJson()).deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
+        hosted.remove("parJkt")
+        hosted.put("parBinding", "confidential_client")
+        every { upstream.getToService(origin, path, emptyMap(), mergedParty.toString()) } returns
+            Response.ok(mapper.writeValueAsString(hosted)).build()
+
+        val edge = edge(upstream).apply { delegationServiceUrl = origin }
+        assertThat(edge.getMcpConnectRequestV2("invalid/ref").status).isEqualTo(400)
+        val review = edge.getMcpConnectRequestV2(requestRef)
+        assertThat(review.status).isEqualTo(200)
+        val json = mapper.writeValueAsString(review.entity)
+        assertThat(json).contains("confidential_client").doesNotContain("parJkt", "ownerOnly")
+        assertThat(OpenApiWireValidator().violations(json, "/mcp/connect-requests-v2/{requestRef}")).isEmpty()
+        verify(exactly = 1) { upstream.getToService(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `selection forwards typed accounts on PUT using only the authenticated party`() {
         val upstream = mockk<UpstreamClient>()
         val selection = CustomerMcpConnectSelection(

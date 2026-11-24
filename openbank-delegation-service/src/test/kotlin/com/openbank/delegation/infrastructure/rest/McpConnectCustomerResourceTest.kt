@@ -83,7 +83,7 @@ class McpConnectCustomerResourceTest {
         val connectionId = UUID.randomUUID()
         coEvery { store.revoke(party, connectionId) } returns true
         coEvery { store.revoke(OTHER_PARTY, connectionId) } returns false
-        val resource = resource()
+        val resource = McpConnectCustomerConnectionResource(access(), store)
         assertThat(runBlocking { resource.revoke(party, connectionId, connectionId.toString()).status }).isEqualTo(204)
         assertThatThrownBy { runBlocking { resource.revoke(OTHER_PARTY, connectionId, connectionId.toString()) } }
             .isInstanceOf(NotFoundException::class.java)
@@ -107,7 +107,7 @@ class McpConnectCustomerResourceTest {
     @Test
     fun `missing and mismatched revocation keys stop before changing state`() {
         val connectionId = UUID.randomUUID()
-        val resource = resource()
+        val resource = McpConnectCustomerConnectionResource(access(), store)
         for (key in listOf(null, UUID.randomUUID().toString())) {
             assertThatThrownBy { runBlocking { resource.revoke(party, connectionId, key) } }
                 .isInstanceOf(IllegalArgumentException::class.java)
@@ -115,14 +115,17 @@ class McpConnectCustomerResourceTest {
         coVerify(exactly = 0) { store.revoke(any(), any()) }
     }
 
-    private fun resource(client: String = "openbank-edge"): McpConnectCustomerResource {
+    private fun resource(client: String = "openbank-edge") =
+        McpConnectCustomerResource(access(client), store, ownership)
+
+    private fun access(client: String = "openbank-edge"): McpConnectCustomerAccess {
         val token = mockk<JsonWebToken>()
         every { token.subject } returns "subject"
         every { token.getClaim<Any?>("azp") } returns client
         every { token.getClaim<Any?>("preferred_username") } returns "service-account-$client"
         val identity = mockk<SecurityIdentity>()
         every { identity.principal } returns token
-        return McpConnectCustomerResource(identity, store, ownership, enabled = true)
+        return McpConnectCustomerAccess(identity, enabled = true)
     }
 
     private companion object {

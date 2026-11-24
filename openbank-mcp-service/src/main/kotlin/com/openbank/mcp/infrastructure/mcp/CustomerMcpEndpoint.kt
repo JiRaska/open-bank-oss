@@ -21,9 +21,8 @@ import jakarta.ws.rs.core.Response
  * - Served ONLY on the mTLS listener (8443): a plain-HTTP request (8150) answers 404, so a customer
  *   request can only arrive through the edge hop, and the DPoP `htu` the customers tenant compares
  *   with `absoluteURI()` is necessarily `https://<external Host>/customer/mcp`.
- * - Authenticated ONLY by the DPoP scheme: the `%prod` `customer-dpop` permission binds this root to
- *   `auth-mechanism: DPoP` (staff `/mcp` keeps `bearer`), and `quarkus.oidc.customers.tenant-paths`
- *   binds it to the customers tenant.
+ * - The customer OIDC mechanism selects the customers-realm tenant for the presented OAuth scheme.
+ *   The Gateway certificate proves the TLS peer identity and is separate from user authentication.
  * - 404 while the customer channel is off: nothing serves a channel that admits no one.
  *
  * The JSON-RPC handling itself is [McpEndpoint]'s: this resource calls [McpEndpoint.handleCustomer], the

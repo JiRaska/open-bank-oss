@@ -133,3 +133,7 @@ The proposal store checks the payee IBAN's uppercase, unspaced form with
 does not validate the country, account structure or checksum. After customer approval, the
 customer edge submits the stored instruction through the usual payment initiation path, where
 the selected rail applies its own account validation.
+
+### Hosted MCP grants
+
+A hosted grant without a DPoP thumbprint is bound to the approved connection ID. Lookup uses the exact customer, client and connection. It does not return grants with a DPoP thumbprint. The dedicated read issuer must also prove current account ownership and commit a first-use read reference before receiving a permit.
