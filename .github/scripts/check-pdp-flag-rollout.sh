@@ -101,6 +101,12 @@ offmain_pin_commit() {
   [ "$n" -eq 0 ] && return 1
   [ "$n" -gt 1 ] && return 3
   full="$cands"
+  # PR refs contribute to ambiguity detection, but only canonical heads prove membership.
+  if [ "${TRUSTED_HEADS_FETCHED:-0}" = 1 ] &&
+    [ -n "$(git --git-dir="$GRAPH_DIR" for-each-ref --count=1 --contains "$full" refs/trusted-heads)" ]; then
+    printf '%s\n' "$full"
+    return 0
+  fi
   prs="$(git --git-dir="$GRAPH_DIR" for-each-ref --contains "$full" --format='%(refname:lstrip=2)' refs/pull)"
   [ -n "$prs" ] || return 1
   [ "$(printf '%s\n' "$prs" | grep -c .)" -le "${PDP_ROLLOUT_PR_LOOKUP_CAP:-20}" ] || return 5
@@ -142,8 +148,8 @@ is_ancestor() {
     # name, so once per invocation fetch the PR heads (no blobs, ~20 s) and try to answer from git.
     # refs/pull/* includes FORK heads, i.e. attacker-chosen objects, so the answer is fail-closed:
     # the short sha must resolve to exactly ONE commit (else LAGGING: a planted collision), and
-    # that commit must be contained in a PR head whose head repository is this repository
-    # (else LAGGING). Only "could not ask which repo" falls through to the compare API.
+    # that commit must be reachable from a verified same-repository PR head or,
+    # when PR metadata is unavailable, from a freshly fetched canonical branch.
     if [ "$grc" = 128 ] && [ "${PULL_HEADS_TRIED:-0}" = 0 ] && [ "${PDP_ROLLOUT_PULL_HEADS:-1}" = 1 ]; then
       PULL_HEADS_TRIED=1
       if GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" fetch -q --filter=blob:none --no-tags origin \
@@ -152,6 +158,18 @@ is_ancestor() {
     if [ "$grc" = 128 ] && [ "${PULL_HEADS_FETCHED:-0}" = 1 ]; then
       local full prc=0
       full="$(offmain_pin_commit "$2")" || prc=$?
+      # Preserve the established path when it already yields a definitive result.
+      # For unavailable PR metadata, re-resolve against the full augmented graph.
+      if [ "$prc" = 2 ] && [ "${TRUSTED_HEADS_TRIED:-0}" = 0 ]; then
+        TRUSTED_HEADS_TRIED=1
+        TRUSTED_HEADS_FETCHED=0
+        if GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" fetch -q --filter=blob:none --no-tags origin \
+          '+refs/heads/*:refs/trusted-heads/*' 2>/dev/null; then
+          TRUSTED_HEADS_FETCHED=1
+          prc=0
+          full="$(offmain_pin_commit "$2")" || prc=$?
+        fi
+      fi
       case "$prc" in
         0) GIT_TERMINAL_PROMPT=0 git --git-dir="$GRAPH_DIR" merge-base --is-ancestor "$1" "$full" 2>/dev/null
            return ;;
@@ -491,10 +509,39 @@ selftest() {
     [ -n "$amb" ] || { echo "selftest FAIL: could not build an ambiguous prefix" >&2; f=1; }
     if [ -n "$amb" ] && PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "$amb" 2>/dev/null; then
       echo "selftest FAIL: an ambiguous short sha was accepted" >&2; f=1; fi
+    TRUSTED_HEADS_TRIED=1 TRUSTED_HEADS_FETCHED=0
     # (a) the PR-repo lookup never answers: LAGGING, never handed to the (always-"ahead") compare.
     gh() { case "$*" in *pulls/*) return 1 ;; *compare/*) echo ahead ;; *) echo main ;; esac; }
     if PDP_ROLLOUT_RETRY_SLEEP=0 PDP_ROLLOUT_API_ATTEMPTS=1 is_ancestor "$shipped" "${own:0:8}" 2>/dev/null; then
       echo "selftest FAIL: an unanswered PR-repo lookup fell through to compare" >&2; f=1; fi
+    # Exercise the actual fetch path against a local canonical origin with a moved tip.
+    env -u GIT_DIR -u GIT_WORK_TREE git init -q --bare "$tmp/trusted-origin.git"
+    local moved previous_origin
+    moved="$(git -c user.email=t@t -c user.name=t commit-tree -p "$own" -m moved "$(git rev-parse "$shipped^{tree}")")"
+    git push -q "$tmp/trusted-origin.git" "$moved:refs/heads/own"
+    previous_origin="$(git config --get remote.origin.url || true)"
+    git config remote.origin.url "$tmp/trusted-origin.git"
+    TRUSTED_HEADS_TRIED=0 TRUSTED_HEADS_FETCHED=0
+    if ! PDP_ROLLOUT_RETRY_SLEEP=0 is_ancestor "$shipped" "${own:0:8}" 2>/dev/null ||
+      [ "$(git rev-parse refs/trusted-heads/own)" != "$moved" ]; then
+      echo "selftest FAIL: canonical branch fetch did not prove membership" >&2; f=1
+    fi
+    git update-ref refs/trusted-heads/collision "$(git rev-parse refs/pull/3)"
+    if [ -n "$amb" ] && is_ancestor "$shipped" "$amb" 2>/dev/null; then
+      echo "selftest FAIL: canonical branch masked an ambiguous short SHA" >&2; f=1
+    fi
+    git config remote.origin.url "$tmp/missing-origin.git"
+    TRUSTED_HEADS_TRIED=0 TRUSTED_HEADS_FETCHED=0
+    if PDP_ROLLOUT_RETRY_SLEEP=0 is_ancestor "$shipped" "${own:0:8}" 2>/dev/null; then
+      echo "selftest FAIL: failed fetch accepted a stale canonical ref" >&2; f=1
+    fi
+    if [ -n "$previous_origin" ]; then
+      git config remote.origin.url "$previous_origin"
+    else
+      git config --unset remote.origin.url
+    fi
+    git update-ref -d refs/trusted-heads/own
+    git update-ref -d refs/trusted-heads/collision
     # (b) in no PR head: compare only for the head of a branch of this repo, else LAGGING.
     lone="$(mk lone)"
     # shellcheck disable=SC2329 # invoked indirectly by is_ancestor
