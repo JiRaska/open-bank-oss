@@ -246,3 +246,5 @@ pending connection review, select eligible owned accounts, list active connectio
 revoke an owned connection. The review supplies the approved capability options and the
 selection is forwarded to Delegation over its internal authenticated route. Revocation
 uses the connection ID as the idempotency key across the Edge and Delegation boundary.
+
+The MCP connection request endpoints with the `-v2` suffix also return hosted approval requests. A hosted request without a DPoP key carries `parBinding: confidential_client`. The original request endpoints retain the DPoP response and selection behavior for existing app versions. Both variants enforce the authenticated customer's party ID.

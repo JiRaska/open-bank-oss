@@ -71,7 +71,7 @@ class CustomerPaymentProposer @Inject constructor(
         val request = CreatePaymentProposalRequest(
             partyId = key.partyId,
             mcpClientId = key.clientId,
-            keyThumbprint = key.keyThumbprint,
+            keyThumbprint = requireNotNull(key.keyThumbprint) { "payment proposals require a DPoP grant" },
             operationType = instruction.operationType,
             debtorAccountId = instruction.debtorAccountId,
             creditorIban = instruction.creditorIban,
@@ -168,7 +168,7 @@ class CustomerPaymentProposer @Inject constructor(
                 add(if (key.connectionId == null) KEY_VERSION else BOUND_KEY_VERSION)
                 add(key.partyId.toString())
                 add(key.clientId)
-                add(key.keyThumbprint)
+                add(requireNotNull(key.keyThumbprint) { "payment proposals require a DPoP grant" })
                 key.connectionId?.let { add(it.toString()) }
                 add(sessionId ?: NO_SESSION)
                 add(clientRequestId)

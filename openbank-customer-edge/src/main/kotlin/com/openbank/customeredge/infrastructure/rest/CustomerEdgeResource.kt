@@ -3338,6 +3338,47 @@ class CustomerEdgeResource(
     }
 
     @GET
+    @Path("/mcp/connect-requests-v2")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun listMcpConnectRequestsV2(): Response = withMcpConnectCustomer { party ->
+        val response = upstream.get(mcpConnectRequestsUrl(includeHosted = true), party.toString())
+        mcpConnectResult(response, CustomerMcpConnectRequests::class.java) { view ->
+            view.requests.all { it.partyId == party }
+        }
+    }
+
+    @GET
+    @Path("/mcp/connect-requests-v2/{requestRef}")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun getMcpConnectRequestV2(@PathParam("requestRef") requestRef: String): Response =
+        withMcpConnectRequest(requestRef, includeHosted = true) { url, party ->
+            mcpConnectReviewResult(upstream.get(url, party.toString()), party, requestRef)
+        }
+
+    @POST
+    @Path("/mcp/connect-requests-v2/{requestRef}/selection")
+    @Authorize(action = "customer.mcp-connect.select")
+    @Blocking
+    fun selectMcpConnectAccountsV2(
+        @PathParam("requestRef") requestRef: String,
+        selection: CustomerMcpConnectSelection?,
+    ): Response = withMcpConnectRequest(requestRef, includeHosted = true) { url, party ->
+        if (selection == null) {
+            badRequest("Account selection is required")
+        } else {
+            try {
+                selection.validateElements()
+            } catch (e: IllegalArgumentException) {
+                return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
+            }
+            val response = upstream.put("$url/selection", party.toString(), objectMapper.writeValueAsString(selection))
+            mcpConnectReviewResult(response, party, requestRef)
+        }
+    }
+
+    @GET
     @Path("/mcp/connections")
     @Authorize(action = "customer.mcp-connect.read")
     @Blocking
@@ -3379,17 +3420,22 @@ class CustomerEdgeResource(
         return Response.fromResponse(response).header("Cache-Control", "no-store").build()
     }
 
-    private fun withMcpConnectRequest(requestRef: String, call: (String, UUID) -> Response): Response =
-        withMcpConnectCustomer { party ->
-            if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
-                call("${mcpConnectRequestsUrl()}/$requestRef", party)
-            } else {
-                badRequest("Invalid MCP connect request reference")
-            }
+    private fun withMcpConnectRequest(
+        requestRef: String,
+        includeHosted: Boolean = false,
+        call: (String, UUID) -> Response,
+    ): Response = withMcpConnectCustomer { party ->
+        if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
+            call("${mcpConnectRequestsUrl(includeHosted)}/$requestRef", party)
+        } else {
+            badRequest("Invalid MCP connect request reference")
         }
+    }
 
-    private fun mcpConnectRequestsUrl(): String =
-        "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/requests"
+    private fun mcpConnectRequestsUrl(includeHosted: Boolean = false): String {
+        val requests = if (includeHosted) "requests-v2" else "requests"
+        return "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/$requests"
+    }
 
     private fun mcpConnectReviewResult(response: Response, party: UUID, requestRef: String): Response =
         mcpConnectResult(response, CustomerMcpConnectReview::class.java) {

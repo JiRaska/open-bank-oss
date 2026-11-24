@@ -25,14 +25,14 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
         val requestRef: String,
         val partyId: UUID,
         val clientId: String,
-        val parJkt: String,
+        val parJkt: String?,
         val redirectHost: String,
         val resource: String,
         val scopes: Set<String>,
         val expiresAt: OffsetDateTime,
     )
 
-    data class Binding(val partyId: UUID, val clientId: String, val parJkt: String)
+    data class Binding(val partyId: UUID, val clientId: String, val parJkt: String?)
 
     data class Challenge(val challengeId: UUID, val contextSha256: String)
 
@@ -256,7 +256,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
         const val BIND_CHALLENGE = """
             UPDATE mcp_connect_requests AS r
             SET challenge_id = $5, context_sha256 = $6
-            WHERE r.request_ref = $1 AND r.party_id = $2 AND r.client_id = $3 AND r.par_jkt = $4
+            WHERE r.request_ref = $1 AND r.party_id = $2 AND r.client_id = $3 AND r.par_jkt IS NOT DISTINCT FROM $4
               AND r.expires_at > statement_timestamp()
               AND (r.challenge_id IS NULL OR (r.challenge_id = $5 AND r.context_sha256 = $6))
               AND EXISTS (SELECT 1 FROM mcp_connect_selected_accounts AS a WHERE a.request_ref = r.request_ref)
@@ -264,7 +264,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
         const val STAGE = """
             UPDATE mcp_connect_requests
             SET code_binding_ref = $7, staged_at = coalesce(staged_at, statement_timestamp())
-            WHERE request_ref = $1 AND party_id = $2 AND client_id = $3 AND par_jkt = $4
+            WHERE request_ref = $1 AND party_id = $2 AND client_id = $3 AND par_jkt IS NOT DISTINCT FROM $4
               AND challenge_id = $5 AND context_sha256 = $6
               AND expires_at > statement_timestamp() AND connection_id IS NULL
               AND (code_binding_ref IS NULL OR code_binding_ref = $7)
@@ -273,7 +273,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
             SELECT r.*, a.account_id, a.capabilities
             FROM mcp_connect_requests AS r
             JOIN mcp_connect_selected_accounts AS a USING (request_ref)
-            WHERE r.party_id = $1 AND r.client_id = $2 AND r.par_jkt = $3 AND r.code_binding_ref = $4
+            WHERE r.party_id = $1 AND r.client_id = $2 AND r.par_jkt IS NOT DISTINCT FROM $3 AND r.code_binding_ref = $4
               AND r.expires_at > statement_timestamp() AND r.connection_id IS NULL
             ORDER BY a.account_id
         """
@@ -282,7 +282,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
                 UPDATE mcp_connect_requests
                 SET refresh_family_ref = $8, connection_id = gen_random_uuid(),
                     activated_at = statement_timestamp(), grant_valid_until = statement_timestamp() + interval '180 days'
-                WHERE request_ref = $1 AND party_id = $2 AND client_id = $3 AND par_jkt = $4
+                WHERE request_ref = $1 AND party_id = $2 AND client_id = $3 AND par_jkt IS NOT DISTINCT FROM $4
                   AND challenge_id = $5 AND context_sha256 = $6 AND code_binding_ref = $7
                   AND expires_at > statement_timestamp() AND connection_id IS NULL
                 RETURNING *
@@ -309,7 +309,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
         """
         const val ACTIVATION_RECEIPT = """
             SELECT r.connection_id FROM mcp_connect_requests AS r
-            WHERE r.request_ref = $1 AND r.party_id = $2 AND r.client_id = $3 AND r.par_jkt = $4
+            WHERE r.request_ref = $1 AND r.party_id = $2 AND r.client_id = $3 AND r.par_jkt IS NOT DISTINCT FROM $4
               AND r.challenge_id = $5 AND r.context_sha256 = $6 AND r.code_binding_ref = $7
               AND r.refresh_family_ref = $8 AND r.revoked_at IS NULL AND r.grant_valid_until > statement_timestamp()
               AND EXISTS (SELECT 1 FROM mcp_connect_selected_accounts AS a
@@ -317,7 +317,7 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
         """
         const val ACTIVE_FAMILY = """
             SELECT connection_id FROM mcp_connect_requests
-            WHERE party_id = $1 AND client_id = $2 AND par_jkt = $3 AND refresh_family_ref = $4
+            WHERE party_id = $1 AND client_id = $2 AND par_jkt IS NOT DISTINCT FROM $3 AND refresh_family_ref = $4
               AND revoked_at IS NULL AND grant_valid_until > statement_timestamp()
         """
         const val REVOKE = """

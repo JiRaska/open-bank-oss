@@ -30,8 +30,8 @@ import java.util.UUID
  * 5. the DPoP proof verifies against the request (`htm`, `htu` = the published resource, `iat`
  *    window, `ath`, `cnf.jkt`, `jti` replay) via the ADR-0320 primitive.
  *
- * Tier H bearer tokens (ADR-0385's recorded exception) are NOT admitted in this slice: every
- * customer token must be DPoP-bound until that exception path is built and reviewed.
+ * Tier H may instead present a verified bearer access token with an explicit connection binding.
+ * The token issuer checks confidential client authentication before creating that connection.
  */
 class CustomerChannelAdmission internal constructor(
     val issuer: String,
@@ -64,7 +64,7 @@ class CustomerChannelAdmission internal constructor(
         data class Admitted(
             val context: ConsentContext,
             val client: McpClientAllowlist.Client,
-            val keyThumbprint: String,
+            val keyThumbprint: String?,
             val connectionId: UUID? = null,
         ) : Outcome
 
@@ -84,8 +84,14 @@ class CustomerChannelAdmission internal constructor(
     /** True when [jwt]'s `iss` is the customers realm — the ONLY selector of this path (ADR-0383 D1.1). */
     fun isCustomerToken(jwt: JsonWebToken): Boolean = jwt.issuer != null && jwt.issuer == issuer
 
+    val supportsHostedBearer: Boolean = requireConnection &&
+        allowlist.clients.values.any { it.enabled && it.tier == McpClientAllowlist.Tier.H }
+
     /** The 401 for a request that carries no token at all (RFC 9728 §5.1, RFC 6750 §3.1: no error code). */
-    fun missingTokenChallenge(): String = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
+    fun missingTokenChallenge(): String {
+        val dpop = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
+        return if (supportsHostedBearer) "Bearer resource_metadata=\"$resourceMetadataUrl\", $dpop" else dpop
+    }
 
     /**
      * @param throttles the D5.3 budgets; see [Throttles] for which runs before and which after the
@@ -109,6 +115,31 @@ class CustomerChannelAdmission internal constructor(
                 ?: return invalidToken("token has no valid MCP connection")
             CLAIM_CONNECTION_ID in jwt.claimNames -> return invalidToken("MCP connection binding is unavailable")
             else -> null
+        }
+        val caller = AdmittedCaller(subject, client, connectionId)
+        return admitCredential(caller, jwt, authorization, dpopHeaders, throttles)
+    }
+
+    @Suppress("ReturnCount") // validate token binding before spending any DPoP budgets
+    private suspend fun admitCredential(
+        caller: AdmittedCaller,
+        jwt: JsonWebToken,
+        authorization: String?,
+        dpopHeaders: List<String>,
+        throttles: Throttles,
+    ): Outcome {
+        val (subject, client, connectionId) = caller
+        if (
+            connectionId != null &&
+            client.tier == McpClientAllowlist.Tier.H &&
+            isHostedBearer(jwt, authorization, dpopHeaders)
+        ) {
+            return try {
+                val refusal = throttles.client(client.clientId) ?: throttles.subject(subject, client.clientId)
+                if (refusal != null) throttled(refusal) else admitted(caller, null)
+            } catch (_: SharedStoreUnavailableException) {
+                storeUnavailable()
+            }
         }
         val jkt = confirmationJkt(jwt) ?: return invalidToken("token is not DPoP-bound")
         val presented = dpopToken(authorization) ?: return invalidToken("DPoP authorization scheme required")
@@ -173,21 +204,9 @@ class CustomerChannelAdmission internal constructor(
     private fun throttled(reason: String) = Outcome.Refused(STATUS_TOO_MANY, null, reason, throttled = true)
 
     private fun outcomeOf(result: DpopResult, request: ProofRequest): Outcome = when (result) {
-        DpopResult.VALID -> Outcome.Admitted(
-            ConsentContext(
-                agentId = request.subject,
-                consentId = "",
-                grantedAccounts = emptyList(),
-                actChain = listOf(request.client.clientId),
-                sessionId = null,
-                principalType = PRINCIPAL_HUMAN,
-                roles = emptyList(),
-                serviceAccount = false,
-                channel = CHANNEL,
-            ),
-            request.client,
+        DpopResult.VALID -> admitted(
+            AdmittedCaller(request.subject, request.client, request.connectionId),
             request.jkt,
-            request.connectionId,
         )
         DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
         DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
@@ -224,11 +243,9 @@ class CustomerChannelAdmission internal constructor(
 
         /** Refusal reason of every store-unavailable 503 (see [storeUnavailable]). */
         const val REPLAY_STORE_UNAVAILABLE = "replay_store_unavailable"
-        private const val PRINCIPAL_HUMAN = "HUMAN"
         private const val HTTP_METHOD = "POST"
         private const val CLAIM_AZP = "azp"
         private const val CLAIM_AUD = "aud"
-        private const val CLAIM_CNF = "cnf"
         internal const val CLAIM_CONNECTION_ID = "openbank_mcp_connection_id"
         private val CANONICAL_UUID = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         private const val STATUS_UNAUTHORIZED = 401
@@ -261,12 +278,6 @@ class CustomerChannelAdmission internal constructor(
             return value.substring(DPOP_SCHEME.length).trim().takeIf { it.isNotEmpty() && ' ' !in it }
         }
 
-        private fun stringValue(v: Any?): String? = when (v) {
-            is String -> v
-            is JsonString -> v.string
-            else -> null
-        }?.takeIf { it.isNotBlank() }
-
         private fun audience(jwt: JsonWebToken): List<String> = when (val aud = jwt.getClaim<Any?>(CLAIM_AUD)) {
             is String -> listOf(aud)
             is JsonString -> listOf(aud.string)
@@ -281,3 +292,38 @@ class CustomerChannelAdmission internal constructor(
         }
     }
 }
+
+private data class AdmittedCaller(val subject: String, val client: McpClientAllowlist.Client, val connectionId: UUID?)
+
+private const val CLAIM_CNF = "cnf"
+private const val PRINCIPAL_HUMAN = "HUMAN"
+
+private fun isHostedBearer(jwt: JsonWebToken, authorization: String?, proofs: List<String>): Boolean {
+    if (CLAIM_CNF in jwt.claimNames || proofs.isNotEmpty()) return false
+    if (stringValue(jwt.getClaim<Any?>("typ")) != "Bearer") return false
+    val raw = jwt.rawToken ?: return false
+    return raw.isNotBlank() && authorization == "Bearer $raw"
+}
+
+private fun admitted(caller: AdmittedCaller, keyThumbprint: String?) = CustomerChannelAdmission.Outcome.Admitted(
+    ConsentContext(
+        agentId = caller.subject,
+        consentId = "",
+        grantedAccounts = emptyList(),
+        actChain = listOf(caller.client.clientId),
+        sessionId = null,
+        principalType = PRINCIPAL_HUMAN,
+        roles = emptyList(),
+        serviceAccount = false,
+        channel = CustomerChannelAdmission.CHANNEL,
+    ),
+    caller.client,
+    keyThumbprint,
+    caller.connectionId,
+)
+
+private fun stringValue(v: Any?): String? = when (v) {
+    is String -> v
+    is JsonString -> v.string
+    else -> null
+}?.takeIf { it.isNotBlank() }

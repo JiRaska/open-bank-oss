@@ -110,3 +110,5 @@ When a new OpenBank service `openbank-foo-service` is created:
 
 - [02 — Architecture](./02-architecture.md) — how libs is internally structured
 - [06 — Compliance](./06-compliance.md) — why the regulator wants this to be shared
+
+The V2 MCP approval context encodes confidential hosted PAR and DPoP-bound PAR with distinct field names. This keeps the mobile approval digest unambiguous and preserves the existing bytes for DPoP connections.

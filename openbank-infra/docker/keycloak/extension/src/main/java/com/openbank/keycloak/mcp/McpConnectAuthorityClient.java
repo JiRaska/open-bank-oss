@@ -39,7 +39,9 @@ final class McpConnectAuthorityClient {
             if (base == null || canonicalUuid(partyId) == null) {
                 throw new IllegalArgumentException("connect identity is incomplete");
             }
-            McpConnectContextV2.requireCanonicalThumbprint(parJkt);
+            if (parJkt != null) {
+                McpConnectContextV2.requireCanonicalThumbprint(parJkt);
+            }
         }
 
         String reference() {
@@ -51,7 +53,7 @@ final class McpConnectAuthorityClient {
         }
 
         Map<String, Object> identity() {
-            return Map.of("partyId", partyId, "clientId", base.clientId(), "parJkt", parJkt);
+            return bindingIdentity(partyId, base.clientId(), parJkt);
         }
 
         Map<String, Object> registration() {
@@ -97,7 +99,7 @@ final class McpConnectAuthorityClient {
     }
 
     void register(Request request) throws IOException {
-        JsonNode response = post(REQUESTS, request.reference(), request.registration(), 200, 201);
+        JsonNode response = post(requestsPath(request.parJkt()), request.reference(), request.registration(), 200, 201);
         requireIdentity(request, response);
         if (!textIs(response, "status", "PENDING_SELECTION")
                 || !textIs(response, "redirectHost", request.base().redirectHost())
@@ -135,8 +137,9 @@ final class McpConnectAuthorityClient {
     }
 
     Stage staged(String partyId, String clientId, String jkt, String codeBindingRef) throws IOException {
-        JsonNode response = post(REQUESTS + "/staged", codeBindingRef,
-                Map.of("partyId", partyId, "clientId", clientId, "parJkt", jkt, "codeBindingRef", codeBindingRef), 200);
+        var body = bindingIdentity(partyId, clientId, jkt);
+        body.put("codeBindingRef", codeBindingRef);
+        JsonNode response = post(requestsPath(jkt) + "/staged", codeBindingRef, body, 200);
         // The bank authority binds the same immutable registered context to the verified code reference.
         var base = new McpConnectContext(clientId, response.path("redirectHost").textValue(),
                 response.path("resource").textValue(), canonicalScopes(response),
@@ -152,11 +155,12 @@ final class McpConnectAuthorityClient {
     }
 
     UUID activeFamily(String partyId, String clientId, String jkt, FamilyReference family) throws IOException {
-        JsonNode response = post(REQUESTS + "/family-status", family.value(),
-                Map.of("partyId", partyId, "clientId", clientId, "parJkt", jkt, "refreshFamilyRef", family.value()), 200);
+        var body = bindingIdentity(partyId, clientId, jkt);
+        body.put("refreshFamilyRef", family.value());
+        JsonNode response = post(requestsPath(jkt) + "/family-status", family.value(), body, 200);
         UUID connection = canonicalUuid(response.path("connectionId").textValue());
         if (!textIs(response, "status", "ACTIVE") || !textIs(response, "partyId", partyId)
-                || !textIs(response, "clientId", clientId) || !textIs(response, "parJkt", jkt)
+                || !textIs(response, "clientId", clientId) || !bindingIs(response, jkt)
                 || !textIs(response, "refreshFamilyRef", family.value()) || connection == null) {
             throw new IOException("connect authority did not attest an active refresh family");
         }
@@ -269,19 +273,35 @@ final class McpConnectAuthorityClient {
         if (!textIs(response, "requestRef", request.reference())
                 || !textIs(response, "partyId", request.partyId())
                 || !textIs(response, "clientId", request.base().clientId())
-                || !textIs(response, "parJkt", request.parJkt())
+                || !bindingIs(response, request.parJkt())
                 || !expiry.isIntegralNumber() || !expiry.canConvertToLong()
                 || expiry.longValue() != request.base().expiresAt()) {
             throw new IOException("connect authority did not attest the exact request");
         }
     }
 
+    private static Map<String, Object> bindingIdentity(String partyId, String clientId, String jkt) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("partyId", partyId);
+        body.put("clientId", clientId);
+        body.put("parJkt", jkt);
+        return body;
+    }
+
+    private static boolean bindingIs(JsonNode response, String jkt) {
+        return jkt == null ? response.path("parJkt").isNull() : textIs(response, "parJkt", jkt);
+    }
+
     private static boolean textIs(JsonNode response, String name, String expected) {
         return expected.equals(response.path(name).textValue());
     }
 
+    private static String requestsPath(String jkt) {
+        return jkt == null ? REQUESTS + "-v2" : REQUESTS;
+    }
+
     private static String path(Request request, String suffix) {
-        return REQUESTS + "/" + request.reference() + suffix;
+        return requestsPath(request.parJkt()) + "/" + request.reference() + suffix;
     }
 
     private JsonNode post(String path, String idempotencyKey, Object body, int... successStatuses) throws IOException {
