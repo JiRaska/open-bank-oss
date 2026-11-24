@@ -6,7 +6,7 @@ package com.openbank.sca.contract
 
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 
-internal object PensionPactReplayIdentity {
+object PensionPactReplayIdentity {
     val identity: QuarkusSecurityIdentity = QuarkusSecurityIdentity.builder()
         // A verified service-account token (azp bound to preferred_username): the reservation
         // follows ServiceAccountIdentity.verifiedPrincipalName, never a bare principal name.
