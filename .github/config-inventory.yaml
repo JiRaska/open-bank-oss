@@ -291,6 +291,11 @@ openbao:
       issue: 16667
       review_by: 2027-01-31
     - kind: openbao
+      names: [mcp-synthetic/runner]
+      reason: "The suspended runner needs the independently enrolled synthetic account, passkey and SCA fixture before enablement."
+      issue: 16617
+      review_by: 2027-02-22
+    - kind: openbao
       names: [fetch-broker/browser-run]
       reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
       issue: 16754

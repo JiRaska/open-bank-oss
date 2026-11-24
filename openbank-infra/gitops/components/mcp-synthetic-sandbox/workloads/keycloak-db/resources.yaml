@@ -56,7 +56,7 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: mcp-synthetic-keycloak
+              app.kubernetes.io/name: keycloak
       ports:
         - protocol: TCP
           port: 5432

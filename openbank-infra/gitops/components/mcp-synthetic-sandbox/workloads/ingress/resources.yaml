@@ -179,7 +179,7 @@ spec:
   - to:
     - podSelector:
         matchLabels:
-          app.kubernetes.io/name: keycloak-sandbox
+          app.kubernetes.io/name: keycloak
     ports:
     - protocol: TCP
       port: 8444
