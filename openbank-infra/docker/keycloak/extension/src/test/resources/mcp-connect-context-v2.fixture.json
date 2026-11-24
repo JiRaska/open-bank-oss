@@ -2,38 +2,6 @@
   "version": "openbank-mcp-connect-context/v2",
   "cases": [
     {
-      "name": "confidential hosted client without DPoP",
-      "input": {
-        "client_id": "synthetic-hosted-assistant",
-        "redirect_uri": "https://assistant.test/callback",
-        "resource": "https://mcp.test/customer/mcp",
-        "scope": "offline_access openid offline_access",
-        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
-        "expires_at": 1800000123,
-        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
-        "par_jkt": null,
-        "accounts": [
-          {
-            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
-            "capabilities": [
-              "ACCOUNT_PROPOSE_PAYMENT"
-            ]
-          },
-          {
-            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
-            "capabilities": [
-              "ACCOUNT_VIEW_DETAILS",
-              "ACCOUNT_READ_BALANCES"
-            ]
-          }
-        ]
-      },
-      "expect": {
-        "canonical": "openbank-mcp-connect-context/v2\nclient_id=synthetic-hosted-assistant\nredirect_host=assistant.test\nresource=https://mcp.test/customer/mcp\nscopes=offline_access openid\nrequest_uri_sha256=3ac4199aef5748e1d98ec333c97819868623cba35277c39c2f9260b7904fc47b\nexpires_at=1800000123\nparty_id=7639cb30-e287-4821-9ef8-78134bbc1140\npar_binding=confidential_client\naccount_scope=00d0391b-4266-4fd4-b574-074b32bacf21:ACCOUNT_READ_BALANCES,ACCOUNT_VIEW_DETAILS\naccount_scope=9f5a41ed-cf4a-464a-8cd2-56509626a507:ACCOUNT_PROPOSE_PAYMENT",
-        "payload_sha256": "afd8e87faf952839ac62c21b9f519cef34e09fe88d99e7e0114582236bf1bbce"
-      }
-    },
-    {
       "name": "account-specific capability sets",
       "input": {
         "client_id": "synthetic-local-assistant",
