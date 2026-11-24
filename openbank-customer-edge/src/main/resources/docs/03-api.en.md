@@ -238,3 +238,11 @@ A connected MCP client can only propose a payment; the customer decides in the a
 The SCA challenge must be an approval challenge whose dynamic linking covers amount, currency and payee plus `approvalRequestId` (`mcp-proposal:<id>`) and `payloadSha256`; no SCA exemption applies. Order: challenge consumed, then the store's approve, then the payment is created as the customer's own domestic or SEPA payment built only from the stored instruction. The payment `Idempotency-Key` is `mcp-proposal-<id>`, so a retry after a failed payment (fresh SCA required) replays and never pays twice. A created payment is then recorded on the proposal as executed.
 
 Audit events: `CUSTOMER_MCP_PROPOSAL_APPROVED` once the store approved, `CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED` when the payment exists but the store did not record the execution (the proposal still reads `APPROVED` until reconciled), and `CUSTOMER_MCP_PROPOSAL_REFUSED` for a refused approval.
+
+## MCP connection approval
+
+With the customer connect feature enabled, a personal first-party app session can read a
+pending connection review, select eligible owned accounts, list active connections, and
+revoke an owned connection. The review supplies the approved capability options and the
+selection is forwarded to Delegation over its internal authenticated route. Revocation
+uses the connection ID as the idempotency key across the Edge and Delegation boundary.

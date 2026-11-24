@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e74ce6cf39d0d909"
+        openbank.tech/policy-checksum: "a7436b8862f961ac"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mcp-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-d0afd669@sha256:a170e0625fe4ef542c7d35cf2d88cdbdfdf63a7bc010caada235d34092dcb729
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-086d7273@sha256:1bec1a22ba277927f5da6b09711ab945a385a16498c65fc667abfcf55bdf0af8
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -154,6 +154,21 @@ spec:
             # Customer-channel grant lookup (ADR-0383 D3): POST /api/v1/delegations/mcp-client/resolve.
             - name: QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
+            # The bound read stays off until an activation overlay supplies the private HTTPS
+            # listeners, client identity, and its network policy. These non-secret URLs are
+            # optional for the dormant deployment and must be supplied together at activation.
+            - name: MCP_BOUND_ISSUER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-bound-read-origins
+                  key: issuer-url
+                  optional: true
+            - name: MCP_BOUND_BALANCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-bound-read-origins
+                  key: balance-url
+                  optional: true
             # openbank-services client secret (shared M2M identity, ADR-0104 D3 — the SAME client
             # transaction-service/lending-service/settlement-service/agent-service already use) —
             # lets RealAccountReadPort's OidcClientRequestReactiveFilter mint a client-credentials

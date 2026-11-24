@@ -18,8 +18,6 @@ import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
-import io.quarkus.security.runtime.QuarkusPrincipal
-import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
@@ -97,10 +95,6 @@ class ScaPactFolderProviderVerificationTest {
         val PENSION_PARTY_ID: UUID = UUID.fromString("7e5a0002-0000-4000-8000-000000000335")
         const val PENSION_PAYLOAD_SHA256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         const val PENSION_APPROVAL_REQUEST_ID = "pension-exit:$PENSION_PAYLOAD_SHA256"
-        val PENSION_IDENTITY: QuarkusSecurityIdentity = QuarkusSecurityIdentity.builder()
-            .setPrincipal(QuarkusPrincipal("service-account-openbank-pension"))
-            .addRole("ROLE_API")
-            .build()
         private val CHALLENGE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999")
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
@@ -171,7 +165,7 @@ class ScaPactFolderProviderVerificationTest {
         // A pension interaction replays as the pension principal: the consumer scope (ADR-0335)
         // is resolved from the authenticated identity, so `pact-verifier` would be refused.
         if (context != null && context.interaction.providerStates.any { it.name == PENSION_OPERATION_STATE }) {
-            testIdentityAssociation.setTestIdentity(PENSION_IDENTITY)
+            testIdentityAssociation.setTestIdentity(PensionPactReplayIdentity.identity)
         }
         context?.verifyInteraction()
     }

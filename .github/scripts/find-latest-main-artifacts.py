@@ -168,7 +168,17 @@ def github_run(repo: str, token: str, run_id: int) -> dict:
 SERVICES_CI = ".github/workflows/services-ci.yml"
 # The one artifact of this family that Services CI does not produce: admin-ui is built and
 # tested by ci.yml, which uploads the same v1 envelope under this name.
-PRODUCERS = {"test-intelligence-openbank-admin-ui": ".github/workflows/ci.yml"}
+PRODUCERS = {
+    "test-intelligence-openbank-admin-ui": ".github/workflows/ci.yml",
+    # Spec conformance (ADR-0273 dimension): identifier-differential.yml runs on a path-filtered
+    # push to main and on a weekly schedule (which also catches a reference-data update).
+    "identifier-conformance": ".github/workflows/identifier-differential.yml",
+}
+# Events a producer may run on main. `schedule` and `workflow_dispatch` only ever run in
+# this repository on its own default-branch code; a fork pull_request named main never is one.
+PRODUCER_EVENTS = {
+    "identifier-conformance": frozenset({"push", "schedule", "workflow_dispatch"}),
+}
 
 
 def producer_of(artifact_name: str) -> str:
@@ -186,6 +196,7 @@ def latest_main_artifact(
     its own: a fork pull_request can be named main, so the run must also be a push from
     this repository."""
     producer = producer_of(artifact_name)
+    events = PRODUCER_EVENTS.get(artifact_name, frozenset({"push"}))
     for page in range(1, MAX_PAGES + 1):
         artifacts = fetch_page(artifact_name, page)
         for artifact in artifacts:
@@ -200,7 +211,7 @@ def latest_main_artifact(
                 run = fetch_run(run_id)
                 if (
                     run.get("path") == producer
-                    and run.get("event") == "push"
+                    and run.get("event") in events
                     and run.get("head_repository") == repo
                     and run.get("status") == "completed"
                 ):
@@ -278,6 +289,22 @@ class LookupTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ArtifactApiError, "quota exhausted"):
             lookup("test", fetch, lambda _run_id: run(".github/workflows/services-ci.yml"))
+
+    def test_identifier_conformance_accepts_its_scheduled_producer_only(self) -> None:
+        artifacts = [
+            {"id": 9, "expired": False, "workflow_run": {"head_branch": "main", "id": 90}},
+            {"id": 8, "expired": False, "workflow_run": {"head_branch": "main", "id": 80}},
+            {"id": 7, "expired": False, "workflow_run": {"head_branch": "main", "id": 70}},
+        ]
+        producer = ".github/workflows/identifier-differential.yml"
+        runs = {
+            90: run(producer, event="pull_request"),
+            80: run(".github/workflows/services-ci.yml", event="schedule"),
+            70: run(producer, event="schedule"),
+        }
+        self.assertEqual(lookup("identifier-conformance", lambda *_: artifacts, runs.__getitem__), "7")
+        # Other artifacts keep requiring push: a scheduled Services CI run is not accepted.
+        self.assertIsNone(lookup("test", lambda *_: artifacts[1:2], runs.__getitem__))
 
     def test_full_final_page_is_unknown_not_absence(self) -> None:
         calls: list[int] = []

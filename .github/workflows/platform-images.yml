@@ -35,19 +35,21 @@ on:
     paths:
       - openbank-infra/docker/keycloak/**
       - openbank-infra/docker/litellm/**
+      - e2e/mcp-harness/**
       - .github/workflows/platform-images.yml
   push:
     branches: [main]
     paths:
       - openbank-infra/docker/keycloak/**
       - openbank-infra/docker/litellm/**
+      - e2e/mcp-harness/**
       - .github/workflows/platform-images.yml
   workflow_dispatch:
     inputs:
       image:
         description: Which image to rebuild
         type: choice
-        options: [all, keycloak, litellm]
+        options: [all, keycloak, litellm, mcp-harness]
         default: all
 
 permissions:
@@ -88,7 +90,8 @@ jobs:
           # name | context | ECR repository | ARG holding the upstream version | tag suffix
           ALL='[
             {"name":"keycloak","context":"openbank-infra/docker/keycloak","repo":"openbank-keycloak","version_arg":"KEYCLOAK_VERSION","suffix":"-optimized"},
-            {"name":"litellm","context":"openbank-infra/docker/litellm","repo":"openbank-litellm","version_arg":"LITELLM_VERSION","suffix":""}
+            {"name":"litellm","context":"openbank-infra/docker/litellm","repo":"openbank-litellm","version_arg":"LITELLM_VERSION","suffix":""},
+            {"name":"mcp-harness","context":"e2e/mcp-harness","repo":"openbank-mcp-harness","version_arg":"PLAYWRIGHT_VERSION","suffix":""}
           ]'
           case "$EVENT" in
             workflow_dispatch)

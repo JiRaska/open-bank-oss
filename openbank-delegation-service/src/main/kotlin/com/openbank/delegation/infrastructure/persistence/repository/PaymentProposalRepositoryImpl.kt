@@ -12,6 +12,7 @@ import com.openbank.delegation.application.port.out.ProposalLimits
 import com.openbank.delegation.application.port.out.openDuplicateOf
 import com.openbank.delegation.domain.event.PaymentProposalEvents
 import com.openbank.delegation.domain.model.PaymentProposal
+import com.openbank.delegation.domain.model.PaymentProposalNotPermittedException
 import com.openbank.delegation.domain.model.PaymentProposalOperationType
 import com.openbank.delegation.domain.model.PaymentProposalStatus
 import com.openbank.delegation.infrastructure.persistence.entity.PaymentProposalEntity
@@ -47,11 +48,25 @@ class PaymentProposalRepositoryImpl(
             session.createNativeQuery<Any>(PARTY_LOCK_SQL)
                 .setParameter("party", candidate.partyId.toString())
                 .singleResult
+                .flatMap { requireActiveGrant(session, candidate.grantId) }
                 .flatMap { loadParty(session, candidate.partyId, PARTY_SCAN_LIMIT) }
                 .flatMap { existing -> expireStale(session, existing, now) }
                 .flatMap { current -> decideCreate(session, current, candidate, limits, now) }
         }
     }.awaitSuspending()
+
+    /** The grant lock serializes proposal insertion with connection revocation. */
+    private fun requireActiveGrant(session: Mutiny.Session, id: UUID): Uni<Void> =
+        session.createNativeQuery<UUID>(LOCK_ACTIVE_GRANT_SQL)
+            .setParameter("id", id)
+            .resultList
+            .flatMap { rows ->
+                if (rows.isNotEmpty()) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    Uni.createFrom().failure(PaymentProposalNotPermittedException("proposal grant is no longer active"))
+                }
+            }
 
     private fun decideCreate(
         session: Mutiny.Session,
@@ -245,6 +260,12 @@ class PaymentProposalRepositoryImpl(
         const val PARTY_SCAN_LIMIT = 200
         const val PARTY_LOCK_SQL =
             "select 1 from (select pg_advisory_xact_lock(hashtextextended('payment-proposal:' || :party, 0))) l"
+        const val LOCK_ACTIVE_GRANT_SQL = """
+            select id from delegation_grants
+             where id = :id and status = 'ACTIVE' and valid_from <= statement_timestamp()
+               and (valid_to is null or valid_to > statement_timestamp())
+             for share
+        """
         const val FIND_BY_ID_SQL = "select * from delegation_payment_proposals where id = :id"
         const val LOCK_BY_ID_SQL = "$FIND_BY_ID_SQL for update"
         const val REJECT_BY_GRANT_SQL = """

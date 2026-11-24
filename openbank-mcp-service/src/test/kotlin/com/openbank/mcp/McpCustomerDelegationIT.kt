@@ -192,12 +192,19 @@ class McpCustomerDelegationIT {
     }
 
     @Test
-    fun `a revoked grant - no active grant - offers no tool and refuses every call`() {
+    fun `the first call after a successful read and grant revocation is denied`() {
+        grants.answer = grant(CustomerCapabilities.READ_BALANCES)
+        call("get_balance").body("result.isError", equalTo(false))
+        assertThat(grants.asked).hasSize(1)
+
         grants.answer = { emptyList() }
-        assertThat(toolNames()).isEmpty()
         call("get_balance").body("result.isError", equalTo(true))
-        assertThat(exchange.calls).isEmpty()
+            .body("result.content[0].text", equalTo("Not permitted"))
+        assertThat(grants.asked).hasSize(2)
+        assertThat(exchange.calls).hasSize(1)
+        assertThat(downstream.tokens).hasSize(1)
         assertThat(recorder.events.last().result).isEqualTo(AuditResult.DENIED)
+        assertThat(toolNames()).isEmpty()
     }
 
     @Test
@@ -236,17 +243,18 @@ class McpCustomerDelegationIT {
     }
 
     @Test
-    fun `a downstream refusal drops the cached grant so the next call asks again`() {
+    fun `a downstream refusal is returned and the next call resolves the grant again`() {
         grants.answer = grant(CustomerCapabilities.READ_BALANCES)
         downstream.refuse = true
         call("get_balance").body("result.isError", equalTo(true))
+            .body("result.content[0].text", equalTo("Not permitted"))
         val before = grants.asked.size
-        call("get_balance")
+        call("get_balance").body("result.isError", equalTo(true))
         assertThat(grants.asked.size).isGreaterThan(before)
     }
 
     @Test
-    fun `a downstream 5xx is an audited refusal and drops the cached grant`() {
+    fun `a downstream 5xx is an audited refusal and the next call resolves the grant again`() {
         grants.answer = grant(CustomerCapabilities.READ_BALANCES)
         Downstream.fail5xx = true
         call("get_balance").body("result.content[0].text", equalTo("Authorization unavailable"))

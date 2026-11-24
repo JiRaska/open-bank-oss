@@ -195,6 +195,41 @@ def trusted_run(run: dict, repo_slug: str, expected_path: str) -> bool:
     )
 
 
+# Spec conformance (ADR-0273 dimension). Its producer runs on schedule/dispatch, never push,
+# so the event set comes from the finder's PRODUCER_EVENTS rather than trusted_run's `push`.
+CONFORMANCE_ARTIFACT = "identifier-conformance"
+CONFORMANCE_MEMBER = "identifier-conformance.json"
+CONFORMANCE_TARGET = "openbank-admin-ui/identifier-conformance/identifier-conformance.json"
+
+
+def trusted_conformance_run(run: dict, repo_slug: str) -> bool:
+    repository = run.get("head_repository")
+    repository_name = repository.get("full_name") if isinstance(repository, dict) else repository
+    return (
+        run.get("event") in FINDER.PRODUCER_EVENTS[CONFORMANCE_ARTIFACT]
+        and run.get("head_branch") == "main"
+        and run.get("path") == FINDER.producer_of(CONFORMANCE_ARTIFACT)
+        and repository_name == repo_slug
+        and isinstance(run.get("head_sha"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]) is not None
+    )
+
+
+def conformance_payload(archive: bytes) -> dict[str, bytes]:
+    """Stage only the matrix; its schema is the node collector's to judge (absent != green)."""
+    members = safe_archive_members(archive)
+    matches = [info for info, path in members if str(path) == CONFORMANCE_MEMBER]
+    if len(matches) != 1:
+        raise CollectionError(f"{CONFORMANCE_ARTIFACT} artifact has no single {CONFORMANCE_MEMBER}")
+    with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+        content = zipped.read(matches[0])
+    try:
+        json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CollectionError(f"{CONFORMANCE_ARTIFACT} artifact is not JSON") from exc
+    return {CONFORMANCE_TARGET: content}
+
+
 def trusted_deploy_run(run: dict, repo_slug: str) -> bool:
     repository = run.get("head_repository")
     repository_name = repository.get("full_name") if isinstance(repository, dict) else repository
@@ -814,6 +849,11 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             raise CollectionError(f"artifact lookup failed for {component}: {exc}") from exc
         planned.append((component, int(artifact_id) if artifact_id is not None else None))
 
+    try:
+        conformance_id = FINDER.latest_main_artifact(CONFORMANCE_ARTIFACT, page, workflow_run, repo_slug)
+    except (FINDER.ArtifactApiError, ValueError, OSError) as exc:
+        raise CollectionError(f"artifact lookup failed for {CONFORMANCE_ARTIFACT}: {exc}") from exc
+
     seed_report = latest_aggregate(repo_slug, token) if seed is SEED_UNSET else seed
     if fetch_archive:
         get_archive = fetch_archive
@@ -919,6 +959,16 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
         stage_payloads(synthetic)
 
         warnings = list(performance["warnings"]) + synthetic_warnings
+        if conformance_id is None:
+            warnings.append(f"No trusted main {CONFORMANCE_ARTIFACT} artifact was available; spec conformance is no evidence, not passed.")
+        else:
+            metadata = artifact_cache.get(str(conformance_id))
+            workflow_metadata = metadata.get("workflow_run") if isinstance(metadata, dict) else None
+            run_id = workflow_metadata.get("id") if isinstance(workflow_metadata, dict) else None
+            if (not isinstance(run_id, int) or metadata.get("expired")
+                    or not trusted_conformance_run(workflow_run(run_id), repo_slug)):
+                raise CollectionError(f"selected {CONFORMANCE_ARTIFACT} artifact is not from trusted main")
+            stage_payloads(conformance_payload(get_archive(int(conformance_id))))
         if absent:
             warnings.append("No retained trusted main run envelope was available for: " + ", ".join(absent) + ". Their execution evidence is unknown, not passed.")
         if seed_report is None:

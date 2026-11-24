@@ -49,6 +49,11 @@ ae8c4ef2d25f3b238fcb3bb58d2456db84810edf:openbank-customer-edge/src/main/kotlin/
 3c2d77bdf5a5d033fb3744bdc29672014e384884:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:17
 3c2d77bdf5a5d033fb3744bdc29672014e384884:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:86
 
+# FALSE POSITIVES (#16864): these historical Pact Idempotency-Key examples are the SHA-256
+# deduplication identifier of fixed synthetic inputs. The current examples use low-entropy hex.
+92471df492d5d652dd8127f20f7a0cffb20b2c9d:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:97
+92471df492d5d652dd8127f20f7a0cffb20b2c9d:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:220
+
 # FALSE POSITIVE (#16623): iban-real matched the red-team corpus's synthetic attacker payee
 # (check digits 00, which no real IBAN can carry) in evals/mcp-redteam/scenarios.json. The value
 # was replaced in the source by a later commit on the same PR; this entry only clears the

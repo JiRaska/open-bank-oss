@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.7](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.6...mcp-service-v0.18.7) (2026-11-24)
+
+
+### Security
+
+* **mcp-service:** customer propose_payment records a PENDING proposal in the delegation store ([#16864](https://github.com/JiRaska/open-bank-oss/issues/16864)) ([fbd7c36](https://github.com/JiRaska/open-bank-oss/commit/fbd7c36b10e02983ca8100132fa121f80f55ae4b))
+
 ## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.5...mcp-service-v0.18.6) (2026-11-23)
 
 

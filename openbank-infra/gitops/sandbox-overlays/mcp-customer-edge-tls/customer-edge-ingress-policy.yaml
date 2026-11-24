@@ -1,0 +1,17 @@
+---
+# The generated same-namespace rule currently admits every port. Keep its existing
+# HTTP, management and policy-sidecar ports while isolating the new TLS listener.
+- op: test
+  path: /spec/ingress/0
+  value:
+    from:
+      - podSelector: {}
+- op: add
+  path: /spec/ingress/0/ports
+  value:
+    - protocol: TCP
+      port: 8128
+    - protocol: TCP
+      port: 8085
+    - protocol: TCP
+      port: 8181

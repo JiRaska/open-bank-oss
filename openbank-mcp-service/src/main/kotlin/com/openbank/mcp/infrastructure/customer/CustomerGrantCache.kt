@@ -12,7 +12,8 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * Short-lived cache in front of [CustomerGrantSource] (ADR-0383 D3 "on every call").
+ * Grant lookup in front of [CustomerGrantSource] (ADR-0383 D3 "on every call").
+ * The default TTL of zero bypasses positive caching so the next call sees a committed revocation.
  *
  * Only POSITIVE answers are cached. "No grant" and "lookup failed" are never stored, so a newly
  * created grant is visible at once and an outage cannot be remembered as either answer. A positive
@@ -33,7 +34,7 @@ class CustomerGrantCache(
     @Inject
     constructor(
         source: CustomerGrantSource,
-        @ConfigProperty(name = "mcp.customer.grant-cache-ttl", defaultValue = "PT15S") ttl: Duration,
+        @ConfigProperty(name = "mcp.customer.grant-cache-ttl", defaultValue = "PT0S") ttl: Duration,
     ) : this(source, ttl, Clock.systemUTC())
 
     init {

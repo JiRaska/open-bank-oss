@@ -113,7 +113,14 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 allowed_reasons contains "service-sca-scoped-consumer" if {
 	input.principal.type == "HUMAN"
 	some consumer in data.rules.scoped_sca_consumers
-	input.principal.id == consumer.principal
+
+	# The VERIFIED machine identity, never the display name: machine_named requires the PEP's
+	# service_account == true marker AND client_id bound to the fixed name, so a person (or an
+	# input without the marker) whose name happens to equal the principal gets nothing. The
+	# explicit marker check also closes machine_named's phase-1 (marker-absent) fallback here: a
+	# scoped consumer spends customer approvals, so it requires the current PEP ABI.
+	input.principal.service_account == true
+	machine_named(consumer.principal)
 	input.action in consumer.actions
 }
 
@@ -127,4 +134,22 @@ allowed_reasons contains "service-sca-scoped-consumer" if {
 prohibited if {
 	machine_grant_ok
 	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
+}
+
+# Only delegation's verified machine can attest a consumed connect approval.
+mcp_connect_receipt_caller if {
+    input.principal.service_account == true
+    "ROLE_API" in input.principal.roles
+    machine_named("service-account-openbank-delegation")
+}
+
+allowed_reasons contains "service-sca-mcp-connect-receipt" if {
+    input.action == "scaChallenge.readMcpConnectReceipt"
+    mcp_connect_receipt_caller
+}
+
+# The generic human operator SCA allowance cannot grant access to this projection.
+prohibited if {
+    input.action == "scaChallenge.readMcpConnectReceipt"
+    not mcp_connect_receipt_caller
 }

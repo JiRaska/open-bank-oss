@@ -35,9 +35,9 @@ Indexes: `family_name`, `birthdate`, `email`, `status`, `kyc_level`, partial `pe
 
 `id` (UUID PK), `party_id` (FK, cascade), `role` ∈ {CUSTOMER, EMPLOYEE, ADMIN, AGENT, GUARANTOR, AUTHORIZED_PERSON}, `status` ∈ {ACTIVE, SUSPENDED, TERMINATED}, `onboarded_at`, `onboarding_channel`, `terminated_at`, `termination_reason`. Unique `(party_id, role, status)` (deferrable) — one active instance of each role.
 
-### `pid_outbox` (V2) — transactional outbox
+### `pid_outbox` (V2)
 
-`id` (BIGSERIAL PK), `event_id` (UUID, UNIQUE), `aggregate_id` (UUID), `event_type`, `payload` (TEXT), `status`, `attempt_count`, `sent_at`, `last_error`, `created_at`, `updated_at`. Indexes on `(status, created_at ASC)` (dispatcher poll) and `aggregate_id`.
+Flyway retains this legacy table. PID has no runtime mapping or writer for it.
 
 ## Flyway migrations
 
@@ -46,7 +46,7 @@ Indexes: `family_name`, `birthdate`, `email`, `status`, `kyc_level`, partial `pe
 | V1 | `V1__init_pid.sql` | extensions `uuid-ossp`, `pgcrypto`; tables `parties`, `party_external_ids`, `party_id_documents`, `party_relationships` + indexes | `DROP TABLE` (reverse FK order); drop extensions |
 | V2 | `V2__create_pid_outbox.sql` | `pid_outbox` + two indexes | `DROP TABLE pid_outbox` |
 | V3 | `V3__add_pid_case_lifecycle.sql` | adds `case_*` columns + check constraints + 2 indexes to `parties` | `ALTER TABLE parties DROP COLUMN case_*`; drop the two indexes |
-| V4 | `V4__hibernate_sequences.sql` | `CREATE SEQUENCE pid_outbox_seq INCREMENT BY 50` (Panache id allocation) | `DROP SEQUENCE pid_outbox_seq` |
+| V4 | `V4__hibernate_sequences.sql` | `CREATE SEQUENCE pid_outbox_seq INCREMENT BY 50` | `DROP SEQUENCE pid_outbox_seq` |
 | V15 | `V15__party_erasure_erased_at.sql` | nullable `erased_at` on `parties` and `identity_verification_case` + partial index (GDPR Art. 17 marker) | drop the index and both columns; safe at any time |
 
 > **Never rewrite an applied migration** (project rule — checksum mismatch crashes Flyway at start). New changes go in a new `Vn__*.sql`.
@@ -73,7 +73,6 @@ Per `governance.yaml`: `dataClassification: restricted`, `retentionPolicy: 10 ye
 | Party with active relationship | ongoing |
 | `status = TERMINATED` / `DECEASED` | retained 10 years (AMLD 6 Art. 40) |
 | Party erased by `PARTY_ERASED` | personal columns anonymised **immediately**; the anonymised shell row is kept, stamped `erased_at` (see Erasure) |
-| `pid_outbox` row `status = SENT` | prune after dispatch confirmation (operational; not statutory evidence) |
 | Audit evidence (events) | held by `audit-service` for the statutory period |
 
 ## Erasure (GDPR Art. 17, ADR-0118)
@@ -109,7 +108,7 @@ Writes to an erased party are refused with 409 (`PartyErasedException`). Party u
 - An `RN:` case still OPEN or awaiting at erasure that is later decided REJECT gets no surviving block (only cases already REJECT-decided are re-keyed).
 - **No automated purge of the retained fraud-block key.** The `RNX:` key and the REJECT decision it carries must be deleted when the applicable AML record-keeping period ends (`06-compliance`, Retained fraud-block key); nothing deletes them yet. Follow-up.
 - `register-identity` does not resolve, so the erased person's number can be registered again to a new party id; the retained REJECT then applies only when that number is next resolved.
-- The short-TTL EUDI offer/presentation tables are keyed by single-use codes, not by party id, and expire by themselves; `pid_outbox` has no writer in the current code.
+- The short-TTL EUDI offer/presentation tables are keyed by single-use codes, not by party id, and expire by themselves.
 - A scheduled hard-delete of shell rows after the retention period (as kyc-service's retention scheduler does for its cases) is a follow-up; the shell holds no personal data.
 
 ## Lineage (`governance.yaml`)

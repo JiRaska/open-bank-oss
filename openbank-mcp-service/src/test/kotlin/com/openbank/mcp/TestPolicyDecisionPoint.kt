@@ -58,6 +58,7 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
         const val CUSTOMER_CHANNEL = "mcp-customer"
         val CUSTOMER_TOOLS = mapOf(
             "list_accounts" to ("query.account.readonly" to "ACCOUNT_VIEW_DETAILS"),
+            "propose_payment" to ("propose.payment" to "ACCOUNT_PROPOSE_PAYMENT"),
             "get_balance" to ("query.balance.readonly" to "ACCOUNT_READ_BALANCES"),
             "list_transactions" to ("query.transaction.readonly" to "ACCOUNT_READ_TRANSACTIONS"),
         )

@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -68,7 +69,8 @@ class KeycloakAdminClient {
 
     private fun fetchAdminToken(): Pair<String, Long> {
         val tokenUrl = "$adminUrl/realms/$adminRealm/protocol/openid-connect/token"
-        val requestBody = "grant_type=client_credentials&client_id=$adminClientId&client_secret=$adminClientSecret"
+        val requestBody = "grant_type=client_credentials&client_id=$adminClientId" +
+            "&client_secret=$adminClientSecret&scope=kc-admin-api"
         val resp = http.send(
             HttpRequest.newBuilder()
                 .uri(URI.create(tokenUrl))
@@ -104,12 +106,28 @@ class KeycloakAdminClient {
             return@runCatching false
         }
         val url = "$adminUrl/admin/realms/$adminRealm/users/$keycloakSub"
-        // Merge only the party_id attribute — other attributes are left intact.
-        val requestBody = """{"attributes":{"party_id":["$partyId"]}}"""
+        val token = adminToken()
+        // Keycloak 26 validates an admin PUT against the realm's user profile and treats an
+        // omitted root attribute as removed: a body of only {"attributes":{"party_id":…}} is
+        // refused 400 `error-user-attribute-required` (email). So read the user and write back its
+        // user-profile fields with party_id merged in — and NOTHING else: Keycloak leaves a field
+        // the body omits (enabled, credentials, requiredActions, …) untouched, so a disable or a
+        // required action set between this GET and the PUT is not reverted by a stale copy.
+        val current = http.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer $token")
+                .timeout(Duration.ofSeconds(5))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+        check(current.statusCode() == 200) { "Keycloak GET /users/$keycloakSub returned ${current.statusCode()}" }
+        val requestBody = withPartyId(current.body(), partyId)
         val resp = http.send(
             HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .header("Authorization", "Bearer ${adminToken()}")
+                .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(5))
                 .PUT(HttpRequest.BodyPublishers.ofString(requestBody))
@@ -128,5 +146,26 @@ class KeycloakAdminClient {
     }.getOrElse { e ->
         Log.warnf("setPartyIdAttribute failed for sub=%s: %s", keycloakSub, e.message)
         false
+    }
+
+    /**
+     * The PUT body for [userJson]: only the user-profile fields Keycloak validates
+     * ([PROFILE_FIELDS]), with `attributes.party_id` set to exactly [partyId]. Account state —
+     * `enabled`, `credentials`, `requiredActions`, `emailVerified`, federation, access — is
+     * deliberately absent so a concurrent admin change to it survives this write.
+     */
+    internal fun withPartyId(userJson: String, partyId: String): String {
+        val user = json.readTree(userJson) as ObjectNode
+        val body = json.createObjectNode()
+        PROFILE_FIELDS.forEach { field -> user.get(field)?.let { body.set<ObjectNode>(field, it) } }
+        val attributes = (user.get("attributes") as? ObjectNode)?.deepCopy() ?: json.createObjectNode()
+        attributes.putArray("party_id").add(partyId)
+        body.set<ObjectNode>("attributes", attributes)
+        return json.writeValueAsString(body)
+    }
+
+    private companion object {
+        /** Root user-profile attributes Keycloak 26 requires present on an admin PUT. */
+        val PROFILE_FIELDS = listOf("username", "email", "firstName", "lastName")
     }
 }

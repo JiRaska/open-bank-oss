@@ -691,8 +691,6 @@ change_requirements:
         reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce. TRACKING (2026-10-17, #13168): #9774."
       - topic: "openbank.risk.limit.events"
         reason: "ADR-0313 D9, first slice. risk-engine emits risk.limit.early-warning.v1 / breach.v1 from its transactional outbox after the EOD snapshot; D9 routes them to alerting and to the responsible human, and neither consumer exists yet (the admin console reads the same statuses from GET /snapshots/{id}/limits meanwhile). ADR-0006 sequences producers before consumers (#1916). Not the #889 class: the absence is the plan and the producer is fully wired (KafkaTopic CR and Write ACL in openbank-infra/gitops/components/risk). Re-triage: remove this entry with the first consumer PR (#10896). TRACKING (2026-10-17, #13168): #10896."
-      - topic: "openbank.pid.events"
-        reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap. TRACKING (2026-10-17, #13168): #13178."
       - topic: "openbank.referral.reward-requested.v1"
         reason: "#7190's outbox relay is producer-only for this topic: the consumer that would post the reward is ADR-0310 D2, which is Proposed and needs human approval of the money-path owner (billing-service) and the expense account before anything may consume it. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). openbank.referral.qualified.v1, its sibling, left this list when loyalty-service began consuming it (ADR-0310 D3). Re-triage and remove with the first reward-posting consumer. TRACKING (2026-10-17, #13168): #13176."
       - topic: "openbank.referral.reward-outcome.v1"
@@ -1752,6 +1750,7 @@ four_eyes:
       - service-account-openbank-edge                              # scaGate before every money-path forward
       - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
       - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
+      - service-account-openbank-keycloak-mcp                      # ADR-0385 D3: connect ceremony only, see scoped_sca_consumers
 
 # ---------------------------------------------------------------------------------------
 # Four-eyes ENFORCEMENT in the deployed manifest (#15748, ADR-0155). `four_eyes` above decides
@@ -3538,6 +3537,8 @@ delegation_exposure_delivery:
       role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpClientGrantResolver.kt
       role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpBalanceReadGrantCheck.kt
+      role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
       role: historical_audit
 
@@ -4201,6 +4202,15 @@ scoped_sca_consumers:
     purposes: [APPROVAL]
     approval_request_prefix: "pension-"
     adr: ADR-0335
+  # ADR-0385 D3 — the authorization server's withheld-code authenticator (Keycloak extension,
+  # openbank realm client `openbank-keycloak-mcp`, ROLE_API only). It raises AND spends connect
+  # challenges; sca-service refuses it any purpose but MCP_CLIENT_CONNECT at initiate
+  # (requireInitiateScope) and any challenge outside `mcp-connect:` at consume (ConsumerScope).
+  - principal: service-account-openbank-keycloak-mcp
+    actions: [scaChallenge.initiate, scaChallenge.consume]
+    purposes: [MCP_CLIENT_CONNECT]
+    approval_request_prefix: "mcp-connect:"
+    adr: ADR-0385
 
 # ADR-0335 D5/D6 — scoped payment initiators. Same shape as scoped_sca_consumers: the policy
 # (gen-domestic-payment-opa-bundle.sh, sdd_rest_ext.rego) reads `principal`, `service` and
@@ -4832,6 +4842,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/domain/model/ExternalDisclosure.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/BusinessSigningClients.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/DocumentDisclosureClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/McpConnectScaReceiptClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
@@ -4953,6 +4964,9 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/McpBalanceGrantClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadIdentity.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadResource.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/LedgerTrialBalanceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"

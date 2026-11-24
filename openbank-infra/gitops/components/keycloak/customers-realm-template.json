@@ -112,7 +112,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "openbank-edge",
+            "included.custom.audience": "openbank-edge",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -143,6 +143,9 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
+      "optionalClientScopes": [
+        "kc-admin-api"
+      ],
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
@@ -160,6 +163,10 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect",
+      "optionalClientScopes": [
+        "offline_access",
+        "kc-admin-api"
+      ],
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
@@ -249,6 +256,34 @@
       ]
     },
     {
+      "clientId": "openbank-mcp-read-delegation",
+      "name": "openbank-mcp-read-delegation",
+      "description": "Dedicated MCP read delegation TLS caller. Enable only with the approved subject and issuing CA DNs configured.",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-x509",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "protocolMappers": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "standard.token.exchange.enabled": "false",
+        "x509.allow.regex.pattern.comparison": "false"
+      }
+    },
+    {
       "clientId": "mcp-hosted-reference",
       "name": "Reference hosted assistant (template, not a registration)",
       "description": "MCP client, ADR-0385 Tier H. DERIVED from mcp-client-allowlist.yaml - do not hand-edit.",
@@ -326,6 +361,7 @@
         "jwks.string": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"sig\",\"alg\":\"ES256\",\"kid\":\"reference-2026-11\",\"x\":\"XdufRJwhfCigQlaGQNm1RS9oUmPCQkKAtyqThufqW4Q\",\"y\":\"A-W1IQzopM5th1tKxq_i1dhaAjamQ6G2VSP-i__kDn4\"}]}",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.resource": "https://mcp.open-bank.tech/customer/mcp",
         "openbank.mcp.tier": "H",
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
@@ -413,6 +449,7 @@
         "frontchannel.logout.session.required": "false",
         "oauth2.device.authorization.grant.enabled": "false",
         "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.resource": "https://mcp.open-bank.tech/customer/mcp",
         "openbank.mcp.tier": "L",
         "pkce.code.challenge.method": "S256",
         "require.pushed.authorization.requests": "true",
@@ -510,6 +547,28 @@
     }
   ],
   "clientScopes": [
+    {
+      "name": "kc-admin-api",
+      "description": "OpenID Connect built-in scope for the Admin REST API",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "Admin API Audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-admin-api-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "true"
+          }
+        }
+      ]
+    },
     {
       "name": "email",
       "description": "OpenID Connect built-in scope: email",
@@ -896,7 +955,7 @@
     {
       "id": "6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001",
       "alias": "openbank-mcp-fresh-passkey",
-      "description": "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie alternative - an SSO session never skips the assertion. DERIVED from mcp-client-allowlist.yaml.",
+      "description": "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie alternative - an SSO session never skips the assertion. D3: the code is withheld until the context-linked SCA challenge is consumed. DERIVED from mcp-client-allowlist.yaml.",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -906,6 +965,13 @@
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "openbank-mcp-withheld-code",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
           "userSetupAllowed": false
         }
       ]
@@ -945,5 +1011,120 @@
         ]
       }
     }
-  ]
+  ],
+  "clientProfiles": {
+    "profiles": [
+      {
+        "name": "openbank-mcp-oauth-hardening",
+        "description": "Review of #16672: PKCE, no implicit, no ROPC for every MCP client. DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [
+          {
+            "executor": "pkce-enforcer",
+            "configuration": {
+              "auto-configure": "false"
+            }
+          },
+          {
+            "executor": "reject-implicit-grant",
+            "configuration": {
+              "auto-configure": "false"
+            }
+          },
+          {
+            "executor": "reject-ropc-grant",
+            "configuration": {}
+          }
+        ]
+      },
+      {
+        "name": "openbank-mcp-dpop",
+        "description": "Review of #16672: DPoP-bound tokens (Tier L). DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [
+          {
+            "executor": "dpop-bind-enforcer",
+            "configuration": {
+              "auto-configure": "false",
+              "enforce-authorization-code-binding-to-dpop": "false"
+            }
+          }
+        ]
+      },
+      {
+        "name": "openbank-mcp",
+        "description": "ADR-0385 / #16667: MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "executors": [
+          {
+            "executor": "openbank-mcp-client-guard",
+            "configuration": {}
+          }
+        ]
+      }
+    ]
+  },
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "openbank-mcp-tier-h",
+        "description": "Review of #16672: Keycloak built-in hardening for Tier H MCP clients. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-attributes",
+            "configuration": {
+              "is_negative_logic": false,
+              "attributes": "[{\"key\": \"openbank.mcp.tier\", \"value\": \"H\"}]"
+            }
+          }
+        ],
+        "profiles": [
+          "openbank-mcp-oauth-hardening"
+        ]
+      },
+      {
+        "name": "openbank-mcp-tier-l",
+        "description": "Review of #16672: Keycloak built-in hardening for Tier L MCP clients. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-attributes",
+            "configuration": {
+              "is_negative_logic": false,
+              "attributes": "[{\"key\": \"openbank.mcp.tier\", \"value\": \"L\"}]"
+            }
+          }
+        ],
+        "profiles": [
+          "openbank-mcp-oauth-hardening",
+          "openbank-mcp-dpop"
+        ]
+      },
+      {
+        "name": "openbank-mcp",
+        "description": "ADR-0385 / #16667: bind the MCP client guard. DERIVED from mcp-client-allowlist.yaml.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "any-client",
+            "configuration": {}
+          }
+        ],
+        "profiles": [
+          "openbank-mcp"
+        ]
+      }
+    ]
+  },
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"displayName\":\"${username}\",\"validations\":{\"length\":{\"min\":3,\"max\":255},\"username-prohibited-characters\":{},\"up-username-not-idn-homograph\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"displayName\":\"${email}\",\"validations\":{\"email\":{},\"length\":{\"max\":255}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"displayName\":\"${firstName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"displayName\":\"${lastName}\",\"validations\":{\"length\":{\"max\":255},\"person-name-prohibited-characters\":{}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"party_id\",\"displayName\":\"Party id (bank-assigned)\",\"validations\":{\"pattern\":{\"pattern\":\"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$\",\"error-message\":\"party_id must be a lower-case UUID\"}},\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}],\"groups\":[{\"name\":\"user-metadata\",\"displayHeader\":\"User metadata\",\"displayDescription\":\"Attributes, which refer to user metadata\"}]}"
+          ]
+        }
+      }
+    ]
+  }
 }

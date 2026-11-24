@@ -1,0 +1,18 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: balance-service
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-balance-oidc-trust
+    mountPath: /mnt/mcp-balance-oidc-trust
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-balance-oidc-trust
+    secret:
+      secretName: balance-mcp-oidc-trust
+      items:
+      - key: ca.crt
+        path: ca.crt
