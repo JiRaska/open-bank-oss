@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank MCP Server
-  version: 1.1.1
+  version: 1.3.0
   description: >
     Model Context Protocol (JSON-RPC 2.0 over HTTP POST) exposing curated consent-scoped read tools
     and a HITL payment proposal to governed AI agents (ADR-0181). Every tools/call is authorized by
@@ -104,3 +104,107 @@ paths:
             application/json:
               schema:
                 type: object
+        "401":
+          description: >-
+            Customer channel only (ADR-0383 / ADR-0385, off by default). No token, a token not
+            admitted for this server (audience, unlisted client, not DPoP-bound) or an invalid DPoP
+            proof. `WWW-Authenticate` uses the `DPoP` scheme and carries the RFC 9728
+            `resource_metadata` URL.
+          headers:
+            WWW-Authenticate:
+              schema: { type: string }
+        "429":
+          description: Customer channel only. The DPoP proof quota for this key is exhausted.
+        "503":
+          description: Customer channel only. The DPoP replay store cannot answer; fails closed.
+  /customer/mcp:
+    post:
+      summary: Customer MCP channel JSON-RPC endpoint (ADR-0383 / ADR-0385, #16847)
+      description: >-
+        The customer channel's own root, off by default. Served only on the mTLS listener the edge
+        reaches (404 on plain HTTP) and authenticated only by the DPoP scheme against the customers
+        realm; the DPoP proof `htu` must be this URL as the client sees it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc: { type: string, example: "2.0" }
+                id: {}
+                method: { type: string, example: tools/list }
+                params: { type: object }
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: >-
+            No token, a token that is not an admitted customers-realm token, or an invalid DPoP proof.
+            `WWW-Authenticate` uses the `DPoP` scheme and carries the RFC 9728 `resource_metadata` URL.
+          headers:
+            WWW-Authenticate:
+              schema: { type: string }
+        "404":
+          description: The customer channel is disabled, or the request did not arrive over mTLS
+        "429":
+          description: The DPoP proof quota for this key is exhausted.
+        "503":
+          description: The DPoP replay store cannot answer; fails closed.
+  /.well-known/oauth-protected-resource/customer/mcp:
+    get:
+      summary: RFC 9728 path-suffixed protected-resource metadata for the `/customer/mcp` resource
+      responses:
+        "200":
+          description: Metadata (only while the customer channel is enabled, and only over mTLS)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResourceMetadata"
+        "404":
+          description: The customer channel is disabled, or the request did not arrive over mTLS
+  /.well-known/oauth-protected-resource:
+    get:
+      summary: RFC 9728 protected-resource metadata for the customer MCP channel
+      responses:
+        "200":
+          description: Metadata (only while the customer channel is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResourceMetadata"
+        "404":
+          description: The customer channel is disabled
+  /.well-known/oauth-protected-resource/mcp:
+    get:
+      summary: RFC 9728 path-suffixed protected-resource metadata for the `/mcp` resource
+      responses:
+        "200":
+          description: Metadata (only while the customer channel is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectedResourceMetadata"
+        "404":
+          description: The customer channel is disabled
+components:
+  schemas:
+    ProtectedResourceMetadata:
+      type: object
+      required: [resource, authorization_servers]
+      properties:
+        resource: { type: string, format: uri }
+        authorization_servers:
+          type: array
+          items: { type: string, format: uri }
+        bearer_methods_supported:
+          type: array
+          items: { type: string }
+        dpop_signing_alg_values_supported:
+          type: array
+          items: { type: string }
+        dpop_bound_access_tokens_required: { type: boolean }

@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import org.gradle.api.tasks.compile.JavaCompile
 
+// Gradle decorates plugin tasks and the init script has a separate classloader.
+// Match the compiler by its exact type in the hierarchy, including KGP subclasses.
+boolean isKotlinCompiler(Class<?> type) {
+    for (Class<?> current = type; current != null; current = current.superclass) {
+        if (current.name == 'org.jetbrains.kotlin.gradle.tasks.KotlinCompile') {
+            return true
+        }
+    }
+    return false
+}
+
 // Apply to included builds too: CodeQL must observe every compiler in the classes graph.
 allprojects {
     tasks.configureEach { task ->
-        if (task instanceof JavaCompile || task.class.name.contains('KotlinCompile')) {
+        if (task instanceof JavaCompile || isKotlinCompiler(task.class)) {
             task.outputs.upToDateWhen { false }
             task.outputs.cacheIf { false }
             if (task instanceof JavaCompile) {

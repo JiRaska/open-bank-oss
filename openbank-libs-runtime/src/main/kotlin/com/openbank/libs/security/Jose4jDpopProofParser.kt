@@ -81,6 +81,7 @@ class Jose4jDpopProofParser : DpopProofParser {
             iat = claims.issuedAt?.let { Instant.ofEpochSecond(it.value) },
             jti = claims.jwtId,
             ath = claims.getStringClaimValue(ATH),
+            nonce = claims.getClaimValue("nonce") as? String,
         )
     }
 

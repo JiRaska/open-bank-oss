@@ -141,6 +141,16 @@ openbank:
   rate-limit:
     enabled: true
     max-concurrent-requests: 150
+  transaction:
+    # `transactions` partition roll-forward (TransactionPartitionMaintainer, #17101). V1 only
+    # created 2025/2026 + DEFAULT; without this a 2027 row lands in transactions_default and the
+    # 2027 partition can no longer be created without a data move under lock. Retention is not
+    # managed here (audited only, never executed).
+    partition:
+      future-years: 2    # keep current year + this many years pre-created
+      every: 24h
+      delayed: 30s
+      lock-timeout: 5s      # bound on waiting for the parent-table lock in partition DDL (fail, retry next tick)
   # Merchant logo ingest (LogoFetcher) is OFF unless a host allowlist is supplied, and there is
   # deliberately no key here to supply one. An endpoint that fetches an operator-named URL from
   # inside the cluster is a server-side request forgery primitive; the allowlist is what bounds it,

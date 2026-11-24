@@ -1,0 +1,285 @@
+{
+  "identifier": "cz-rc",
+  "reference": "stdnum.cz.rc",
+  "as_of": "2026-06-15",
+  "sources": [
+    "https://www.zakonyprolidi.cz/cs/2000-133#p13",
+    "https://www.mvcr.cz/clanek/rodne-cislo.aspx"
+  ],
+  "cases": [
+    {
+      "value": "7605060001",
+      "valid": true,
+      "rule": "10-digit male 1976",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7655060006",
+      "valid": true,
+      "rule": "10-digit female 1976 (month+50)",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "5401010010",
+      "valid": true,
+      "rule": "first 10-digit year 1954",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "531231000",
+      "valid": true,
+      "rule": "9-digit, last 9-digit year 1953",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "540101001",
+      "valid": false,
+      "rule": "9-digit form never issued for 1954+",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "850101000",
+      "valid": false,
+      "rule": "9-digit form never issued for 1985 (stdnum reads it as 1885)",
+      "stdnum_divergence": "stdnum maps 9-digit YY>=80 to 18xx; no 9-digit number was issued for 1880-1899 births either",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "8501010090",
+      "valid": true,
+      "rule": "remainder-10 quirk, check digit 0, birth year 1985",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "8601010100",
+      "valid": false,
+      "rule": "remainder-10 quirk not valid from birth year 1986",
+      "stdnum_divergence": "stdnum applies the remainder-10 quirk to every year",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "0421010007",
+      "valid": true,
+      "rule": "month+20 overflow, 2004",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "0471010001",
+      "valid": true,
+      "rule": "month+70 overflow female, 2004",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "0321010008",
+      "valid": false,
+      "rule": "month+20 overflow never issued before 2004",
+      "stdnum_divergence": "stdnum strips +20 for every year",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "0371010002",
+      "valid": false,
+      "rule": "month+70 overflow never issued before 2004",
+      "stdnum_divergence": "stdnum strips +20 for every year",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "302101000",
+      "valid": false,
+      "rule": "9-digit form never carries the +20 overflow",
+      "stdnum_divergence": "stdnum strips +20 for every year",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "７６０５０６０００１",
+      "valid": false,
+      "rule": "full-width (non-ASCII) digits",
+      "stdnum_divergence": "stdnum accepts any Unicode decimal digit",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "2606150008",
+      "valid": true,
+      "rule": "birthdate equals as_of (today): not in the future [as_of]",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "2606160007",
+      "valid": false,
+      "rule": "birthdate is the day after as_of (tomorrow) [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "3001010001",
+      "valid": false,
+      "rule": "10-digit number for 2030, after as_of [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "5301010000",
+      "valid": false,
+      "rule": "10-digit number for 2053, the furthest the century rule reaches [as_of]",
+      "stdnum_divergence": "stdnum does not know a clock; the future rule needs a caller-supplied today",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7613010009",
+      "valid": false,
+      "rule": "month 13",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7641010003",
+      "valid": false,
+      "rule": "month 41 is no encoding",
+      "stdnum_divergence": "stdnum reduces month %50 %20, so 41 reads as January",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7633010000",
+      "valid": false,
+      "rule": "month 33 (beyond +20 range)",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7663010003",
+      "valid": false,
+      "rule": "month 63 (beyond +50 range)",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7683010005",
+      "valid": false,
+      "rule": "month 83 (beyond +70 range)",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7601000000",
+      "valid": false,
+      "rule": "day 00",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7601320001",
+      "valid": false,
+      "rule": "day 32",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "9602290005",
+      "valid": true,
+      "rule": "29 Feb in leap year 1996",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "9702290004",
+      "valid": false,
+      "rule": "29 Feb in non-leap year 1997",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "7605060002",
+      "valid": false,
+      "rule": "checksum mismatch",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "76050603",
+      "valid": false,
+      "rule": "length 8",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "76050600011",
+      "valid": false,
+      "rule": "length 11",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "76O5060342",
+      "valid": false,
+      "rule": "non-digit",
+      "stdnum": false,
+      "origin": "synthetic",
+      "policy": "spec"
+    },
+    {
+      "value": "760506/0001",
+      "valid": true,
+      "rule": "slash separator is accepted",
+      "stdnum": true,
+      "origin": "synthetic",
+      "policy": "spec"
+    }
+  ],
+  "implementations": [
+    {
+      "module": "openbank-libs-domain",
+      "symbol": "com.openbank.libs.identity.RodneCislo.isValid",
+      "file": "openbank-libs-domain/src/main/kotlin/com/openbank/libs/identity/RodneCislo.kt"
+    }
+  ],
+  "differential": true
+}

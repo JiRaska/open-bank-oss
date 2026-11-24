@@ -234,3 +234,18 @@ interface DelegationRecertificationUseCase {
         callerPartyId: CallerPartyId,
     ): DelegationRecertificationCycle
 }
+
+/**
+ * ADR-0383 D3 — the customer MCP channel's grant lookup by `(grantor party, client id, DPoP key
+ * thumbprint)`. Returns the matching ACTIVE `MCP_CLIENT` grants; empty is the refusal.
+ */
+interface ResolveMcpClientGrantUseCase {
+    suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String): List<DelegationGrant>
+
+    suspend fun resolveForConnection(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+        connectionId: UUID,
+    ): List<DelegationGrant> = emptyList()
+}

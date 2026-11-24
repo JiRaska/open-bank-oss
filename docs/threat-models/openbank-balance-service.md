@@ -72,6 +72,26 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 - Four-eyes approval-decide endpoint: same role set as the gated actions (`OPERATOR`/`ADMIN`),
   plus a domain-level segregation-of-duties check (checker id != maker id) — see §4a.
 
+### Customer MCP balance reads (ADR-0383 D4)
+
+The dedicated internal GET route accepts a customers-realm balance token with one audience,
+one read scope, one account and one connection. Keycloak verifies the original customer DPoP
+evidence and live grant, then binds the downstream token to the MCP workload certificate.
+Balance-service compares the token thumbprint to the authenticated native TLS peer and checks
+current account ownership and grant status before returning any balance. The balance reader
+uses its own identity for the grant check. The route starts disabled.
+
+| Threat | Control | Verification |
+|--------|---------|--------------|
+| A copied token is used from another workload | Native TLS peer validation and exact token certificate thumbprint | `McpBalanceReadIdentityTest` and the local MCP read journey |
+| Valid credentials are used for another account or connection | Exact scoped JWT claims, current owner lookup and live connection-bound grant check | `McpBalanceReadIdentityTest` and `McpClientGrantResolverTest` |
+| A token outlives a revocation | Check the grant on every balance read and deny when ownership or grant state is unavailable | The local MCP journey revokes the connection then verifies denial with the same access token and refresh family |
+| A read token reaches a money-moving route | Dedicated customer tenant and path, read-only scope and separate authorization for staff and payment routes | The dedicated grant and route contracts pin the issuer, audience, scope and account |
+
+Enablement requires a trusted workload certificate, approved routes and network policy, and
+tested issuer and grant availability. A read admitted before revocation may finish. The next
+read checks the current grant.
+
 ## 4. STRIDE analysis
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |

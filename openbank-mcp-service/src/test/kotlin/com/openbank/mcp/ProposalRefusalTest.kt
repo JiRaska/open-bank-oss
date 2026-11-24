@@ -137,12 +137,13 @@ class ProposalRefusalTest {
             registry = toolRegistry,
             pdp = pdp,
             auditor = McpCallAuditor(audit),
-            callerResolver = CallerContextResolver(jwt, false, NoSessions),
+            callerResolver = CallerContextResolver(jwt, false, NoSessions, customerIssuer = java.util.Optional.empty()),
             mapper = mapper,
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(meters)
             rateLimiter = McpRateLimiter.withDefaults()
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, 0)

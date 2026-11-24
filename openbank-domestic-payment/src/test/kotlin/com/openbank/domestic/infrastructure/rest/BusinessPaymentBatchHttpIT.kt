@@ -49,7 +49,7 @@ class BusinessPaymentBatchHttpIT {
               "debtorAccountId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
               "items":[{
                 "itemId":"$itemId",
-                "creditorAccountNumber":"123456789",
+                "creditorAccountNumber":"123456788",
                 "creditorBankCode":"0800",
                 "creditorName":"Supplier",
                 "amountMinor":125,

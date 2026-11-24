@@ -47,6 +47,7 @@ data class OpenAccountCommand(
     val termsVersion: String? = null,
     val termsUrl: String? = null,
     val termsEffectiveFrom: LocalDate? = null,
+    val passportGrantId: UUID? = null,
 )
 
 data class CloseAccountCommand(val accountId: UUID, val reason: String?, val requestedBy: UUID)

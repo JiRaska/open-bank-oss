@@ -25,6 +25,19 @@ import java.util.UUID
     ],
 )
 class AccountEntity : PanacheEntityBase {
+
+    @Column(name = "booking_bank_id", updatable = false)
+    var bookingBankId: UUID? = null
+
+    @Column(name = "booking_establishment_id", updatable = false)
+    var bookingEstablishmentId: UUID? = null
+
+    @Column(name = "booking_host_country", updatable = false)
+    var bookingHostCountry: String? = null
+
+    @Column(name = "booking_mode", updatable = false)
+    var bookingMode: String? = null
+
     @Id
     @Column(name = "id", nullable = false, updatable = false)
     lateinit var id: UUID

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# mcp-service account-ref key (#16678). Fed by AccountRefKeyConfig, which registers the gauge
+# openbank_mcp_account_ref_ephemeral_key at boot (@Startup): 1 while the service runs on a
+# per-process random key because openbank.mcp.account-ref.secret is absent, 0 once the
+# ESO-generated Secret is mounted. The gauge is seeded at registration, so a cold pod reports
+# its real mode from its first scrape: there is no warm-up value to special-case.
+#
+# Ephemeral mode fails closed (a ref minted on another pod or before a restart is refused), so
+# this is a warning, not an outage: chaining degrades to an extra list_accounts per pod hop.
+# 15m absorbs a rollout where the Secret syncs moments after the pod starts.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-mcp-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.mcp
+      rules:
+        - alert: McpAccountRefEphemeralKey
+          expr: max by (namespace, pod) (openbank_mcp_account_ref_ephemeral_key) == 1
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "mcp-service is issuing accountRefs under a per-process key"
+            description: >-
+              {{ $labels.pod }} has run for 15m without openbank.mcp.account-ref.secret, so its
+              accountRefs do not survive a restart or reach another replica and are refused there.
+              Check the mcp-service-account-ref ExternalSecret and its Password generator.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-mcp-service/src/main/resources/docs/05-operations.en.md#account-handles-for-tool-chaining-16678

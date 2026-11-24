@@ -1,0 +1,277 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "GET one payment proposal scoped to its customer",
+      "providerStates": [
+        {
+          "name": "a PENDING payment proposal exists for the customer"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "c0ffee00-2222-4333-8444-555566667777"
+        },
+        "method": "GET",
+        "path": "/api/v1/payment-proposals/c0ffee00-1111-4222-8333-444455556666",
+        "query": {
+          "partyId": [
+            "c0ffee00-2222-4333-8444-555566667777"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "amount": "1250.50",
+          "approvalRequestId": "mcp-proposal:c0ffee00-1111-4222-8333-444455556666",
+          "creditorIban": "CZ6508000000192000145399",
+          "creditorName": "Elektrarna Praha a.s.",
+          "currency": "CZK",
+          "debtorAccountId": "c0ffee00-3333-4444-8555-666677778888",
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "id": "c0ffee00-1111-4222-8333-444455556666",
+          "mcpClientId": "mcp-hosted-reference",
+          "operationType": "DOMESTIC_PAYMENT",
+          "partyId": "c0ffee00-2222-4333-8444-555566667777",
+          "payloadSha256": "29089fbd8e3a306bf8dde87306c085c8cce8e72a9813508fbced0a9197ec38a7",
+          "status": "PENDING"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST approve a payment proposal with its payload hash",
+      "providerStates": [
+        {
+          "name": "a PENDING payment proposal exists for the customer"
+        }
+      ],
+      "request": {
+        "body": {
+          "partyId": "c0ffee00-2222-4333-8444-555566667777",
+          "payloadSha256": "29089fbd8e3a306bf8dde87306c085c8cce8e72a9813508fbced0a9197ec38a7"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "mcp-proposal-approve-c0ffee00-1111-4222-8333-444455556666-c0ffee00-5555-4666-8777-88889999aaaa",
+          "X-Customer-Party-Id": "c0ffee00-2222-4333-8444-555566667777"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/payment-proposals/c0ffee00-1111-4222-8333-444455556666/approve"
+      },
+      "response": {
+        "body": {
+          "amount": "1250.50",
+          "approvalRequestId": "mcp-proposal:c0ffee00-1111-4222-8333-444455556666",
+          "creditorIban": "CZ6508000000192000145399",
+          "creditorName": "Elektrarna Praha a.s.",
+          "currency": "CZK",
+          "debtorAccountId": "c0ffee00-3333-4444-8555-666677778888",
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "id": "c0ffee00-1111-4222-8333-444455556666",
+          "mcpClientId": "mcp-hosted-reference",
+          "operationType": "DOMESTIC_PAYMENT",
+          "partyId": "c0ffee00-2222-4333-8444-555566667777",
+          "payloadSha256": "29089fbd8e3a306bf8dde87306c085c8cce8e72a9813508fbced0a9197ec38a7",
+          "status": "APPROVED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST reject a payment proposal",
+      "providerStates": [
+        {
+          "name": "a PENDING payment proposal exists for the customer"
+        }
+      ],
+      "request": {
+        "body": {
+          "partyId": "c0ffee00-2222-4333-8444-555566667777"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "mcp-proposal-reject-c0ffee00-1111-4222-8333-444455556666",
+          "X-Customer-Party-Id": "c0ffee00-2222-4333-8444-555566667777"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/payment-proposals/c0ffee00-1111-4222-8333-444455556666/reject"
+      },
+      "response": {
+        "body": {
+          "amount": "1250.50",
+          "approvalRequestId": "mcp-proposal:c0ffee00-1111-4222-8333-444455556666",
+          "creditorIban": "CZ6508000000192000145399",
+          "creditorName": "Elektrarna Praha a.s.",
+          "currency": "CZK",
+          "debtorAccountId": "c0ffee00-3333-4444-8555-666677778888",
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "id": "c0ffee00-1111-4222-8333-444455556666",
+          "mcpClientId": "mcp-hosted-reference",
+          "operationType": "DOMESTIC_PAYMENT",
+          "partyId": "c0ffee00-2222-4333-8444-555566667777",
+          "payloadSha256": "29089fbd8e3a306bf8dde87306c085c8cce8e72a9813508fbced0a9197ec38a7",
+          "status": "REJECTED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST record the execution of an approved payment proposal",
+      "providerStates": [
+        {
+          "name": "an APPROVED payment proposal exists for the customer"
+        }
+      ],
+      "request": {
+        "body": {
+          "partyId": "c0ffee00-2222-4333-8444-555566667777",
+          "payloadSha256": "29089fbd8e3a306bf8dde87306c085c8cce8e72a9813508fbced0a9197ec38a7",
+          "paymentId": "c0ffee00-4444-4555-8666-777788889999"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "mcp-proposal-execution-c0ffee00-1111-4222-8333-444455556666-c0ffee00-4444-4555-8666-777788889999",
+          "X-Customer-Party-Id": "c0ffee00-2222-4333-8444-555566667777"
+        },
+        "matchingRules": {
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": ".+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/payment-proposals/c0ffee00-1111-4222-8333-444455556666/execution"
+      },
+      "response": {
+        "body": {
+          "amount": "1250.50",
+          "approvalRequestId": "mcp-proposal:c0ffee00-1111-4222-8333-444455556666",
+          "creditorIban": "CZ6508000000192000145399",
+          "creditorName": "Elektrarna Praha a.s.",
+          "currency": "CZK",
+          "debtorAccountId": "c0ffee00-3333-4444-8555-666677778888",
+          "executedPaymentId": "c0ffee00-4444-4555-8666-777788889999",
+          "expiresAt": "2099-01-01T00:00:00Z",
+          "id": "c0ffee00-1111-4222-8333-444455556666",
+          "mcpClientId": "mcp-hosted-reference",
+          "operationType": "DOMESTIC_PAYMENT",
+          "partyId": "c0ffee00-2222-4333-8444-555566667777",
+          "payloadSha256": "29089fbd8e3a306bf8dde87306c085c8cce8e72a9813508fbced0a9197ec38a7",
+          "status": "EXECUTED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.7"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-delegation-service"
+  }
+}

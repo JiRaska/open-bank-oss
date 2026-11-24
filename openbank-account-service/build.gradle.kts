@@ -10,6 +10,7 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":openbank-libs-market"))
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+# Sources that LOOK like identifier validators (check-identifier-validator-inventory.py derives
+# the candidates from code) but are not one. Each needs a class and a reason; a validator never
+# belongs here — it gets spec vectors, or stays a baselined ad-hoc copy until consolidated.
+# Classes: generator, masking, consumer, harness, not-identifier.
+- file: fuzz/ossfuzz/src/main/kotlin/com/openbank/fuzz/RodneCisloFuzzer.kt
+  class: harness
+  reason: Jazzer target for RodneCislo; its mod-11 is the structured-input generator.
+- file: fuzz/ossfuzz/src/main/kotlin/com/openbank/fuzz/RodneCisloReference.kt
+  class: harness
+  reason: the fuzzer's independent reference, held to the spec vectors by RodneCisloReferenceTest.
+- file: openbank-billing-service/src/main/kotlin/com/openbank/billing/infrastructure/rest/BillingResource.kt
+  class: not-identifier
+  reason: names Currency.getInstance in a comment only; validation goes through CurrencyCode.
+- file: openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/application/usecase/CardService.kt
+  class: consumer
+  reason: calls SyntheticPanGenerator, which is the conformance-tested implementation.
+- file: openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/application/usecase/CardPanVaultBackfill.kt
+  class: generator
+  reason: rebuilds Luhn-valid synthetic PANs through SyntheticPanGenerator; validates nothing itself.
+- file: openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/model/MockModelProvider.kt
+  class: masking
+  reason: IBAN-shaped regex redacts account numbers from mock model output; it accepts nothing.
+- file: openbank-copilot-service/src/main/kotlin/com/openbank/copilot/infrastructure/model/MockModelProvider.kt
+  class: masking
+  reason: IBAN-shaped regex redacts account numbers from mock model output; it accepts nothing.
+- file: openbank-communication-service/src/main/kotlin/com/openbank/communication/domain/CommStyleLinter.kt
+  class: masking
+  reason: flags IBAN-shaped text in outbound copy for a style warning; not an account check.
+- file: openbank-notification-service/src/main/kotlin/com/openbank/notification/application/OversightWebhook.kt
+  class: masking
+  reason: redacts IBAN-shaped text before an oversight webhook leaves the bank.

@@ -8,6 +8,7 @@ import re
 import sys
 import tempfile
 import zipfile
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,8 +45,8 @@ def extract(archive: bytes) -> bytes:
         return validate(zipped.read(names[0]))
 
 
-def prune_cache(directory: Path) -> int:
-    """Drop pre-validator cache entries that must not enter a new image."""
+def prune_history(directory: Path) -> int:
+    """Drop invalid retained envelopes before deployment."""
     if not directory.is_dir():
         raise ValueError(f"run history is not a directory: {directory}")
     removed = 0
@@ -56,6 +57,24 @@ def prune_cache(directory: Path) -> int:
             path.unlink()
             removed += 1
     return removed
+
+
+def main_artifacts(inventory: dict, repository_id: int, prefix: str) -> Iterator[tuple[int, str]]:
+    """Yield same-repository main artifacts with names safe to stage locally."""
+    for artifact in inventory["artifacts"]:
+        run = artifact.get("workflow_run") or {}
+        name = artifact["name"]
+        artifact_id = artifact["id"]
+        if (
+            artifact["expired"] is False
+            and run.get("head_branch") == "main"
+            and run.get("head_repository_id") == repository_id
+            and type(artifact_id) is int
+            and artifact_id > 0
+            and name.startswith(prefix)
+            and re.fullmatch(r"test-intelligence-run-[a-z0-9-]+", name)
+        ):
+            yield artifact_id, name
 
 
 def self_test() -> None:
@@ -110,6 +129,18 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"invalid artifact was accepted: {list(files)}")
+    entry = {"id": 42, "name": "test-intelligence-run-openbank-test-42-a1", "expired": False}
+    main = {"head_branch": "main", "head_repository_id": 17}
+    inventory = {"artifacts": [
+        entry | {"workflow_run": main},
+        entry | {"workflow_run": main | {"head_repository_id": 99}},
+        entry | {"workflow_run": main | {"head_branch": "feature"}},
+        entry | {"workflow_run": main, "expired": True},
+        entry | {"workflow_run": main, "name": "test-intelligence-run-../invalid"},
+        entry | {"workflow_run": main, "name": "test-intelligence-run-other-project"},
+        entry,
+    ]}
+    assert list(main_artifacts(inventory, 17, "test-intelligence-run-openbank-")) == [(42, entry["name"])]
     with tempfile.TemporaryDirectory() as temp:
         cache = Path(temp)
         (cache / "valid.json").write_bytes(good)
@@ -117,12 +148,10 @@ def self_test() -> None:
             json.dumps(example | {"run": example["run"] | {"branch": "feature"}}).encode()
         )
         (cache / "malformed.json").write_bytes(b"not-json")
-        (cache / ".staged-ids").write_text("42\n43\n")
-        assert prune_cache(cache) == 2
+        assert prune_history(cache) == 2
         assert (cache / "valid.json").read_bytes() == good
         assert not (cache / "wrong-branch.json").exists()
         assert not (cache / "malformed.json").exists()
-        assert (cache / ".staged-ids").read_text() == "42\n43\n"
 
 
 if __name__ == "__main__":
@@ -134,12 +163,15 @@ if __name__ == "__main__":
         except (OSError, ValueError, UnicodeError, TypeError) as error:
             print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
             sys.exit(1)
-    elif len(sys.argv) == 3 and sys.argv[1] == "--prune-cache":
+    elif len(sys.argv) == 4 and sys.argv[1] == "--main-artifacts":
+        for artifact_id, name in main_artifacts(json.load(sys.stdin), int(sys.argv[2]), sys.argv[3]):
+            print(artifact_id, name)
+    elif len(sys.argv) == 3 and sys.argv[1] == "--prune-history":
         try:
-            removed = prune_cache(Path(sys.argv[2]))
-            print(f"Pruned {removed} invalid cached Test Intelligence run envelope(s).")
+            removed = prune_history(Path(sys.argv[2]))
+            print(f"Pruned {removed} invalid retained Test Intelligence run envelope(s).")
         except (OSError, ValueError) as error:
-            print(f"Test Intelligence cache validation failed: {error}", file=sys.stderr)
+            print(f"Test Intelligence history validation failed: {error}", file=sys.stderr)
             sys.exit(1)
     elif len(sys.argv) == 3:
         try:
@@ -148,5 +180,5 @@ if __name__ == "__main__":
             print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
             sys.exit(1)
     else:
-        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-cache DIRECTORY | --validate-component PATH COMPONENT", file=sys.stderr)
+        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-history DIRECTORY | --main-artifacts REPOSITORY_ID PREFIX | --validate-component PATH COMPONENT", file=sys.stderr)
         sys.exit(2)

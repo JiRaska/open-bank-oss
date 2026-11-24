@@ -52,6 +52,7 @@ concurrency:
 
 jobs:
   watch:
+    if: github.event_name != 'schedule' || (vars.UPSTREAM_UNBLOCK_WATCH_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: upstream-unblock-watch
     runs-on: ubuntu-latest
     timeout-minutes: 10

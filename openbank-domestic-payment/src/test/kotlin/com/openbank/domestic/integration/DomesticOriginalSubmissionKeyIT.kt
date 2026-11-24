@@ -204,10 +204,10 @@ class DomesticOriginalSubmissionKeyIT {
         return request.body(
             mapOf(
                 "debtorAccountId" to debtorAccountId,
-                "debtorAccountNumber" to "1234567890",
+                "debtorAccountNumber" to "1234567899",
                 "debtorBankCode" to "0800",
                 "debtorName" to "Alice Example",
-                "creditorAccountNumber" to "9876543210",
+                "creditorAccountNumber" to "9876543211",
                 "creditorBankCode" to "0100",
                 "creditorName" to "Brno Utility",
                 "amount" to "100.00".toBigDecimal(),
