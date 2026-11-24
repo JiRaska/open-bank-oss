@@ -1,0 +1,232 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-synthetic-router-server
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: '2'
+spec:
+  secretName: mcp-synthetic-router-server
+  dnsNames:
+  - sandbox.sandbox.invalid
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+  - server auth
+  issuerRef:
+    name: mcp-synthetic-private-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-synthetic-router-client
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: '2'
+spec:
+  secretName: mcp-synthetic-router-client
+  dnsNames:
+  - sandbox.sandbox.invalid
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+  - client auth
+  issuerRef:
+    name: mcp-synthetic-private-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox
+  namespace: mcp-synthetic-sandbox
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mcp-synthetic-router
+  ports:
+  - name: https
+    port: 443
+    targetPort: 8443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-synthetic-router
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: '3'
+spec:
+  replicas: 1
+  selector:
+    matchLabels: &id001
+      app.kubernetes.io/name: mcp-synthetic-router
+  template:
+    metadata:
+      labels: *id001
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: router
+        image: registry.invalid/openbank-mcp-harness@sha256:769ba1d4df5a2c37ae29a107f7a3a5a706dd85f8d71993bfb453e13c8c66de10
+        command:
+        - node
+        - /app/router.mjs
+        env:
+        - name: MCP_ROUTER_HOST
+          value: sandbox.sandbox.invalid
+        - name: MCP_ROUTER_CUSTOMER_REALM
+          value: openbank-customers
+        - name: MCP_ROUTER_MCP_ORIGIN
+          value: https://mcp-sandbox.sandbox.invalid:8443
+        - name: MCP_ROUTER_ISSUER_ORIGIN
+          value: https://sandbox-oidc.sandbox.invalid:8443
+        - name: MCP_ROUTER_CUSTOMER_EDGE_ORIGIN
+          value: https://customer-edge-sandbox.sandbox.invalid:8443
+        ports:
+        - name: https
+          containerPort: 8443
+        readinessProbe:
+          tcpSocket:
+            port: https
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+        volumeMounts:
+        - name: server
+          mountPath: /tls/server
+          readOnly: true
+        - name: mcp-client
+          mountPath: /tls/mcp-client
+          readOnly: true
+        - name: router
+          mountPath: /app
+          readOnly: true
+      volumes:
+      - name: server
+        secret:
+          secretName: mcp-synthetic-router-server
+      - name: mcp-client
+        secret:
+          secretName: mcp-synthetic-router-client
+      - name: router
+        configMap:
+          name: mcp-synthetic-router-code
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-synthetic-router
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-synthetic-router
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-synthetic-runner
+    ports:
+    - protocol: TCP
+      port: 8443
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-sandbox
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: customer-edge-sandbox
+    ports:
+    - protocol: TCP
+      port: 8443
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: keycloak-sandbox
+    ports:
+    - protocol: TCP
+      port: 8444
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-sandbox-from-private-router
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-sandbox
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-synthetic-router
+    ports:
+    - protocol: TCP
+      port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: customer-edge-sandbox-from-private-router
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: customer-edge-sandbox
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-synthetic-router
+    ports:
+    - protocol: TCP
+      port: 8443
