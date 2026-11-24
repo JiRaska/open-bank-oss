@@ -300,7 +300,7 @@ class UpstreamClient {
             builder.queryParam(name, "{$parameter}")
             values[parameter] = value
         }
-        sendGet(builder.buildFromMap(values), partyId, requestTimeoutMs)
+        sendGet(builder.buildFromMap(values).toASCIIString(), partyId, requestTimeoutMs)
     } catch (e: Exception) {
         // Some request exceptions include their complete URI, which may carry opaque query values.
         Log.error("structured upstream GET failed: ${e::class.qualifiedName}")
@@ -310,17 +310,17 @@ class UpstreamClient {
 
     /** Cap a single call by the caller's remaining aggregate budget. */
     fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
-        sendGet(validatedUri(url), partyId, timeoutMs)
+        sendGet(url, partyId, timeoutMs)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
             .type(MediaType.APPLICATION_JSON).build()
     }
 
-    private fun sendGet(uri: URI, partyId: String?, timeoutMs: Long): Response {
+    private fun sendGet(url: String, partyId: String?, timeoutMs: Long): Response {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
-            .uri(uri)
+            .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken(deadline)}")
             .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
