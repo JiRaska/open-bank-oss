@@ -293,7 +293,7 @@ def render_rca(records: list[dict], now: dt.datetime, cover: dict) -> str:
             f"> **{headline}**",
             f"> {cover['detail']}",
             ">",
-            "> The ledger was not updated. Treat this review as FAILED until evidence is available.",
+            "> Treat this review as FAILED until evidence is available.",
             "",
         ]
     else:
@@ -361,7 +361,6 @@ def observations_in_review_window(
         if day in expected_days and observed_at <= now:
             by_day[day] = (observed_at, alerts)
     return list(by_day.values()), [day.isoformat() for day in expected_days if day not in by_day]
-
 
 
 def replay(records: list[dict], observations: list[tuple[dt.datetime, list[dict]]],

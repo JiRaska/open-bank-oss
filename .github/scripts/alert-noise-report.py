@@ -50,13 +50,13 @@ def classify(alerts: list[dict]) -> tuple[str, list[tuple[int, str, str]]]:
             continue
         annotations = a.get("annotations")
         summary = annotations.get("summary") if isinstance(annotations, dict) else None
-        name, severity = lab.get("alert_name"), lab.get("alert_severity")
-        if not all(isinstance(value, str) and value for value in (name, severity, summary)):
+        name, severity = lab.get("alert_name"), lab.get("alert_severity", "")
+        if not isinstance(severity, str) or not all(isinstance(value, str) and value for value in (name, summary)):
             raise ValueError("AlertRuleFlapping evidence lacks labels or summary")
         match = re.search(r"fired (\d+)(?:\.\d+)? separate times", summary)
         if not match:
             raise ValueError("AlertRuleFlapping summary lacks an onset count")
-        rows.append((int(match.group(1)), name, severity))
+        rows.append((int(match.group(1)), name, severity or "?"))
     rows.sort(reverse=True)
     return ("NOISY" if rows else "QUIET"), rows
 

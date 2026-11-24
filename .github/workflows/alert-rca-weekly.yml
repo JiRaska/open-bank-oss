@@ -93,8 +93,10 @@ jobs:
           DIGEST_BUCKET: openbank-sandbox-alert-digest
         run: |
           set -euo pipefail
-          for back in 0 1 2 3 4 5 6 7; do
-            day="$(date -u -d "$back days ago" +%Y-%m-%d)"
+          # Match alert-rca-ledger.py and the digest CronJob's 08:30 UTC poll.
+          last_day="$(date -u -d '8 hours 30 minutes ago' +%Y-%m-%d)"
+          for back in 0 1 2 3 4 5 6; do
+            day="$(date -u -d "$last_day $back days ago" +%Y-%m-%d)"
             key="observations/${day}/alert-observation.json"
             dir="observations/s3-${day}"
             mkdir -p "$dir"
