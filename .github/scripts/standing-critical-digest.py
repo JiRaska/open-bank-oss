@@ -2,8 +2,8 @@
 """Render and optionally publish the standing-critical Alertmanager digest.
 
 The script is intentionally stdlib-only.  It fails closed when credentials or the
-Alertmanager response are missing; an empty, unauthenticated response is never
-reported as "zero criticals".  The P90 value is the age of currently standing
+Alertmanager response are missing. The in-cluster relay snapshot must contain
+Watchdog before the digest can report "zero criticals".  The P90 value is the age of currently standing
 critical alerts (not MTTR, which requires resolved-alert history).
 """
 from __future__ import annotations
@@ -104,6 +104,13 @@ def main() -> int:
     try:
         alerts = fetch(url, token, relay=unauthenticated)
         critical = [alert for alert in alerts if alert["labels"].get("severity") == "critical"]
+        if unauthenticated:
+            noise = [
+                alert for alert in alerts
+                if alert["labels"].get("alertname") in {"Watchdog", "AlertRuleFlapping"}
+            ]
+            if not any(alert["labels"]["alertname"] == "Watchdog" for alert in noise):
+                raise RuntimeError("Watchdog absent from the Alertmanager response")
         digest = render(critical, now)
     except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -116,10 +123,7 @@ def main() -> int:
     if alerts_output:
         envelope = {"observedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "alerts": critical}
         if unauthenticated:
-            envelope["alertNoise"] = [
-                alert for alert in alerts
-                if alert["labels"].get("alertname") in {"Watchdog", "AlertRuleFlapping"}
-            ]
+            envelope["alertNoise"] = noise
         with open(alerts_output, "w", encoding="utf-8") as stream:
             json.dump(envelope, stream)
     output = os.environ.get("DIGEST_OUTPUT", "standing-critical-digest.md")

@@ -154,6 +154,8 @@ spec:
       app.kubernetes.io/name: alertmanager-read-proxy
   template:
     metadata:
+      annotations:
+        openbank.tech/relay-script-sha256: "7cb2868b9d41b896abcca1ffa9360fb22ba990c402b404e1a276cf3362a1b84f"
       labels:
         app.kubernetes.io/name: alertmanager-read-proxy
         app.kubernetes.io/part-of: observability

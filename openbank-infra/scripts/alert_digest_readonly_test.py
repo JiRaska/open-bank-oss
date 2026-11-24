@@ -19,6 +19,7 @@ relay, so the envelope the weekly RCA consumes is produced by the path that will
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import http.server
 import importlib.util
@@ -214,17 +215,39 @@ class RelayRefusesWrites(unittest.TestCase):
             self.assertIn("observedAt", envelope)
             self.assertIn("Open criticals: **1**", Path(tmp, "digest.md").read_text())
 
-    def test_malformed_upstream_does_not_write_an_envelope(self):
-        FakeAlertmanager.alerts = {"error": "bad upstream payload"}
+    def test_unreadable_upstream_does_not_write_an_envelope(self):
+        for alerts, error in (
+            ({"error": "bad upstream payload"}, "HTTP Error 502"),
+            ([], "Watchdog absent"),
+            (ALERTS, "Watchdog absent"),
+        ):
+            with self.subTest(alerts=alerts), tempfile.TemporaryDirectory() as tmp:
+                FakeAlertmanager.alerts = alerts
+                env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
+                envelope = Path(tmp, "obs.json")
+                digest = Path(tmp, "digest.md")
+                env.update(ALERTMANAGER_URL=f"http://127.0.0.1:{self.port}", ALERTMANAGER_AUTH="none",
+                           DIGEST_OUTPUT=str(digest), DIGEST_ALERTS_OUTPUT=str(envelope))
+                result = subprocess.run([sys.executable, "-I", str(DIGEST_SCRIPT)], env=env,
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                self.assertFalse(envelope.exists())
+                self.assertFalse(digest.exists())
+
+    def test_watchdog_only_is_a_genuine_zero_critical_observation(self):
+        FakeAlertmanager.alerts = [NOISE_ALERTS[0]]
         with tempfile.TemporaryDirectory() as tmp:
             env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
             envelope = Path(tmp, "obs.json")
+            digest = Path(tmp, "digest.md")
             env.update(ALERTMANAGER_URL=f"http://127.0.0.1:{self.port}", ALERTMANAGER_AUTH="none",
-                       DIGEST_OUTPUT=f"{tmp}/digest.md", DIGEST_ALERTS_OUTPUT=str(envelope))
+                       DIGEST_OUTPUT=str(digest), DIGEST_ALERTS_OUTPUT=str(envelope))
             result = subprocess.run([sys.executable, "-I", str(DIGEST_SCRIPT)], env=env,
                                     capture_output=True, text=True, timeout=10)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(envelope.exists())
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(envelope.read_text())["alerts"], [])
+            self.assertIn("Open criticals: **0**", digest.read_text())
 
     def test_missing_token_without_explicit_opt_out_still_fails_closed(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
@@ -316,7 +339,11 @@ class NetworkLayerBlocksTheDirectPath(unittest.TestCase):
 
     def test_relay_runs_the_tested_configmap(self):
         dep = find(RELAY_YAML, "Deployment", "alertmanager-read-proxy")
-        spec = dep["spec"]["template"]["spec"]
+        template = dep["spec"]["template"]
+        script = find(RELAY_YAML, "ConfigMap", "alertmanager-read-proxy")["data"]["relay.py"]
+        self.assertEqual(template["metadata"]["annotations"]["openbank.tech/relay-script-sha256"],
+                         hashlib.sha256(script.encode("utf-8")).hexdigest())
+        spec = template["spec"]
         self.assertEqual(spec["containers"][0]["command"], ["python3", "-I", "/app/relay.py"])
         self.assertEqual(spec["volumes"][0]["configMap"]["name"], "alertmanager-read-proxy")
 

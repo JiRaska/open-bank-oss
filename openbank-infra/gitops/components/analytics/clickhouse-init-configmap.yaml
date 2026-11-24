@@ -1782,3 +1782,6 @@ kind: ConfigMap
 metadata:
   name: clickhouse-init
   namespace: analytics
+  annotations:
+    # The schema apply Job is a PostSync hook and is excluded from the Argo CD diff.
+    openbank.tech/clickhouse-schema-apply-revision: "preserve-synthetic-filters"

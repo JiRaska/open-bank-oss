@@ -493,7 +493,7 @@ gates:
       python3 .github/scripts/alert-rca-ledger.py --self-test
 
   - id: standing-critical-digest-guards
-    selftest_exempt: "is-a-test-suite — the run: IS standing-critical-digest.py --self-test"
+    selftest_exempt: "is-a-test-suite — the run executes the digest and relay regression suites"
     name: "standing-critical digest guards (severity filter, observation envelope)"
     group: lint
     mode: enforced
@@ -502,6 +502,7 @@ gates:
     review_after: "2027-02-21"
     run: |
       python3 .github/scripts/standing-critical-digest.py --self-test
+      python3 openbank-infra/scripts/alert_digest_readonly_test.py
 
   - id: yamllint
     selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
