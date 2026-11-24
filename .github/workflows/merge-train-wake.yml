@@ -19,6 +19,8 @@ on:
   workflow_run:
     workflows: ["Services CI", "CI", "Security scan"]
     types: [completed]
+    # The main train workflow already receives carrier completions directly.
+    branches-ignore: ["train/**"]
 
 permissions:
   contents: read
