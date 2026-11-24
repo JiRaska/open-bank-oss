@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.25.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.24.0...admin-ui-v4.25.0) (2026-11-24)
+
+
+### Features
+
+* **infra:** stage synthetic MCP sandbox workloads ([#17251](https://github.com/JiRaska/open-bank-oss/issues/17251)) ([1253c2e](https://github.com/JiRaska/open-bank-oss/commit/1253c2ea151d44c6c171ad6794e3d8270c9cf3ab))
+
+
+### Bug Fixes
+
+* **admin-ui:** describe hosted MCP approval and balance flow ([#17256](https://github.com/JiRaska/open-bank-oss/issues/17256)) ([95759c6](https://github.com/JiRaska/open-bank-oss/commit/95759c6ce05070e780c3f8485b83f7bfb2bf7f17))
+
 ## [4.24.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.2...admin-ui-v4.24.0) (2026-11-24)
 
 
