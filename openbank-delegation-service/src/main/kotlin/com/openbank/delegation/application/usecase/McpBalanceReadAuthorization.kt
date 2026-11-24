@@ -43,7 +43,11 @@ class McpBalanceReadAuthorization(
         val connection = request.connectionId
         val candidates = when {
             thumbprint == null && connection == null -> return null
-            thumbprint == null -> grants.resolveHostedConnection(request.partyId, request.clientId, requireNotNull(connection))
+            thumbprint == null -> grants.resolveHostedConnection(
+                request.partyId,
+                request.clientId,
+                requireNotNull(connection),
+            )
             connection == null -> grants.resolve(request.partyId, request.clientId, thumbprint)
             else -> grants.resolveForConnection(request.partyId, request.clientId, thumbprint, connection)
         }

@@ -3424,14 +3424,13 @@ class CustomerEdgeResource(
         requestRef: String,
         includeHosted: Boolean = false,
         call: (String, UUID) -> Response,
-    ): Response =
-        withMcpConnectCustomer { party ->
-            if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
-                call("${mcpConnectRequestsUrl(includeHosted)}/$requestRef", party)
-            } else {
-                badRequest("Invalid MCP connect request reference")
-            }
+    ): Response = withMcpConnectCustomer { party ->
+        if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
+            call("${mcpConnectRequestsUrl(includeHosted)}/$requestRef", party)
+        } else {
+            badRequest("Invalid MCP connect request reference")
         }
+    }
 
     private fun mcpConnectRequestsUrl(includeHosted: Boolean = false): String {
         val requests = if (includeHosted) "requests-v2" else "requests"

@@ -5,9 +5,9 @@
 
 package com.openbank.mcp.infrastructure.customer
 
-import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.enterprise.context.ApplicationScoped

@@ -67,8 +67,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: Registration?,
-    ): Map<String, Any?> =
-        registerImpl(idempotencyKey, customerParty, body, includeHosted = false)
+    ): Map<String, Any?> = registerImpl(idempotencyKey, customerParty, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2")
@@ -77,8 +76,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: Registration?,
-    ): Map<String, Any?> =
-        registerImpl(idempotencyKey, customerParty, body, includeHosted = true)
+    ): Map<String, Any?> = registerImpl(idempotencyKey, customerParty, body, includeHosted = true)
 
     private suspend fun registerImpl(
         idempotencyKey: String?,
@@ -106,8 +104,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: McpConnectRequestStore.Binding?,
-    ): Map<String, Any?> =
-        selectionImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+    ): Map<String, Any?> = selectionImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2/{requestRef}/selection")
@@ -117,8 +114,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: McpConnectRequestStore.Binding?,
-    ): Map<String, Any?> =
-        selectionImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+    ): Map<String, Any?> = selectionImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
 
     private suspend fun selectionImpl(
         idempotencyKey: String?,
@@ -143,8 +139,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: ChallengeBinding?,
-    ): Map<String, Any?> =
-        challengeImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+    ): Map<String, Any?> = challengeImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2/{requestRef}/challenge")
@@ -154,8 +149,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: ChallengeBinding?,
-    ): Map<String, Any?> =
-        challengeImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+    ): Map<String, Any?> = challengeImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
 
     private suspend fun challengeImpl(
         idempotencyKey: String?,
@@ -194,8 +188,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
-    ): Map<String, Any?> =
-        stageImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+    ): Map<String, Any?> = stageImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2/{requestRef}/stage")
@@ -205,8 +198,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
-    ): Map<String, Any?> =
-        stageImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+    ): Map<String, Any?> = stageImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
 
     private suspend fun stageImpl(
         idempotencyKey: String?,
@@ -232,8 +224,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: CodeLookup?,
-    ): Map<String, Any?> =
-        stagedImpl(idempotencyKey, customerParty, body, includeHosted = false)
+    ): Map<String, Any?> = stagedImpl(idempotencyKey, customerParty, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2/staged")
@@ -242,8 +233,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: CodeLookup?,
-    ): Map<String, Any?> =
-        stagedImpl(idempotencyKey, customerParty, body, includeHosted = true)
+    ): Map<String, Any?> = stagedImpl(idempotencyKey, customerParty, body, includeHosted = true)
 
     private suspend fun stagedImpl(
         idempotencyKey: String?,
@@ -273,8 +263,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
-    ): Map<String, Any?> =
-        activateImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
+    ): Map<String, Any?> = activateImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2/{requestRef}/activate")
@@ -284,8 +273,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
-    ): Map<String, Any?> =
-        activateImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
+    ): Map<String, Any?> = activateImpl(idempotencyKey, customerParty, requestRef, body, includeHosted = true)
 
     private suspend fun activateImpl(
         idempotencyKey: String?,
@@ -321,8 +309,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: FamilyLookup?,
-    ): Map<String, Any?> =
-        familyStatusImpl(idempotencyKey, customerParty, body, includeHosted = false)
+    ): Map<String, Any?> = familyStatusImpl(idempotencyKey, customerParty, body, includeHosted = false)
 
     @POST
     @Path("/requests-v2/family-status")
@@ -331,8 +318,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: FamilyLookup?,
-    ): Map<String, Any?> =
-        familyStatusImpl(idempotencyKey, customerParty, body, includeHosted = true)
+    ): Map<String, Any?> = familyStatusImpl(idempotencyKey, customerParty, body, includeHosted = true)
 
     private suspend fun familyStatusImpl(
         idempotencyKey: String?,
@@ -459,7 +445,9 @@ class McpConnectIssuerResource(
         val expiresAtEpochSecond: Long,
     ) {
         fun toRequest(): McpConnectRequestStore.Request {
-            require(REQUEST_REF.matches(requestRef) && (parJkt == null || JKT.matches(parJkt))) { "invalid connect binding" }
+            require(REQUEST_REF.matches(requestRef) && (parJkt == null || JKT.matches(parJkt))) {
+                "invalid connect binding"
+            }
             require(clientId.isNotBlank() && clientId.length <= DelegationGrant.CLIENT_ID_MAX_LENGTH) {
                 "invalid client"
             }

@@ -84,9 +84,8 @@ class CustomerChannelAdmission internal constructor(
     /** True when [jwt]'s `iss` is the customers realm — the ONLY selector of this path (ADR-0383 D1.1). */
     fun isCustomerToken(jwt: JsonWebToken): Boolean = jwt.issuer != null && jwt.issuer == issuer
 
-    fun supportsHostedBearer(): Boolean = requireConnection && allowlist.clients.values.any {
-        it.enabled && it.tier == McpClientAllowlist.Tier.H
-    }
+    fun supportsHostedBearer(): Boolean = requireConnection &&
+        allowlist.clients.values.any { it.enabled && it.tier == McpClientAllowlist.Tier.H }
 
     /** The 401 for a request that carries no token at all (RFC 9728 §5.1, RFC 6750 §3.1: no error code). */
     fun missingTokenChallenge(): String {
@@ -118,8 +117,10 @@ class CustomerChannelAdmission internal constructor(
             else -> null
         }
         if (
-            client.tier == McpClientAllowlist.Tier.H && connectionId != null &&
-            CLAIM_CNF !in jwt.claimNames && dpopHeaders.isEmpty() &&
+            client.tier == McpClientAllowlist.Tier.H &&
+            connectionId != null &&
+            CLAIM_CNF !in jwt.claimNames &&
+            dpopHeaders.isEmpty() &&
             stringValue(jwt.getClaim<Any?>("typ")) == "Bearer" &&
             jwt.rawToken?.let { it.isNotBlank() && authorization == "Bearer $it" } == true
         ) {

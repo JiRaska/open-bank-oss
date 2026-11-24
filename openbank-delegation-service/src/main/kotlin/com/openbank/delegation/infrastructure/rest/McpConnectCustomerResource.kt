@@ -39,8 +39,11 @@ class McpConnectCustomerResource(
     @GET
     @Path("/requests")
     @Authorize(action = "delegation.mcp-connect.customer.read")
-    suspend fun list(@HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?): Reviews =
-        Reviews(store.listForParty(customerAccess.requireCustomer(customerPartyId)).filter { it.request.parJkt != null }.map(Review::from))
+    suspend fun list(@HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: UUID?): Reviews {
+        val party = customerAccess.requireCustomer(customerPartyId)
+        val requests = store.listForParty(party).filter { it.request.parJkt != null }
+        return Reviews(requests.map(Review::from))
+    }
 
     @GET
     @Path("/requests-v2")
