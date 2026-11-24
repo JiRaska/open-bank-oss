@@ -21,6 +21,24 @@ each SLA is what it is sits next to each rule. Three rules hold for every sectio
   payment completes only on a strictly matched answer. A correction made outside it (a four-eyes
   reversal, a ledger adjustment) does not close the clock; see "Closing a corrected payment" below.
 
+## Domestic payments stalled before booking
+
+`DomesticPaymentStrandedBeforeClearing` covers stale RECEIVED and VALIDATED
+payments. `DomesticPaymentStuckInClearing` covers stale SENT_TO_CLEARING
+payments, including payments that never opened a booking clock.
+
+1. Assign the alert to the domestic rail owner. Record the environment, state,
+   count and age of the oldest payment in the incident.
+2. For RECEIVED and VALIDATED, match the payment to its workflow and screening
+   outcome. For SENT_TO_CLEARING, reconcile clearing acceptance and outcome,
+   then check the transaction and ledger evidence if a booking was attempted.
+3. Record which hand-off was missing and the owner's recovery decision. Apply
+   the normal recovery procedure for that rail and reuse the existing booking
+   identity for any approved re-drive.
+4. Confirm each affected payment has an expected terminal outcome and that the
+   corresponding clearing and ledger evidence agree. Open a follow-up for the
+   failure mode if a hand-off can stall without an explicit retry or escalation.
+
 ## 0. Which payment, and which answer did it get
 
 ```promql

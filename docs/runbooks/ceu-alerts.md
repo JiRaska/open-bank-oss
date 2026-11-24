@@ -20,7 +20,10 @@ dropped (`synthetic_accounts_dropped`, `synthetic_relations_dropped`).
 
 ## CeuDailyOverviewNotFiled
 
-Today's overview is not filed and the 12:00 deadline is under an hour away.
+The reporting environment has passed its 11:00 cutoff without a recorded submission.
+Identify the environment first. A sandbox alert calls for sandbox diagnosis.
+For a filing environment, reconcile the latest receipt and recorded status before
+attempting a submission. The filing deadline is 12:00 Prague on a working day.
 
 1. `GET /api/v1/statutory-returns` (auditor or operator) and find `returnCode=CEUSIFE10` for the
    window ending yesterday (Sunday's date on a Monday).

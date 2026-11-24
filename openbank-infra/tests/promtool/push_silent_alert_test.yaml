@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+rule_files:
+  - prometheus-rules-push.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: "An idle environment stays quiet"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PushChannelSilent
+        exp_alerts: []
+
+  - name: "Fan-outs without devices do not imply a silent push channel"
+    input_series:
+      - series: 'openbank_notification_push_fanouts_total{devices_bucket="0"}'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PushChannelSilent
+        exp_alerts: []
+
+  - name: "Fan-outs to registered devices without any sends fire"
+    input_series:
+      - series: 'openbank_notification_push_fanouts_total{devices_bucket="1"}'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PushChannelSilent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              subject_period: continuous
+              summary: "Push fan-outs recorded in the last 6h but no push send"
+              description: "notification-service fanned out PUSH notifications in the last 6h and recorded no send for any of them: the adapter is not running, or every send is SKIPPED. Neither is visible from any error signal — check openbank_notification_push_fanouts_total and the consumer lag on openbank.notification.requests."

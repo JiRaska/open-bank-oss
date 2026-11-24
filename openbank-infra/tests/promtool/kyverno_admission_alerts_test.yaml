@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+rule_files:
+  - prometheus-rules-kyverno.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: "A denied rollout request fires even if current replicas can serve"
+    interval: 1m
+    input_series:
+      - series: 'kyverno_admission_requests_total{resource_kind="Deployment",resource_namespace="example",resource_request_operation="CREATE",request_allowed="false"}'
+        values: "0 1+0x11"
+      - series: 'kube_deployment_status_replicas_available{namespace="example",deployment="service"}'
+        values: "2x12"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: KyvernoAdmissionDenied
+        exp_alerts:
+          - exp_labels:
+              resource_kind: Deployment
+              resource_namespace: example
+              resource_request_operation: CREATE
+              severity: critical
+            exp_annotations:
+              summary: "Kyverno denied admission for Deployment in example"
+              description: "Kyverno denied CREATE admission for Deployment in namespace example. The 10m counter window has contained a denial for 5m. Check rollout status and available replicas to establish serving impact. Use KyvernoEnforcePolicyBlocking and admission-controller logs to identify the policy and check whether a later retry succeeded."
+      - eval_time: 12m
+        alertname: KyvernoAdmissionDenied
+        exp_alerts: []
+
+  - name: "Allowed requests and a historic denial outside the counter window stay quiet"
+    interval: 1m
+    input_series:
+      - series: 'kyverno_admission_requests_total{resource_kind="Deployment",resource_namespace="example",resource_request_operation="CREATE",request_allowed="true"}'
+        values: "0+1x12"
+      - series: 'kyverno_admission_requests_total{resource_kind="Deployment",resource_namespace="example",resource_request_operation="CREATE",request_allowed="false"}'
+        values: "1x12"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: KyvernoAdmissionDenied
+        exp_alerts: []

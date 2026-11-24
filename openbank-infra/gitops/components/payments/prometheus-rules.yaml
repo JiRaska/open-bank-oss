@@ -188,6 +188,7 @@ spec:
               Customer funds are neither moved nor returned and nothing else alerts on this state.
               Check for an open AML case (alert_code SCREENING_UNAVAILABLE) and whether the Temporal
               workflow for that payment completed without advancing it.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#domestic-payments-stalled-before-booking"
         - alert: DomesticPaymentStuckInClearing
           # SENT_TO_CLEARING legitimately waits for a clearing cycle, so this threshold is a day
           # rather than an hour — it catches a missed cycle, not a slow one.
@@ -204,6 +205,7 @@ spec:
             description: >-
               The oldest domestic payment in SENT_TO_CLEARING is {{ $value | humanizeDuration }} old —
               at least one clearing cycle has been missed, or settlement is failing silently.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0032-payment-rail-unsettled-booking.md#domestic-payments-stalled-before-booking"
         - alert: DomesticPaymentHeldPastExpiry
           # ADR-0374: a HELD payment is released, rejected or expired within 48 hours of being
           # HELD. One held longer has lost the workflow run that owns its expiry and the

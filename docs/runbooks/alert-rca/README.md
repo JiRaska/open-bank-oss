@@ -40,6 +40,23 @@ as a reliability defect and gets a follow-up issue opened automatically before
 the next review. Counted per `alertname` (not per service), over `startsAt`,
 counting resolved and still-open firings alike.
 
+## Classifying recurring alerts
+
+Record the alert instance, time window, environment and source evidence in the
+weekly RCA. Classify it before changing thresholds or routing:
+
+| Outcome | Evidence to record | Follow-up |
+|---|---|---|
+| Confirmed fault | The condition in the rule occurred. Record serving or business impact separately, including when impact is unknown. | Assign remediation or recovery to the affected service owner. |
+| False positive | The condition the alert claims to detect was absent. Record the authoritative signal showing that it was absent. | Fix the rule, input signal or alert text at the layer that made the wrong claim. |
+| Evidence unavailable | The required signal, query or observation was missing. | Restore or verify the evidence before grading the alert. |
+| Repeat notification | Multiple messages represent the same firing and operational action. | Review grouping and repeat timing with the owner. |
+
+Flapping identifies which alerts to review. Before changing a rule for a known
+false positive, add a case to the existing promtool suite using the shipped rule.
+Cover the reported false-positive input and a genuine failure the rule must
+still detect. Use existing observations to check the outcome after deployment.
+
 ## Observation coverage — an empty week is not a clean week
 
 The daily standing-critical digest archives an observation envelope on **every**

@@ -32,11 +32,9 @@ spec:
   groups:
     - name: openbank.kyverno.admission
       rules:
-        # THE alert the SBOM-attestation enforcement incident needed. Any denied
-        # admission request is a workload that cannot start — by the time this fires
-        # a pod is already being turned away. Not scoped to a policy or namespace on
-        # purpose: an Enforce-mode policy denying ANYTHING is a cluster-wide risk,
-        # since the blast radius is "every pod that happens to reschedule".
+        # A denial is evidence of a blocked request. Existing replicas can still
+        # serve, and a later retry can pass. Workload availability rules report
+        # serving impact independently.
         - alert: KyvernoAdmissionDenied
           expr: |
             sum by (resource_kind, resource_namespace, resource_request_operation) (
@@ -46,15 +44,14 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: "Kyverno is BLOCKING admission of {{ $labels.resource_kind }} in {{ $labels.resource_namespace }}"
+            summary: "Kyverno denied admission for {{ $labels.resource_kind }} in {{ $labels.resource_namespace }}"
             description: >-
-              Kyverno denied {{ $value | printf "%.0f" }} {{ $labels.resource_request_operation }}
-              admission request(s) for {{ $labels.resource_kind }} in namespace
-              {{ $labels.resource_namespace }} over the last 10m, sustained for >5m. The workload
-              CANNOT start and will stay down until the policy passes or is relaxed — already-running
-              pods are NOT re-admitted, so this may be silent until a pod reschedules. Find the policy
-              with the KyvernoEnforcePolicyBlocking alert, or:
-              kubectl -n {{ $labels.resource_namespace }} describe <kind> / kubectl logs -n kyverno -l app.kubernetes.io/component=admission-controller
+              Kyverno denied {{ $labels.resource_request_operation }} admission for
+              {{ $labels.resource_kind }} in namespace {{ $labels.resource_namespace }}.
+              The 10m counter window has contained a denial for 5m. Check rollout
+              status and available replicas to establish serving impact. Use
+              KyvernoEnforcePolicyBlocking and admission-controller logs to identify
+              the policy and check whether a later retry succeeded.
         # Same event, attributed to the policy + rule that did the blocking. Split from
         # the alert above because kyverno_admission_requests_total carries no policy_name
         # (the webhook handler does not know which policy denied) and
