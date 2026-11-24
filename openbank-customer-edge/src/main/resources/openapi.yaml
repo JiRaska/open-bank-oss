@@ -67,7 +67,9 @@ info:
   # once the reservation-bound create is switched on. Request shape unchanged.
   # 1.96.0 -> 1.97.0 (ADR-0383 D6, #16590): additive — /mcp-proposals routes (list, read, reject,
   # approve with SCA bound to the proposal's payload hash). App session only.
-  version: 1.97.0
+  # 1.97.0 -> 1.98.0 (ADR-0385, #16650): additive app-only MCP connect review and account selection.
+  # 1.98.0 -> 1.99.0 (#16650): additive app-only MCP connection list and customer revocation.
+  version: 1.99.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3672,6 +3674,111 @@ paths:
                         status: {type: string, enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]}
                         performedAt: {type: string, format: date-time}
 
+  /mcp/connections:
+    get:
+      tags: [Delegation]
+      summary: List this customer's assistant connections
+      description: Requires the customer's own app session. Includes retained revoked and expired connections.
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Owned connections and their granted accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnection' }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: MCP connect is disabled }
+        '503': { description: The authoritative connection store is unavailable }
+  /mcp/connections/{connectionId}/revoke:
+    post:
+      tags: [Delegation]
+      summary: Revoke one of this customer's assistant connections
+      description: The customer is derived from the app session. No request body is needed.
+      security: [{customerOidc: []}]
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: The connection has been revoked }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: The connection is unavailable to this customer or MCP connect is disabled }
+        '503': { description: Revocation could not be confirmed }
+  /mcp/connect-requests:
+    get:
+      tags: [Delegation]
+      summary: List this customer's pending assistant connection requests
+      description: Requires the customer's own bank app session. Disabled until the bank enables MCP connect.
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Pending requests owned by the authenticated customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnectReview' }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: MCP connect is disabled }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests/{requestRef}:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    get:
+      tags: [Delegation]
+      summary: Read the bank-owned context for one assistant connection request
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Owned connection request and its SCA linkage when the challenge is bound
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReview' }
+        '400': { description: Malformed request reference }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: Request is unavailable to this customer or MCP connect is disabled }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests/{requestRef}/selection:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    post:
+      tags: [Delegation]
+      summary: Submit the accounts and capabilities to review for an assistant connection
+      description: The selection does not approve the challenge or establish a connection.
+      security: [{customerOidc: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accounts]
+              properties:
+                accounts:
+                  type: array
+                  items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+      responses:
+        '200':
+          description: The current authoritative review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReview' }
+        '400': { description: Invalid request reference or account selection }
+        '403': { description: An eligible personal app session and ownership of the selected accounts are required }
+        '404': { description: Request is unavailable to this customer or MCP connect is disabled }
+        '409': { description: Request is no longer selectable }
+        '503': { description: The authoritative connect request store is unavailable }
   /mcp-proposals:
     get:
       tags: [Payments]
@@ -7195,6 +7302,11 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   parameters:
+    McpConnectRequestRef:
+      name: requestRef
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{64}$' }
     PensionContractId:
       name: contractId
       in: path
@@ -7208,6 +7320,51 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    McpConnection:
+      type: object
+      required: [connectionId, partyId, clientId, resource, expiresAtEpochSecond, status, accounts]
+      properties:
+        connectionId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string }
+        resource: { type: string, format: uri }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string, enum: [ACTIVE, REVOKED, EXPIRED] }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+    McpConnectAccountScope:
+      type: object
+      required: [accountId, capabilities]
+      properties:
+        accountId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          items: { type: string }
+    McpConnectReview:
+      type: object
+      required: [requestRef, partyId, clientId, redirectHost, resource, scopes, parJkt, expiresAtEpochSecond, status, accounts]
+      properties:
+        requestRef:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the authorizer's PAR request URI.
+        partyId: { type: string, format: uuid, description: Canonical party owning this request }
+        clientId: { type: string }
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes:
+          type: array
+          items: { type: string }
+        parJkt: { type: string }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+        challengeId: { type: string, format: uuid }
+        approvalRequestId: { type: string }
+        contextSha256: { type: string }
     DomesticPaymentSubmission:
       oneOf:
         - type: object

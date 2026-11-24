@@ -366,3 +366,10 @@ missing or expired. The client retries with a fresh proof signed with the same D
 resource and Keycloak must share the base64url-encoded `MCP_READ_NONCE_KEY`. The challenge binds
 the exact resource and proof key and expires after 60 seconds. Proof replay claims remain
 independent of the nonce.
+
+## Private customer MCP sandbox
+
+The synthetic sandbox uses a private HTTPS route with its own trust, a canonical customer
+issuer and a certificate-bound Balance hop. Smoke-test connection approval, a scoped
+balance read and revocation using the browser runner. Run the pending-proposal check
+separately with valid synthetic accounts and the settlement boundary in place.

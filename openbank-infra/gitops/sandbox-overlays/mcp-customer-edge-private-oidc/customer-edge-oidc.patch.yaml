@@ -1,0 +1,30 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: customer-edge
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-oidc-config
+    mountPath: /mnt/mcp-oidc-config
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-oidc-ca
+    mountPath: /mnt/mcp-oidc-ca
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-oidc-config
+    configMap:
+      name: customer-edge-mcp-oidc-tls
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-oidc-ca
+    secret:
+      secretName: customer-edge-mcp-oidc-trust
+      items:
+      - key: ca.crt
+        path: ca.crt

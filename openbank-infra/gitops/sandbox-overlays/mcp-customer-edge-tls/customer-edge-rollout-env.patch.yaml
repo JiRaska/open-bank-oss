@@ -1,0 +1,24 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+spec:
+  template:
+    spec:
+      containers:
+      - name: customer-edge
+        env:
+        - name: QUARKUS_HTTP_SSL_PORT
+          value: '8443'
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+          value: /tls/sandbox-https/tls.crt
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+          value: /tls/sandbox-https/tls.key
+        - name: QUARKUS_HTTP_SSL_PROTOCOLS
+          value: TLSv1.3
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+          value: 1h
+        - name: QUARKUS_HTTP_INSECURE_REQUESTS
+          value: enabled

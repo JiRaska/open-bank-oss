@@ -44,8 +44,7 @@ class ScaClient {
     }
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER).build();
+    private static final HttpClient HTTP = McpOutboundHttp.create(TIMEOUT);
     private static volatile CachedToken cached;
 
     private record CachedToken(String key, String value, long expiresAtMillis) {

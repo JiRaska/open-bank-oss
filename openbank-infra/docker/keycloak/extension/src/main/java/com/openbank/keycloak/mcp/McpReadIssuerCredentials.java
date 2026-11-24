@@ -19,8 +19,7 @@ import java.util.function.Supplier;
 
 final class McpReadIssuerCredentials implements Supplier<String> {
     private static final Duration TIMEOUT = Duration.ofSeconds(4);
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER).build();
+    private static final HttpClient HTTP = McpOutboundHttp.create(TIMEOUT);
     private static final String CLIENT = "openbank-mcp-read-issuer";
 
     private final URI endpoint;

@@ -297,3 +297,22 @@ test_keycloak_mcp_machine_may_initiate_and_consume_only if {
 			with data.rules as rules_with_kc_mcp
 	}
 }
+
+receipt_delegation := {
+	"service_account": true,
+	"client_id": "openbank-delegation",
+	"type": "HUMAN",
+	"id": "service-account-openbank-delegation",
+	"roles": ["ROLE_API"],
+}
+
+test_mcp_connect_receipt_requires_the_verified_delegation_machine if {
+	action := "scaChallenge.readMcpConnectReceipt"
+	decision := rest.allow with input as {"principal": receipt_delegation, "action": action}
+		with data.rules as rules_mock
+	decision.allow
+	every caller in [operator, edge, services_m2m, object.union(receipt_delegation, {"service_account": false})] {
+		denied := rest.allow with input as {"principal": caller, "action": action} with data.rules as rules_mock
+		not denied.allow
+	}
+}

@@ -1,0 +1,19 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: balance-service
+  namespace: balances
+spec:
+  template:
+    spec:
+      containers:
+      - name: balance-service
+        env:
+        - name: QUARKUS_CONFIG_LOCATIONS
+          value: /mnt/msg-config/override.properties,/mnt/mcp-read-tls-config/runtime.properties,/mnt/mcp-read-tls-config/private-oidc.properties
+        - name: BALANCE_MCP_OIDC_DISCOVERY_URL
+          valueFrom:
+            secretKeyRef:
+              name: balance-mcp-read-origins
+              key: discovery-url

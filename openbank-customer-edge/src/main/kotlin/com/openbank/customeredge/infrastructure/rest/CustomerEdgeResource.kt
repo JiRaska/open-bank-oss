@@ -239,6 +239,15 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.identity-resume-enabled", defaultValue = "false")
     var identityResumeEnabled: Boolean = false
 
+    private var mcpConnectEnabled = false
+
+    @Inject
+    fun configureMcpConnect(
+        @ConfigProperty(name = "openbank.edge.mcp-connect-enabled", defaultValue = "false") enabled: Boolean,
+    ) {
+        mcpConnectEnabled = enabled
+    }
+
     // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created
     // through domestic-payment's reservation-bound route and its reservation is settled by the
     // payment's outcome in delegation-service, not confirmed here on the rail's 2xx. Default off =
@@ -3285,6 +3294,129 @@ class CustomerEdgeResource(
         return resp
     }
 
+    // --- ADR-0385: customer review and selection for a pending connect ---
+
+    @GET
+    @Path("/mcp/connect-requests")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun listMcpConnectRequests(): Response = withMcpConnectCustomer { party ->
+        val response = upstream.get(mcpConnectRequestsUrl(), party.toString())
+        mcpConnectResult(response, CustomerMcpConnectRequests::class.java) { view ->
+            view.requests.all { it.partyId == party }
+        }
+    }
+
+    @GET
+    @Path("/mcp/connect-requests/{requestRef}")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun getMcpConnectRequest(@PathParam("requestRef") requestRef: String): Response =
+        withMcpConnectRequest(requestRef) { url, party ->
+            mcpConnectReviewResult(upstream.get(url, party.toString()), party, requestRef)
+        }
+
+    @POST
+    @Path("/mcp/connect-requests/{requestRef}/selection")
+    @Authorize(action = "customer.mcp-connect.select")
+    @Blocking
+    fun selectMcpConnectAccounts(
+        @PathParam("requestRef") requestRef: String,
+        selection: CustomerMcpConnectSelection?,
+    ): Response = withMcpConnectRequest(requestRef) { url, party ->
+        if (selection == null) {
+            badRequest("Account selection is required")
+        } else {
+            try {
+                selection.validateElements()
+            } catch (e: IllegalArgumentException) {
+                return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
+            }
+            val response = upstream.put("$url/selection", party.toString(), objectMapper.writeValueAsString(selection))
+            mcpConnectReviewResult(response, party, requestRef)
+        }
+    }
+
+    @GET
+    @Path("/mcp/connections")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun listMcpConnections(): Response = withMcpConnectCustomer { party ->
+        val response = upstream.get(mcpConnectionsUrl(), party.toString())
+        mcpConnectResult(response, CustomerMcpConnections::class.java) { view ->
+            view.connections.all { it.partyId == party }
+        }
+    }
+
+    @POST
+    @Path("/mcp/connections/{connectionId}/revoke")
+    @Authorize(action = "customer.mcp-connect.revoke")
+    @Blocking
+    fun revokeMcpConnection(@PathParam("connectionId") connectionId: UUID): Response {
+        val revokeUrl = "${mcpConnectionsUrl()}/$connectionId/revoke"
+        return withMcpConnectCustomer { party ->
+            val response = upstream.post(revokeUrl, party.toString(), "", idempotencyKey = connectionId.toString())
+            when (response.status) {
+                Response.Status.NO_CONTENT.statusCode -> Response.noContent().build()
+                Response.Status.FORBIDDEN.statusCode -> forbidden("MCP connect revocation is not permitted")
+                Response.Status.NOT_FOUND.statusCode -> notFound("MCP connection was not found")
+                else -> mcpConnectUnavailable()
+            }
+        }
+    }
+
+    private fun mcpConnectionsUrl(): String =
+        "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/connections"
+
+    private fun withMcpConnectCustomer(call: (UUID) -> Response): Response {
+        val response = when {
+            !mcpConnectEnabled -> notFound("MCP connect is unavailable")
+            this::requestHeaders.isInitialized && !requestHeaders.getHeaderString(ACTING_FOR_HEADER).isNullOrBlank() ->
+                forbidden("MCP connect requires the customer's own app session")
+            else -> appSessionCustomer()?.let { call(it.partyId) }
+                ?: forbidden("MCP connect requires the customer's own app session")
+        }
+        return Response.fromResponse(response).header("Cache-Control", "no-store").build()
+    }
+
+    private fun withMcpConnectRequest(requestRef: String, call: (String, UUID) -> Response): Response =
+        withMcpConnectCustomer { party ->
+            if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
+                call("${mcpConnectRequestsUrl()}/$requestRef", party)
+            } else {
+                badRequest("Invalid MCP connect request reference")
+            }
+        }
+
+    private fun mcpConnectRequestsUrl(): String =
+        "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/requests"
+
+    private fun mcpConnectReviewResult(response: Response, party: UUID, requestRef: String): Response =
+        mcpConnectResult(response, CustomerMcpConnectReview::class.java) {
+            it.partyId == party && it.requestRef == requestRef
+        }
+
+    private fun <T : Any> mcpConnectResult(
+        response: Response,
+        type: Class<T>,
+        isExpectedReview: (T) -> Boolean,
+    ): Response = when (response.status) {
+        200 -> runCatching {
+            val view = requireNotNull(objectMapper.readValue(response.entity as String, type))
+            require(isExpectedReview(view))
+            Response.ok(view).build()
+        }.getOrElse { mcpConnectUnavailable() }
+        400 -> badRequest("Invalid MCP connect request")
+        403 -> forbidden("MCP connect request is not permitted")
+        404 -> notFound("MCP connect request was not found")
+        Response.Status.CONFLICT.statusCode -> Response.status(Response.Status.CONFLICT)
+            .entity(mapOf("error" to "MCP connect request is no longer selectable")).build()
+        else -> mcpConnectUnavailable()
+    }
+
+    private fun mcpConnectUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("error" to "MCP connect is temporarily unavailable")).build()
+
     // --- ADR-0383 D6: payment proposals from a connected MCP client ---
 
     /**
@@ -3482,9 +3614,8 @@ class CustomerEdgeResource(
     }
 
     /**
-     * ADR-0383 D6: only the customer's OWN app session may see or decide a proposal — never a
-     * delegated (`act`) token, never another client's token (so never an MCP client's), never a
-     * business acting-for context.
+     * Require the customer's own app session for MCP connect and proposal actions. Excludes
+     * delegated (`act`) tokens, other clients and business acting-for contexts.
      */
     private fun appSessionCustomer(): CustomerIdentity? {
         // azp alone names the client; the audience is what only the bank app's own login carries
@@ -6306,6 +6437,7 @@ class CustomerEdgeResource(
         /** Dynamic-linking keys an additive caller may never supply (see [scaGate]). */
         private const val APP_CLIENT_ID = "openbank-app"
         private const val EDGE_AUDIENCE = "openbank-edge"
+        private val MCP_CONNECT_REQUEST_REF = Regex("^[0-9a-f]{64}$")
         private const val MCP_PROPOSAL_APP_ONLY = "Proposals can only be viewed and approved in the bank app"
         internal val PAYMENT_LINKING_KEYS = setOf("amount", "currency", "creditor", "partyId")
 

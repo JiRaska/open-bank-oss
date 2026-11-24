@@ -406,3 +406,14 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## MCP connect receipt access
+
+The consumed-receipt endpoint accepts the exact Delegation service principal. The
+runtime identity guard and OPA policy protect the receipt independently. It returns
+a receipt only for the requested, consumed MCP connect challenge and marks it
+`Cache-Control: no-store`. A storage outage returns a service error. The consumer
+checks the party and context against its pending connection before granting access.
+A compromised authorized Delegation workload could read receipt metadata for a known
+challenge ID; the private listener and explicit network policy limit access to
+the service path.

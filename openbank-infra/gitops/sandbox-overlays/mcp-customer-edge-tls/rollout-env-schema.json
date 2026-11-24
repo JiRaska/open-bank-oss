@@ -1,0 +1,50 @@
+{
+  "definitions": {
+    "RolloutEnv": {
+      "type": "object",
+      "properties": {
+        "spec": {
+          "type": "object",
+          "properties": {
+            "template": {
+              "type": "object",
+              "properties": {
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "containers": {
+                      "type": "array",
+                      "x-kubernetes-patch-strategy": "merge",
+                      "x-kubernetes-patch-merge-key": "name",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "env": {
+                            "type": "array",
+                            "x-kubernetes-patch-strategy": "merge",
+                            "x-kubernetes-patch-merge-key": "name",
+                            "items": {
+                              "type": "object",
+                              "properties": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-kubernetes-group-version-kind": [
+        {
+          "group": "argoproj.io",
+          "version": "v1alpha1",
+          "kind": "Rollout"
+        }
+      ]
+    }
+  }
+}

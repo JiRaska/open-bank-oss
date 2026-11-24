@@ -23,8 +23,7 @@ import java.util.UUID;
 final class McpBalancePermitClient {
     private static final Duration TIMEOUT = Duration.ofSeconds(4);
     private static final int MAX_RESPONSE_BYTES = 4096;
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER).build();
+    private static final HttpClient HTTP = McpOutboundHttp.create(TIMEOUT);
 
     private final URI endpoint;
     private final Clock clock;

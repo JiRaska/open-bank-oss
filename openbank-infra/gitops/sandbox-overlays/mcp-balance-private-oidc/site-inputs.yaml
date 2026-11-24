@@ -1,0 +1,21 @@
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: balance-mcp-oidc-trust
+  namespace: balances
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: balance-mcp-oidc-trust
+    creationPolicy: Owner
+  data:
+  - secretKey: ca.crt
+    remoteRef:
+      key: mcp-synthetic-sandbox/balance-mcp-oidc-trust
+      property: ca.crt
