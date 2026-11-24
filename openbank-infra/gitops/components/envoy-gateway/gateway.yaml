@@ -229,6 +229,22 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: platform
+    - name: https-mcp
+      protocol: HTTPS
+      port: 443
+      hostname: mcp.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: mcp-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
     - name: https-rum
       protocol: HTTPS
       port: 443
