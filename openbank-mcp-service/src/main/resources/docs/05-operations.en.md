@@ -377,3 +377,5 @@ separately with valid synthetic accounts and the settlement boundary in place.
 ### ChatGPT hosted client registration
 
 The allowlist declares ChatGPT's exact published OAuth client ID and callback. The generated realm client pins the reviewed RS256 key set and uses private-key JWT authentication. The declaration stays disabled until sandbox deployment verifies the hosted authorization and refresh flow. Review key rotation against the vendor's published JWKS before updating the pin.
+
+The Claude sandbox registration is disabled by default and uses a confidential client exception authorized for 30 days. Start the sandbox with a dedicated secret from the bank secret store and supply it only to the authorized connector operator. Keep the callback fixed to the published Claude URL. Remove the sandbox registration and revoke its token families when the exception ends.
