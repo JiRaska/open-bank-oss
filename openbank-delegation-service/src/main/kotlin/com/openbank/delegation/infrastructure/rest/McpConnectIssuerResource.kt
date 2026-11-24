@@ -66,7 +66,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: Registration?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         val request = requireNotNull(body) { "registration is required" }.toRequest()
         requireMcpConnectIdempotencyKey(idempotencyKey, request.requestRef)
@@ -86,7 +86,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: McpConnectRequestStore.Binding?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val review = find(requestRef, requireNotNull(body) { "binding is required" })
@@ -102,7 +102,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: ChallengeBinding?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "challenge binding is required" }
@@ -132,7 +132,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "code binding is required" }
@@ -149,7 +149,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: CodeLookup?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         val lookup = requireNotNull(body) { "code binding is required" }
         requireMcpConnectIdempotencyKey(idempotencyKey, lookup.codeBindingRef)
@@ -171,7 +171,7 @@ class McpConnectIssuerResource(
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         @PathParam("requestRef") requestRef: String,
         body: StagedRequest?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         requireMcpConnectIdempotencyKey(idempotencyKey, requestRef)
         val link = requireNotNull(body) { "refresh family is required" }
@@ -198,7 +198,7 @@ class McpConnectIssuerResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerParty: String?,
         body: FamilyLookup?,
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         requireIssuer(customerParty)
         val lookup = requireNotNull(body) { "refresh family is required" }
         requireMcpConnectIdempotencyKey(idempotencyKey, lookup.refreshFamilyRef)
@@ -218,7 +218,7 @@ class McpConnectIssuerResource(
     private fun stagedEnvelope(
         review: McpConnectRequestStore.Review,
         stage: McpConnectRequestStore.StageBinding,
-    ): Map<String, Any> = envelope(review.request, "APPROVED_AWAITING_FAMILY") + mapOf(
+    ): Map<String, Any?> = envelope(review.request, "APPROVED_AWAITING_FAMILY") + mapOf(
         "redirectHost" to review.request.redirectHost,
         "resource" to review.request.resource,
         "scopes" to review.request.scopes.sorted(),
@@ -280,7 +280,7 @@ class McpConnectIssuerResource(
         return McpConnectRequestStore.Challenge(id, hash)
     }
 
-    private fun envelope(request: McpConnectRequestStore.Request, status: String): Map<String, Any> = mapOf(
+    private fun envelope(request: McpConnectRequestStore.Request, status: String): Map<String, Any?> = mapOf(
         "requestRef" to request.requestRef,
         "partyId" to request.partyId,
         "clientId" to request.clientId,
@@ -310,14 +310,14 @@ class McpConnectIssuerResource(
         val requestRef: String,
         val partyId: UUID,
         val clientId: String,
-        val parJkt: String,
+        val parJkt: String?,
         val redirectHost: String,
         val resource: String,
         val scopes: Set<String?>,
         val expiresAtEpochSecond: Long,
     ) {
         fun toRequest(): McpConnectRequestStore.Request {
-            require(REQUEST_REF.matches(requestRef) && JKT.matches(parJkt)) { "invalid connect binding" }
+            require(REQUEST_REF.matches(requestRef) && (parJkt == null || JKT.matches(parJkt))) { "invalid connect binding" }
             require(clientId.isNotBlank() && clientId.length <= DelegationGrant.CLIENT_ID_MAX_LENGTH) {
                 "invalid client"
             }
@@ -351,7 +351,7 @@ class McpConnectIssuerResource(
     data class ChallengeBinding(
         val partyId: UUID,
         val clientId: String,
-        val parJkt: String,
+        val parJkt: String?,
         val challengeId: UUID,
         val approvalRequestId: String,
         val contextSha256: String,
@@ -360,7 +360,7 @@ class McpConnectIssuerResource(
     data class StagedRequest(
         val partyId: UUID,
         val clientId: String,
-        val parJkt: String,
+        val parJkt: String?,
         val challengeId: UUID,
         val approvalRequestId: String,
         val contextSha256: String,
@@ -370,9 +370,9 @@ class McpConnectIssuerResource(
         fun binding() = McpConnectRequestStore.Binding(partyId, clientId, parJkt)
     }
 
-    data class CodeLookup(val partyId: UUID, val clientId: String, val parJkt: String, val codeBindingRef: String)
+    data class CodeLookup(val partyId: UUID, val clientId: String, val parJkt: String?, val codeBindingRef: String)
 
-    data class FamilyLookup(val partyId: UUID, val clientId: String, val parJkt: String, val refreshFamilyRef: String)
+    data class FamilyLookup(val partyId: UUID, val clientId: String, val parJkt: String?, val refreshFamilyRef: String)
 
     private companion object {
         const val KEYCLOAK_CONNECT_CLIENT = "openbank-keycloak-mcp"

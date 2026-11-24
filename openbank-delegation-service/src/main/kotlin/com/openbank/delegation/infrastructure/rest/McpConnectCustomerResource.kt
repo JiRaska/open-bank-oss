@@ -130,7 +130,7 @@ class McpConnectCustomerResource(
         val redirectHost: String,
         val resource: String,
         val scopes: Set<String>,
-        val parJkt: String,
+        val parJkt: String?,
         val expiresAtEpochSecond: Long,
         val status: String,
         val accounts: List<McpConnectRequestStore.AccountSelection>,

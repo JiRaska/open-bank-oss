@@ -67,6 +67,7 @@ class McpConnectContextV2Test {
             requestUri = input["request_uri"].asText(),
             expiresAt = input["expires_at"].asLong(),
         )
-        return McpConnectContextV2.of(base, input["party_id"].asText(), input["par_jkt"].asText(), accounts)
+        val thumbprint = input["par_jkt"].takeUnless(JsonNode::isNull)?.asText()
+        return McpConnectContextV2.of(base, input["party_id"].asText(), thumbprint, accounts)
     }
 }

@@ -122,8 +122,9 @@ paths:
       summary: Customer MCP channel JSON-RPC endpoint (ADR-0383 / ADR-0385, #16847)
       description: >-
         The customer channel's own root, off by default. Served only on the mTLS listener the edge
-        reaches (404 on plain HTTP) and authenticated only by the DPoP scheme against the customers
-        realm; the DPoP proof `htu` must be this URL as the client sees it.
+        reaches (404 on plain HTTP). The customers realm authenticates DPoP and allowlisted Tier H
+        bearer credentials. DPoP proof `htu` must match the externally visible URL. Tier H bearer
+        requests require the signed identifier of the active approved connection.
       requestBody:
         required: true
         content:

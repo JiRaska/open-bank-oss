@@ -30,8 +30,8 @@ import java.util.UUID
  * 5. the DPoP proof verifies against the request (`htm`, `htu` = the published resource, `iat`
  *    window, `ath`, `cnf.jkt`, `jti` replay) via the ADR-0320 primitive.
  *
- * Tier H bearer tokens (ADR-0385's recorded exception) are NOT admitted in this slice: every
- * customer token must be DPoP-bound until that exception path is built and reviewed.
+ * Tier H may instead present a verified bearer access token with an explicit connection binding.
+ * The token issuer checks confidential client authentication before creating that connection.
  */
 class CustomerChannelAdmission internal constructor(
     val issuer: String,
@@ -64,7 +64,7 @@ class CustomerChannelAdmission internal constructor(
         data class Admitted(
             val context: ConsentContext,
             val client: McpClientAllowlist.Client,
-            val keyThumbprint: String,
+            val keyThumbprint: String?,
             val connectionId: UUID? = null,
         ) : Outcome
 
@@ -85,7 +85,13 @@ class CustomerChannelAdmission internal constructor(
     fun isCustomerToken(jwt: JsonWebToken): Boolean = jwt.issuer != null && jwt.issuer == issuer
 
     /** The 401 for a request that carries no token at all (RFC 9728 §5.1, RFC 6750 §3.1: no error code). */
-    fun missingTokenChallenge(): String = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
+    fun missingTokenChallenge(): String {
+        val dpop = "DPoP algs=\"$ALGS\", resource_metadata=\"$resourceMetadataUrl\""
+        val hostedEnabled = requireConnection && allowlist.clients.values.any {
+            it.enabled && it.tier == McpClientAllowlist.Tier.H
+        }
+        return if (hostedEnabled) "Bearer resource_metadata=\"$resourceMetadataUrl\", $dpop" else dpop
+    }
 
     /**
      * @param throttles the D5.3 budgets; see [Throttles] for which runs before and which after the
@@ -109,6 +115,19 @@ class CustomerChannelAdmission internal constructor(
                 ?: return invalidToken("token has no valid MCP connection")
             CLAIM_CONNECTION_ID in jwt.claimNames -> return invalidToken("MCP connection binding is unavailable")
             else -> null
+        }
+        if (
+            client.tier == McpClientAllowlist.Tier.H && connectionId != null &&
+            CLAIM_CNF !in jwt.claimNames && dpopHeaders.isEmpty() &&
+            stringValue(jwt.getClaim<Any?>("typ")) == "Bearer" &&
+            jwt.rawToken?.let { it.isNotBlank() && authorization == "Bearer $it" } == true
+        ) {
+            return try {
+                val refusal = throttles.client(client.clientId) ?: throttles.subject(subject, client.clientId)
+                if (refusal != null) throttled(refusal) else admitted(subject, client, null, connectionId)
+            } catch (_: SharedStoreUnavailableException) {
+                storeUnavailable()
+            }
         }
         val jkt = confirmationJkt(jwt) ?: return invalidToken("token is not DPoP-bound")
         val presented = dpopToken(authorization) ?: return invalidToken("DPoP authorization scheme required")
@@ -170,25 +189,32 @@ class CustomerChannelAdmission internal constructor(
         return outcomeOf(result, req)
     }
 
+    private fun admitted(
+        subject: String,
+        client: McpClientAllowlist.Client,
+        keyThumbprint: String?,
+        connectionId: UUID?,
+    ) = Outcome.Admitted(
+        ConsentContext(
+            agentId = subject,
+            consentId = "",
+            grantedAccounts = emptyList(),
+            actChain = listOf(client.clientId),
+            sessionId = null,
+            principalType = PRINCIPAL_HUMAN,
+            roles = emptyList(),
+            serviceAccount = false,
+            channel = CHANNEL,
+        ),
+        client,
+        keyThumbprint,
+        connectionId,
+    )
+
     private fun throttled(reason: String) = Outcome.Refused(STATUS_TOO_MANY, null, reason, throttled = true)
 
     private fun outcomeOf(result: DpopResult, request: ProofRequest): Outcome = when (result) {
-        DpopResult.VALID -> Outcome.Admitted(
-            ConsentContext(
-                agentId = request.subject,
-                consentId = "",
-                grantedAccounts = emptyList(),
-                actChain = listOf(request.client.clientId),
-                sessionId = null,
-                principalType = PRINCIPAL_HUMAN,
-                roles = emptyList(),
-                serviceAccount = false,
-                channel = CHANNEL,
-            ),
-            request.client,
-            request.jkt,
-            request.connectionId,
-        )
+        DpopResult.VALID -> admitted(request.subject, request.client, request.jkt, request.connectionId)
         DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
         DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
         DpopResult.REPLAY_STORE_UNAVAILABLE -> storeUnavailable()

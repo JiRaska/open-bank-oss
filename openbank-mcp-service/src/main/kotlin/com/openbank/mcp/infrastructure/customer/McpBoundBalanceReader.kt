@@ -45,6 +45,18 @@ interface McpBoundBalanceIssuer {
         @FormParam("account_id") accountId: UUID,
         @FormParam("connection_id") connectionId: UUID?,
     ): JsonNode
+
+    @POST
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    @Produces(MediaType.APPLICATION_JSON)
+    fun issueHosted(
+        @FormParam("grant_type") grantType: String,
+        @FormParam("client_id") clientId: String,
+        @FormParam("subject_token") subjectToken: String,
+        @FormParam("hosted_read_id") readId: UUID,
+        @FormParam("account_id") accountId: UUID,
+        @FormParam("connection_id") connectionId: UUID,
+    ): JsonNode
 }
 
 @RegisterRestClient(configKey = "mcp-bound-balance")
@@ -79,9 +91,16 @@ class McpBoundBalanceReader(
             issuerTls.isPresent && issuerTls == balanceTls,
             "bound balance delegation requires one shared client TLS configuration",
         )
-        val proof = caller.resourceProof ?: throw TokenExchangeRefused("verified resource proof is unavailable")
-        val connectionId = caller.grantKey?.connectionId
-        val answer = issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId)
+        val key = caller.grantKey
+        val connectionId = key?.connectionId
+        val answer = if (key != null && key.keyThumbprint == null) {
+            refuseUnless(caller.resourceProof == null, "hosted balance request cannot carry a DPoP proof")
+            val boundConnection = connectionId ?: throw TokenExchangeRefused("hosted connection binding is unavailable")
+            issuer.issueHosted(GRANT_TYPE, CLIENT, caller.rawToken, UUID.randomUUID(), grant.accountId, boundConnection)
+        } else {
+            val proof = caller.resourceProof ?: throw TokenExchangeRefused("verified resource proof is unavailable")
+            issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId)
+        }
         return readBalance(grant.accountId, validated(answer, caller.subject, grant, connectionId))
     }
 

@@ -1080,7 +1080,7 @@ paths:
       tags: [Delegations]
       summary: Authorize one balance read for the internal token issuer
       description: |
-        Reserved to the dedicated bank read issuer service account after independent DPoP verification.
+        Reserved to the dedicated bank read issuer service account after independent customer credential verification.
         A permit requires an active account grant, current ownership and a committed first proof claim.
       requestBody:
         required: true
@@ -1092,7 +1092,10 @@ paths:
               properties:
                 partyId: { type: string, format: uuid }
                 clientId: { type: string, minLength: 1, maxLength: 255 }
-                keyThumbprint: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                keyThumbprint:
+                  type: [string, 'null']
+                  pattern: '^[A-Za-z0-9_-]{43}$'
+                  description: Verified DPoP thumbprint or null for a hosted grant with a connectionId.
                 accountId: { type: string, format: uuid }
                 proofKey: { type: string, pattern: '^[0-9a-f]{64}$' }
                 connectionId: { type: string, format: uuid }
@@ -1677,7 +1680,10 @@ components:
       properties:
         partyId: { type: string, format: uuid }
         clientId: { type: string, minLength: 1, maxLength: 255 }
-        parJkt: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        parJkt:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Verified PAR DPoP thumbprint, or null for a confidential hosted client.
     McpConnectIssuerRegistration:
       allOf:
         - $ref: '#/components/schemas/McpConnectIssuerBinding'
@@ -1733,7 +1739,10 @@ components:
         requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
         partyId: { type: string, format: uuid }
         clientId: { type: string, minLength: 1, maxLength: 255 }
-        parJkt: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        parJkt:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Verified PAR DPoP thumbprint, or null for a confidential hosted client.
         redirectHost: { type: string }
         resource: { type: string, format: uri }
         scopes: { type: array, items: { type: string } }
@@ -1784,7 +1793,10 @@ components:
         scopes:
           type: array
           items: { type: string }
-        parJkt: { type: string }
+        parJkt:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Verified PAR DPoP thumbprint, or null for a confidential hosted client.
         expiresAtEpochSecond: { type: integer, format: int64 }
         status: { type: string, enum: [PENDING_SELECTION, SELECTED, CHALLENGE_BOUND, ACTIVE] }
         accounts:

@@ -187,6 +187,14 @@ class CustomerReadToolsTest {
         claims.put(connectionClaim, connectionId.toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+        val hostedCaller = scopedCaller.copy(grantKey = scopedKey.copy(keyThumbprint = null), resourceProof = null)
+        every {
+            issuer.issueHosted(any(), any(), "customer-token", any(), account, connectionId)
+        } answers { boundPermit(claims) }
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, hostedCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+        verify(exactly = 1) { issuer.issueHosted(any(), any(), "customer-token", any(), account, connectionId) }
+
         claims.put(connectionClaim, UUID.randomUUID().toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
@@ -197,7 +205,7 @@ class CustomerReadToolsTest {
         claims.put("account_id", UUID.randomUUID().toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, boundCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
-        verify(exactly = 2) { balance.read(any(), any()) }
+        verify(exactly = 3) { balance.read(any(), any()) }
         verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
         verify(exactly = 0) { downstream.balances(any(), any()) }
     }

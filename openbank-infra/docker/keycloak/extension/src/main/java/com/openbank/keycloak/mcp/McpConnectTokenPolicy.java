@@ -5,6 +5,9 @@ package com.openbank.keycloak.mcp;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -36,6 +39,7 @@ final class McpConnectTokenPolicy {
         if (!McpClientGuardExecutor.isMcp(client)) {
             return;
         }
+        requireHostedClientAuthentication(client);
         var factory = factory(session);
         if (factory.allowsLegacyV1()) {
             return;
@@ -44,7 +48,7 @@ final class McpConnectTokenPolicy {
             McpConnectAuthorityClient authority = factory.tokenAuthority();
             BoundFamily bound = boundFamily(session, client, context.getAccessTokenResponseBuilder());
             var code = context.getParseResult().getCodeData();
-            if (!"S256".equals(code.getCodeChallengeMethod()) || !bound.jkt().equals(code.getDpopJkt())
+            if (!"S256".equals(code.getCodeChallengeMethod()) || !Objects.equals(bound.jkt(), code.getDpopJkt())
                     || !client.getId().equals(code.getClientUUID()) || !bound.sessionId().equals(code.getUserSessionId())) {
                 throw deny();
             }
@@ -67,6 +71,7 @@ final class McpConnectTokenPolicy {
         if (!McpClientGuardExecutor.isMcp(client)) {
             return;
         }
+        requireHostedClientAuthentication(client);
         var factory = factory(session);
         if (factory.allowsLegacyV1()) {
             return;
@@ -78,6 +83,40 @@ final class McpConnectTokenPolicy {
             bindConnection(context.getAccessTokenResponseBuilder().getAccessToken(), connection);
         } catch (IOException | RuntimeException e) {
             throw deny();
+        }
+    }
+
+    /**
+     * Keycloak has already authenticated the client before either response hook. Enforce the
+     * bank's allowed authenticator and the runtime exception deadline even on an imported realm.
+     */
+    private static void requireHostedClientAuthentication(ClientModel client) throws ClientPolicyException {
+        if (!"H".equals(client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))) {
+            return;
+        }
+        if (!hostedClientAuthenticationAllowed(client)) {
+            throw new ClientPolicyException(OAuthErrorException.INVALID_CLIENT,
+                    "MCP hosted client authentication is unavailable");
+        }
+    }
+
+    static boolean hostedClientAuthenticationAllowed(ClientModel client) {
+        return !client.isPublicClient() && switch (client.getClientAuthenticatorType()) {
+            case "client-jwt" -> true;
+            case "client-secret" -> validSecretException(
+                    client.getAttribute("openbank.mcp.secret_exception_expires"), LocalDate.now(ZoneOffset.UTC));
+            case null, default -> false;
+        };
+    }
+
+    static boolean validSecretException(String expiry, LocalDate today) {
+        if (expiry == null) {
+            return false;
+        }
+        try {
+            return !LocalDate.parse(expiry).isBefore(today);
+        } catch (DateTimeParseException e) {
+            return false;
         }
     }
 
@@ -98,22 +137,30 @@ final class McpConnectTokenPolicy {
         String issuer = Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName());
         String party = McpWithheldCodeAuthenticator.partyOf(user).orElseThrow(McpConnectTokenPolicy::deny);
         String sid = userSession.getId();
-        if (!"openbank-customers".equals(realm.getName()) || !"L".equals(client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))
+        String tier = client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE);
+        if (!"openbank-customers".equals(realm.getName()) || !McpConnectPolicy.isMcpClient(tier)
                 || !client.getId().equals(clientSession.getClient().getId()) || userSession.isOffline()
                 || !realm.isRevokeRefreshToken() || realm.getRefreshTokenMaxReuse() != 0
-                || access == null || refresh == null || !DPoPUtil.DPOP_TOKEN_TYPE.equals(access.getType())
+                || access == null || refresh == null
                 || !TokenUtil.TOKEN_TYPE_REFRESH.equals(refresh.getType()) || !issuer.equals(access.getIssuer())
                 || !issuer.equals(refresh.getIssuer()) || !user.getId().equals(access.getSubject())
                 || !user.getId().equals(refresh.getSubject()) || !sid.equals(access.getSessionId())
                 || !sid.equals(refresh.getSessionId()) || !client.getClientId().equals(access.getIssuedFor())
                 || !client.getClientId().equals(refresh.getIssuedFor()) || !Objects.equals(party, access.getOtherClaims().get("party_id"))
-                || access.getConfirmation() == null || refresh.getConfirmation() == null || proof == null) {
+                || !(refresh.getOtherClaims().get(Constants.REUSE_ID) instanceof String reuseId)) {
             throw deny();
         }
-        String jkt = proof.getThumbprint();
-        if (jkt == null || !jkt.equals(access.getConfirmation().getKeyThumbprint())
-                || !jkt.equals(refresh.getConfirmation().getKeyThumbprint())
-                || !(refresh.getOtherClaims().get(Constants.REUSE_ID) instanceof String reuseId)) {
+        String jkt = null;
+        if (proof != null) {
+            jkt = proof.getThumbprint();
+            if (jkt == null || !DPoPUtil.DPOP_TOKEN_TYPE.equals(access.getType())
+                    || access.getConfirmation() == null || refresh.getConfirmation() == null
+                    || !jkt.equals(access.getConfirmation().getKeyThumbprint())
+                    || !jkt.equals(refresh.getConfirmation().getKeyThumbprint())) {
+                throw deny();
+            }
+        } else if (!"H".equals(tier) || !"Bearer".equals(access.getType())
+                || access.getConfirmation() != null || refresh.getConfirmation() != null) {
             throw deny();
         }
         return new BoundFamily(party, sid, jkt, McpConnectTokenReferences.family(realm.getId(), sid, client.getId(), reuseId));

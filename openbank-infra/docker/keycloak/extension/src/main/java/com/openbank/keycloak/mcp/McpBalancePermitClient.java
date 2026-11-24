@@ -63,7 +63,8 @@ final class McpBalancePermitClient {
 
     static Map<String, String> permitBody(McpReadDelegationEvidence.Verified evidence, UUID accountId, String proofKey) {
         var body = new HashMap<>(Map.of("partyId", evidence.partyId().toString(), "clientId", evidence.clientId(),
-                "keyThumbprint", evidence.keyThumbprint(), "accountId", accountId.toString(), "proofKey", proofKey));
+                "accountId", accountId.toString(), "proofKey", proofKey));
+        body.put("keyThumbprint", evidence.keyThumbprint());
         if (evidence.connectionId() != null) {
             body.put("connectionId", evidence.connectionId().toString());
         }

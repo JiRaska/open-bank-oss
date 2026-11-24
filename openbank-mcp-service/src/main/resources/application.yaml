@@ -51,6 +51,11 @@ quarkus:
         issuer: ${mcp.customer.issuer}
         # RFC 9449: customer tokens arrive as `Authorization: DPoP <token>`.
         authorization-scheme: DPoP
+    customers-hosted:
+      tenant-enabled: ${MCP_CUSTOMER_ENABLED:false}
+      auth-server-url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      token:
+        issuer: ${mcp.customer.issuer}
   # Outbound M2M client-credentials auth (ADR-0195 step 3) — mirrors agent-service's oidc-client
   # exactly: DownstreamClients / ConsentValidateClient (@RegisterProvider
   # OidcClientRequestReactiveFilter) mint an `openbank-services` token and attach it as a Bearer, so
@@ -289,12 +294,8 @@ openbank:
             paths: /mcp,/mcp/*,/api/v1/mcp/sessions,/api/v1/mcp/sessions/*,/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource/*
             policy: permit
             auth-mechanism: bearer
-          # #16847 (owner decision 2026-11-21, option b): the customer channel's own root takes the
-          # RFC 9449 DPoP scheme ONLY. Measured: under `bearer` an `Authorization: DPoP` request is never
-          # authenticated by the customers tenant (its htu check never runs), and the permission is
-          # global to both listeners, so the two schemes need two roots. CustomerMcpEndpoint also
-          # answers 404 off the mTLS listener.
-          customer-dpop:
+          # Bind both customer OAuth schemes to OIDC, never to the Gateway certificate.
+          customer-oidc:
             paths: /customer/mcp,/customer/mcp/*
             policy: permit
-            auth-mechanism: DPoP
+            auth-mechanism: customer-oidc

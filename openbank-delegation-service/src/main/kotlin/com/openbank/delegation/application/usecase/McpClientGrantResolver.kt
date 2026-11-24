@@ -44,6 +44,25 @@ class McpClientGrantResolver(private val delegationRepository: DelegationReposit
         connectionId: UUID,
     ): List<DelegationGrant> = resolveBound(grantorPartyId, clientId, keyThumbprint, connectionId)
 
+    override suspend fun resolveHostedConnection(
+        grantorPartyId: UUID,
+        clientId: String,
+        connectionId: UUID,
+    ): List<DelegationGrant> {
+        val now = OffsetDateTime.now(clock)
+        val granteeId = DelegationGrant.mcpClientGranteeId(clientId)
+        return delegationRepository.findActiveHostedMcpClientGrants(grantorPartyId, clientId, connectionId).filter {
+            it.grantorPartyId == grantorPartyId &&
+                it.granteePartyId == granteeId &&
+                it.granteeType == DelegationGranteeType.MCP_CLIENT &&
+                it.granteeClientId == clientId &&
+                it.mcpConnectionId == connectionId &&
+                it.granteeKeyThumbprint == null &&
+                it.exposure == null &&
+                it.isActiveOn(now)
+        }
+    }
+
     private suspend fun resolveBound(
         grantorPartyId: UUID,
         clientId: String,

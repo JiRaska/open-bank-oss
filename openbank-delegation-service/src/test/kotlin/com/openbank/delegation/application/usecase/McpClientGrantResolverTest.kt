@@ -81,6 +81,21 @@ class McpClientGrantResolverTest {
     }
 
     @Test
+    fun `hosted lookup requires the exact connection and rejects DPoP grants`() {
+        val connection = UUID.randomUUID()
+        val hosted = grant().copy(mcpConnectionId = connection, granteeKeyThumbprint = null)
+        val dpop = hosted.copy(granteeKeyThumbprint = jkt)
+        val otherParty = hosted.copy(grantorPartyId = UUID.randomUUID())
+        val otherConnection = hosted.copy(mcpConnectionId = UUID.randomUUID())
+        coEvery {
+            repository.findActiveHostedMcpClientGrants(party, clientId, connection)
+        } returns listOf(hosted, dpop, otherParty, otherConnection)
+
+        val resolved = runBlocking { resolver.resolveHostedConnection(party, clientId, connection) }
+        assertThat(resolved).containsExactly(hosted)
+    }
+
+    @Test
     fun `a grant made by another party to the same client never matches (shared-grantee defect)`() {
         assertThat(given(grant(grantor = UUID.randomUUID()))).isEmpty()
     }
@@ -134,6 +149,25 @@ class McpClientGrantResolverTest {
         repeat(2) {
             assertThat(runBlocking { authorization.authorize(request) }).isNull()
         }
+    }
+
+    @Test
+    fun `hosted balance permit requires a connection and the first issuer proof claim`() {
+        val connection = UUID.randomUUID()
+        val grant = grant().copy(mcpConnectionId = connection, granteeKeyThumbprint = null)
+        val ownership = mockk<ResourceOwnershipClient>()
+        val replay = mockk<McpIssuerProofReplayStore>()
+        val authorization = McpBalanceReadAuthorization(resolver, ownership, replay)
+        val request = McpBalanceReadAuthorization.VerifiedRequest(party, clientId, null, grant.resourceId, "0".repeat(64))
+        assertThat(runBlocking { authorization.authorize(request) }).isNull()
+
+        coEvery { repository.findActiveHostedMcpClientGrants(party, clientId, connection) } returns listOf(grant)
+        coEvery { ownership.verifyOwnership(party, DelegationResourceType.ACCOUNT, grant.resourceId) } returns
+            OwnershipVerdict.OWNED
+        coEvery { replay.claim(request.proofKey) } returnsMany listOf(ReplayClaim.FIRST_USE, ReplayClaim.REPLAYED)
+        assertThat(runBlocking { authorization.authorize(request.copy(connectionId = connection)) }?.grantId)
+            .isEqualTo(grant.id)
+        assertThat(runBlocking { authorization.authorize(request.copy(connectionId = connection)) }).isNull()
     }
 
     @Test
