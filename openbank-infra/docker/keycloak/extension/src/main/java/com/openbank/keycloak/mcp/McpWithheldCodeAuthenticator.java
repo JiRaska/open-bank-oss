@@ -286,11 +286,16 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
 
     private static McpConnectAuthorityClient.Request v2Request(AuthenticationSessionModel auth, McpConnectContext base,
                                                               String party) {
-        if (!"L".equals(auth.getClient().getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))
-                || Arrays.asList(base.scopes().split(" ")).contains("offline_access")) {
-            throw new IllegalArgumentException("V2 requires an online Tier L connection");
+        var client = auth.getClient();
+        String tier = client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE);
+        String proof = auth.getAuthNote(McpNotes.PAR_PROOF_JKT);
+        if (Arrays.asList(base.scopes().split(" ")).contains("offline_access")
+                || ("L".equals(tier) && proof == null)
+                || ("H".equals(tier) && !McpConnectTokenPolicy.hostedClientAuthenticationAllowed(client))
+                || !McpConnectPolicy.isMcpClient(tier)) {
+            throw new IllegalArgumentException("V2 requires an authenticated online MCP connection");
         }
-        return new McpConnectAuthorityClient.Request(base, party, auth.getAuthNote(McpNotes.PAR_PROOF_JKT));
+        return new McpConnectAuthorityClient.Request(base, party, proof);
     }
 
     private static String codeBinding(AuthenticationFlowContext ctx, McpConnectAuthorityClient.Request request) {

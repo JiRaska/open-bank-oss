@@ -11,10 +11,13 @@ final class McpConnectTokenReferences {
     }
 
     static String codeBinding(String realmId, String partyId, String clientUuid, String jkt, String codeChallenge) {
-        McpConnectContextV2.requireCanonicalThumbprint(jkt);
         if (codeChallenge == null || !codeChallenge.matches("[A-Za-z0-9_-]{43}")) {
             throw new IllegalArgumentException("expected an S256 PKCE challenge");
         }
+        if (jkt == null) {
+            return reference("mcp-connect-hosted-code-binding/v1", realmId, partyId, clientUuid, codeChallenge);
+        }
+        McpConnectContextV2.requireCanonicalThumbprint(jkt);
         return reference("mcp-connect-code-binding/v1", realmId, partyId, clientUuid, jkt, codeChallenge);
     }
 
