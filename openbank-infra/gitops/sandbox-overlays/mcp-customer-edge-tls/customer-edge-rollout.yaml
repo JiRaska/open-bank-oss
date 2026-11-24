@@ -1,0 +1,25 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: customer-edge
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value:
+    name: sandbox-https
+    containerPort: 8443
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: sandbox-https-server
+    mountPath: /tls/sandbox-https
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: sandbox-https-server
+    secret:
+      secretName: customer-edge-mcp-sandbox-server-tls
+      items:
+      - key: tls.crt
+        path: tls.crt
+      - key: tls.key
+        path: tls.key

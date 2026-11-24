@@ -1,0 +1,6 @@
+- op: add
+  path: /spec/ports/-
+  value:
+    name: https-native
+    port: 8443
+    targetPort: https-native

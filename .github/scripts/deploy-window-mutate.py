@@ -147,12 +147,15 @@ def main(args: argparse.Namespace) -> None:
     should_arm = reselect(args.number, args.selected_head, args.selected_main)
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before arming; retry next flush")
-    latest = selected_pr(gh("api", f"repos/{repo}/pulls/{args.number}"), repo,
-                         args.number, args.selected_head)
+    latest_pr = gh("api", f"repos/{repo}/pulls/{args.number}")
+    latest = selected_pr(latest_pr, repo, args.number, args.selected_head)
     if latest != (node_id, branch):
         raise ValueError("selected deploy PR identity changed before arming")
     if not should_arm:
         print(f"::notice::repair priority is active; deploy PR #{args.number} remains unarmed")
+        return
+    if latest_pr.get("mergeable") is False or latest_pr.get("mergeable_state") == "dirty":
+        print(f"::notice::deploy PR #{args.number} has a merge conflict and remains unarmed")
         return
     gh("api", "graphql", "-f", "query=mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) {pullRequest {number}}}",
        "-f", f"id={node_id}")

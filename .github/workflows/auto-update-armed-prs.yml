@@ -33,6 +33,7 @@ concurrency:
 
 jobs:
   update:
+    if: github.event_name != 'schedule' || (vars.AUTO_UPDATE_ARMED_PRS_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: update behind + green + armed PRs
     runs-on: ubuntu-latest
     timeout-minutes: 10

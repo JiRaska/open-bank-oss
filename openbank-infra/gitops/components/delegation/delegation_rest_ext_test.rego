@@ -278,6 +278,45 @@ test_operator_is_prohibited_from_business_signing if {
 	prohibited with input as {"principal": operator, "action": "delegation.signing.approval.sign"}
 }
 
+# --- ADR-0383 D6 customer MCP payment proposals ---
+
+mcp := {"service_account": true, "client_id": "openbank-mcp", "type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+proposal_decisions := {
+	"delegation.proposal.read",
+	"delegation.proposal.approve",
+	"delegation.proposal.reject",
+	"delegation.proposal.execution",
+}
+
+test_mcp_may_create_a_proposal if {
+	allow with input as {"principal": mcp, "action": "delegation.proposal.create"}
+}
+
+test_mcp_may_not_read_approve_reject_or_record_execution if {
+	every action in proposal_decisions {
+		not allow with input as {"principal": mcp, "action": action}
+	}
+}
+
+test_edge_may_read_and_decide_its_customer_proposals if {
+	every action in proposal_decisions {
+		allow with input as {"principal": edge, "action": action}
+	}
+}
+
+test_edge_may_not_create_a_proposal if {
+	not allow with input as {"principal": edge, "action": "delegation.proposal.create"}
+}
+
+test_staff_and_shared_backend_may_not_touch_proposals if {
+	every principal in [operator, admin, services_m2m] {
+		every action in proposal_decisions | {"delegation.proposal.create"} {
+			not allow with input as {"principal": principal, "action": action}
+		}
+	}
+}
+
 # --- ADR-0383 D3: mcp-service resolving a customer's MCP_CLIENT grants ---
 
 mcp_m2m := {"service_account": true, "client_id": "openbank-mcp", "type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
@@ -308,4 +347,99 @@ test_renamed_machine_may_not_resolve_mcp_client_grants if {
 # machine_named's legacy branch admits a marker-less principal by name; this grant must not.
 test_mcp_name_without_service_account_marker_may_not_resolve if {
 	not allow with input as object.union(resolve, {"principal": {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}})
+}
+
+# --- proposal-create grant pinned to the service-account marker (defence in depth) ---
+
+markerless_mcp := {"type": "HUMAN", "id": "service-account-openbank-mcp", "roles": ["ROLE_API"]}
+
+test_genuine_mcp_service_account_may_create_proposal_pinned if {
+	allow with input as {"principal": mcp_m2m, "action": "delegation.proposal.create"}
+}
+
+test_mcp_name_without_marker_may_not_create_proposal if {
+	not allow with input as {"principal": markerless_mcp, "action": "delegation.proposal.create"}
+	prohibited with input as {"principal": markerless_mcp, "action": "delegation.proposal.create"}
+}
+
+test_human_named_mcp_with_service_account_false_may_not_create_proposal if {
+	p := object.union(mcp_m2m, {"service_account": false})
+	not allow with input as {"principal": p, "action": "delegation.proposal.create"}
+	prohibited with input as {"principal": p, "action": "delegation.proposal.create"}
+}
+
+authorize_balance_read := {"action": "delegation.mcp-client.authorize-balance-read"}
+
+mcp_read_issuer := {
+	"type": "HUMAN", "service_account": true, "client_id": "openbank-mcp-read-issuer",
+	"id": "service-account-openbank-mcp-read-issuer", "roles": ["ROLE_API"],
+}
+
+mcp_balance_reader := {
+	"type": "HUMAN", "service_account": true, "client_id": "openbank-balance-mcp-reader",
+	"id": "service-account-openbank-balance-mcp-reader", "roles": ["ROLE_API"],
+}
+
+test_dedicated_mcp_read_issuer_may_request_balance_permit if {
+	allow with input as object.union(authorize_balance_read, {"principal": mcp_read_issuer})
+}
+
+test_dedicated_mcp_read_issuer_is_vetoed_on_ordinary_delegation_reads if {
+	prohibited with input as {"principal": mcp_read_issuer, "action": "delegation.read"}
+}
+
+test_mcp_lookup_identity_may_not_request_balance_permit if {
+	principal := {
+		"type": "HUMAN", "service_account": true, "client_id": "openbank-mcp",
+		"id": "service-account-openbank-mcp", "roles": ["ROLE_API"],
+	}
+	prohibited with input as object.union(authorize_balance_read, {"principal": principal})
+}
+
+check_balance_grant := {"action": "delegation.mcp-client.check-balance-grant"}
+
+test_balance_reader_can_check_grant if {
+	allow with input as object.union(check_balance_grant, {"principal": mcp_balance_reader})
+}
+
+test_balance_reader_is_vetoed_on_ordinary_delegation_reads if {
+	prohibited with input as {"principal": mcp_balance_reader, "action": "delegation.read"}
+}
+
+test_mcp_read_identities_cannot_use_either_others_action if {
+	not allow with input as object.union(check_balance_grant, {"principal": mcp_read_issuer})
+	not allow with input as object.union(authorize_balance_read, {"principal": mcp_balance_reader})
+}
+
+test_shared_service_cannot_check_balance_grant if {
+	prohibited with input as object.union(check_balance_grant, {"principal": services_m2m})
+}
+
+test_mcp_connect_customer_actions_require_verified_edge if {
+    edge := {
+        "id": "service-account-openbank-edge",
+        "type": "HUMAN",
+        "client_id": "openbank-edge",
+        "service_account": true,
+        "roles": ["ROLE_API"],
+    }
+    every action in {"delegation.mcp-connect.customer.read", "delegation.mcp-connect.customer.select"} {
+        "mcp-connect-customer-edge" in allowed_reasons with input as {"action": action, "principal": edge}
+        prohibited with input as {"action": action, "principal": object.remove(edge, {"service_account"})}
+    }
+}
+
+test_mcp_connect_issuer_actions_require_keycloak_machine if {
+    issuer := {
+        "id": "service-account-openbank-keycloak-mcp",
+        "type": "HUMAN",
+        "client_id": "openbank-keycloak-mcp",
+        "service_account": true,
+        "roles": ["ROLE_API"],
+    }
+    every action in {"stage", "activate", "family-status"} {
+        operation := sprintf("delegation.mcp-connect.issuer.%s", [action])
+        "mcp-connect-issuer" in allowed_reasons with input as {"action": operation, "principal": issuer}
+        prohibited with input as {"action": operation, "principal": object.remove(issuer, {"service_account"})}
+    }
 }

@@ -171,6 +171,12 @@ BASELINE: dict[str, str] = {
     # `NetworkTokenStatus` pairs twice on ACTIVE/SUSPENDED alone, against a card-token lifecycle and
     # a party lifecycle. Neither is drift, and reconciling either would mean changing a customer
     # spec to match an enum it does not serve.
+    "openbank-customer-edge:ACTIVE,EXPIRED,PENDING_SCA,REJECTED,REVOKED,SUPERSEDED":
+        "#16996 — PSD2 consent status overlaps the MCP connection enum. Consent has its own "
+        "approval, rejection and supersession lifecycle.",
+    "openbank-customer-edge:ACTIVE,EXPIRED,PAID,PROCESSING,REJECTED":
+        "#16996 — nearby-pay session status overlaps the MCP connection enum. Payment "
+        "processing, payment and rejection belong to the session lifecycle.",
     "openbank-customer-edge:MASTERCARD,VISA":
         "#8810 — mis-pairing: card BRAND on the card resource vs libs CardScheme, which names the "
         "answering ADAPTER and carries SIMULATOR by design.",

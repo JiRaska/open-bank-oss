@@ -228,3 +228,21 @@ new payment from this result. This lookup consumes no SCA and sends no payment.
 ## Payment symbols (#16748)
 
 `variableSymbol` and `specificSymbol` must be 1-10 ASCII digits and `constantSymbol` 1-4 (libs-domain `CzechPaymentSymbol`; KS matches the domestic-payment column); a blank value counts as absent. Anything else is refused with 400 before the request goes further.
+
+## In-app approval of MCP payment proposals (ADR-0383 D6)
+
+A connected MCP client can only propose a payment; the customer decides in the app. The routes are `GET /mcp-proposals`, `GET /mcp-proposals/{id}`, `POST /mcp-proposals/{id}/reject` and `POST /mcp-proposals/{id}/approve`. They answer only to the customer's own app session (`azp` `openbank-app`, no `act`); anything else gets 403. Proposals are read from delegation-service by the token party, and a store outage is a 503, never "not found".
+
+`approve` takes `{ "payloadSha256" }` (64 hex characters) and the `X-SCA-Challenge-Id` header. Before any challenge is spent the edge recomputes the canonical SHA-256 from the stored instruction and refuses with 409 when the proposal is not `PENDING` (or `APPROVED` with no payment yet), is expired, is malformed, has an invalid stored hash, or the supplied hash differs. The debtor account must belong to the customer.
+
+The SCA challenge must be an approval challenge whose dynamic linking covers amount, currency and payee plus `approvalRequestId` (`mcp-proposal:<id>`) and `payloadSha256`; no SCA exemption applies. Order: challenge consumed, then the store's approve, then the payment is created as the customer's own domestic or SEPA payment built only from the stored instruction. The payment `Idempotency-Key` is `mcp-proposal-<id>`, so a retry after a failed payment (fresh SCA required) replays and never pays twice. A created payment is then recorded on the proposal as executed.
+
+Audit events: `CUSTOMER_MCP_PROPOSAL_APPROVED` once the store approved, `CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED` when the payment exists but the store did not record the execution (the proposal still reads `APPROVED` until reconciled), and `CUSTOMER_MCP_PROPOSAL_REFUSED` for a refused approval.
+
+## MCP connection approval
+
+With the customer connect feature enabled, a personal first-party app session can read a
+pending connection review, select eligible owned accounts, list active connections, and
+revoke an owned connection. The review supplies the approved capability options and the
+selection is forwarded to Delegation over its internal authenticated route. Revocation
+uses the connection ID as the idempotency key across the Edge and Delegation boundary.

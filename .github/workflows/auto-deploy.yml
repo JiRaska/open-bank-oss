@@ -236,7 +236,7 @@ jobs:
           set -euo pipefail
           # Static on purpose and drift-prone: check-deploy-coverage.sh keeps it equal to the fleet.
           # Every past gap (and why) lives in docs/ci/auto-deploy-service-list-history.md.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-card-processing-service openbank-document-renderer openbank-pension-service openbank-tax-reporting-service openbank-pension-fund-service'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-card-processing-service openbank-document-renderer openbank-pension-service openbank-tax-reporting-service openbank-pension-fund-service openbank-fetch-broker'
 
           reconcile_candidates() {
             # Scheduled and on-demand reconcile must use the hold on LIVE main.
@@ -725,6 +725,7 @@ jobs:
         env:
           NEEDS_CHANGES_SERVICES: ${{ needs.changes.outputs.services }}
           STEP_BUILD_TAG: ${{ steps.build.outputs.tag }}
+          AUTO_DEPLOY_MAX_PARALLEL: ${{ vars.AUTO_DEPLOY_MAX_PARALLEL || '3' }}
         run: |
           set -euo pipefail
           SERVICES="${NEEDS_CHANGES_SERVICES}"
@@ -816,7 +817,8 @@ jobs:
               "$metadata" > "${RUNNER_TEMP}/image-digest-${svc}" || return 1
           }
 
-          MAX_PARALLEL=3   # limit concurrent buildx to avoid OOM on 16GB Docker host
+          MAX_PARALLEL="${AUTO_DEPLOY_MAX_PARALLEL}"   # concurrent buildx; >4 risks OOM on a 16GB host
+          case "$MAX_PARALLEL" in [1-4]) ;; *) echo "::warning::AUTO_DEPLOY_MAX_PARALLEL='${MAX_PARALLEL}' is not an integer in [1, 4]; using default 3"; MAX_PARALLEL=3 ;; esac
           RUNNING=0; PIDS=(); SVCS=()
 
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
@@ -1526,7 +1528,7 @@ jobs:
             pruned=0
             : > "${PLACEHOLDER_FILE}.new"
             while IFS= read -r line || [ -n "$line" ]; do
-              if printf '%s' "$line" | grep -qE '^[[:space:]]*(#|$)' \
+              if printf '%s\n' "$line" | grep -qE '^[[:space:]]*(#|$)' \
                  || printf '%s\n' "$declared" | grep -qxF "$line"; then
                 printf '%s\n' "$line" >> "${PLACEHOLDER_FILE}.new"
               else

@@ -30,6 +30,7 @@ import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
+import com.openbank.sca.domain.model.ConsumerScope
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
@@ -84,11 +85,21 @@ class ScaChallengeExpiredException(id: UUID) : RuntimeException("SCA challenge e
 class ScaChallengeMaxAttemptsException(id: UUID) : RuntimeException("Max attempts exceeded for challenge: $id")
 class ScaVerificationFailedException(id: UUID) : RuntimeException("SCA verification failed for challenge: $id")
 class ScaChallengeNotAwaitingException(id: UUID) : RuntimeException("SCA challenge is not awaiting a decision: $id")
-class ScaChallengeNotApprovedException(id: UUID) : RuntimeException("SCA challenge is not approved: $id")
+
+/**
+ * [status] is the challenge's status at the refusal: PENDING means "not decided yet" (a poller may
+ * keep waiting), anything else is final (denied, failed, cancelled).
+ */
+class ScaChallengeNotApprovedException(id: UUID, val status: ScaStatus? = null) :
+    RuntimeException("SCA challenge is not approved: $id")
 class ScaChallengeAlreadyConsumedException(id: UUID) : RuntimeException("SCA challenge already consumed: $id")
 class ScaChallengePartyMismatchException(id: UUID) : RuntimeException("SCA challenge belongs to another party: $id")
 class ScaConsumerScopeViolationException(id: UUID) :
     RuntimeException("SCA challenge is outside this consumer's scope: $id")
+
+/** ADR-0335 D1 / ADR-0385 D3: a scoped consumer tried to raise a challenge outside its namespace. */
+class ScaInitiateScopeViolationException(purpose: ScaPurpose) :
+    RuntimeException("This consumer may not initiate a $purpose challenge in this namespace")
 class ScaDynamicLinkingMismatchException(id: UUID) :
     RuntimeException("Operation does not match what the device signed for challenge: $id")
 class DeviceNotEnrolledException(credentialId: String) :
@@ -197,6 +208,8 @@ class ScaService(
         if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
         requireApprovalLinking(command)
         requireMcpConnectLinking(command)
+        // After the shape checks: a malformed request is a 400 whoever sends it.
+        requireInitiateScope(command)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 
@@ -473,7 +486,11 @@ class ScaService(
         ) {
             challenge = verifyDecoupled(challenge, now)
         }
-        if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
+        if (challenge.status !=
+            ScaStatus.COMPLETED
+        ) {
+            throw ScaChallengeNotApprovedException(command.challengeId, challenge.status)
+        }
         val authorised = linkingAuthorises(challenge.dynamicLinkingData, command, challenge.purpose)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
@@ -550,6 +567,29 @@ class ScaService(
             require(runCatching { canonicalAmount(dl.amount) }.isSuccess) {
                 "amount must be a decimal with at most two fractional digits"
             }
+        }
+    }
+
+    /**
+     * The MCP_CONNECT consumer (ADR-0385 D3) is the one scoped consumer OPA admits to initiate, so it
+     * raises only challenges it could itself spend: MCP_CLIENT_CONNECT, signed into `mcp-connect:`.
+     * It therefore cannot raise a payment or approval prompt on a customer's device. Other scoped
+     * consumers (pension) hold no initiate grant at all; OPA refuses them before this point.
+     */
+    private fun requireInitiateScope(command: InitiateScaCommand) {
+        // And the converse: a connect prompt is raised by the authorization server's consumer ONLY.
+        // Any other OPA-admitted initiator (the edge holds scaChallenge.initiate) is refused, so no
+        // caller but Keycloak can push "connect an assistant" to a customer's device.
+        if (command.purpose == ScaPurpose.MCP_CLIENT_CONNECT &&
+            command.scope != ConsumerScope.Reserved(ReservedNamespace.MCP_CONNECT)
+        ) {
+            throw ScaInitiateScopeViolationException(command.purpose)
+        }
+        val scope = command.scope as? ConsumerScope.Reserved ?: return
+        if (scope.namespace != ReservedNamespace.MCP_CONNECT) return
+        val id = command.dynamicLinkingData?.approvalRequestId
+        if (command.purpose !in scope.namespace.purposes || id == null || !scope.namespace.isWellFormed(id)) {
+            throw ScaInitiateScopeViolationException(command.purpose)
         }
     }
 

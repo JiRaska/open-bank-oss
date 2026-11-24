@@ -127,6 +127,10 @@ module "audit_baseline" {
   config_recording_enabled   = local.config_recording_enabled
   config_recording_frequency = "DAILY"
 
+  # GuardDuty EKS Runtime Monitoring: off (FinOps, ~$7/day; Falco covers runtime rules).
+  # Audit-log monitoring, S3 and EBS findings stay on. Re-enable with this one flag.
+  runtime_monitoring_enabled = false
+
   # 1-day COMPLIANCE lock keeps the sandbox destroyable; config history is short-lived.
   log_retention_days            = 1
   config_history_retention_days = 90

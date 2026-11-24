@@ -15,6 +15,10 @@ metadata:
   labels:
     app.kubernetes.io/name: copilot-redis
     app.kubernetes.io/part-of: copilot-service
+  annotations:
+    # The exporter port is reachable only by the Prometheus pods (not admin-ui, not all of
+    # observability); read by gen-network-policies.py.
+    open-bank.tech/metrics-ingress-prometheus-only: "true"
 spec:
   replicas: 1
   # Terminate-first, deliberately (#3545). This is a single-writer cache on an emptyDir
@@ -43,8 +47,39 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: docker.io/valkey/valkey:9.1.3-alpine
-          args: ["--save", "", "--appendonly", "no"]
+          image: docker.io/valkey/valkey:9.1.3-alpine@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b
+          # The metrics password never reaches argv or this container's environment (both end up in the
+          # OCI runtime spec, i.e. `crictl inspect`): it is mounted as a FILE from the Secret (secret volumes
+          # are tmpfs; mode 0440, group = fsGroup 1000), and a POSIX-sh wrapper renders the config into a
+          # memory-medium emptyDir (/conf, never on disk) and execs valkey-server on it. It refuses to start
+          # on an empty password or one that is not purely letters/digits (the generator emits exactly that;
+          # anything else would break the quoted config line). The `default` user is left exactly as before
+          # (existing clients connect unchanged); the config only ADDS a least-privilege `metrics` user.
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              mpw="$(cat /secrets/metrics/metrics_password)"
+              case "$mpw" in
+                ''|*[!A-Za-z0-9]*) echo "metrics password is empty or not [A-Za-z0-9]+: refusing to start" >&2; exit 1 ;;
+              esac
+              umask 077
+              {
+                echo 'save ""'
+                echo 'appendonly no'
+                echo 'dir /data'
+                echo 'slowlog-log-slower-than -1'
+                # The exporter's OWN user: read-only server introspection, no key or channel access,
+                # no data or admin commands, and no CONFIG GET. +command|info +commandlog|len: the exporter runs COMMAND INFO, then COMMANDLOG LEN
+                # on Valkey 9 every scrape (measured: NOPERM in ACL LOG without them); metadata and a count only.
+                # No +client|list: client addresses stay private, and redis_exporter only runs CLIENT LIST
+                # with -export-client-list (default off). The slow log can echo command arguments, so it is
+                # switched off (slowlog-log-slower-than -1); +slowlog|get stays granted because redis_exporter
+                # v1.92.1 issues SLOWLOG GET on every scrape with no flag to skip it, and it now returns nothing.
+                printf 'user metrics on >%s resetkeys resetchannels -@all +ping +info +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram +command|info +commandlog|len\n' "$mpw"
+              } > /conf/valkey.conf
+              unset mpw
+              exec valkey-server /conf/valkey.conf
           ports:
             - name: redis
               containerPort: 6379
@@ -57,6 +92,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: conf
+              mountPath: /conf
+            - name: metrics-password
+              mountPath: /secrets/metrics
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: redis
@@ -78,8 +118,22 @@ spec:
         # Valkey/Redis protocol and exposes redis_* metrics on :9121. Non-alpine tag:
         # multi-arch (incl. arm64/Graviton) — the -alpine variant is amd64-only.
         - name: exporter
-          image: docker.io/oliver006/redis_exporter:v1.92.1
-          args: ["--redis.addr=redis://localhost:6379"]
+          image: docker.io/oliver006/redis_exporter:v1.92.1@sha256:7fbc93d30f0f91eed1b2fe6968a956259cc5d260a984dd9071f1d1e9c2692ecd
+          # Logs in as the least-privilege `metrics` ACL user. Its password stays an env var (residual):
+          # --redis.password-file only feeds the multi-target /scrape map (measured on #16791: a plain file
+          # is rejected as non-JSON, a JSON map leaves the main target NOAUTH), and the URI form would put
+          # it in argv. So this credential is in the exporter's container spec; it can read no data.
+          # --disable-scrape-endpoint: no multi-target `/scrape?target=` endpoint.
+          # --config-command=-: no CONFIG GET (the metrics user may not run it; maxmemory comes from INFO).
+          args: ["--redis.addr=redis://localhost:6379", "--disable-scrape-endpoint", "--config-command=-"]
+          env:
+            - name: REDIS_USER
+              value: metrics
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-redis-exporter
+                  key: metrics_password
           ports:
             - name: redis-metrics
               containerPort: 9121
@@ -100,6 +154,19 @@ spec:
       volumes:
         - name: data
           emptyDir: {}
+        # The rendered config holds the metrics password: tmpfs, never the node's disk.
+        - name: conf
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # REQUIRED secret (no `optional`): without it the pod never starts.
+        - name: metrics-password
+          secret:
+            secretName: copilot-redis-exporter
+            defaultMode: 0440
+            items:
+              - key: metrics_password
+                path: metrics_password
 ---
 apiVersion: v1
 kind: Service
@@ -137,3 +204,55 @@ spec:
     - port: redis-metrics
       path: /metrics
       interval: 30s
+---
+# Credential of the exporter's `metrics` ACL user. CLUSTER-GENERATED (ESO Password generator, no
+# OpenBao copy: nothing outside the cluster holds it), `refreshPolicy: CreatedOnce` so it is stable
+# across restarts. The Secret ref above is REQUIRED, so until ESO creates it the pod does not start.
+# ROTATION: delete Secret platform/copilot-redis-exporter, then restart the copilot-redis Deployment (both containers
+# read it at start; the restart empties this ephemeral keyspace).
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: copilot-redis-exporter-password
+  annotations:
+    # Before the Deployment that requires the Secret (wave 0).
+    argocd.argoproj.io/sync-wave: "-1"
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: copilot-service
+spec:
+  length: 48
+  digits: 12
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+    # ADR-0279 #18: in-cluster exporter credential with no external holder; rotate per ROTATION above.
+    open-bank.tech/rotation-deadline: "2027-11-19"
+  name: copilot-redis-exporter
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: copilot-service
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: copilot-redis-exporter
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+      data:
+        metrics_password: "{{ .password }}"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: copilot-redis-exporter-password

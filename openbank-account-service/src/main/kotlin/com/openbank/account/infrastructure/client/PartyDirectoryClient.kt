@@ -15,9 +15,12 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -39,6 +42,10 @@ interface PartyDirectoryRestClient {
         @QueryParam("page") page: Int,
         @QueryParam("size") size: Int,
     ): Uni<PartyDirectoryListDto>
+
+    @GET
+    @Path("/{id}")
+    fun get(@PathParam("id") id: UUID): Uni<PartyDirectoryItemDto>
 }
 
 /** Only what the catch-up needs; `ignoreUnknown` keeps e-mail and other fields out of the heap. */
@@ -58,11 +65,17 @@ class PartyDirectoryClient(@RestClient private val client: PartyDirectoryRestCli
 
     override suspend fun listActive(page: Int, size: Int): DirectoryPage {
         val dto = client.list("ACTIVE", page, size).awaitSuspending()
-        val items = dto.items.mapNotNull { item ->
-            runCatching { UUID.fromString(item.id) }.getOrNull()?.let {
-                DirectoryParty(it, item.partyType, item.status, item.legalName.orEmpty().trim())
-            }
-        }
+        val items = dto.items.mapNotNull(PartyDirectoryItemDto::toParty)
         return DirectoryPage(items, hasMore = (page.toLong() + 1) * size < dto.total)
     }
+    override suspend fun find(partyId: UUID): DirectoryParty? = try {
+        client.get(partyId).awaitSuspending().toParty()?.takeIf { it.partyId == partyId }
+    } catch (failure: WebApplicationException) {
+        if (failure.response?.status != Response.Status.NOT_FOUND.statusCode) throw failure
+        null
+    }
+}
+
+private fun PartyDirectoryItemDto.toParty(): DirectoryParty? = runCatching { UUID.fromString(id) }.getOrNull()?.let {
+    DirectoryParty(it, partyType, status, legalName.orEmpty().trim())
 }

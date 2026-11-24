@@ -7,3 +7,10 @@
 # Both callers fail closed until then. Blocked on #10515.
 openbank-copilot-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
 openbank-lending-service: quarkus.rest-client.analytics-sink.url falls back to localhost and gitops never sets ANALYTICS_SINK_URL
+# Literal `http://localhost:NNNN` URLs (no ${ENV:} form), found when the gate learned that form
+# (#16800). Not triaged; tracked in #16840.
+openbank-agent-service: quarkus.rest-client.consent-service.url falls back to localhost and gitops never sets QUARKUS_REST_CLIENT_CONSENT_SERVICE_URL
+openbank-agent-service: quarkus.rest-client.psd2-service.url falls back to localhost and gitops never sets QUARKUS_REST_CLIENT_PSD2_SERVICE_URL
+openbank-mcp-service: quarkus.rest-client.domestic-payment-service.url falls back to localhost and gitops never sets QUARKUS_REST_CLIENT_DOMESTIC_PAYMENT_SERVICE_URL
+openbank-mcp-service: quarkus.rest-client.sepa-payment-service.url falls back to localhost and gitops never sets QUARKUS_REST_CLIENT_SEPA_PAYMENT_SERVICE_URL
+openbank-mcp-service: quarkus.rest-client.statement-service.url falls back to localhost and gitops never sets QUARKUS_REST_CLIENT_STATEMENT_SERVICE_URL

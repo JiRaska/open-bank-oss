@@ -78,6 +78,11 @@ volá `parse(raw, clock)` (a `isValid(raw, clock)`) s vlastními hodinami `Clock
 v `Europe/Prague`, protože rodné číslo je české občanské datum, a pro pozdější datum narození vrací
 `Invalid("birthdate is in the future")`.
 
+`parse(raw)` kontroluje jen strukturu: neodmítá datum narození v budoucnosti. Kdo přijímá osobu,
+volá `parse(raw, clock)` (a `isValid(raw, clock)`) s vlastními hodinami `Clock`: „dnešek“ si libs počítá
+v `Europe/Prague`, protože rodné číslo je české občanské datum, a pro pozdější datum narození vrací
+`Invalid("birthdate is in the future")`.
+
 ## domain/identifiers — typesafe IDs
 
 ```kotlin

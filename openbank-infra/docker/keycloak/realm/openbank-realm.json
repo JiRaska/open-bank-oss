@@ -1143,6 +1143,24 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-keycloak-mcp",
+      "name": "OpenBank Keycloak MCP connect",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-pension-fund",
       "name": "OpenBank Pension Fund Service",
       "enabled": true,
@@ -1658,6 +1676,14 @@
       "username": "service-account-openbank-pension",
       "enabled": true,
       "serviceAccountClientId": "openbank-pension",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-keycloak-mcp",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-keycloak-mcp",
       "realmRoles": [
         "ROLE_API"
       ]

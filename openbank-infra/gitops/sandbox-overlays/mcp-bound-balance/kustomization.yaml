@@ -1,0 +1,37 @@
+---
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- tls-config-and-policy.yaml
+- site-inputs.yaml
+patches:
+- path: balance-rollout.patch.yaml
+  target:
+    kind: Rollout
+    namespace: balances
+    name: balance-service
+- path: delegation-deployment.patch.yaml
+  target:
+    kind: Deployment
+    namespace: delegation
+    name: delegation-service
+- path: mcp-deployment.patch.yaml
+  target:
+    kind: Deployment
+    namespace: platform
+    name: mcp-service
+- path: https-service.patch.yaml
+  target:
+    kind: Service
+    namespace: balances
+    name: balance-service(-canary)?
+- path: https-service.patch.yaml
+  target:
+    kind: Service
+    namespace: delegation
+    name: delegation-service
+- path: balance-rollout-env.patch.yaml
+- path: delegation-deployment-env.patch.yaml
+- path: mcp-deployment-env.patch.yaml
+openapi:
+  path: rollout-env-schema.json

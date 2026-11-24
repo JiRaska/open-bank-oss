@@ -103,6 +103,105 @@ MAX_TIMEOUT = 1800  # cap on a per-gate `timeout_seconds`
 MEASUREMENTS = ".github/gates/gate-runtime-measurements.json"
 VALID_EXPECT = {"pass", "fail"}
 
+# ADR-0389 operational knob: ONE repository variable scales every SAFE gate's `budget_seconds`
+# and hard timeout, so a slower runner fleet is answered by a var change instead of a PR that
+# re-tunes dozens of gates.yaml lines (6 such PRs before this knob existed). Security,
+# money-path and authorization/policy gates are NEVER scaled (ADR-0389 tie-break: the stricter
+# class wins): their budgets are part of the control, not a performance hint.
+BUDGET_MULTIPLIER_ENV = "GATE_BUDGET_MULTIPLIER"
+# Floor 1.0: below it, 17 enforced gates would redden on their CPU budget, i.e. a "speed-up"
+# knob that manufactures findings. The knob only ever buys headroom.
+BUDGET_MULTIPLIER_MIN, BUDGET_MULTIPLIER_MAX = 1.0, 4.0
+# ALLOW-list, not a deny-list: a gate is scaled ONLY if its group is explicitly SAFE AND its id
+# names no security / money-path / policy / evidence control. Everything else — every gate in
+# `security`, `supplychain`, `gitops`, any group added later, and any denied id — is exempt by
+# default (ADR-0389 tie-break: the stricter class wins). Widening either list is a reviewed change,
+# and the self-test pins a set of real gates that must stay unscaled.
+BUDGET_SCALED_GROUPS = frozenset({"lint", "kotlin", "registry", "data", "api"})
+BUDGET_DENY_ID_RE = re.compile(
+    r"money|authz|opa|rego|policy|secret|threat|ledger|idempoten|four-eyes|realm|oidc|pdp|principal"
+    r"|pci|ruleset|agent-merge|agent-review|mtls|tls|credential|outbox|card|provenance|attest|cosign"
+    r"|honeytoken|dlq|deploy-hold|release-evidence|approval|supply|security|audit|sanction|payment"
+    r"|matrix|acl|delegation|value-movement|screening|treasury|asvs|crypto|dast|enforcement|write"
+    r"|scope|evidence|compliance|regulatory|high-risk|merge-train|merged-past-red|deregistered"
+    r"|gate-runner|agent-pr-guard|lock-integrity|gh-token|gate-invocation|gate-selftest"
+    r"|gate-subject-floor|selftest-inputs|armed-prs|taint|synthetic|pg-extension"
+)
+# The `gates` job in ci.yml runs under a 25-minute gate budget; a scaled per-gate kill above that
+# (minus a margin for setup/report) could never fire — the job would be cancelled first, which
+# reads as "not a verdict" rather than a timeout finding. The self-test pins this to ci.yml.
+GATES_JOB_TIMEOUT_SECONDS = 25 * 60
+# Preserve the per-gate ADR-0389 cap when the aggregate job gets extra tracing time.
+SCALED_GATE_TIMEOUT_CAP_SECONDS = 14 * 60
+GATES_JOB_TIMEOUT_MARGIN = 60
+
+
+GATES_JOB_PER_SLUG_TIMEOUT_RE = re.compile(
+    r"^\$\{\{ matrix\.slug == '([a-z0-9-]+)' && ([0-9]+) \|\| ([0-9]+) \}\}$")
+GATES_FETCH_SLUG_IF_RE = re.compile(r"^matrix\.slug == '([a-z0-9-]+)'$")
+
+
+def gates_job_timeout_error(job) -> str | None:
+    """None when ci.yml's gates job gives every shard exactly GATES_JOB_TIMEOUT_SECONDS for its GATES.
+    One shard may add time, but only exactly the `timeout-minutes` of its evidence-receive step
+    (id current-evidence, `if: matrix.slug == '<that slug>'`), which runs before `Run gates`: its
+    gates keep the same ceiling (#11442)."""
+    base = GATES_JOB_TIMEOUT_SECONDS // 60
+    tmo = job.get("timeout-minutes")
+    msg = f"GATES_JOB_TIMEOUT_SECONDS ({GATES_JOB_TIMEOUT_SECONDS}s) disagrees with ci.yml jobs.gates.timeout-minutes ({tmo})"
+    if tmo == base:
+        return None
+    m = GATES_JOB_PER_SLUG_TIMEOUT_RE.fullmatch(tmo) if isinstance(tmo, str) else None
+    fetch = [s for s in job.get("steps") or [] if s.get("id") == "current-evidence"]
+    tmo_f = fetch[0].get("timeout-minutes") if len(fetch) == 1 else None
+    cond = GATES_FETCH_SLUG_IF_RE.fullmatch(str(fetch[0].get("if", ""))) if len(fetch) == 1 else None
+    # The extra time belongs to the ONE shard that runs the fetch: same slug, or it is a free budget.
+    if not m or not cond or m.group(1) != cond.group(1) or int(m.group(3)) != base \
+            or type(tmo_f) is not int or int(m.group(2)) != base + tmo_f:
+        return msg + (f"; a per-slug value must name the slug in the current-evidence step's `if:` and be "
+                      f"{base} + that step's timeout-minutes")
+    return None
+
+
+def budget_multiplier_exempt(gate) -> bool:
+    return (gate.get("group") not in BUDGET_SCALED_GROUPS
+            or bool(BUDGET_DENY_ID_RE.search(gate["id"])))
+
+
+def parse_budget_multiplier(raw):
+    """(multiplier, warning-or-None). Unset/empty is 1.0 silently; anything invalid is 1.0 + a warning."""
+    if raw is None or str(raw).strip() == "":
+        return 1.0, None
+    try:
+        m = float(str(raw).strip())
+    except ValueError:
+        m = None
+    if m is None or m != m or not (BUDGET_MULTIPLIER_MIN <= m <= BUDGET_MULTIPLIER_MAX):
+        return 1.0, (f"::warning::run-gates: {BUDGET_MULTIPLIER_ENV}=`{raw}` is not a number in "
+                     f"[{BUDGET_MULTIPLIER_MIN}, {BUDGET_MULTIPLIER_MAX}]; using 1.0")
+    return m, None
+
+
+def apply_budget_multiplier(gates, m: float, default_timeout: int):
+    """Scale budget_seconds and the hard timeout of every SAFE gate in place; return exempt ids.
+    The scaled timeout is clamped to MAX_TIMEOUT and to the gates job's own limit minus a margin,
+    and the budget is clamped to that timeout so the pairing load() enforces stays enforceable."""
+    exempt = []
+    cap = min(MAX_TIMEOUT, SCALED_GATE_TIMEOUT_CAP_SECONDS, GATES_JOB_TIMEOUT_SECONDS - GATES_JOB_TIMEOUT_MARGIN)
+    for g in gates:
+        if budget_multiplier_exempt(g):
+            exempt.append(g["id"])
+            continue
+        if m == 1.0:
+            continue
+        base_tmo = g.get("timeout_seconds", default_timeout)
+        tmo = max(base_tmo, min(cap, int(round(base_tmo * m))))  # never BELOW the declared value
+        g["timeout_seconds"] = tmo
+        if g.get("budget_seconds") is not None:
+            g["budget_seconds"] = max(g["budget_seconds"], min(round(g["budget_seconds"] * m, 3), tmo))
+    return exempt
+
+
 # Variables the Actions runner sets and a laptop does not. A gate reading one of these BARE dies
 # under `bash -euo pipefail` with `unbound variable`, which is the same failure the PR_DIFF_BASE
 # guard below already exists to dress properly — see its comment: "refusing to run vacuously" says
@@ -641,10 +740,18 @@ def _trace_mode() -> str:
 def _selftest_trace_file(gate, is_pr: bool):
     """(trace_file or None, note). Tracing is opt-in via OB_SELFTEST_TRACE (CI sets `require`)."""
     mode = _trace_mode()
-    # Pull requests only. A finding fails only there (see execute), and tracing costs ~2x the
-    # self-test time (measured over the estate: 420 s -> 919 s), which main need not pay to
-    # produce warnings: the PR that introduces an undeclared read is where it is caught.
-    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs") or not is_pr:
+    # Every event, push to main included (#16895). This used to be pull-request-only, on the
+    # argument that tracing costs ~2x the self-test time (estate: 420 s -> 919 s) and that the PR
+    # introducing an undeclared read is where it gets caught. The second half is false: a
+    # corpus-walking self-test starts reading a NEW file when an unrelated PR adds one (#16621
+    # added e2e/mcp-harness/; three self-tests read it), and that PR need not touch the gate, so
+    # its own run skips the self-test. main then stayed green while every later PR touching those
+    # shards went red, and the merge train blamed them. Red on main at the commit that caused
+    # the drift is the point. The cost is paid per shard, inside the 2x traced timeout already
+    # granted below, and is excluded from the budget comparison (traced_cost) -- the same
+    # envelope every PR touching run-gates.py already runs in, since that traces all self-tests.
+    del is_pr  # kept in the signature: callers pass it, and the event no longer decides
+    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs"):
         return None, ""
     # A self-test that drives Gradle (a daemon plus forked JVMs) does not finish under `strace -f`
     # within the shard timeout: test-provenance-cache's ran >10 min traced and the shard was
@@ -770,10 +877,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
             if trace_file and rc != 124 and (rc == 0) == want_pass:
                 found = _judge_trace(gate, root, trace_file, r, buf)
-                # Tracing happens only on a pull request (_selftest_trace_file), where a self-test
-                # runs because the gate or its declared inputs changed — the moment a new
-                # undeclared read is introduced. Never on main: there a scanning self-test's
-                # corpus grows with no one touching the gate, and that must not turn main red.
+                # Fails on every event, push to main included (#16895): a scanning self-test's
+                # corpus grows with no one touching the gate, and main must go red at the commit
+                # that grew it, not leave the red to whichever PR next runs the self-test.
                 undeclared_fail = found
         finally:
             if trace_file:
@@ -1193,6 +1299,20 @@ def main(argv=None):
         sys.stderr.write("::error::selection matched no gates — refusing to report success\n")
         return 2
 
+    mult, mult_warn = parse_budget_multiplier(os.environ.get(BUDGET_MULTIPLIER_ENV))
+    if mult_warn:
+        print(mult_warn)
+    exempt_seen = apply_budget_multiplier(sel, mult, args.timeout)
+    mult_line = (f"[run-gates] effective {BUDGET_MULTIPLIER_ENV}={mult:g} (ADR-0389); "
+                 f"{len(exempt_seen)} of {len(sel)} selected gates exempt (security/money-path/policy)")
+    print(mult_line)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        try:
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                fh.write(f"\n{mult_line.replace('[run-gates] ', '')}\n")
+        except OSError as exc:
+            sys.stderr.write(f"::warning::run-gates: could not write the job summary: {exc}\n")
+
     is_pr = os.environ.get("GITHUB_EVENT_NAME", "pull_request") == "pull_request"
     jobs = args.jobs or min(8, (os.cpu_count() or 2))
     print(f"[run-gates] {len(sel)} gates, {jobs} concurrent, event="
@@ -1330,16 +1450,19 @@ gates:
     name: "a gate whose CPU (and wall) time exceed its budget: real work, FAILS"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
   - id: wall-over-budget
     name: "a gate long in wall time but idle on CPU (a loaded runner): reported, PASSES"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "sleep 0.6"
   - id: not-evaluated
     name: "a gate that could not read its subject (#13400): red, never PASS, never a budget overrun"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "sleep 0.5; echo 'GATE_VERDICT=NOT_EVALUATED  # API timed out'; exit 1"
   - id: not-evaluated-exit-zero
     name: "the NOT EVALUATED line never turns a zero exit into anything but its own verdict"
@@ -1349,6 +1472,7 @@ gates:
     name: "a gate that found something AND was slow is a finding, not a budget overrun"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'; exit 1"
   - id: within-budget
     name: "a gate inside its budget"
@@ -1594,6 +1718,95 @@ def self_test():
                 bad.append(f"load() gave no diagnostic for ({body!r})")
             if not want_abort and fixture_output:
                 bad.append(f"load() emitted output for valid ({body!r})")
+
+        # ADR-0389 budget multiplier: parsing, scaling, clamping and the allow-list.
+        for raw, want_m, want_warn in (
+            (None, 1.0, False), ("", 1.0, False), ("2", 2.0, False), ("1.0", 1.0, False),
+            ("4.0", 4.0, False), ("4.5", 1.0, True), ("0.5", 1.0, True), ("0.99", 1.0, True),
+            ("-1", 1.0, True), ("abc", 1.0, True), ("nan", 1.0, True), ("inf", 1.0, True),
+        ):
+            got_m, got_w = parse_budget_multiplier(raw)
+            if got_m != want_m or bool(got_w) != want_warn:
+                bad.append(f"parse_budget_multiplier({raw!r}): want ({want_m}, warn={want_warn}), "
+                           f"got ({got_m}, {got_w!r})")
+        scaled = [{"id": "plain", "group": "lint", "budget_seconds": 30},
+                  {"id": "plain-tmo", "group": "lint", "budget_seconds": 100, "timeout_seconds": 600},
+                  {"id": "big", "group": "kotlin", "budget_seconds": 400, "timeout_seconds": 1800},
+                  {"id": "sec", "group": "security", "budget_seconds": 30},
+                  {"id": "gitops-plain", "group": "gitops", "budget_seconds": 30},
+                  {"id": "x-money-path-y", "group": "lint", "budget_seconds": 30},
+                  {"id": "new-group-gate", "group": "brand-new", "budget_seconds": 30}]
+        ex = apply_budget_multiplier(scaled, 2.0, 420)
+        # 840 = the preserved scaled per-gate ceiling; "big" keeps its declared 1800 (never lowered)
+        want = {"plain": (60, 840), "plain-tmo": (200, 840), "big": (800, 1800),
+                "sec": (30, None), "gitops-plain": (30, None), "x-money-path-y": (30, None),
+                "new-group-gate": (30, None)}
+        for g in scaled:
+            if (g["budget_seconds"], g.get("timeout_seconds")) != want[g["id"]]:
+                bad.append(f"apply_budget_multiplier: {g['id']} -> budget {g['budget_seconds']}, "
+                           f"timeout {g.get('timeout_seconds')}; want {want[g['id']]}")
+        if sorted(ex) != sorted(["sec", "gitops-plain", "x-money-path-y", "new-group-gate"]):
+            bad.append(f"apply_budget_multiplier exempt set wrong: {sorted(ex)}")
+        # must-FAIL if the allow-list is widened: these REAL gates must never be scaled.
+        must_stay_exempt = (
+            "deploy-hold-image-pins", "ruleset-bypass-actors", "ruleset-context-parity",
+            "release-evidence-coverage", "agent-merge-authorization-selftest",
+            "agent-review-proof-falsifiable", "agent-review-scope-falsifiable", "no-handrolled-cosign",
+            "workflow-supply-chain", "fleet-attestation-classifier", "test-provenance-cache",
+            "approval-store-redis-host", "honeytoken-wiring", "card-capability-matrix-drift",
+            "mtls-bearer-only", "mtls-keeps-http-port", "tls-certificate-reload",
+            "credential-expiry-watch-coverage", "credential-deadline-ratchet", "incoming-dlq-wiring",
+            "outbox-conformance-it-present", "outbox-sent-retention", "outbox-claim-sql-ratchet",
+            "outbox-dispatch-enabled-guard", "outbox-has-writer", "outbox-v2-cutover-quiesced",
+            "provenance", "security-checklist-money-path", "authz-enforce-money-path",
+            "matrix-write-grants", "kafka-acl-coverage", "value-movement-admission-coverage",
+            "delegation-capability-enforcement", "asvs-l3-mechanical-subset", "openssf-gold-evidence",
+            "merge-train-declaration", "gates-not-deregistered", "agent-pr-guard",
+            "ci-artifact-lock-integrity", "workflow-gh-token-declared", "gate-subject-floor",
+            "synthetic-taint-rest-client-boundaries",
+        )
+        real = pathlib.Path(__file__).resolve().parents[2]
+        if (real / MANIFEST).exists():
+            with open(real / MANIFEST, encoding="utf-8") as fh:
+                real_gates = {g["id"]: g for g in (yaml.safe_load(fh) or {}).get("gates") or []}
+            for gid in must_stay_exempt:
+                if gid not in real_gates:
+                    bad.append(f"must-stay-exempt gate `{gid}` is not in {MANIFEST} (renamed? update the pin)")
+                    continue
+                probe = [dict(real_gates[gid], budget_seconds=10)]
+                apply_budget_multiplier(probe, 4.0, 420)
+                if probe[0]["budget_seconds"] != 10 or "timeout_seconds" in probe[0] and \
+                        probe[0]["timeout_seconds"] != real_gates[gid].get("timeout_seconds"):
+                    bad.append(f"gate `{gid}` was SCALED by the budget multiplier; it must stay exempt")
+        ci_yml = real / ".github" / "workflows" / "ci.yml"
+        for label, job, want in (
+            ("plain", {"timeout-minutes": 25}, None),
+            ("plain wrong", {"timeout-minutes": 20}, "disagrees"),
+            ("per-slug exact", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 25 }}",
+                                "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                           "timeout-minutes": 32}]}, None),
+            ("per-slug extra on a shard that does not fetch",
+             {"timeout-minutes": "${{ matrix.slug == 'gitops-api' && 57 || 25 }}",
+              "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'", "timeout-minutes": 32}]},
+             "disagrees"),
+            ("per-slug extra exceeds fetch cap", {"timeout-minutes": "${{ matrix.slug == 'x' && 60 || 25 }}",
+                                                  "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                                             "timeout-minutes": 32}]},
+             "disagrees"),
+            ("per-slug base wrong", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 20 }}",
+                                     "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
+                                                "timeout-minutes": 32}]}, "disagrees"),
+            ("per-slug without capped fetch", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 25 }}",
+                                               "steps": []}, "disagrees"),
+        ):
+            got = gates_job_timeout_error(job)
+            if (want is None) != (got is None):
+                bad.append(f"gates job timeout check `{label}`: got {got!r}")
+        if ci_yml.exists():
+            with open(ci_yml, encoding="utf-8") as fh:
+                err = gates_job_timeout_error((yaml.safe_load(fh) or {}).get("jobs", {}).get("gates", {}))
+            if err:
+                bad.append(err)
 
         # Headroom warning: 85% warns, 50% does not, p95 alone triggers, failures are not repeated.
         def fake(seconds, budget=100, timeout=420, status="ok"):
@@ -2100,6 +2313,46 @@ def self_test():
                 bad.append("require mode fails a gate that opted out with selftest_trace: false")
             if not _trace_refused(g, None):
                 bad.append("require mode no longer fails a gate whose self-test could not be traced")
+            # #16895: a push to main traces too, and an undeclared read there FAILS the gate.
+            # Before the fix both held only on a pull request, so main stayed green over drift.
+            pushed, _ = _selftest_trace_file(g, False)
+            if not pushed:
+                bad.append("a self-test was not traced on a push event (main hides drift)")
+            else:
+                os.unlink(pushed)
+        finally:
+            sit.strace_usable = saved_usable
+            if saved_mode is None:
+                os.environ.pop(sit.TRACE_ENV, None)
+            else:
+                os.environ[sit.TRACE_ENV] = saved_mode
+
+        # #16895, kept OUTSIDE the block above so it runs whatever that block found: an
+        # undeclared self-test read must FAIL the gate on a push to main as on a pull request.
+        saved_mode = os.environ.get(sit.TRACE_ENV)
+        saved_usable = sit.strace_usable
+        try:
+            os.environ[sit.TRACE_ENV] = "require"
+            sit.strace_usable = lambda: (True, "")
+            saved_argv, saved_analyse = sit.strace_argv, sit.analyse
+            try:
+                sit.strace_argv = lambda _f: []
+                sit.analyse = lambda *_a, **_k: (["undeclared/read.txt"], [], [])
+                (tmp / "declared").mkdir(exist_ok=True)
+                (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                    "gates:\n  - id: u\n    name: u\n    group: t\n    run: \"true\"\n"
+                    "    selftest: \"true\"\n    selftest_expect: pass\n"
+                    "    selftest_inputs: [declared/]\n"
+                )
+                gu = load(tmp)[0]
+                for pr in (True, False):
+                    ru = execute(gu, tmp, is_pr=pr, timeout=5)
+                    if ru.status != "failed" or "undeclared/read.txt" not in ru.output:
+                        bad.append(f"undeclared self-test read did not fail the gate "
+                                   f"(is_pr={pr}): got {ru.status}")
+                man.write_text(SELF_TEST_MANIFEST)
+            finally:
+                sit.strace_argv, sit.analyse = saved_argv, saved_analyse
         finally:
             sit.strace_usable = saved_usable
             if saved_mode is None:

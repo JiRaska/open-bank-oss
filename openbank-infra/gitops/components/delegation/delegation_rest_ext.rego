@@ -18,6 +18,11 @@
 #   delegation.mcp-client.resolve — mcp-service only: ACTIVE MCP_CLIENT grants for (party, azp, jkt)
 #   delegation.recertification.read    — customer reads own pending review tasks
 #   delegation.recertification.confirm — customer records an authority-neutral review
+#   delegation.proposal.create    — mcp-service records a customer MCP client's payment PROPOSAL
+#   delegation.proposal.read      — the edge lists/reads the customer's own proposals
+#   delegation.proposal.approve   — the edge records the customer's SCA-consumed approval
+#   delegation.proposal.reject    — the edge records the customer's rejection
+#   delegation.proposal.execution — the edge records the outcome of the customer's own payment
 #
 # WHY THIS FILE IS NARROW. Every backend service authenticates on the shared `openbank-services`
 # Keycloak client, and that service account carries ROLE_OPERATOR in the realm — the trap
@@ -49,6 +54,7 @@ allowed_reasons contains "operator-delegation-write" if {
 	startswith(input.action, "delegation.")
     not startswith(input.action, "delegation.approval.")
     not startswith(input.action, "delegation.signing.")
+    not startswith(input.action, "delegation.proposal.")
     input.action != "delegation.recertification.confirm"
 }
 
@@ -150,6 +156,100 @@ mcp_service_principal if {
 	machine_named("service-account-openbank-mcp")
 }
 
+mcp_read_issuer_principal if {
+	input.principal.type == "HUMAN"
+	input.principal.service_account == true
+	machine_named("service-account-openbank-mcp-read-issuer")
+}
+
+allowed_reasons contains "mcp-balance-read-issuer" if {
+	input.action == "delegation.mcp-client.authorize-balance-read"
+	mcp_read_issuer_principal
+}
+
+prohibited if {
+	input.action == "delegation.mcp-client.authorize-balance-read"
+	not mcp_read_issuer_principal
+}
+
+prohibited if {
+    mcp_read_issuer_principal
+    input.action != "delegation.mcp-client.authorize-balance-read"
+}
+
+mcp_balance_reader_principal if {
+	input.principal.type == "HUMAN"
+	input.principal.service_account == true
+	machine_named("service-account-openbank-balance-mcp-reader")
+}
+
+allowed_reasons contains "mcp-balance-grant-check" if {
+	input.action == "delegation.mcp-client.check-balance-grant"
+	mcp_balance_reader_principal
+}
+
+prohibited if {
+	input.action == "delegation.mcp-client.check-balance-grant"
+	not mcp_balance_reader_principal
+}
+
+prohibited if {
+    mcp_balance_reader_principal
+    input.action != "delegation.mcp-client.check-balance-grant"
+}
+
+mcp_connect_issuer_action if {
+    input.action in {
+        "delegation.mcp-connect.issuer.register",
+        "delegation.mcp-connect.issuer.selection",
+        "delegation.mcp-connect.issuer.challenge",
+        "delegation.mcp-connect.issuer.stage",
+        "delegation.mcp-connect.issuer.staged",
+        "delegation.mcp-connect.issuer.activate",
+        "delegation.mcp-connect.issuer.family-status",
+    }
+}
+
+mcp_connect_issuer if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-keycloak-mcp")
+}
+
+allowed_reasons contains "mcp-connect-issuer" if {
+    mcp_connect_issuer_action
+    mcp_connect_issuer
+}
+
+prohibited if {
+    mcp_connect_issuer_action
+    not mcp_connect_issuer
+}
+
+mcp_connect_customer_action if {
+    input.action in {
+        "delegation.mcp-connect.customer.read",
+        "delegation.mcp-connect.customer.select",
+        "delegation.mcp-connect.customer.revoke",
+    }
+}
+
+mcp_connect_customer_edge if {
+    input.principal.type == "HUMAN"
+    input.principal.service_account == true
+    machine_named("service-account-openbank-edge")
+}
+
+allowed_reasons contains "mcp-connect-customer-edge" if {
+    mcp_connect_customer_action
+    mcp_connect_customer_edge
+}
+
+prohibited if {
+    mcp_connect_customer_action
+    not mcp_connect_customer_edge
+}
+
 # Only the authenticated customer edge may record a customer's review, regardless of other roles.
 prohibited if {
     input.action == "delegation.recertification.confirm"
@@ -188,5 +288,45 @@ allowed_reasons contains "edge-service-business-signing" if {
 # for every principal except the edge: an extra allow reason can never bypass `prohibited`.
 prohibited if {
 	startswith(input.action, "delegation.signing.")
+	not machine_named("service-account-openbank-edge")
+}
+
+# ADR-0383 D6 — customer MCP proposals. Two callers, two DISJOINT halves, both enumerated:
+#   * mcp-service may only CREATE. It cannot read a proposal back, approve, reject or record an
+#     execution: "MCP proposes, the customer authorises in the app" is the whole decision.
+#   * the customer edge may read and decide, never create — a proposal it could create would be
+#     indistinguishable from one the customer typed, which D6 forbids.
+# Approving moves no money here; the edge has already consumed the customer's SCA challenge,
+# bound to the proposal's payload hash, and initiates the payment through the ordinary path.
+allowed_reasons contains "mcp-service-payment-proposal-create" if {
+	input.principal.type == "HUMAN"
+	# Pinned via mcp_service_principal: machine_named's legacy branch would admit a principal
+	# with NO service_account marker by name alone.
+	mcp_service_principal
+	input.action == "delegation.proposal.create"
+}
+
+allowed_reasons contains "edge-service-payment-proposal" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-edge")
+	input.action in {
+		"delegation.proposal.read",
+		"delegation.proposal.approve",
+		"delegation.proposal.reject",
+		"delegation.proposal.execution",
+	}
+}
+
+# Base rest.rego's operator-read-any admits staff and the shared backend identity to any read, and
+# operator-delegation-write excludes this family only by prefix. Veto at the allow head: no other
+# allow reason can widen either half.
+prohibited if {
+	input.action == "delegation.proposal.create"
+	not mcp_service_principal
+}
+
+prohibited if {
+	startswith(input.action, "delegation.proposal.")
+	input.action != "delegation.proposal.create"
 	not machine_named("service-account-openbank-edge")
 }

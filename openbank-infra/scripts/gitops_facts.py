@@ -334,7 +334,7 @@ def _has_management_port(doc: str) -> bool:
     return False
 
 
-def management_port_workloads(gitops: Path) -> dict[str, set[str]]:
+def management_port_workloads(gitops: Path, *, exclude_dormant_sandbox: bool = False) -> dict[str, set[str]]:
     """{namespace: {workload names}} for every workload declaring a container port `management`.
 
     This is the SCRAPE CONTRACT, read off the workloads themselves. The fleet PodMonitor scrapes
@@ -354,6 +354,7 @@ def management_port_workloads(gitops: Path) -> dict[str, set[str]]:
     """
     out: dict[str, set[str]] = {}
     for f in sorted(gitops.rglob("*.yaml")):
+        sandbox_overlay = f.relative_to(gitops).parts[0] == "sandbox-overlays"
         text = read(f)
         if "name: management" not in text:
             continue
@@ -362,6 +363,8 @@ def management_port_workloads(gitops: Path) -> dict[str, set[str]]:
             if not kind or kind.group(1) not in ("Deployment", "Rollout", "StatefulSet"):
                 continue
             if not _has_management_port(doc):
+                continue
+            if exclude_dormant_sandbox and sandbox_overlay and re.search(r"^  replicas:[ \t]*0[ \t]*(?:#.*)?$", doc, re.M):
                 continue
             name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
             explicit = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
