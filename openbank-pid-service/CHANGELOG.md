@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.11.1...pid-service-v0.11.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **pid:** retire the unwired PID outbox channel ([#17157](https://github.com/JiRaska/open-bank-oss/issues/17157)) ([f03fc4c](https://github.com/JiRaska/open-bank-oss/commit/f03fc4c15ce5501e2124452079e4889a54325d5d))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.11.0...pid-service-v0.11.1) (2026-11-20)
 
 
