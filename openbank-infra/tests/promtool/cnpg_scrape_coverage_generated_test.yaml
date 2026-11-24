@@ -170,6 +170,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-1",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-2",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
@@ -395,6 +399,8 @@ tests:
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="mcp-synthetic-sandbox"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
@@ -632,6 +638,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-1",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-2",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
@@ -858,6 +868,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="mcp-synthetic-sandbox"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1070,6 +1082,10 @@ tests:
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-1",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-2",job="mcp-synthetic-keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -1299,6 +1315,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="mcp-synthetic-sandbox"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1515,6 +1533,10 @@ tests:
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-1",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-2",job="mcp-synthetic-keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
@@ -1741,6 +1763,8 @@ tests:
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="mcp-synthetic-sandbox"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
@@ -1964,6 +1988,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-1",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-2",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
@@ -2187,6 +2215,8 @@ tests:
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="mcp-synthetic-sandbox"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
@@ -2403,6 +2433,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-1",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="mcp-synthetic-sandbox",pod="mcp-synthetic-keycloak-db-2",job="mcp-synthetic-keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
@@ -2626,6 +2660,8 @@ tests:
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="mcp-synthetic-sandbox"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"

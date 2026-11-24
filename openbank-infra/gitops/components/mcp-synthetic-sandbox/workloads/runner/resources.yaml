@@ -1,0 +1,205 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mcp-synthetic-passkey-counter
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=confirm,Delete=confirm
+    argocd.argoproj.io/sync-wave: '2'
+spec:
+  accessModes:
+  - ReadWriteOncePod
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mcp-synthetic-runner
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: '4'
+    openbank.tech/max-success-age-seconds: "180000"
+spec:
+  schedule: 17 3 * * *
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: mcp-synthetic-runner
+        spec:
+          serviceAccountName: mcp-synthetic-runner
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            fsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: journey
+            image: registry.invalid/openbank-mcp-harness@sha256:769ba1d4df5a2c37ae29a107f7a3a5a706dd85f8d71993bfb453e13c8c66de10
+            command:
+            - sh
+            - -euc
+            - 'umask 077
+
+              cp /fixture/passkey.json /tmp/passkey.json
+
+              cp /fixture/device.pem /tmp/device.pem
+
+              exec sh ./run-sandbox-journey.sh "$@"'
+            - sandbox-journey
+            args:
+            - --read-only
+            - --verify-revocation
+            env:
+            - name: MCP_HARNESS_SYNTHETIC_SANDBOX
+              value: 'true'
+            - name: MCP_HARNESS_SOFTWARE_CONNECT_APPROVAL
+              value: 'true'
+            - name: MCP_HARNESS_APP_SIGN_IN
+              value: 'true'
+            - name: MCP_HARNESS_ALLOWED_SUFFIXES
+              value: sandbox.invalid
+            - name: MCP_HARNESS_RESOURCE_URL
+              value: SITE_OVERRIDE_REQUIRED
+            - name: MCP_HARNESS_AUTH_SERVER
+              value: SITE_OVERRIDE_REQUIRED
+            - name: MCP_HARNESS_CUSTOMER_EDGE_URL
+              value: SITE_OVERRIDE_REQUIRED
+            - name: MCP_HARNESS_CLIENT_ID
+              value: mcp-local-sandbox
+            - name: MCP_HARNESS_SCOPE
+              value: openid
+            - name: MCP_HARNESS_READ_TOOL
+              value: get_balance
+            - name: MCP_HARNESS_PASSKEY_FILE
+              value: /tmp/passkey.json
+            - name: MCP_HARNESS_CONNECT_PRIVATE_KEY_FILE
+              value: /tmp/device.pem
+            - name: MCP_HARNESS_PRIVATE_CA_FILE
+              value: /ca/ca.crt
+            - name: MCP_HARNESS_APP_COUNTER_FILE
+              value: /state/counter.json
+            - name: MCP_HARNESS_PARTY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-synthetic-fixture
+                  key: party-id
+            - name: MCP_HARNESS_CONNECT_CREDENTIAL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-synthetic-fixture
+                  key: device-id
+            - name: MCP_HARNESS_READ_TOOL_ARGS
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-synthetic-fixture
+                  key: read-tool-args.json
+            - name: MCP_HARNESS_VERIFY_BALANCE_CURRENCY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-synthetic-fixture
+                  key: currency
+            volumeMounts:
+            - name: fixture
+              mountPath: /fixture
+              readOnly: true
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+            - name: state
+              mountPath: /state
+            - name: home
+              mountPath: /home/pwuser
+            - name: tmp
+              mountPath: /tmp
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+                ephemeral-storage: 256Mi
+              limits:
+                cpu: '1'
+                memory: 1Gi
+                ephemeral-storage: 1Gi
+          volumes:
+          - name: fixture
+            secret:
+              secretName: mcp-synthetic-fixture
+              defaultMode: 288
+              items:
+              - key: passkey.json
+                path: passkey.json
+              - key: device.pem
+                path: device.pem
+          - name: ca
+            secret:
+              secretName: mcp-synthetic-router-server
+              items:
+              - key: ca.crt
+                path: ca.crt
+          - name: state
+            persistentVolumeClaim:
+              claimName: mcp-synthetic-passkey-counter
+          - name: home
+            emptyDir:
+              sizeLimit: 256Mi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 256Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-synthetic-runner
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-synthetic-runner
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress: []
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-synthetic-router
+    ports:
+    - protocol: TCP
+      port: 8443
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
