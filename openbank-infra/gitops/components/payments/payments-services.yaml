@@ -1590,7 +1590,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-44fff644@sha256:5119d729a791b3083ad38d6a9193d7b4cf85af261a825bb6c2e19d30d9c720e6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-086d7273@sha256:7082c0817a4204b2e37d342e31b7352013a92506c4cad988de69ac13f1dd8ad8
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
