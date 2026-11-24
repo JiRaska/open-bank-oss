@@ -83,7 +83,7 @@ jobs:
           [[ -n "$BG_APP_ID" && "$BG_APP_KEY_SET" == true ]] || { echo "::error::BREAK_GLASS_APP_ID / BREAK_GLASS_APP_PRIVATE_KEY environment secrets are not set — owner setup incomplete"; exit 1; }
       - name: Mint the GitHub App installation token (the App the ruleset pins merge-train to)
         id: app_token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.BREAK_GLASS_APP_ID }}
           private-key: ${{ secrets.BREAK_GLASS_APP_PRIVATE_KEY }}
