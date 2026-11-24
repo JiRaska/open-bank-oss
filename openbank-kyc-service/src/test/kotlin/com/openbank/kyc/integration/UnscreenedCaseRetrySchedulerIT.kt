@@ -272,15 +272,7 @@ class UnscreenedCaseRetrySchedulerIT {
         val erased = onboard(ERASED)
         await("the name to be retained for a retry", { retainedName(erased) }) { it == ERASED }
 
-        val payload = objectMapper.writeValueAsString(
-            mapOf(
-                "eventType" to "PARTY_ERASED",
-                "partyId" to erased.toString(),
-            ),
-        )
-        VertxContextSupport.subscribeAndAwait {
-            uni(CoroutineScope(Dispatchers.Unconfined)) { consumer.consume(payload) }
-        }
+        eraseParty(erased)
 
         assertThat(retainedName(erased)).describedAs("the legal name is PII (GDPR Art. 17)").isNull()
         // A pass that began before the erasure may still finish one call; nothing may follow it.
@@ -291,46 +283,69 @@ class UnscreenedCaseRetrySchedulerIT {
         assertThat(retainedName(erased)).isNull()
     }
 
-    @Test
-    fun `a case marked erased is never picked up, even if a name is still stored on it`() {
-        // Not a state the service produces — erasure clears the name — but the sweep must not
-        // depend on that: the erasure mark alone has to keep the name from being sent anywhere.
+    private fun eraseParty(partyId: UUID) {
+        val payload = objectMapper.writeValueAsString(
+            mapOf(
+                "eventType" to "PARTY_ERASED",
+                "partyId" to partyId.toString(),
+            ),
+        )
+        VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) { consumer.consume(payload) }
+        }
+    }
+
+    private fun insertRetryFixture(id: Long, name: String, status: String, erased: Boolean): UUID {
         val caseId = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
         dataSource.connection.use { c ->
             c.prepareStatement(
                 """
                 INSERT INTO kyc_cases (id, case_id, party_id, status, risk_level, checks_json, created_at,
                                        updated_at, erased_at, pending_screening_name, screening_attempted_at)
-                VALUES ($GHOST_ROW_ID, ?, ?, 'OPEN', 'MEDIUM', ?, NOW() - INTERVAL '1 hour',
-                        NOW() - INTERVAL '1 hour', NOW() - INTERVAL '30 minutes', ?, NOW() - INTERVAL '1 hour')
+                VALUES (?, ?, ?, ?, 'MEDIUM', ?, NOW() - INTERVAL '1 hour',
+                        NOW() - INTERVAL '1 hour', CASE WHEN ? THEN NOW() - INTERVAL '30 minutes' END,
+                        ?, NOW() - INTERVAL '1 hour')
                 """.trimIndent(),
             ).use { st ->
-                st.setObject(1, caseId)
-                st.setObject(2, UUID.randomUUID())
+                st.setLong(1, id)
+                st.setObject(2, caseId)
+                st.setObject(3, partyId)
+                st.setString(4, status)
                 st.setString(
-                    3,
+                    5,
                     """[{"id":"${UUID.randomUUID()}","caseId":"$caseId","checkType":"SANCTIONS_SCREENING",""" +
                         """"status":"PENDING","result":null,"provider":null,"performedAt":null,""" +
                         """"createdAt":"2026-11-01T00:00:00Z"}]""",
                 )
-                st.setString(4, GHOST)
+                st.setBoolean(6, erased)
+                st.setString(7, name)
                 st.executeUpdate()
             }
         }
+        return partyId
+    }
+
+    @Test
+    fun `a case marked erased is never picked up, even if a name is still stored on it`() {
+        // Erasure alone must prevent sending the retained name to the provider.
+        insertRetryFixture(GHOST_ROW_ID, GHOST, "OPEN", erased = true)
         // Known-positive for the wait: a live case opened now IS retried within the same window.
         val control = onboard(LIVE_CONTROL)
-        await("the live control case to be retried", { screening.keysFor(LIVE_CONTROL).size }) { it >= 3 }
-
-        assertThat(screening.keysFor(GHOST)).describedAs("the name stored on an erased case").isEmpty()
-
-        // Close the control case so it does not stay in the backlog the other test counts.
-        dataSource.connection.use { c ->
-            c.prepareStatement("UPDATE kyc_cases SET status = 'EXPIRED' WHERE party_id = ?").use {
-                it.setObject(1, control)
-                it.executeUpdate()
-            }
+        try {
+            await("the live control case to be retried", { screening.keysFor(LIVE_CONTROL).size }) { it >= 3 }
+            assertThat(screening.keysFor(GHOST)).describedAs("the name stored on an erased case").isEmpty()
+        } finally {
+            // Erasure uses the same row lock as the retry's in-flight write.
+            eraseParty(control)
         }
-        await("the closed case's name to be released", { retainedName(control) }) { it == null }
+    }
+
+    @Test
+    fun `the scheduler releases retained names from closed cases`() {
+        val closed = insertRetryFixture(CLOSED_ROW_ID, CLOSED, "EXPIRED", erased = false)
+        await("the closed case's name to be released", { retainedName(closed) }) { it == null }
+        assertThat(screening.keysFor(CLOSED)).isEmpty()
     }
 
     private fun outboxRowsFor(caseId: UUID): Int = dataSource.connection.use { c ->
@@ -385,6 +400,8 @@ class UnscreenedCaseRetrySchedulerIT {
         // Explicit and far from the Hibernate sequence: the BIGSERIAL default would hand out an id
         // the application's own pooled sequence already used.
         const val GHOST_ROW_ID = 9_000_000_001L
+        const val CLOSED_ROW_ID = 9_000_000_002L
+        const val CLOSED = "Retry Closed Person"
         const val LIVE_CONTROL = "Retry Control Person"
         const val ERASED = "Retry Erased Person"
         const val CLEAR = "Retry Clear Person"
