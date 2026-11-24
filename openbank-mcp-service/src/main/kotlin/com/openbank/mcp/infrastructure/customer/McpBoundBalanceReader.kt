@@ -45,7 +45,7 @@ interface McpBoundBalanceIssuer {
         @FormParam("resource_dpop_proof") resourceProof: String?,
         @FormParam("account_id") accountId: UUID,
         @FormParam("connection_id") connectionId: UUID?,
-        @FormParam("hosted_read_id") hostedReadId: UUID? = null,
+        @FormParam("hosted_read_id") hostedReadId: UUID?,
     ): JsonNode
 }
 
@@ -89,7 +89,7 @@ class McpBoundBalanceReader(
             issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, null, grant.accountId, boundConnection, Ids.randomId())
         } else {
             val proof = caller.resourceProof ?: throw TokenExchangeRefused("verified resource proof is unavailable")
-            issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId)
+            issuer.issue(GRANT_TYPE, CLIENT, caller.rawToken, proof, grant.accountId, connectionId, null)
         }
         return readBalance(grant.accountId, validated(answer, caller.subject, grant, connectionId))
     }

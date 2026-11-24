@@ -167,7 +167,7 @@ class CustomerReadToolsTest {
             .put("grant_id", g.grantId.toString())
         claims.putObject("cnf").put("x5t#S256", "A".repeat(43))
         every {
-            issuer.issue(any(), any(), "customer-token", "original-proof", account, null)
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, null, null)
         } answers { boundPermit(claims) }
         every { balance.read(account, match { it.startsWith("Bearer fixture.") }) } returns mapper.createObjectNode()
         val args = args("accountId" to account.toString())
@@ -180,7 +180,7 @@ class CustomerReadToolsTest {
         val scopedKey = GrantKey(UUID.randomUUID(), caller.clientId, "test-key", connectionId)
         val scopedCaller = boundCaller.copy(grantKey = scopedKey)
         every {
-            issuer.issue(any(), any(), "customer-token", "original-proof", account, connectionId)
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, connectionId, null)
         } answers { boundPermit(claims) }
         assertThat(boundTools.list(listOf(g), connectionBound = true).map { it.name })
             .containsExactly("get_balance")

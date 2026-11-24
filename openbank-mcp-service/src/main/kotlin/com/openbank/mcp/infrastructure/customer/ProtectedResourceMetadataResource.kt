@@ -62,7 +62,7 @@ class ProtectedResourceMetadataResource(private val channel: CustomerChannel) {
                 authorizationServers = listOf(admission.issuer),
                 bearerMethodsSupported = listOf("header"),
                 dpopSigningAlgValuesSupported = DpopProofVerifier.ALLOWED_ALGORITHMS.sorted(),
-                dpopBoundAccessTokensRequired = !admission.supportsHostedBearer(),
+                dpopBoundAccessTokensRequired = !admission.supportsHostedBearer,
             ),
         ).build()
     }
