@@ -373,3 +373,7 @@ The synthetic sandbox uses a private HTTPS route with its own trust, a canonical
 issuer and a certificate-bound Balance hop. Smoke-test connection approval, a scoped
 balance read and revocation using the browser runner. Run the pending-proposal check
 separately with valid synthetic accounts and the settlement boundary in place.
+
+### ChatGPT hosted client registration
+
+The allowlist declares ChatGPT's exact published OAuth client ID and callback. The generated realm client pins the reviewed RS256 key set and uses private-key JWT authentication. The declaration stays disabled until sandbox deployment verifies the hosted authorization and refresh flow. Review key rotation against the vendor's published JWKS before updating the pin.

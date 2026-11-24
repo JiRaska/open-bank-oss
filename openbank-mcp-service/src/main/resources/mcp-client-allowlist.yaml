@@ -68,6 +68,18 @@ exchange:
       scope: mcp-customer-transaction-read
 
 clients:
+  - client_id: https://chatgpt.com/oauth/client.json
+    tier: H
+    enabled: false
+    display_name: "ChatGPT"
+    redirect_uris:
+      - https://chatgpt.com/connector_platform_oauth_redirect
+    auth:
+      method: private_key_jwt
+      signing_alg: RS256
+      jwks_file: mcp-clients/chatgpt.jwks.json
+      jwks_sha256: e92c2799a5b8d33b19231421ffe6609a2770edba72d0212bae10919472a26e4b
+
   - client_id: mcp-hosted-reference
     tier: H
     enabled: false
