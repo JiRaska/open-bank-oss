@@ -4,6 +4,8 @@ kind: ExternalSecret
 metadata:
   name: sandbox-keycloak-settings
   namespace: mcp-synthetic-sandbox
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -27,6 +29,8 @@ kind: ExternalSecret
 metadata:
   name: sandbox-keycloak-postgres-credentials
   namespace: mcp-synthetic-sandbox
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -50,6 +54,8 @@ kind: ExternalSecret
 metadata:
   name: sandbox-keycloak-realm-import
   namespace: mcp-synthetic-sandbox
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -69,6 +75,8 @@ kind: ExternalSecret
 metadata:
   name: sandbox-keycloak-postgres-trust
   namespace: mcp-synthetic-sandbox
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:

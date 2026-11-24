@@ -4,6 +4,8 @@ kind: ExternalSecret
 metadata:
   name: balance-mcp-oidc-trust
   namespace: balances
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:

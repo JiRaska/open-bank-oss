@@ -4,6 +4,8 @@ kind: ExternalSecret
 metadata:
   name: mcp-customer-oidc-origins
   namespace: platform
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -23,6 +25,8 @@ kind: ExternalSecret
 metadata:
   name: mcp-customer-oidc-trust
   namespace: platform
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:

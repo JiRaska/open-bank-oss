@@ -295,6 +295,21 @@ openbao:
       reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
       issue: 16754
       review_by: 2027-02-18
+    - kind: openbao
+      names:
+        - mcp-synthetic-sandbox/balance-mcp-oidc-trust
+        - mcp-synthetic-sandbox/balance-mcp-read-origins
+        - mcp-synthetic-sandbox/customer-edge-mcp-oidc-origins
+        - mcp-synthetic-sandbox/customer-edge-mcp-oidc-trust
+        - mcp-synthetic-sandbox/mcp-customer-oidc-origins
+        - mcp-synthetic-sandbox/mcp-customer-oidc-trust
+        - mcp-synthetic-sandbox/sandbox-keycloak-postgres-credentials
+        - mcp-synthetic-sandbox/sandbox-keycloak-postgres-trust
+        - mcp-synthetic-sandbox/sandbox-keycloak-realm-import
+        - mcp-synthetic-sandbox/sandbox-keycloak-settings
+      reason: "Site-owned private MCP sandbox bootstrap, discovery and trust inputs. The sandbox overlays are dormant until the owner provisions and verifies the exact synthetic inputs."
+      issue: 16996
+      review_by: 2027-01-31
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
