@@ -18,14 +18,16 @@ import com.openbank.mcp.application.protocol.ToolDefinition
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * The customer channel's tool surface (ADR-0383 D3/D4): three READS, each offered only while one of
- * the caller's active `MCP_CLIENT` grants carries the delegation capability it needs, and each call
- * checked against the grant of the ONE account it names. Nothing here writes; `propose_payment` is
- * not on this channel in this slice.
+ * The customer channel's tool surface (ADR-0383 D3/D4/D6): three READS and one PROPOSAL, each
+ * offered only while one of the caller's active `MCP_CLIENT` grants carries the delegation
+ * capability it needs, and each call checked against the grant of the ONE account it names.
+ * `propose_payment` writes only a PENDING proposal to delegation-service's store
+ * ([CustomerPaymentProposer]); it can neither approve nor execute, and moves no money.
  *
  * Order on a call, cheapest refusal first: unknown tool → argument shape → is this account in a
  * grant that carries this tool's capability → mcp-service's PDP → exchange the customer's token for a 60-second token
@@ -42,9 +44,26 @@ class CustomerReadTools @Inject constructor(
     private val downstream: CustomerDownstream,
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
+    private val proposer: CustomerPaymentProposer,
+    private val boundBalance: McpBoundBalanceReader?,
+    @ConfigProperty(name = "mcp.customer.connection-binding.propose-enabled", defaultValue = "false")
+    private val boundProposalEnabled: Boolean,
 ) {
-    /** The authenticated caller, as admission verified it. */
-    data class Caller(val subject: String, val rawToken: String, val clientId: String)
+    /**
+     * The authenticated caller, as admission verified it. [grantKey] is the verified grant triple
+     * (required to propose — the store finds the grant from it) and [sessionId] the token's session,
+     * both part of the proposal's derived Idempotency-Key.
+     */
+    data class Caller(
+        val subject: String,
+        val rawToken: String,
+        val clientId: String,
+        val grantKey: GrantKey? = null,
+        val sessionId: String? = null,
+        val resourceProof: String? = null,
+    ) {
+        override fun toString(): String = "CustomerReadCaller[redacted]"
+    }
 
     sealed interface Outcome {
         /** [grantId] is the grant the call ran under; null for `list_accounts` (it reads no account). */
@@ -56,6 +75,8 @@ class CustomerReadTools @Inject constructor(
             val capability: String?,
             val unavailable: Boolean = false,
             val invalidateGrant: Boolean = false,
+            /** Fixed, safe text for the client; null means the generic refusal text. */
+            val message: String? = null,
         ) : Outcome
 
         /** The downstream refused the exchanged token: the grant may have changed. Caller invalidates. */
@@ -106,11 +127,25 @@ class CustomerReadTools @Inject constructor(
             CustomerCapabilities.READ_TRANSACTIONS,
             "query.transaction.readonly",
         ),
+        Tool(
+            ToolDefinition(
+                name = PROPOSE_PAYMENT,
+                description = "Propose a payment from an account you have shared for payment proposals. " +
+                    "This only records a proposal: nothing is paid until you review and approve it in the " +
+                    "bank app with strong customer authentication. Reuse the same clientRequestId to retry.",
+                inputSchema = proposeSchema(),
+                service = "openbank-delegation-service",
+            ),
+            CustomerCapabilities.PROPOSE_PAYMENT,
+            PROPOSE_ACTION,
+        ),
     ).associateBy { it.definition.name }
 
     /** Tools whose capability at least one active grant carries. No grant ⇒ no tools. */
-    fun list(grants: List<CustomerGrant>): List<ToolDefinition> =
-        tools.values.filter { t -> grants.any { it.allows(t.capability) } }.map { it.definition }
+    fun list(grants: List<CustomerGrant>, connectionBound: Boolean = false): List<ToolDefinition> =
+        tools.values.filter { t ->
+            toolAvailable(t.definition.name, connectionBound) && grants.any { it.allows(t.capability) }
+        }.map { it.definition }
 
     val totalTools: Int get() = tools.size
 
@@ -119,17 +154,73 @@ class CustomerReadTools @Inject constructor(
     fun call(tool: String, arguments: JsonNode, caller: Caller, grants: List<CustomerGrant>): Outcome {
         val spec = tools[tool] ?: return Outcome.Refused("tool not available on the customer channel", null)
         val capability = spec.capability
+        val connectionBound = caller.grantKey?.connectionId != null
+        if (!toolAvailable(tool, connectionBound)) {
+            return Outcome.Refused("tool not available for an MCP connection", capability)
+        }
         if (tool == LIST_ACCOUNTS) {
             val shared = grants.filter { it.allows(capability) }
             if (shared.isEmpty()) return Outcome.Refused("no active grant carries $capability", capability)
             policy(spec, caller, shared.flatMap { it.capabilities }.toSet())?.let { return it }
-            return Outcome.Allowed(render(accounts(shared)), capability, null)
+            return Outcome.Allowed(render(accounts(shared, connectionBound)), capability, null)
         }
+        if (tool == PROPOSE_PAYMENT) return propose(spec, arguments, caller, grants)
         val read = readOf(tool, arguments) ?: return Outcome.Refused("invalid arguments", capability)
         val grant = grants.firstOrNull { it.accountId == read.accountId && it.allows(capability) }
             ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
         policy(spec, caller, grant.capabilities)?.let { return it }
         return exchangeAndRead(read, caller, capability, grant)
+    }
+
+    private fun toolAvailable(tool: String, connectionBound: Boolean): Boolean {
+        if (!connectionBound) return true
+        return when (tool) {
+            LIST_ACCOUNTS -> true
+            GET_BALANCE -> boundBalance?.enabled == true
+            PROPOSE_PAYMENT -> boundProposalEnabled
+            else -> false
+        }
+    }
+
+    /**
+     * ADR-0383 D6, cheapest refusal first: argument validation → a grant over the DEBTOR account
+     * carrying the propose capability → the PDP (`propose.payment`) → the store. No token is
+     * exchanged: the store is called on mcp-service's own service-account, the one identity it
+     * admits to create, with the verified grant triple so the store finds the grant itself.
+     */
+    @Suppress("ReturnCount")
+    private fun propose(spec: Tool, arguments: JsonNode, caller: Caller, grants: List<CustomerGrant>): Outcome {
+        val capability = spec.capability
+        val instruction = try {
+            CustomerPaymentProposer.parse(arguments)
+        } catch (e: IllegalArgumentException) {
+            val detail = e.message ?: "invalid arguments"
+            return Outcome.Refused("invalid arguments: $detail", capability, message = "Invalid arguments: $detail")
+        }
+        val key = caller.grantKey
+            ?: return Outcome.Refused("no verified grant key for a proposal", capability, unavailable = true)
+        // The token's session is part of the derived Idempotency-Key: without it two sessions of the
+        // same client reusing one clientRequestId would replay each other's proposal. No sid, no write.
+        val session = caller.sessionId
+            ?: return Outcome.Refused("no session (sid) on the customer token", capability)
+        val grant = grants.firstOrNull { it.accountId == instruction.debtorAccountId && it.allows(capability) }
+            ?: return Outcome.Refused("account is not shared with this client for $capability", capability)
+        policy(spec, caller, grant.capabilities)?.let { return it }
+        return when (val result = proposer.propose(instruction, key, session)) {
+            is CustomerPaymentProposer.Result.Proposed -> Outcome.Allowed(
+                render(result.body),
+                capability,
+                grant.grantId,
+            )
+
+            is CustomerPaymentProposer.Result.Refused -> Outcome.Refused(
+                result.reason,
+                capability,
+                unavailable = result.unavailable,
+                invalidateGrant = result.invalidateGrant,
+                message = result.message,
+            )
+        }
     }
 
     /**
@@ -185,8 +276,9 @@ class CustomerReadTools @Inject constructor(
     private fun exchangeAndRead(read: Read, caller: Caller, capability: String, grant: CustomerGrant): Outcome {
         val balance = read.tool == GET_BALANCE
         val audience = if (balance) DownstreamAudience.BALANCE else DownstreamAudience.TRANSACTION
+        val bound = if (balance) boundBalance?.takeIf { it.enabled } else null
         val token = try {
-            exchange.exchange(caller.rawToken, caller.subject, audience)
+            if (bound == null) exchange.exchange(caller.rawToken, caller.subject, audience) else null
         } catch (e: CancellationException) {
             throw e
         } catch (e: TokenExchangeRefused) {
@@ -195,14 +287,12 @@ class CustomerReadTools @Inject constructor(
             return Outcome.Refused("token exchange failed: ${e.javaClass.simpleName}", capability, unavailable = true)
         }
         val body = try {
-            if (balance) {
-                downstream.balances(
-                    token,
-                    read.accountId,
-                )
-            } else {
-                downstream.transactions(token, read.accountId, read.limit)
-            }
+            bound?.read(caller, grant) ?: downstream.readLegacy(
+                audience,
+                requireNotNull(token),
+                read.accountId,
+                read.limit,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: DownstreamRefused) {
@@ -220,38 +310,36 @@ class CustomerReadTools @Inject constructor(
         return Outcome.Allowed(render(body), capability, grant.grantId)
     }
 
-    private fun accounts(grants: List<CustomerGrant>): JsonNode {
+    private fun accounts(grants: List<CustomerGrant>, connectionBound: Boolean): JsonNode {
         val root = mapper.createObjectNode()
         val list = root.putArray("accounts")
         grants.forEach { g ->
             val entry = list.addObject().put(ACCOUNT_ID, g.accountId.toString())
             val names = entry.putArray("tools")
-            readTools(g).forEach { names.add(it) }
+            list(listOf(g), connectionBound).forEach { tool ->
+                if (tool.name != LIST_ACCOUNTS) names.add(tool.name)
+            }
         }
         return root
     }
-
-    private fun readTools(g: CustomerGrant): List<String> = tools.values.filter {
-        it.definition.name != LIST_ACCOUNTS && g.allows(it.capability)
-    }.map { it.definition.name }
 
     private fun render(result: JsonNode): ToolCallResult {
         val masked = mapper.writeValueAsString(masker.mask(result))
         return ToolCallResult(listOf(ToolContent(text = McpUntrustedData.wrap(masked))))
     }
 
-    private fun accountIdOf(arguments: JsonNode): UUID? = arguments.path(ACCOUNT_ID)
-        .takeIf { it.isTextual && UUID_SHAPE.matches(it.asText()) }
-        ?.let { UUID.fromString(it.asText()) }
-
     companion object {
         private const val HUMAN = "HUMAN"
         const val LIST_ACCOUNTS = "list_accounts"
         const val GET_BALANCE = "get_balance"
         const val LIST_TRANSACTIONS = "list_transactions"
+        const val PROPOSE_PAYMENT = "propose_payment"
+
+        /** The staff registry's action name for the same tool (`McpToolRegistry`), on this channel too. */
+        const val PROPOSE_ACTION = "propose.payment"
+
         private const val ACCOUNT_ID = "accountId"
         const val UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        private val UUID_SHAPE = Regex(UUID_PATTERN)
     }
 }
 
@@ -261,8 +349,64 @@ private fun uuidProp() = mapOf(
     "description" to "accountId from list_accounts",
 )
 
+private val ACCOUNT_UUID_SHAPE = Regex(CustomerReadTools.UUID_PATTERN)
+
+private fun accountIdOf(arguments: JsonNode): UUID? = arguments.path("accountId")
+    .takeIf { it.isTextual && ACCOUNT_UUID_SHAPE.matches(it.asText()) }
+    ?.let { UUID.fromString(it.asText()) }
+
+private fun proposeSchema(): Map<String, Any> = schema(
+    mapOf(
+        CustomerPaymentProposer.DEBTOR to uuidProp(),
+        CustomerPaymentProposer.IBAN to mapOf(
+            "type" to "string",
+            "pattern" to McpInputBounds.IBAN_PATTERN,
+            "description" to "Creditor IBAN, uppercase, no spaces",
+        ),
+        CustomerPaymentProposer.NAME to mapOf(
+            "type" to "string",
+            "minLength" to 1,
+            "maxLength" to CustomerPaymentProposer.MAX_NAME,
+        ),
+        CustomerPaymentProposer.AMOUNT to mapOf(
+            "type" to "string",
+            "pattern" to "^(0|[1-9][0-9]{0,6})(\\.[0-9]{1,2})?$",
+            "description" to "Plain decimal, at most two decimals, e.g. 12.50",
+        ),
+        CustomerPaymentProposer.CURRENCY to mapOf("type" to "string", "enum" to listOf("CZK", "EUR")),
+        CustomerPaymentProposer.REFERENCE to mapOf(
+            "type" to "string",
+            "minLength" to 1,
+            "maxLength" to CustomerPaymentProposer.MAX_REFERENCE,
+        ),
+        CustomerPaymentProposer.REQUEST_ID to mapOf(
+            "type" to "string",
+            "pattern" to "^[A-Za-z0-9._-]{8,64}$",
+            "description" to "Your id for this proposal; reuse it on a retry",
+        ),
+    ),
+    listOf(
+        CustomerPaymentProposer.DEBTOR,
+        CustomerPaymentProposer.IBAN,
+        CustomerPaymentProposer.NAME,
+        CustomerPaymentProposer.AMOUNT,
+        CustomerPaymentProposer.CURRENCY,
+        CustomerPaymentProposer.REQUEST_ID,
+    ),
+) + ("additionalProperties" to false)
+
 private fun schema(props: Map<String, Any>, required: List<String>): Map<String, Any> = buildMap {
     put("type", "object")
     put("properties", props)
     if (required.isNotEmpty()) put("required", required)
+}
+
+private fun CustomerDownstream.readLegacy(
+    audience: DownstreamAudience,
+    token: String,
+    accountId: UUID,
+    limit: Int,
+): JsonNode = when (audience) {
+    DownstreamAudience.BALANCE -> balances(token, accountId)
+    DownstreamAudience.TRANSACTION -> transactions(token, accountId, limit)
 }

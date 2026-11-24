@@ -4,10 +4,13 @@
 
 package com.openbank.delegation.application.usecase
 
+import com.openbank.delegation.application.port.`in`.ResolveMcpClientGrantUseCase
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PaymentProposalRepository
 import com.openbank.delegation.application.port.out.ProposalCreateOutcome
 import com.openbank.delegation.application.port.out.ProposalLimits
+import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationGranteeType
@@ -39,6 +42,7 @@ data class CreatePaymentProposalCommand(
     /** The DPoP key thumbprint (`cnf.jkt`) of that token; trusted from mcp-service likewise. */
     val keyThumbprint: String,
     val payload: PaymentProposalPayload,
+    val connectionId: UUID? = null,
 )
 
 data class CreatedPaymentProposal(val proposal: PaymentProposal, val deduplicated: Boolean)
@@ -60,6 +64,8 @@ data class CreatedPaymentProposal(val proposal: PaymentProposal, val deduplicate
 class PaymentProposalService(
     private val proposals: PaymentProposalRepository,
     private val grants: DelegationRepository,
+    private val mcpGrants: ResolveMcpClientGrantUseCase,
+    private val ownership: ResourceOwnershipClient,
     private val clock: Clock,
     private val ttl: Duration,
     private val limits: ProposalLimits,
@@ -68,6 +74,8 @@ class PaymentProposalService(
     constructor(
         proposals: PaymentProposalRepository,
         grants: DelegationRepository,
+        mcpGrants: ResolveMcpClientGrantUseCase,
+        ownership: ResourceOwnershipClient,
         @ConfigProperty(name = "openbank.delegation.payment-proposals.ttl", defaultValue = "PT24H") ttl: Duration,
         @ConfigProperty(name = "openbank.delegation.payment-proposals.max-open-per-party", defaultValue = "10")
         maxOpen: Int,
@@ -76,7 +84,7 @@ class PaymentProposalService(
             defaultValue = "20",
         )
         maxPerDay: Int,
-    ) : this(proposals, grants, Clock.systemUTC(), ttl, ProposalLimits(maxOpen, maxPerDay))
+    ) : this(proposals, grants, mcpGrants, ownership, Clock.systemUTC(), ttl, ProposalLimits(maxOpen, maxPerDay))
 
     init {
         require(!ttl.isNegative && !ttl.isZero && ttl <= MAX_TTL) { "proposal ttl must be within (0, $MAX_TTL]" }
@@ -169,29 +177,42 @@ class PaymentProposalService(
     private suspend fun mutate(id: UUID, transition: (PaymentProposal) -> PaymentProposal): PaymentProposal =
         proposals.transition(id, transition) ?: throw PaymentProposalNotFoundException()
 
-    /**
-     * ADR-0383 D3/D6: the grant is FOUND, never named — no grant id is accepted from anyone. The
-     * triple (party, azp, cnf.jkt) is supplied by mcp-service, which read it from the customer
-     * token it verified; this service TRUSTS mcp-service for it and does not re-verify it (it sees
-     * only mcp-service's own service-account token). A compromised mcp-service could therefore
-     * name any party that holds an active MCP_CLIENT grant — and still only create a proposal that
-     * party must approve with SCA. Binding create to the exchanged customer token is a follow-up.
-     */
-    private suspend fun proposeGrantFor(command: CreatePaymentProposalCommand, now: OffsetDateTime): DelegationGrant =
-        grants.findByGrantorId(command.partyId).firstOrNull { grant ->
+    /** A cached V2 receipt still requires live consent for this exact connection and account. */
+    suspend fun requireLiveCreateGrant(command: CreatePaymentProposalCommand) {
+        proposeGrantFor(command, OffsetDateTime.now(clock))
+    }
+
+    private suspend fun proposeGrantFor(command: CreatePaymentProposalCommand, now: OffsetDateTime): DelegationGrant {
+        val connection = command.connectionId
+        val candidates = if (connection == null) {
+            grants.findByGrantorId(command.partyId)
+        } else {
+            mcpGrants.resolveForConnection(command.partyId, command.mcpClientId, command.keyThumbprint, connection)
+        }
+        val eligible = candidates.filter { grant ->
             grant.granteeType == DelegationGranteeType.MCP_CLIENT &&
+                grant.grantorPartyId == command.partyId &&
                 grant.granteeClientId == command.mcpClientId &&
                 grant.granteeKeyThumbprint == command.keyThumbprint &&
+                grant.mcpConnectionId == connection &&
                 grant.isActiveOn(now) &&
                 grant.hasCapability(DelegationCapability.ACCOUNT_PROPOSE_PAYMENT) &&
                 grant.resourceType == DelegationResourceType.ACCOUNT &&
                 grant.resourceId == command.payload.debtorAccountId
-        } ?: throw PaymentProposalNotPermittedException(
-            "no active MCP_CLIENT grant permits proposing a payment from this account",
-        )
+        }
+        val grant = (if (connection == null) eligible.firstOrNull() else eligible.singleOrNull())
+            ?: throw PaymentProposalNotPermittedException(NO_PROPOSE_GRANT)
+        if (connection != null &&
+            ownership.verifyOwnership(command.partyId, grant.resourceType, grant.resourceId) != OwnershipVerdict.OWNED
+        ) {
+            throw PaymentProposalNotPermittedException(NO_PROPOSE_GRANT)
+        }
+        return grant
+    }
 
     private companion object {
         const val LIST_LIMIT = 50
+        const val NO_PROPOSE_GRANT = "no active MCP_CLIENT grant permits proposing a payment from this account"
         val MAX_TTL: Duration = Duration.ofHours(24)
     }
 }

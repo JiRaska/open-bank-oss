@@ -1,0 +1,6 @@
+**
+!package.json
+!package-lock.json
+!src/
+!src/**
+!run-sandbox-journey.sh

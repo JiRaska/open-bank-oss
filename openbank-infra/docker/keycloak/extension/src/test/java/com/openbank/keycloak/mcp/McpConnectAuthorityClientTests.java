@@ -98,6 +98,9 @@ public final class McpConnectAuthorityClientTests {
                 INTERNAL + "/" + request.reference() + "/stage", INTERNAL + "/staged",
                 INTERNAL + "/" + request.reference() + "/activate", INTERNAL + "/family-status")),
                 "exact origin paths");
+        require(transport.keys.equals(List.of(request.reference(), request.reference(), request.reference(),
+                request.reference(), request.reference(), codeRef, request.reference(), family.value())),
+                "stable operation-specific idempotency keys");
         require(challenge.binding(request).equals(transport.posted.get(3)), "exact challenge request");
         var activateRequest = challenge.binding(request);
         activateRequest.put("refreshFamilyRef", family.value());
@@ -253,6 +256,7 @@ public final class McpConnectAuthorityClientTests {
     private static final class Transport extends ScaClient {
         private final List<Reply> replies;
         private final List<String> paths = new ArrayList<>();
+        private final List<String> keys = new ArrayList<>();
         private final List<Object> posted = new ArrayList<>();
 
         Transport(List<Reply> replies) {
@@ -263,7 +267,9 @@ public final class McpConnectAuthorityClientTests {
         @Override
         HttpResponse<String> postWithBankIdentity(HttpRequest.Builder builder, Object body) throws IOException {
             int index = paths.size();
-            var uri = builder.build().uri();
+            var request = builder.build();
+            keys.add(request.headers().firstValue("Idempotency-Key").orElseThrow());
+            var uri = request.uri();
             require("https".equals(uri.getScheme()) && "connect.test".equals(uri.getHost()), "trusted HTTPS origin");
             paths.add(uri.getPath());
             posted.add(body);

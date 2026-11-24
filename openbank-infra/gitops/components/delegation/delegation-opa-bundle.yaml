@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "25bd11dccdfbb868"
+    openbank.tech/policy-checksum: "a81819b798c644fa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -994,6 +994,100 @@ data:
     mcp_service_principal if {
     	input.principal.service_account == true
     	machine_named("service-account-openbank-mcp")
+    }
+
+    mcp_read_issuer_principal if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-mcp-read-issuer")
+    }
+
+    allowed_reasons contains "mcp-balance-read-issuer" if {
+    	input.action == "delegation.mcp-client.authorize-balance-read"
+    	mcp_read_issuer_principal
+    }
+
+    prohibited if {
+    	input.action == "delegation.mcp-client.authorize-balance-read"
+    	not mcp_read_issuer_principal
+    }
+
+    prohibited if {
+        mcp_read_issuer_principal
+        input.action != "delegation.mcp-client.authorize-balance-read"
+    }
+
+    mcp_balance_reader_principal if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-balance-mcp-reader")
+    }
+
+    allowed_reasons contains "mcp-balance-grant-check" if {
+    	input.action == "delegation.mcp-client.check-balance-grant"
+    	mcp_balance_reader_principal
+    }
+
+    prohibited if {
+    	input.action == "delegation.mcp-client.check-balance-grant"
+    	not mcp_balance_reader_principal
+    }
+
+    prohibited if {
+        mcp_balance_reader_principal
+        input.action != "delegation.mcp-client.check-balance-grant"
+    }
+
+    mcp_connect_issuer_action if {
+        input.action in {
+            "delegation.mcp-connect.issuer.register",
+            "delegation.mcp-connect.issuer.selection",
+            "delegation.mcp-connect.issuer.challenge",
+            "delegation.mcp-connect.issuer.stage",
+            "delegation.mcp-connect.issuer.staged",
+            "delegation.mcp-connect.issuer.activate",
+            "delegation.mcp-connect.issuer.family-status",
+        }
+    }
+
+    mcp_connect_issuer if {
+        input.principal.type == "HUMAN"
+        input.principal.service_account == true
+        machine_named("service-account-openbank-keycloak-mcp")
+    }
+
+    allowed_reasons contains "mcp-connect-issuer" if {
+        mcp_connect_issuer_action
+        mcp_connect_issuer
+    }
+
+    prohibited if {
+        mcp_connect_issuer_action
+        not mcp_connect_issuer
+    }
+
+    mcp_connect_customer_action if {
+        input.action in {
+            "delegation.mcp-connect.customer.read",
+            "delegation.mcp-connect.customer.select",
+            "delegation.mcp-connect.customer.revoke",
+        }
+    }
+
+    mcp_connect_customer_edge if {
+        input.principal.type == "HUMAN"
+        input.principal.service_account == true
+        machine_named("service-account-openbank-edge")
+    }
+
+    allowed_reasons contains "mcp-connect-customer-edge" if {
+        mcp_connect_customer_action
+        mcp_connect_customer_edge
+    }
+
+    prohibited if {
+        mcp_connect_customer_action
+        not mcp_connect_customer_edge
     }
 
     # Only the authenticated customer edge may record a customer's review, regardless of other roles.

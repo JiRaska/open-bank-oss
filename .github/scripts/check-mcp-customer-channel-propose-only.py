@@ -73,10 +73,18 @@ ALLOWLIST: dict[tuple[str, str, str, str], str] = {
         "ADR-0383 D3 grant lookup: a POST that READS. delegation-service's McpClientGrantResolver "
         "only queries ACTIVE MCP_CLIENT grants for the (party, client, key) triple and writes "
         "nothing; POST keeps the party id and key thumbprint out of the URL and access logs.",
+    ("com.openbank.mcp.infrastructure.customer.McpBoundBalanceIssuer", "issue", "POST", "/protocol/openid-connect/token"):
+        "ADR-0383 D4: issue a certificate-bound token for one balance read through the dedicated grant. "
+        "The issuer verifies the original DPoP evidence and requires a committed read permit.",
     ("com.openbank.mcp.infrastructure.customer.CustomerTokenEndpointClient", "exchange", "POST", "/protocol/openid-connect/token"):
         "ADR-0383 D4 RFC 8693 token exchange at the customers realm: the token endpoint is POST by "
         "specification and mints a short-lived, single-audience READ-scoped token. It changes no "
         "banking state and cannot authorise a write.",
+    ("com.openbank.mcp.infrastructure.customer.PaymentProposalStoreClient", "create", "POST", "/api/v1/payment-proposals"):
+        "ADR-0383 D6: creating a PENDING payment proposal IS the propose-only capability; it moves "
+        "no money, and the customer authorises it in the bank app with their own SCA. "
+        "delegation_rest_ext.rego grants service-account-openbank-mcp only "
+        "delegation.proposal.create (no read, approve, reject or execution).",
 }
 
 # Non-GET operations a client INHERITS from a generated openbank-client-* API.

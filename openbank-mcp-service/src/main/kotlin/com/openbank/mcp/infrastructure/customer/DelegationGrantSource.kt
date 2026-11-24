@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.customer
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -39,7 +40,12 @@ interface DelegationGrantClient {
 }
 
 /** Mirrors delegation-service's request DTO; kept local (no cross-service import). */
-data class ResolveMcpClientGrantRequest(val grantorPartyId: UUID, val clientId: String, val keyThumbprint: String)
+data class ResolveMcpClientGrantRequest(
+    val grantorPartyId: UUID,
+    val clientId: String,
+    val keyThumbprint: String,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val connectionId: UUID? = null,
+)
 
 data class ResolveMcpClientGrantResponse(val grants: List<McpClientGrantDto>? = null)
 
@@ -62,7 +68,7 @@ class DelegationGrantSource @Inject constructor(@RestClient private val client: 
     @Suppress("TooGenericExceptionCaught") // every failure mode must become the one fail-closed signal
     override fun resolve(key: GrantKey): List<CustomerGrant> {
         val response = try {
-            client.resolve(ResolveMcpClientGrantRequest(key.partyId, key.clientId, key.keyThumbprint))
+            client.resolve(ResolveMcpClientGrantRequest(key.partyId, key.clientId, key.keyThumbprint, key.connectionId))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

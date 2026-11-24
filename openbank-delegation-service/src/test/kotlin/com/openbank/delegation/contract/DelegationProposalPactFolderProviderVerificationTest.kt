@@ -72,7 +72,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(PaymentProposalApiIT.InMemoryKafka::class)
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = DelegationProposalPactFolderProviderVerificationTest.EDGE, roles = ["ROLE_API"])
+@TestSecurity(user = DelegationProposalPactFolderProviderVerificationTest.EDGE, roles = ["ROLE_OPERATOR"])
 @OidcSecurity(
     claims = [
         Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),

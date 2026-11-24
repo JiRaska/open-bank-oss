@@ -219,7 +219,7 @@ class ScaStub:
                     return self.reply(401, {})
                 body = json.loads(raw or b"{}")
                 if authority and self.path.startswith(ConnectAuthority.PATH):
-                    return self.reply(*authority.answer(self.path, body))
+                    return self.reply(*authority.answer(self.path, body, self.headers.get("Idempotency-Key")))
                 if self.path == "/api/v1/sca/challenges":
                     return self.reply(*stub.initiate(body, self.headers.get("Idempotency-Key")))
                 m = re.fullmatch(r"/api/v1/sca/challenges/([0-9a-f-]+)/consume", self.path)
@@ -311,8 +311,9 @@ class ConnectAuthority:
         self.revoked = False
         self.checks = []
 
-    def answer(self, path, body):
+    def answer(self, path, body, idempotency_key):
         if path == self.PATH:
+            assert idempotency_key == body["requestRef"]
             assert body["partyId"] == PARTY and body["clientId"] == L
             assert body["resource"] == RESOURCE and body["scopes"] == ["openid"]
             self.request = body
@@ -321,6 +322,8 @@ class ConnectAuthority:
         assert all(body.get(k) == v for k, v in identity.items())
         ref = self.request["requestRef"]
         operation = path.removeprefix(self.PATH)
+        key_field = {"/staged": "codeBindingRef", "/family-status": "refreshFamilyRef"}.get(operation)
+        assert idempotency_key == (body[key_field] if key_field else ref)
         if operation == f"/{ref}/selection":
             return 200, {**self.request, "status": "SELECTED", "accounts": [
                 {"accountId": self.ACCOUNT, "capabilities": ["ACCOUNT_READ_BALANCES"]}]}

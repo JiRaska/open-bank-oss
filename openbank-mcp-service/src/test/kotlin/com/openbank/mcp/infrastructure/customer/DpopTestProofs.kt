@@ -35,6 +35,7 @@ object DpopTestProofs {
         token: String = ACCESS_TOKEN,
         /** The key whose PUBLIC half goes in the `jwk` header; defaults to the signing key. */
         headerKey: PublicJsonWebKey = key,
+        nonce: String? = null,
     ): String {
         val claims = JwtClaims()
         claims.setStringClaim("htm", htm)
@@ -42,6 +43,7 @@ object DpopTestProofs {
         claims.issuedAt = NumericDate.fromSeconds(iat.epochSecond)
         claims.jwtId = jti
         claims.setStringClaim("ath", DpopProofVerifier.accessTokenHash(token))
+        nonce?.let { claims.setStringClaim("nonce", it) }
         val jws = JsonWebSignature()
         jws.payload = claims.toJson()
         jws.algorithmHeaderValue = AlgorithmIdentifiers.ECDSA_USING_P256_CURVE_AND_SHA256

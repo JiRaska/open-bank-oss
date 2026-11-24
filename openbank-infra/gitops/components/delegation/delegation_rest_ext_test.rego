@@ -367,3 +367,79 @@ test_human_named_mcp_with_service_account_false_may_not_create_proposal if {
 	not allow with input as {"principal": p, "action": "delegation.proposal.create"}
 	prohibited with input as {"principal": p, "action": "delegation.proposal.create"}
 }
+
+authorize_balance_read := {"action": "delegation.mcp-client.authorize-balance-read"}
+
+mcp_read_issuer := {
+	"type": "HUMAN", "service_account": true, "client_id": "openbank-mcp-read-issuer",
+	"id": "service-account-openbank-mcp-read-issuer", "roles": ["ROLE_API"],
+}
+
+mcp_balance_reader := {
+	"type": "HUMAN", "service_account": true, "client_id": "openbank-balance-mcp-reader",
+	"id": "service-account-openbank-balance-mcp-reader", "roles": ["ROLE_API"],
+}
+
+test_dedicated_mcp_read_issuer_may_request_balance_permit if {
+	allow with input as object.union(authorize_balance_read, {"principal": mcp_read_issuer})
+}
+
+test_dedicated_mcp_read_issuer_is_vetoed_on_ordinary_delegation_reads if {
+	prohibited with input as {"principal": mcp_read_issuer, "action": "delegation.read"}
+}
+
+test_mcp_lookup_identity_may_not_request_balance_permit if {
+	principal := {
+		"type": "HUMAN", "service_account": true, "client_id": "openbank-mcp",
+		"id": "service-account-openbank-mcp", "roles": ["ROLE_API"],
+	}
+	prohibited with input as object.union(authorize_balance_read, {"principal": principal})
+}
+
+check_balance_grant := {"action": "delegation.mcp-client.check-balance-grant"}
+
+test_balance_reader_can_check_grant if {
+	allow with input as object.union(check_balance_grant, {"principal": mcp_balance_reader})
+}
+
+test_balance_reader_is_vetoed_on_ordinary_delegation_reads if {
+	prohibited with input as {"principal": mcp_balance_reader, "action": "delegation.read"}
+}
+
+test_mcp_read_identities_cannot_use_either_others_action if {
+	not allow with input as object.union(check_balance_grant, {"principal": mcp_read_issuer})
+	not allow with input as object.union(authorize_balance_read, {"principal": mcp_balance_reader})
+}
+
+test_shared_service_cannot_check_balance_grant if {
+	prohibited with input as object.union(check_balance_grant, {"principal": services_m2m})
+}
+
+test_mcp_connect_customer_actions_require_verified_edge if {
+    edge := {
+        "id": "service-account-openbank-edge",
+        "type": "HUMAN",
+        "client_id": "openbank-edge",
+        "service_account": true,
+        "roles": ["ROLE_API"],
+    }
+    every action in {"delegation.mcp-connect.customer.read", "delegation.mcp-connect.customer.select"} {
+        "mcp-connect-customer-edge" in allowed_reasons with input as {"action": action, "principal": edge}
+        prohibited with input as {"action": action, "principal": object.remove(edge, {"service_account"})}
+    }
+}
+
+test_mcp_connect_issuer_actions_require_keycloak_machine if {
+    issuer := {
+        "id": "service-account-openbank-keycloak-mcp",
+        "type": "HUMAN",
+        "client_id": "openbank-keycloak-mcp",
+        "service_account": true,
+        "roles": ["ROLE_API"],
+    }
+    every action in {"stage", "activate", "family-status"} {
+        operation := sprintf("delegation.mcp-connect.issuer.%s", [action])
+        "mcp-connect-issuer" in allowed_reasons with input as {"action": operation, "principal": issuer}
+        prohibited with input as {"action": operation, "principal": object.remove(issuer, {"service_account"})}
+    }
+}

@@ -34,7 +34,22 @@ class McpClientGrantResolver(private val delegationRepository: DelegationReposit
     @Inject
     constructor(delegationRepository: DelegationRepository) : this(delegationRepository, Clock.systemUTC())
 
-    override suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String): List<DelegationGrant> {
+    override suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String): List<DelegationGrant> =
+        resolveBound(grantorPartyId, clientId, keyThumbprint, null)
+
+    override suspend fun resolveForConnection(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+        connectionId: UUID,
+    ): List<DelegationGrant> = resolveBound(grantorPartyId, clientId, keyThumbprint, connectionId)
+
+    private suspend fun resolveBound(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+        connectionId: UUID?,
+    ): List<DelegationGrant> {
         val now = OffsetDateTime.now(clock)
         val granteeId = DelegationGrant.mcpClientGranteeId(clientId)
         // The query already filters on all three keys and ACTIVE; the checks below repeat it as
@@ -42,6 +57,7 @@ class McpClientGrantResolver(private val delegationRepository: DelegationReposit
         return delegationRepository.findActiveMcpClientGrants(grantorPartyId, clientId, keyThumbprint).filter { grant ->
             grant.granteePartyId == granteeId &&
                 grant.granteeType == DelegationGranteeType.MCP_CLIENT &&
+                grant.mcpConnectionId == connectionId &&
                 grant.grantorPartyId == grantorPartyId &&
                 grant.granteeClientId == clientId &&
                 sameThumbprint(grant.granteeKeyThumbprint, keyThumbprint) &&

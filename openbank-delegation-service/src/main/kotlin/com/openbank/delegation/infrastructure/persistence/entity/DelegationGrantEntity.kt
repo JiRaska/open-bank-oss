@@ -55,6 +55,9 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "grantee_key_thumbprint", length = JKT_LENGTH)
     var granteeKeyThumbprint: String? = null
 
+    @Column(name = "mcp_connection_id")
+    var mcpConnectionId: UUID? = null
+
     /** Nullable by design — see [DelegationGrant.grantorName] (issue #3604). */
     @Column(name = "grantor_name", length = NAME_MAX_LENGTH)
     var grantorName: String? = null
@@ -168,6 +171,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
         granteeType = granteeType,
         granteeClientId = granteeClientId,
         granteeKeyThumbprint = granteeKeyThumbprint,
+        mcpConnectionId = mcpConnectionId,
         grantorName = grantorName,
         granteeName = granteeName,
         resourceType = resourceType,
@@ -241,6 +245,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
             granteeType = g.granteeType
             granteeClientId = g.granteeClientId
             granteeKeyThumbprint = g.granteeKeyThumbprint
+            mcpConnectionId = g.mcpConnectionId
             grantorName = g.grantorName?.take(NAME_MAX_LENGTH)
             granteeName = g.granteeName?.take(NAME_MAX_LENGTH)
             resourceType = g.resourceType

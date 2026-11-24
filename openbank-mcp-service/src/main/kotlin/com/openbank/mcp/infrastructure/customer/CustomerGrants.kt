@@ -13,7 +13,7 @@ import java.util.UUID
  * beyond what admission has already verified, and the party is part of it, so one customer's grant
  * can never answer for another customer of the same client.
  */
-data class GrantKey(val partyId: UUID, val clientId: String, val keyThumbprint: String)
+data class GrantKey(val partyId: UUID, val clientId: String, val keyThumbprint: String, val connectionId: UUID? = null)
 
 /** One ACTIVE `MCP_CLIENT` grant over one account, as delegation-service answered it. */
 data class CustomerGrant(
@@ -41,4 +41,7 @@ object CustomerCapabilities {
     const val VIEW_DETAILS = "ACCOUNT_VIEW_DETAILS"
     const val READ_BALANCES = "ACCOUNT_READ_BALANCES"
     const val READ_TRANSACTIONS = "ACCOUNT_READ_TRANSACTIONS"
+
+    /** ADR-0383 D6: may PROPOSE a payment from the account; approving stays with the customer's SCA. */
+    const val PROPOSE_PAYMENT = "ACCOUNT_PROPOSE_PAYMENT"
 }

@@ -3539,6 +3539,8 @@ delegation_exposure_delivery:
       role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpClientGrantResolver.kt
       role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpBalanceReadGrantCheck.kt
+      role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
       role: historical_audit
 
@@ -4842,6 +4844,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/domain/model/ExternalDisclosure.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/BusinessSigningClients.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/DocumentDisclosureClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/McpConnectScaReceiptClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
@@ -4963,6 +4966,9 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/McpBalanceGrantClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadIdentity.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadResource.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/LedgerTrialBalanceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"

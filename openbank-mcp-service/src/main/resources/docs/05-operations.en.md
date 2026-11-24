@@ -204,11 +204,24 @@ nothing advertises a channel that does not admit anyone.
 
 ## Customer reads: grant lookup and token exchange (ADR-0383 D3/D4)
 
+- **Connection binding.** `mcp.customer.connection-binding.enabled`
+  (`MCP_CUSTOMER_CONNECTION_BINDING_ENABLED`, default false) requires a canonical UUID in the
+  verified customer token's `openbank_mcp_connection_id` claim. Admission refuses tokens without
+  that claim before spending a budget. With the switch off, a token carrying the connection claim
+  is refused to prevent fallback to the legacy grant scope. Grant resolution includes the
+  connection along with the party, client and key. The certificate-bound balance call passes it to the issuer and requires
+  the same claim in the returned token. Enable only with a realm issuing the claim and a
+  delegation-service enforcing connection scope. This switch is independent of the bound-balance
+  switch. With connection binding on, `list_accounts` uses only the resolved grants and
+  `get_balance` is available when certificate-bound balance is enabled. Transaction reads and
+  payment proposals stay unavailable for these connections until their downstream grant checks
+  enforce the same connection scope.
+
 With the customer channel on, an admitted customer sees only the read tools its active `MCP_CLIENT` grants allow: `list_accounts` (accounts shared with this client), `get_balance` (`ACCOUNT_READ_BALANCES`) and `list_transactions` (`ACCOUNT_READ_TRANSACTIONS`). There are no write tools on this channel.
 
-- **Grant lookup.** On every `tools/list` and `tools/call`, mcp-service asks delegation-service `POST /api/v1/delegations/mcp-client/resolve` for the grants of the triple (the token's `party_id`, its `azp`, its `cnf.jkt`), on its own `m2m` identity. Only positive answers are cached, for `mcp.customer.grant-cache-ttl` (`MCP_CUSTOMER_GRANT_CACHE_TTL`, default `PT15S`, at most `PT30S`), so a revoked grant stops working within that bound. A lookup failure is a refusal (`Authorization unavailable`), never a stale or empty answer reused.
+- **Grant lookup.** On every `tools/list` and `tools/call`, mcp-service asks delegation-service `POST /api/v1/delegations/mcp-client/resolve` for the grants of the triple (the token's `party_id`, its `azp`, its `cnf.jkt`), on its own `m2m` identity. Keep `mcp.customer.grant-cache-ttl` (`MCP_CUSTOMER_GRANT_CACHE_TTL`) at its default `PT0S` so the next call sees a committed revocation. A nonzero TTL (up to `PT30S`) is for isolated diagnostics and can delay revocation by that duration. A lookup failure refuses the call with `Authorization unavailable`.
 - **Token exchange.** Each read exchanges the customer's own token at the customers realm (RFC 8693) for a token with one audience (`openbank-balance-service` or `openbank-transaction-service`) and one read scope, living at most 60 s. The requester client is `mcp.customer.exchange.client-id` (default `openbank-mcp-service`); its secret is read only from `MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET` (OpenBao `keycloak/mcp-service-customer-exchange`). With no secret set, every customer read is refused. The realm side (requester, audience clients, scopes) is derived from the allowlist's `exchange:` block by `gen-mcp-realm-clients.py` and held to it by the `mcp-client-realm-parity` gate.
-- **Audit.** Every customer call is audited under the customer's subject; an allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 drops the cached grant.
+- **Audit.** Every customer call is audited under the customer's subject. An allowed read records `consent_id = delegation:<grantId>`. A downstream 401/403 invalidates any diagnostic cache entry.
 - **Not yet working end to end:** the downstream services accept only the staff realm today, so exchanged customer tokens are refused there until ADR-0383 P5 lands. Every failure on this path is a refusal.
 
 ## Customer-channel Valkey (`mcp-valkey`)
@@ -306,6 +319,22 @@ from a peer header.
   pass the external Host through (or routed to `:8150`); every tokenless caller sharing one audit
   key means the SAN pin does not match the gateway certificate.
 
+## Customer payment proposals (ADR-0383 D6)
+
+The customer MCP channel offers `propose_payment` when an active account grant includes
+`ACCOUNT_PROPOSE_PAYMENT`. The request names the debtor account and supplies the creditor,
+amount, currency, and a stable `clientRequestId`. A verified customer token session is required.
+Retry the same instruction with the same request ID in the same session to reuse its deduplication key.
+
+A successful call returns a `PENDING` proposal ID. The customer reviews and authorizes the payment
+with transaction-bound SCA in the banking app. The MCP service can create a proposal and has no
+route to approve or execute it.
+
+A grant denial or inaccessible account yields a tool error without creating a proposal.
+For a store outage, investigate the delegation-service create route and its policy decision.
+Match the bounded `propose_payment` tool-call counter and customer channel tag with the MCP audit
+decision. Keep customer arguments and credentials out of diagnostic logs.
+
 ## Customer channel metrics and alerts (ADR-0384 slice 1)
 
 `McpMetricsAdapter` records the customer MCP channel's admission and tool-call outcomes
@@ -323,3 +352,17 @@ where `kind` is a closed set: `invalid_params` (client error), `unavailable` (an
 with nothing behind it yet) and `error` (a server-side fault, also the default for any unmapped
 reason, and what a PDP outage maps to). The customer-channel availability SLO
 (`pyrra-slo-mcp-customer.yaml`) counts `kind="error"` only.
+
+### Certificate-bound customer balance delegation
+
+When `MCP_BOUND_BALANCE_ENABLED` is true, the customer balance tool submits the original verified
+DPoP proof and subject token to `MCP_BOUND_ISSUER_URL`. It checks that the returned token is for
+the requested account and grant, then calls the dedicated balance route at `MCP_BOUND_BALANCE_URL`.
+Both endpoints must use HTTPS and share the named client TLS configuration selected by
+`MCP_BOUND_TLS_CONFIGURATION`. The balance reader refuses a failed bound delegation.
+
+The resource issues a `DPoP-Nonce` challenge after validating a signed proof when its nonce is
+missing or expired. The client retries with a fresh proof signed with the same DPoP key. The
+resource and Keycloak must share the base64url-encoded `MCP_READ_NONCE_KEY`. The challenge binds
+the exact resource and proof key and expires after 60 seconds. Proof replay claims remain
+independent of the nonce.

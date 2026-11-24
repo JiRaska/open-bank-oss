@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.usecase.CreatePaymentProposalCommand
 import com.openbank.delegation.application.usecase.PaymentProposalService
@@ -56,7 +57,6 @@ import java.util.UUID
 @Path("/api/v1/payment-proposals")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed("ROLE_API")
 @Suppress("TooManyFunctions") // five routes, each a thin public handler over a private body
 class PaymentProposalResource(
     private val proposals: PaymentProposalService,
@@ -82,15 +82,19 @@ class PaymentProposalResource(
         scope: String,
         key: String?,
         request: Any,
+        authorizeReplay: suspend () -> Unit = {},
         block: suspend () -> Response,
     ): Response {
         require(!key.isNullOrBlank() && key.length <= IDEMPOTENCY_KEY_MAX) { "Idempotency-Key header is required" }
         val storeKey = "payment-proposal:$operation:$scope:$key"
         val hash = sha256(objectMapper.writeValueAsString(request))
         when (val reserved = idempotencyStore.reserve(storeKey, hash)) {
-            is ReserveResult.Replay -> return Response.status(reserved.record.statusCode)
-                .entity(reserved.record.responseBody).type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true").build()
+            is ReserveResult.Replay -> {
+                authorizeReplay()
+                return Response.status(reserved.record.statusCode)
+                    .entity(reserved.record.responseBody).type(MediaType.APPLICATION_JSON)
+                    .header("X-Idempotency-Replayed", "true").build()
+            }
             ReserveResult.Mismatch -> return proposalError(
                 Response.Status.CONFLICT,
                 "IDEMPOTENCY_KEY_REUSED",
@@ -123,6 +127,7 @@ class PaymentProposalResource(
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
     @POST
+    @RolesAllowed("ROLE_API")
     @Authorize(action = "delegation.proposal.create", resource = "#request.partyId")
     suspend fun create(
         request: CreatePaymentProposalRequest?,
@@ -131,34 +136,39 @@ class PaymentProposalResource(
         requireCaller(MCP_PRINCIPAL)
         val body = requireNotNull(request) { "request body is required" }
         val party = requireNotNull(body.partyId) { "partyId is required" }
-        return idempotent("create", party.toString(), idempotencyKey, body) { createNow(body) }
+        val connection = body.connectionId
+        val scope = connection?.let { "$party:$it" } ?: party.toString()
+        return idempotent("create", scope, idempotencyKey, body, authorizeReplay = {
+            if (connection != null) proposals.requireLiveCreateGrant(createCommand(body, party))
+        }) {
+            val created = proposals.create(createCommand(body, party))
+            val status = if (created.deduplicated) Response.Status.OK else Response.Status.CREATED
+            Response.status(status).entity(McpProposalReceipt.of(created.proposal, created.deduplicated)).build()
+        }
     }
 
-    private suspend fun createNow(body: CreatePaymentProposalRequest): Response {
-        val created = proposals.create(
-            CreatePaymentProposalCommand(
-                partyId = requireNotNull(body.partyId) { "partyId is required" },
-                mcpClientId = requireText(body.mcpClientId, "mcpClientId", CLIENT_ID_MAX),
-                keyThumbprint = requireText(body.keyThumbprint, "keyThumbprint", THUMBPRINT_MAX),
-                payload = PaymentProposalPayload(
-                    operationType = requireNotNull(body.operationType) { "operationType is required" },
-                    debtorAccountId = requireNotNull(body.debtorAccountId) { "debtorAccountId is required" },
-                    creditorIban = requireText(body.creditorIban, "creditorIban", IBAN_MAX)
-                        .replace(" ", "").uppercase(),
-                    creditorName = PaymentProposalPayload.normalize(
-                        requireText(body.creditorName, "creditorName", PaymentProposalPayload.MAX_NAME),
-                    ),
-                    amount = requireNotNull(body.amount) { "amount is required" },
-                    currency = requireText(body.currency, "currency", CURRENCY_LEN).uppercase(),
-                    reference = body.reference?.takeIf { it.isNotBlank() }?.let(PaymentProposalPayload::normalize),
+    private fun createCommand(body: CreatePaymentProposalRequest, party: UUID): CreatePaymentProposalCommand =
+        CreatePaymentProposalCommand(
+            partyId = party,
+            mcpClientId = requireText(body.mcpClientId, "mcpClientId", CLIENT_ID_MAX),
+            keyThumbprint = requireText(body.keyThumbprint, "keyThumbprint", THUMBPRINT_MAX),
+            payload = PaymentProposalPayload(
+                operationType = requireNotNull(body.operationType) { "operationType is required" },
+                debtorAccountId = requireNotNull(body.debtorAccountId) { "debtorAccountId is required" },
+                creditorIban = requireText(body.creditorIban, "creditorIban", IBAN_MAX)
+                    .replace(" ", "").uppercase(),
+                creditorName = PaymentProposalPayload.normalize(
+                    requireText(body.creditorName, "creditorName", PaymentProposalPayload.MAX_NAME),
                 ),
+                amount = requireNotNull(body.amount) { "amount is required" },
+                currency = requireText(body.currency, "currency", CURRENCY_LEN).uppercase(),
+                reference = body.reference?.takeIf { it.isNotBlank() }?.let(PaymentProposalPayload::normalize),
             ),
+            connectionId = body.connectionId,
         )
-        val status = if (created.deduplicated) Response.Status.OK else Response.Status.CREATED
-        return Response.status(status).entity(McpProposalReceipt.of(created.proposal, created.deduplicated)).build()
-    }
 
     @GET
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "delegation.proposal.read", resource = "#partyId")
     suspend fun listPending(
         @QueryParam("partyId") partyId: UUID?,
@@ -171,6 +181,7 @@ class PaymentProposalResource(
 
     @GET
     @Path("/{id}")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "delegation.proposal.read", resource = "#id")
     suspend fun get(
         @PathParam("id") id: UUID,
@@ -183,6 +194,7 @@ class PaymentProposalResource(
 
     @POST
     @Path("/{id}/approve")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "delegation.proposal.approve", resource = "#id")
     suspend fun approve(
         @PathParam("id") id: UUID,
@@ -204,6 +216,7 @@ class PaymentProposalResource(
 
     @POST
     @Path("/{id}/reject")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "delegation.proposal.reject", resource = "#id")
     suspend fun reject(
         @PathParam("id") id: UUID,
@@ -221,6 +234,7 @@ class PaymentProposalResource(
 
     @POST
     @Path("/{id}/execution")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "delegation.proposal.execution", resource = "#id")
     suspend fun recordExecution(
         @PathParam("id") id: UUID,
@@ -290,6 +304,8 @@ data class CreatePaymentProposalRequest(
     val amount: BigDecimal? = null,
     val currency: String? = null,
     val reference: String? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val connectionId: UUID? = null,
 )
 
 data class ProposalDecisionRequest(val partyId: UUID? = null, val payloadSha256: String? = null)

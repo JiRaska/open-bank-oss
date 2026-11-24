@@ -54,6 +54,9 @@ class CustomerChannel @Inject constructor(
     redis: Instance<ReactiveRedisDataSource>,
     limiter: McpRateLimiter,
     launchMode: LaunchMode,
+    nonceSettings: McpResourceNonceSettings? = null,
+    @ConfigProperty(name = "mcp.customer.connection-binding.enabled", defaultValue = "false")
+    requireConnection: Boolean = false,
 ) {
     private var shared: SharedState? = null
 
@@ -62,7 +65,7 @@ class CustomerChannel @Inject constructor(
      * validated first, the shared store selected second, so each refusal names its own cause.
      */
     val admission: CustomerChannelAdmission? = if (enabled.orElse(false)) {
-        load(issuer, allowlistLocation) {
+        load(issuer, allowlistLocation, nonceSettings?.policy(), requireConnection) {
             selectStore(storeSettings, redis, limiter, launchMode).also { shared = it }.replayStore
         }
     } else {
@@ -162,9 +165,11 @@ class CustomerChannel @Inject constructor(
         }
 
         @Suppress("TooGenericExceptionCaught") // any parser failure must become a boot refusal, see below
-        fun load(
+        internal fun load(
             issuer: Optional<String>,
             location: Optional<String>,
+            nonce: McpResourceNonce? = null,
+            requireConnection: Boolean = false,
             replayStore: () -> DpopReplayStore,
         ): CustomerChannelAdmission {
             val iss = issuer.filter { it.isNotBlank() }.orElseThrow {
@@ -199,7 +204,7 @@ class CustomerChannel @Inject constructor(
                 store.javaClass.simpleName,
             )
             val verifier = DpopProofVerifier(Jose4jDpopProofParser(), store)
-            return CustomerChannelAdmission(iss, allowlist, verifier, Clock.systemUTC())
+            return CustomerChannelAdmission(iss, allowlist, verifier, Clock.systemUTC(), nonce, requireConnection)
         }
 
         private fun read(location: String): String? = if (location.startsWith(CLASSPATH_PREFIX)) {

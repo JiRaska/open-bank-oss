@@ -107,6 +107,16 @@ V34) or `MCP_CLIENT`, a customer-admitted third-party MCP client.
   The answer carries only grant id, resource type and id, capabilities and `validTo`; an empty list
   is the refusal.
 
+The internal balance-read authorization component selects one active grant for the requested account
+and checks account ownership before recording the issuer proof claim. It returns the grant ID,
+account ID and validity deadline only after the first claim commits. The HTTP entry point requires the
+dedicated bank issuer service account. The issuer must independently verify the DPoP evidence, and
+the downstream balance route must enforce the account binding and current grant.
+
+The balance-service grant recheck is reserved to its dedicated reader identity. It re-reads the
+grant by ID and verifies the customer, MCP client, account, capability and current validity window
+before returning an empty success response.
+
 ## `delegation_payment_proposals` (V38, ADR-0383 D6)
 
 Payment **proposals** made by a customer-connected MCP client under an ACTIVE `MCP_CLIENT` grant.

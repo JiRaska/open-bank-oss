@@ -112,6 +112,13 @@ spec:
             # transaction-service's port — the wrong value made getPartyId time out → 500.
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # Live MCP grant check using the scoped Balance reader identity.
+            - name: BALANCE_MCP_DELEGATION_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: balance-mcp-read-origins
+                  key: delegation-url
+                  optional: true
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
