@@ -29,7 +29,11 @@ final class McpIssuerProofReference {
         try {
             Mac mac = Mac.getInstance(ALGORITHM);
             mac.init(secret);
-            for (String field : new String[] {"mcp-read-proof/v1", deployment, realm, proof.keyThumbprint(), proof.proofId()}) {
+            String[] fields = proof.keyThumbprint() == null
+                    ? new String[] {"mcp-hosted-read/v1", deployment, realm, proof.clientId(),
+                            proof.connectionId().toString(), proof.proofId()}
+                    : new String[] {"mcp-read-proof/v1", deployment, realm, proof.keyThumbprint(), proof.proofId()};
+            for (String field : fields) {
                 byte[] encoded = field.getBytes(StandardCharsets.UTF_8);
                 mac.update(ByteBuffer.allocate(Integer.BYTES).putInt(encoded.length).array());
                 mac.update(encoded);

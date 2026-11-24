@@ -37,6 +37,12 @@ interface DelegationRepository {
         keyThumbprint: String,
     ): List<DelegationGrant>
 
+    suspend fun findActiveHostedMcpClientGrants(
+        grantorPartyId: UUID,
+        clientId: String,
+        connectionId: UUID,
+    ): List<DelegationGrant>
+
     fun findExpiredActive(threshold: OffsetDateTime): Uni<List<DelegationGrant>>
     fun markExpired(
         id: UUID,

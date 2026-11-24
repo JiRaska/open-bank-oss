@@ -373,3 +373,7 @@ The synthetic sandbox uses a private HTTPS route with its own trust, a canonical
 issuer and a certificate-bound Balance hop. Smoke-test connection approval, a scoped
 balance read and revocation using the browser runner. Run the pending-proposal check
 separately with valid synthetic accounts and the settlement boundary in place.
+
+### Hosted customer credentials
+
+The customer MCP endpoint accepts bearer tokens for enabled Tier H clients with a signed connection claim. Local clients still need DPoP. Hosted balance reads require the bank read issuer and its dedicated mTLS identity. The issuer checks the original access token and obtains an account-scoped permit from Delegation before issuing a certificate-bound read token.

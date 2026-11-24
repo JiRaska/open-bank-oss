@@ -6,6 +6,7 @@ metadata:
 data:
   private-oidc.properties: |
     quarkus.oidc.customers.tls.tls-configuration-name=mcp-customer-oidc
+    quarkus.oidc.customers-hosted.tls.tls-configuration-name=mcp-customer-oidc
     quarkus.rest-client.customer-token-exchange.tls-configuration-name=mcp-customer-oidc
     quarkus.tls.mcp-customer-oidc.trust-store.pem.certs=/mnt/mcp-customer-oidc-trust/ca.crt
     quarkus.tls.mcp-customer-oidc.protocols=TLSv1.3

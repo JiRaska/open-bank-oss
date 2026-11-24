@@ -9,6 +9,7 @@ import org.keycloak.util.JsonSerialization;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,12 @@ public final class ExtensionTests {
     }
 
     public static void main(String[] args) throws Exception {
+        LocalDate today = LocalDate.of(2026, 11, 24);
+        check("hosted secret valid through expiry date", McpConnectTokenPolicy.validSecretException("2026-11-24", today));
+        check("expired hosted secret refused", !McpConnectTokenPolicy.validSecretException("2026-11-23", today));
+        check("missing hosted secret exception refused", !McpConnectTokenPolicy.validSecretException(null, today));
+        check("malformed hosted secret exception refused", !McpConnectTokenPolicy.validSecretException("never", today));
+
         Map<?, ?> fixture = JsonSerialization.readValue(Files.readString(Path.of(args[0])), Map.class);
         eq("fixture version", McpConnectContext.VERSION, fixture.get("version"));
         List<?> cases = (List<?>) fixture.get("cases");

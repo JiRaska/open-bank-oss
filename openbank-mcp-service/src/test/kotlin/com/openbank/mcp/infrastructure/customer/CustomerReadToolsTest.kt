@@ -167,7 +167,7 @@ class CustomerReadToolsTest {
             .put("grant_id", g.grantId.toString())
         claims.putObject("cnf").put("x5t#S256", "A".repeat(43))
         every {
-            issuer.issue(any(), any(), "customer-token", "original-proof", account, null)
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, null, null)
         } answers { boundPermit(claims) }
         every { balance.read(account, match { it.startsWith("Bearer fixture.") }) } returns mapper.createObjectNode()
         val args = args("accountId" to account.toString())
@@ -180,13 +180,21 @@ class CustomerReadToolsTest {
         val scopedKey = GrantKey(UUID.randomUUID(), caller.clientId, "test-key", connectionId)
         val scopedCaller = boundCaller.copy(grantKey = scopedKey)
         every {
-            issuer.issue(any(), any(), "customer-token", "original-proof", account, connectionId)
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, connectionId, null)
         } answers { boundPermit(claims) }
         assertThat(boundTools.list(listOf(g), connectionBound = true).map { it.name })
             .containsExactly("get_balance")
         claims.put(connectionClaim, connectionId.toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+        val hostedCaller = scopedCaller.copy(grantKey = scopedKey.copy(keyThumbprint = null), resourceProof = null)
+        every {
+            issuer.issue(any(), any(), "customer-token", null, account, connectionId, any())
+        } answers { boundPermit(claims) }
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, hostedCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+        verify(exactly = 1) { issuer.issue(any(), any(), "customer-token", null, account, connectionId, any()) }
+
         claims.put(connectionClaim, UUID.randomUUID().toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
@@ -197,7 +205,7 @@ class CustomerReadToolsTest {
         claims.put("account_id", UUID.randomUUID().toString())
         assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, boundCaller, listOf(g)))
             .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
-        verify(exactly = 2) { balance.read(any(), any()) }
+        verify(exactly = 3) { balance.read(any(), any()) }
         verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
         verify(exactly = 0) { downstream.balances(any(), any()) }
     }

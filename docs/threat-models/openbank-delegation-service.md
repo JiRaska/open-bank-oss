@@ -613,3 +613,7 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+### Hosted MCP connection binding (ADR-0385)
+
+A bearer token must resolve to an active grant for the exact customer, client, approved connection and account. Hosted lookup matches only grants whose DPoP thumbprint is null; it cannot select a grant created with DPoP. Balance authorization is restricted to the dedicated issuer service account and requires a fresh proof reference and a current account ownership verdict. The resource endpoint refuses hosted requests without a connection ID. Revoking the connection invalidates its hosted grants and blocks refresh.

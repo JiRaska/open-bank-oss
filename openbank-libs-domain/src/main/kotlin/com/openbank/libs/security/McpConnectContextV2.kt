@@ -38,16 +38,17 @@ class McpConnectContextV2 private constructor(private val canonical: String) {
 
         /**
          * The caller supplies the party and JKT from verified authorization-server state and
-         * the account choices from an ownership-validated approval. This validates their encoding.
+         * the account choices from an ownership-validated approval. A null thumbprint represents
+         * a PAR request verified by the authorization server as a confidential hosted client.
          */
         fun of(
             base: McpConnectContext,
             partyId: String,
-            parProofThumbprint: String,
+            parProofThumbprint: String?,
             accounts: Collection<AccountScope>,
         ): McpConnectContextV2 {
             requireCanonicalUuid(partyId)
-            requireCanonicalThumbprint(parProofThumbprint)
+            parProofThumbprint?.let(::requireCanonicalThumbprint)
             require(accounts.isNotEmpty()) { "selected accounts are required" }
 
             val selected = sortedMapOf<String, String>()
@@ -66,8 +67,12 @@ class McpConnectContextV2 private constructor(private val canonical: String) {
                 append(base.canonical().removePrefix(McpConnectContext.VERSION))
                 append("\nparty_id=")
                 append(partyId)
-                append("\npar_jkt=")
-                append(parProofThumbprint)
+                if (parProofThumbprint == null) {
+                    append("\npar_binding=confidential_client")
+                } else {
+                    append("\npar_jkt=")
+                    append(parProofThumbprint)
+                }
                 selected.forEach { (account, capabilities) ->
                     append("\naccount_scope=")
                     append(account)
