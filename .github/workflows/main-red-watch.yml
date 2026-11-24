@@ -99,6 +99,7 @@ on:
       # has no fallback for it during the next upstream outage.
       - "CI artifact mirror"
       - "Keycloak workload identity"
+      - "Keycloak MCP client admission"
       - "Agent charter registry"
       - "AI governance snapshot"
       - "API contract post-merge guard"

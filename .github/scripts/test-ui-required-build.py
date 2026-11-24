@@ -11,12 +11,13 @@ class UiRequiredBuildTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
         script = workflow["jobs"]["ui"]["steps"][0]["run"]
-        base = dict(RESULT="success", COVERAGE_RESULT="success", DETECTION_RESULT="success", UI_CHANGED="true",
+        base = dict(RESULT="success", COVERAGE_RESULT="success", E2E_RESULT="success", DETECTION_RESULT="success", UI_CHANGED="true",
                     RBAC_TESTS="", REGISTRY_TEST="false", RBAC_RESULT="skipped",
                     EVENT="pull_request", REF="refs/pull/1/merge")
         cases = [
             ("changed success", {}, 0),
-            ("unchanged skipped", dict(UI_CHANGED="false", RESULT="skipped", COVERAGE_RESULT="skipped"), 0),
+            ("unchanged skipped", dict(UI_CHANGED="false", RESULT="skipped", COVERAGE_RESULT="skipped",
+                E2E_RESULT="skipped"), 0),
             ("failed detection", dict(DETECTION_RESULT="failure"), 1),
             ("failed cross guard", dict(UI_CHANGED="false", RESULT="skipped",
                 RBAC_TESTS="some-test", RBAC_RESULT="failure"), 1),
@@ -28,6 +29,12 @@ class UiRequiredBuildTest(unittest.TestCase):
             ("changed skipped coverage", dict(COVERAGE_RESULT="skipped"), 1),
             ("cancelled coverage PR", dict(COVERAGE_RESULT="cancelled"), 1),
             ("cancelled coverage push", dict(COVERAGE_RESULT="cancelled", EVENT="push"), 0),
+            # Every E2E shard must pass: the matrix aggregate is the verdict input (ui-e2e).
+            ("failed e2e shard", dict(E2E_RESULT="failure"), 1),
+            ("changed skipped e2e", dict(E2E_RESULT="skipped"), 1),
+            ("cancelled e2e PR", dict(E2E_RESULT="cancelled"), 1),
+            ("cancelled e2e push", dict(E2E_RESULT="cancelled", EVENT="push"), 0),
+            ("failed e2e push", dict(E2E_RESULT="failure", EVENT="push"), 1),
         ]
         for name, overrides, expected in cases:
             with self.subTest(name=name):

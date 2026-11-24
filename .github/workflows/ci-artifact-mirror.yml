@@ -42,7 +42,9 @@ concurrency:
 
 jobs:
   mirror:
-    if: github.ref == 'refs/heads/main' && github.repository == 'JiRaska/open-bank-oss'
+    if: >-
+      (github.event_name != 'schedule' || (vars.CI_ARTIFACT_MIRROR_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
+      (github.ref == 'refs/heads/main' && github.repository == 'JiRaska/open-bank-oss')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

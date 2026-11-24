@@ -12,7 +12,7 @@
 export const IDENTIFIER_CONFORMANCE_SCHEMA = 'identifier-conformance/v1'
 
 const RESULT_VALUES = new Set(['pass', 'fail', 'not-run'])
-const STATUSES = new Set(['conformance-tested', 'known-defect', 'unverified-ad-hoc-copy'])
+const STATUSES = new Set(['conformance-tested', 'declared', 'failed', 'not-measured', 'known-defect', 'unverified-ad-hoc-copy'])
 const FUZZ_LABELS = new Set(['semantic', 'robustness-only', 'none'])
 const PITEST = new Set(['advisory', 'service-lane', 'none'])
 
@@ -41,9 +41,9 @@ function validatorRow(row, freshnessAwareState) {
   const vectorCount = Number.isInteger(row.vectors) && row.vectors >= 0 ? row.vectors : 0
   let state
   if (status === 'unverified-ad-hoc-copy') state = 'unknown'
-  else if (vectors === 'fail' || differential === 'fail') state = 'failed'
+  else if (status === 'failed' || vectors === 'fail' || differential === 'fail') state = 'failed'
   else if (status === 'known-defect') state = 'blocked'
-  else if (vectorCount > 0 && vectors === 'pass' && (differential === 'pass' || differential === 'no-reference')) {
+  else if (status === 'conformance-tested' && vectorCount > 0 && vectors === 'pass' && (differential === 'pass' || differential === 'no-reference')) {
     state = freshnessAwareState('passed', at)
   } else state = 'not-run'
   const fuzz = row.fuzz && typeof row.fuzz === 'object' ? row.fuzz : {}

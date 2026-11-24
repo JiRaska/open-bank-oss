@@ -12,6 +12,7 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
@@ -50,6 +51,7 @@ import com.openbank.sca.application.usecase.ScaChallengeNotFoundException
 import com.openbank.sca.application.usecase.ScaChallengePartyMismatchException
 import com.openbank.sca.application.usecase.ScaConsumerScopeViolationException
 import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
+import com.openbank.sca.application.usecase.ScaInitiateScopeViolationException
 import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
 import com.openbank.sca.domain.model.DeviceDecisionType
@@ -269,6 +271,7 @@ class ScaResource(
             dynamicLinkingData = request.dynamicLinkingData,
             redirectUrl = request.redirectUrl,
             onBehalfOfPartyId = request.onBehalfOfPartyId,
+            scope = ConsumerScopes.forPrincipal(ServiceAccountIdentity.verifiedPrincipalName(identity)),
         )
         if (requestKey == null) {
             return Response.status(201).entity(ScaChallengeResponse.from(initiateSca.initiate(command))).build()
@@ -438,7 +441,9 @@ class ScaResource(
             cardAction = request.cardAction,
             approvalRequestId = request.approvalRequestId,
             payloadSha256 = request.payloadSha256,
-            scope = ConsumerScopes.forPrincipal(consumer),
+            // The reservation follows the VERIFIED service-account identity (azp bound to
+            // preferred_username), never the display name a person's token could also carry.
+            scope = ConsumerScopes.forPrincipal(ServiceAccountIdentity.verifiedPrincipalName(identity)),
         )
         val challenge = try {
             consumeSca.consume(command)
@@ -549,10 +554,17 @@ class InvalidDeviceAssertionMapper : ExceptionMapper<InvalidDeviceAssertionExcep
 
 @Provider
 class ScaNotApprovedMapper : ExceptionMapper<ScaChallengeNotApprovedException> {
-    override fun toResponse(e: ScaChallengeNotApprovedException): Response =
-        Response.status(ErrorCode.VALIDATION_ERROR.httpStatus)
-            .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Challenge not approved")).build()
+    // ADR-0385 D3: a still-PENDING challenge gets its own code, so a poller (the Keycloak
+    // withheld-code authenticator) can tell "wait" from "denied/failed" and from any other 400.
+    override fun toResponse(e: ScaChallengeNotApprovedException): Response {
+        val body = err(ErrorCode.VALIDATION_ERROR, e.message ?: "Challenge not approved")
+        return Response.status(ErrorCode.VALIDATION_ERROR.httpStatus)
+            .entity(if (e.status == ScaStatus.PENDING) body.copy(code = SCA_CHALLENGE_PENDING) else body).build()
+    }
 }
+
+/** The 400 `code` of a consume refused only because the device has not decided yet. */
+const val SCA_CHALLENGE_PENDING = "SCA_CHALLENGE_PENDING"
 
 @Provider
 class ScaAlreadyConsumedMapper : ExceptionMapper<ScaChallengeAlreadyConsumedException> {
@@ -574,6 +586,14 @@ class ScaConsumerScopeViolationMapper : ExceptionMapper<ScaConsumerScopeViolatio
     override fun toResponse(e: ScaConsumerScopeViolationException): Response =
         Response.status(Response.Status.FORBIDDEN)
             .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge outside consumer scope")).build()
+}
+
+/** ADR-0385 D3: a scoped consumer raising a challenge outside its namespace — 403, nothing minted. */
+@Provider
+class ScaInitiateScopeViolationMapper : ExceptionMapper<ScaInitiateScopeViolationException> {
+    override fun toResponse(e: ScaInitiateScopeViolationException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(err(ErrorCode.FORBIDDEN, e.message ?: "Challenge outside initiator scope")).build()
 }
 
 @Provider

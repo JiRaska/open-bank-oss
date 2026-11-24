@@ -204,3 +204,111 @@ tests:
                 request is answered 503. Staff and agent traffic is unaffected by design (no
                 readiness check on the store), so nothing else will show this. Check the Valkey
                 pods and mcp-service's connection errors.
+
+  # McpCustomerChannelNoTraffic. 5m interval: 288 samples = 24h, so `offset 1d` at eval 25h30m
+  # looks at 00:30-01:30 and the "now" window at 24:30-25:30.
+  - interval: 5m
+    name: "no-traffic: t=0, no customer series at all, is silent a day later"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="agent",client="none",synthetic="false",tool="list_accounts"}'
+        values: "0+50x310"
+    alert_rule_test:
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []
+
+  - interval: 5m
+    name: "no-traffic: the channel's first day (no offset-1d history) is silent even when traffic stops"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="acme",synthetic="false",tool="list_accounts"}'
+        values: "_x200 0+20x40 800x70"
+    alert_rule_test:
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []
+
+  - interval: 5m
+    name: "no-traffic MUST FIRE: real traffic stops (counter flat) while the canary keeps going"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="acme",synthetic="false",tool="list_accounts"}'
+        values: "0+20x288 5760x22"
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="canary",synthetic="true",tool="list_accounts"}'
+        values: "0+5x310"
+    alert_rule_test:
+      - eval_time: 1440m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              subject_period: continuous
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerchannelnotraffic
+              summary: "Customer MCP channel received no real traffic for an hour"
+              description: >-
+                The same hour yesterday carried at least 50 real customer-channel requests, and the
+                last hour carried none, neither completed tool calls nor refusals. Requests are not
+                reaching mcp-service: check the route, the gateway and the published discovery
+                metadata before the service itself.
+
+  - interval: 5m
+    name: "no-traffic MUST FIRE: every pod's series vanishes (nothing scraped reaches the channel)"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="acme",synthetic="false",tool="list_accounts",pod="a"}'
+        values: "0+20x288"
+    alert_rule_test:
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              subject_period: continuous
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/mcp-customer-channel.md#mcpcustomerchannelnotraffic
+              summary: "Customer MCP channel received no real traffic for an hour"
+              description: >-
+                The same hour yesterday carried at least 50 real customer-channel requests, and the
+                last hour carried none, neither completed tool calls nor refusals. Requests are not
+                reaching mcp-service: check the route, the gateway and the published discovery
+                metadata before the service itself.
+
+  - interval: 5m
+    name: "no-traffic: a pod roll with traffic still flowing (old series ends, new one born at 1) is silent"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="acme",synthetic="false",tool="list_accounts",pod="old"}'
+        values: "0+20x290"
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="acme",synthetic="false",tool="list_accounts",pod="new"}'
+        values: "_x291 1+20x20"
+    alert_rule_test:
+      - eval_time: 1460m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []
+
+  - interval: 5m
+    name: "no-traffic: refusals still arriving count as reached"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="acme",synthetic="false",tool="list_accounts"}'
+        values: "0+20x288 5760x22"
+      - series: 'openbank_mcp_customer_rejected_total{layer="grant",reason="no_grant",client="acme",synthetic="false"}'
+        values: "0+3x310"
+    alert_rule_test:
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []
+
+  - interval: 5m
+    name: "no-traffic: a channel that was below the 50/h floor yesterday is silent when it stops"
+    input_series:
+      - series: 'openbank_mcp_tool_calls_total{channel="customer",client="quiet",synthetic="false",tool="list_accounts"}'
+        values: "0+3x288 864x22"
+    alert_rule_test:
+      - eval_time: 1530m
+        alertname: McpCustomerChannelNoTraffic
+        exp_alerts: []

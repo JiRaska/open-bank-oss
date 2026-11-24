@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Negative controls for fast backend-to-Admin-UI contract selection."""
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -28,6 +30,35 @@ class SelectionTest(unittest.TestCase):
     def test_backend_change_selects_guard(self):
         self.assertEqual(['treasury-rbac.guard.test.ts'], selector.select(
             self.repo, {'openbank-treasury-service/src/main/TreasuryResource.kt'}))
+
+    def test_party_resource_change_runs_real_focused_workflow(self):
+        repo = SCRIPT.parents[2]
+        party = (
+            'openbank-party-service/src/main/kotlin/com/openbank/party/'
+            'infrastructure/rest/PartyResource.kt'
+        )
+        selected = selector.select(repo, {party})
+        self.assertEqual(['party-rbac-alignment.guard.test.ts'], selected)
+
+        workflow = (repo / '.github/workflows/ci.yml').read_text()
+        step = workflow.split('      - name: Verify affected cross-package guards\n', 1)[1]
+        step = step.split('\n  ui-build:', 1)[0].split('        run: |\n', 1)[1]
+        command = '\n'.join(line[10:] for line in step.splitlines())
+        env = dict(os.environ, RBAC_TESTS=' '.join(selected), REGISTRY_TEST='false')
+        result = subprocess.run(
+            ['bash', '-c', 'npm() { printf "%s\\n" "$@"; }\n' + command],
+            env=env, capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(
+            ['run', 'test', '--', 'src/test/party-rbac-alignment.guard.test.ts'],
+            result.stdout.splitlines(),
+        )
+
+    def test_undeclared_cross_package_guard_fails_detection(self):
+        test = self.repo / 'openbank-admin-ui/src/test/new-backend.guard.test.ts'
+        test.write_text("const resource = read('../../openbank-treasury-service/src/main/TreasuryResource.kt')")
+        with self.assertRaisesRegex(ValueError, 'undeclared cross-package guard'):
+            selector.dependencies(self.repo)
 
     def test_unrelated_backend_change_stays_fast(self):
         self.assertEqual([], selector.select(self.repo, {'openbank-ledger-service/src/main/Ledger.kt'}))

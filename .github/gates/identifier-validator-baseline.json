@@ -47,7 +47,6 @@
     "openbank-delegation-service/src/main/kotlin/com/openbank/delegation/domain/model/BusinessSigning.kt": 1,
     "openbank-libs-iso20022/src/main/kotlin/com/openbank/libs/iso20022/Pacs009Builder.kt": 1,
     "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpInputBounds.kt": 1,
-    "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpPiiMasker.kt": 1,
     "openbank-notification-service/src/main/kotlin/com/openbank/notification/application/OversightWebhook.kt": 1,
     "openbank-pension-service/src/main/kotlin/com/openbank/pension/application/exit/ExitSupport.kt": 1,
     "openbank-pension-service/src/main/kotlin/com/openbank/pension/application/usecase/ContributionService.kt": 1,

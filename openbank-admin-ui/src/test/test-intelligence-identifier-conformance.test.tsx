@@ -77,6 +77,17 @@ describe('identifier conformance ingestion', () => {
     ])
   })
 
+  it('preserves producer verdicts and requires measured status for a pass', () => {
+    const projected = projectIdentifierConformance(matrix(
+      row({ status: 'failed', result: { vectors: 'fail', differential: 'fail', run: RUN, at: recent } }),
+      row({ status: 'not-measured', result: { vectors: 'not-run', differential: 'not-run' } }),
+      row({ status: 'declared' }),
+    ), freshnessAwareState)
+    expect(projected.validators.map(({ status, state }) => [status, state])).toEqual([
+      ['failed', 'failed'], ['not-measured', 'not-run'], ['declared', 'not-run'],
+    ])
+  })
+
   it('a pass with no run time is not a pass', () => {
     const projected = projectIdentifierConformance(matrix(row({ result: { vectors: 'pass', differential: 'pass', run: RUN, at: null } })), freshnessAwareState)
     expect(projected.validators[0].state).toBe('not-run')

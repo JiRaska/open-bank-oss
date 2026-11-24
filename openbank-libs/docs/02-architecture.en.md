@@ -64,6 +64,8 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
 
+`TopicProducers` attributes `openbank.delegation.payment-proposal-events` to delegation-service (ADR-0383 D6, #16590). audit-service subscribes before the producer publishes; `rules.yaml` lists the topic as a consumer-first exemption until the producer PR removes it.
+
 The same table attributes `openbank.tpp.registry.event` to tpp-registry-service, so audit-service can label the TPP register changes (registered, blacklisted) it records on the audit trail.
 
 ### Temporal worker pilot
@@ -75,3 +77,17 @@ a fleet-wide runtime upgrade. Original histories gate forward replay; new histor
 must not be assumed readable by the old SDK.
 
 `TopicProducers` attributes `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` to account-service (#9073); audit-service and analytics-sink subscribe to both before the producer switches.
+
+### Customer MCP proof and consent contracts
+
+The shared security library holds the common DPoP proof verifier and replay result
+used by the MCP and Balance paths. A caller may act only after its replay store
+records a fresh proof. A repeat, exhausted quota or unavailable store cannot
+produce an authorization. Delegation uses the same result vocabulary for its
+separately committed, deployment-scoped proof reference.
+
+The V2 connect context shares the canonical serialization of the request,
+customer, expiry, accounts and capabilities. Keycloak and the bank services use
+the same digest to attest the exact selection for SCA. Live ownership, TLS
+identity and grant validity remain responsibilities of the services that read or
+issue the protected resource.

@@ -206,11 +206,20 @@ test_edge_may_not_decide_approval if {
 
 # --- ADR-0335 D1: pension-service is a consume-only scoped consumer ---
 
-pension := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+pension := {"service_account": true, "client_id": "openbank-pension", "type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
 
-other_sa := {"type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
+other_sa := {"service_account": true, "client_id": "openbank-billing", "type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
 
-agent := {"type": "AI_AGENT", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+agent := {"service_account": true, "client_id": "openbank-pension", "type": "AI_AGENT", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+
+kc_mcp := {"service_account": true, "client_id": "openbank-keycloak-mcp", "type": "HUMAN", "id": "service-account-openbank-keycloak-mcp", "roles": ["ROLE_API"]}
+
+rules_with_kc_mcp := object.union(rules_mock, {"scoped_sca_consumers": array.concat(rules_mock.scoped_sca_consumers, [{
+	"principal": "service-account-openbank-keycloak-mcp",
+	"actions": ["scaChallenge.initiate", "scaChallenge.consume"],
+	"purposes": ["MCP_CLIENT_CONNECT"],
+	"approval_request_prefix": "mcp-connect:",
+}])})
 
 test_pension_may_consume if {
 	decision := rest.allow with input as {"principal": pension, "action": "scaChallenge.consume", "resource": {"type": "scaChallenge", "id": "c-1"}}
@@ -247,4 +256,44 @@ test_pension_denied_when_not_declared if {
 	# The grant exists only because the data declares it: an empty register denies.
 	rest.allow == false with input as {"principal": pension, "action": "scaChallenge.consume"}
 		with data.rules as object.union(rules_mock, {"scoped_sca_consumers": []})
+}
+
+# --- review of #16672: the scoped grant follows the VERIFIED machine identity, not the name ---
+
+test_scoped_consumer_name_as_person_denied if {
+	# A person (service_account == false) whose id equals the declared principal gets nothing.
+	every p in [object.union(pension, {"service_account": false}), object.union(kc_mcp, {"service_account": false})] {
+		every action in {"scaChallenge.initiate", "scaChallenge.consume"} {
+			rest.allow == false with input as {"principal": p, "action": action}
+				with data.rules as rules_with_kc_mcp
+		}
+	}
+}
+
+test_scoped_consumer_without_machine_marker_denied if {
+	# An input with no service_account marker at all (old PEP, hand-built input) gets nothing.
+	every p in [object.remove(pension, ["service_account", "client_id"]), object.remove(kc_mcp, ["service_account", "client_id"])] {
+		every action in {"scaChallenge.initiate", "scaChallenge.consume"} {
+			rest.allow == false with input as {"principal": p, "action": action}
+				with data.rules as rules_with_kc_mcp
+		}
+	}
+}
+
+test_scoped_consumer_with_borrowed_client_id_denied if {
+	# The name of one client with another client's verified client_id.
+	p := object.union(kc_mcp, {"client_id": "openbank-edge"})
+	rest.allow == false with input as {"principal": p, "action": "scaChallenge.consume"}
+		with data.rules as rules_with_kc_mcp
+}
+
+test_keycloak_mcp_machine_may_initiate_and_consume_only if {
+	every action in {"scaChallenge.initiate", "scaChallenge.consume"} {
+		"service-sca-scoped-consumer" in rest.allowed_reasons with input as {"principal": kc_mcp, "action": action}
+			with data.rules as rules_with_kc_mcp
+	}
+	every action in {"scaChallenge.read", "scaChallenge.decide", "scaChallenge.verify", "device.enroll"} {
+		rest.allow == false with input as {"principal": kc_mcp, "action": action, "resource": {"type": "party", "id": "p-1"}}
+			with data.rules as rules_with_kc_mcp
+	}
 }

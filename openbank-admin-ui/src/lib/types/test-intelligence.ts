@@ -375,7 +375,7 @@ export interface IdentifierValidatorConformance {
   module: string
   symbol: string
   file: string
-  status: 'conformance-tested' | 'known-defect' | 'unverified-ad-hoc-copy'
+  status: 'conformance-tested' | 'declared' | 'failed' | 'not-measured' | 'known-defect' | 'unverified-ad-hoc-copy'
   /** Derived verdict: an ad-hoc copy is `unknown`, a not-run differential never `passed`. */
   state: EvidenceState
   vectors: { count: number; sources: string[]; result: 'pass' | 'fail' | 'not-run' }

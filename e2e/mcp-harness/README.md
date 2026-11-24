@@ -7,7 +7,8 @@ Layers 2 and 3 of the customer MCP channel test strategy (issue #16617, ADR-0383
   `resource`, DPoP when the authorization server advertises ES256, a Playwright browser whose
   passkey ceremony is answered by a CDP WebAuthn virtual authenticator, the in-app SCA approval by a
   software device against sca-service's real device API, the RFC 9207 `iss` check, then
-  `tools/list`, a read tool and `propose_payment` through the official MCP SDK client.
+  `tools/list`, a read tool and `propose_payment` through the official MCP SDK client. The last
+  step verifies a `PENDING` proposal receipt with its ID, amount and currency.
 - **Attack suite (layer 3)** — `node src/cli.ts --run`: one case per ADR-0383/0385 negative delivery
   check a black-box client can observe, each asserting the exact expected outcome.
 
@@ -58,8 +59,112 @@ others. No deployed host is built in. The journey writes tokens and the DPoP key
 `MCP_HARNESS_SESSION_FILE` (mode 0600, `*.session.json` is gitignored) for the DPoP and refresh
 cases.
 
+The positive journey defaults to `https://localhost/customer/mcp` on a local HTTPS edge. Set
+`MCP_HARNESS_RESOURCE_URL` to the deployed customer route in an isolated test environment.
+Set `MCP_HARNESS_PROPOSE_ARGS` to a JSON object with the synthetic fixture's `debtorAccountId`,
+`creditorIban`, `creditorName`, `amount`, `currency` and `clientRequestId` as strings, plus an
+optional `reference`. Use an enrolled synthetic customer's granted account and a test creditor.
+The journey stops when the proposal is pending. Payment approval and admission are outside this
+command.
+
+For a connect-and-read check in an isolated sandbox, run `npm run journey -- --read-only`.
+This uses `list_accounts` by default and needs no proposal fixture or payment approval settings.
+To check a downstream read, set `MCP_HARNESS_READ_TOOL=get_balance` or `list_transactions` and
+provide the granted test account in the JSON object `MCP_HARNESS_READ_TOOL_ARGS`. This mode
+completes the connect SCA and read, then stops before creating a payment proposal.
+
+For unattended V2 Connect approval, set `MCP_HARNESS_SOFTWARE_CONNECT_APPROVAL=true` and
+`MCP_HARNESS_SYNTHETIC_SANDBOX=true` with `--read-only`. Set `MCP_HARNESS_CUSTOMER_EDGE_URL`
+to the sandbox base ending in `/customer/v1`, `MCP_HARNESS_APP_TOKEN` to the synthetic customer's
+first-party app token and `MCP_HARNESS_PARTY_ID` to that customer. Set
+`MCP_HARNESS_CONNECT_CREDENTIAL_ID` and `MCP_HARNESS_CONNECT_PRIVATE_KEY_FILE` to the existing
+synthetic SCA credential and its local P-256 PEM file (mode 0600). The device must already satisfy
+the bank's 72-hour enrollment floor. Use `MCP_HARNESS_READ_TOOL=get_balance` with the synthetic
+`accountId` in `MCP_HARNESS_READ_TOOL_ARGS`. The harness selects balance access for that one
+account, checks the V2 context against the journey's PAR and app's pending SCA challenge, then
+signs the standard app decision. This mode requires PAR and DPoP and disallows target overrides
+and session files. It can be combined with `--verify-revocation`.
+
+To acquire the app session during each run, set `MCP_HARNESS_APP_SIGN_IN=true` in the synthetic
+software mode and omit `MCP_HARNESS_APP_TOKEN`. Set `MCP_HARNESS_AUTH_SERVER` to the exact trusted
+sandbox customers realm issuer and mount the enrolled synthetic resident passkey as
+`MCP_HARNESS_PASSKEY_FILE` with owner-only permissions. The app uses its standard S256
+authorization code flow. The registered callback is intercepted locally, and only the
+short-lived access token remains in memory for Customer Edge.
+
+For a shared sandbox, also set `MCP_HARNESS_APP_COUNTER_FILE` to an owner-only state file on a
+writable persistent volume. Launch scheduled and manual shared runs through
+`sh run-sandbox-journey.sh --read-only --verify-revocation` (or pass `--verify-proposal`).
+When the private sandbox uses a dedicated CA, mount the single public root
+certificate read-only and set its absolute path in `MCP_HARNESS_PRIVATE_CA_FILE`.
+The image wrapper imports it into a fresh Chromium NSS store under the
+container's existing `/home/pwuser` and passes the same root to Node. Give
+each job a fresh writable home. Hostname and certificate verification are
+required throughout. Mount the public certificate alone.
+
+The Linux runner needs util-linux `flock`. The wrapper holds a nonblocking exclusive file lock
+for the entire Node process and releases it on process exit or crash. Use the same durable
+mount and path for each run. Use a single-pod write mount, or otherwise guarantee equivalent
+filesystem lock semantics for that volume. Keep CronJob `concurrencyPolicy: Forbid` as well.
+The harness atomically persists a new range before the browser makes either assertion, so a
+crash can leave unused counts without causing reuse. The state contains the credential identity
+hash and reserved counter only. Preserve it across pod replacements, and provision a new state
+when rotating the passkey. An absent, corrupt or mismatched file stops the shared run.
+
+Initialize the state once when enrolling a new synthetic credential, using its registered
+counter as the starting value and creating the file exclusively. A previously used fixture
+requires a counter upper bound from its latest state before migration.
+
+```sh
+node --input-type=module -e '
+  import { readFileSync, writeFileSync } from "node:fs";
+  import { passkeyCounterIdentity } from "./src/passkey-counter.ts";
+  const credential = JSON.parse(readFileSync(process.env.MCP_HARNESS_PASSKEY_FILE, "utf8"));
+  writeFileSync(process.env.MCP_HARNESS_APP_COUNTER_FILE, JSON.stringify({
+    version: 1,
+    credentialSha256: passkeyCounterIdentity(credential),
+    reservedThrough: credential.signCount ?? 0,
+  }) + "\n", { flag: "wx", mode: 0o600 });
+'
+```
+
+For a loopback issuer, the disposable clock-based counter remains available without the state
+file. Existing explicit-token mode remains available for local fixtures.
+
+Run `npm run journey -- --verify-proposal` to verify V2 proposal creation with the same synthetic
+software device and Customer Edge settings. Keep the scope at `openid` for online authorization.
+Provide `MCP_HARNESS_PROPOSE_ARGS` with the synthetic instruction described above, using the same
+debtor account as `MCP_HARNESS_READ_TOOL_ARGS`. This mode consents to balance and proposal access
+for that one account, checks the actual balance, then creates a `PENDING` proposal. It reads the
+same pending, unexecuted instruction from the owner's app endpoint and stops there.
+
+In an isolated synthetic fixture, append `--verify-revocation` to verify that the new connection can
+be revoked. Set `MCP_HARNESS_SYNTHETIC_SANDBOX=true`, `MCP_HARNESS_READ_TOOL=get_balance` and provide
+the granted account ID in `MCP_HARNESS_READ_TOOL_ARGS`, its currency in
+`MCP_HARNESS_VERIFY_BALANCE_CURRENCY`, and the matching customer's existing app token and sandbox
+edge base in `MCP_HARNESS_APP_TOKEN` and `MCP_HARNESS_CUSTOMER_EDGE_URL` (ending at `/customer/v1`).
+This mode needs a V2 DPoP connection and rotating refresh tokens. It reads the expected balance,
+proves the refresh family works, revokes the one connection through the app's own endpoint, then
+requires an explicit grant refusal with the same access token and a refresh refusal with the
+rotated token. The mode disallows target overrides and session files.
+
 ## Checks deliberately not here
 
 These belong to other layers: the `opa eval` bundle checks (ADR-0383 D4), the `MCP_CLIENT`
 allow-list unit test, the realm and allowlist parity gate, the throttle-ordering IT, Valkey-down
 and other chaos cases (layer 7), the same-device app-link checks (layer 9) and CIMD.
+
+
+## Observe sandbox app approval
+
+For the complete payment journey, set `MCP_HARNESS_CUSTOMER_EDGE_URL` to the isolated
+sandbox edge base ending in `/customer/v1`, and `MCP_HARNESS_APP_TOKEN` to the same synthetic
+customer's existing bank-app session token. Both the MCP and customer-edge servers must pass
+the sandbox-only target rule. The token stays in memory and is sent only to the customer edge.
+
+The complete journey first requires a downstream balance for the synthetic debtor account
+and requested currency. It then reads the proposal from the app API and confirms it is pending with no
+payment ID. Follow the prompt to review and approve the sandbox proposal in the app with SCA.
+The harness uses only GET requests to observe the proposal. It passes this step when the
+proposal reaches `EXECUTED` with a payment ID, which proves initiation and does not establish
+settlement. Omit both observation variables to run only through the pending proposal.

@@ -8,12 +8,14 @@ import com.openbank.libs.security.Jose4jDpopProofParser
 import com.openbank.mcp.TestJsonWebToken
 import com.openbank.mcp.infrastructure.customer.CustomerChannelAdmission.Outcome
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import jakarta.json.JsonValue
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 /**
  * ADR-0383 D1/D2 + ADR-0385 D1 admission, one gate per test. Each negative case was also run with
@@ -34,11 +36,11 @@ class CustomerChannelAdmissionTest {
 
     /** No budget anywhere: every gate except the throttles is what is under test. */
     private object Unlimited : CustomerChannelAdmission.Throttles {
-        override fun proofKey(thumbprint: String): String? = null
+        override suspend fun proofKey(thumbprint: String): String? = null
 
-        override fun client(clientId: String): String? = null
+        override suspend fun client(clientId: String): String? = null
 
-        override fun subject(subject: String, clientId: String): String? = null
+        override suspend fun subject(subject: String, clientId: String): String? = null
     }
 
     /** The real shared limiter behind the three budgets, as McpCustomerBranch wires it. */
@@ -49,13 +51,13 @@ class CustomerChannelAdmissionTest {
         private fun refuse(key: String, o: McpRateLimiter.Outcome) =
             o.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.reason.also { spent += key }
 
-        override fun proofKey(thumbprint: String) =
+        override suspend fun proofKey(thumbprint: String) =
             CustomerChannelAdmission.proofKeyThrottleKey(thumbprint).let { refuse(it, limiter.check(it)) }
 
-        override fun client(clientId: String) =
+        override suspend fun client(clientId: String) =
             CustomerChannelAdmission.clientThrottleKey(clientId).let { refuse(it, limiter.checkShared(it)) }
 
-        override fun subject(subject: String, clientId: String) =
+        override suspend fun subject(subject: String, clientId: String) =
             CustomerChannelAdmission.throttleKey(subject, clientId).let { refuse(it, limiter.check(it)) }
     }
 
@@ -65,6 +67,7 @@ class CustomerChannelAdmissionTest {
         aud: Any = "openbank-mcp-service",
         jkt: String? = DpopTestProofs.jkt(key),
         sub: String = "c0ffee00-0000-0000-0000-000000000001",
+        connection: Any? = null,
     ) = TestJsonWebToken(
         buildMap {
             put("iss", iss)
@@ -72,6 +75,7 @@ class CustomerChannelAdmissionTest {
             put("azp", azp)
             put("aud", aud)
             jkt?.let { put("cnf", mapOf("jkt" to it)) }
+            connection?.let { put(CustomerChannelAdmission.CLAIM_CONNECTION_ID, it) }
         },
     )
 
@@ -97,6 +101,88 @@ class CustomerChannelAdmissionTest {
         assertThat(ctx.serviceAccount).isFalse()
         assertThat(ctx.actChain).containsExactly("mcp-local-test")
         assertThat(ctx.consentId).isEmpty()
+    }
+
+    @Test
+    fun `resource nonce follows the Keycloak fixture format`() {
+        val policy = McpResourceNonce(ByteArray(32))
+        val now = Instant.parse("2026-11-23T10:00:00Z")
+        val resource = "https://mcp.test/customer/mcp"
+        val nonce = "v1.1795428060.AAAAAAAAAAAAAAAAAAAAAA.g5AAiaJGvRN4Nbn6b9TCX1sQWizote78Xok58_-feQY"
+        assertThat(policy.refreshIfRequired(nonce, resource, "A".repeat(43), now)).isNull()
+        assertThat(policy.refreshIfRequired(nonce, resource, "B".repeat(43), now)).isNotNull()
+    }
+
+    @Test
+    fun `connection mode accepts the signed connection and refuses invalid claims before any budget`() {
+        val boundAdmission = CustomerChannelAdmission(
+            DpopTestProofs.ISSUER,
+            allowlist,
+            DpopProofVerifier(Jose4jDpopProofParser(), InMemoryDpopReplayStore()),
+            Clock.systemUTC(),
+            requireConnection = true,
+        )
+        val connectionId = UUID.fromString("aabbccdd-0000-4000-8000-000000000001")
+        val throttles = LimiterThrottles()
+        val proof = DpopTestProofs.proof(key)
+        val authorization = "DPoP ${DpopTestProofs.ACCESS_TOKEN}"
+        val invalidClaims = listOf(
+            null,
+            connectionId.toString().uppercase(),
+            "1-2-3-4-5",
+            listOf(connectionId.toString()),
+        )
+        runBlocking {
+            for (invalid in invalidClaims) {
+                val result = boundAdmission.admit(token(connection = invalid), authorization, listOf(proof), throttles)
+                assertThat(refused(result).challenge).contains("invalid_token")
+            }
+            assertThat(throttles.spent).isEmpty()
+            val accepted = boundAdmission.admit(
+                token(connection = connectionId.toString()),
+                authorization,
+                listOf(proof),
+                throttles,
+            )
+            assertThat((accepted as Outcome.Admitted).connectionId).isEqualTo(connectionId)
+        }
+        val legacy = admit()
+        assertThat((legacy as Outcome.Admitted).connectionId).isNull()
+    }
+
+    @Test
+    fun `legacy mode refuses any connection claim instead of falling back to triple scope`() {
+        val throttles = LimiterThrottles()
+        for (claim in listOf("aabbccdd-0000-4000-8000-000000000001", "malformed", JsonValue.NULL)) {
+            val result = admit(jwt = token(connection = claim), throttles = throttles)
+            assertThat(refused(result).challenge).contains("invalid_token", "connection binding is unavailable")
+        }
+        assertThat(throttles.spent).isEmpty()
+    }
+
+    @Test
+    fun `bound balance challenges before spending a proof and admits a fresh signed retry`() {
+        val admission = CustomerChannelAdmission(
+            DpopTestProofs.ISSUER,
+            allowlist,
+            DpopProofVerifier(Jose4jDpopProofParser(), InMemoryDpopReplayStore()),
+            Clock.systemUTC(),
+            McpResourceNonce(ByteArray(32)),
+        )
+        val throttles = LimiterThrottles()
+        val authorization = "DPoP ${DpopTestProofs.ACCESS_TOKEN}"
+        val first = runBlocking {
+            admission.admit(token(), authorization, listOf(DpopTestProofs.proof(key)), throttles)
+        }
+        val challenge = refused(first)
+        assertThat(challenge.challenge).contains("use_dpop_nonce")
+        assertThat(throttles.spent).isEmpty()
+        val nonce = requireNotNull(challenge.resourceNonce)
+        val retried = DpopTestProofs.proof(key, nonce = nonce)
+        val accepted = runBlocking { admission.admit(token(), authorization, listOf(retried), throttles) }
+        assertThat(accepted).isInstanceOf(Outcome.Admitted::class.java)
+        val replay = runBlocking { admission.admit(token(), authorization, listOf(retried), throttles) }
+        assertThat(refused(replay).resourceNonce).isNull()
     }
 
     @Test
