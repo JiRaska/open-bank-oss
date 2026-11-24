@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-11-23T11:38:03.000Z",
-  "inputFingerprint": "sha256:5d1f9fe72a2e53afbfa02952bce9c0aef60dbb3c8c320a186c499d9d0bd712d3",
+  "generatedAt": "2026-11-24T00:11:36.000Z",
+  "inputFingerprint": "sha256:57e480e138186183d1f9a5176f7fa4c42f50d5f412a7d0f11c9e78e8a6e383e3",
   "counts": {
-    "namespaces": 87,
-    "networkPolicies": 152,
+    "namespaces": 88,
+    "networkPolicies": 157,
     "externalSecrets": 250,
     "clusterPolicies": 0
   },
@@ -552,6 +552,15 @@
       "declared": true
     },
     {
+      "name": "mcp-synthetic-sandbox",
+      "group": "domain",
+      "role": {
+        "cs": "mcp-synthetic-sandbox",
+        "en": "mcp-synthetic-sandbox"
+      },
+      "declared": true
+    },
+    {
       "name": "messaging",
       "group": "backbone",
       "role": {
@@ -880,11 +889,11 @@
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 152 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
-        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 152 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 157 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 157 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy manifests (152)",
+        "NetworkPolicy manifests (157)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -1133,8 +1142,8 @@
         "en": "Technical separation of workloads and legal entities"
       },
       "reality": {
-        "cs": "87 namespaců",
-        "en": "87 namespaces"
+        "cs": "88 namespaců",
+        "en": "88 namespaces"
       },
       "status": "live"
     },
@@ -1148,8 +1157,8 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "152 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
-        "en": "152 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
+        "cs": "157 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "157 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
       "status": "partial"
     },

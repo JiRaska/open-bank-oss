@@ -336,3 +336,27 @@ component. Apply it only to a sandbox-assigned Edge workload when the
 canonical issuer differs from the bank realm. The existing Edge messaging
 properties and outbound staff authentication continue to use their own
 configuration.
+
+### Activate the private synthetic flow
+
+After the site GitOps overlay has synchronized and each private TLS path has been verified,
+set the following values to `true` on the sandbox-assigned workloads. Confirm that the
+runner, customer Keycloak realm and MCP resource metadata all use the same HTTPS resource
+and canonical customer issuer.
+
+| Workload | Private sandbox flags |
+| --- | --- |
+| Keycloak | `KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CONNECT_V2_ENABLED`, `MCP_READ_GRANT_ENABLED`, `MCP_READ_CONNECTION_BINDING_ENABLED` |
+| Delegation | `DELEGATION_MCP_CONNECT_ENABLED` |
+| Customer Edge | `MCP_CONNECT_ENABLED` |
+| Balance | `BALANCE_MCP_ENABLED`, `BALANCE_MCP_CONNECTION_BINDING_ENABLED` |
+| MCP | `MCP_CUSTOMER_ENABLED`, `MCP_CUSTOMER_CONNECTION_BINDING_ENABLED`, `MCP_BOUND_BALANCE_ENABLED` |
+
+Use the scoped staff client Secret references for the Keycloak SCA and read issuer clients
+and for the Balance grant reader. Share only the read nonce key between the customer issuer
+and MCP. Keep the issuer proof key separate. Set the issuer's exact customer issuer,
+resource, staff token URL and Delegation origin, and the MCP deployment's exact native
+issuer, Balance HTTPS origin and named client TLS configuration. Enable
+`MCP_CUSTOMER_BOUND_PROPOSAL_ENABLED` only for the separate synthetic proposal run after
+the synthetic settlement boundary has been confirmed. Record the deployed revision, both
+journey outcomes and the revoked connection check.
