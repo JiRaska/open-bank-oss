@@ -8,7 +8,8 @@
 # are synced, so the DDL runs against a service that is actually there. `CREATE DATABASE/TABLE IF
 # NOT EXISTS` and `CREATE OR REPLACE VIEW` are idempotent, so this is safe to re-run on every sync
 # where either schema ConfigMap (or anything else in this directory) changes, which is what
-# BeforeHookCreation causes to happen.
+# BeforeHookCreation causes to happen. The live replay skips historical view definitions
+# that V9 replaces with synthetic-event exclusion.
 #
 # The clickhouse-init ConfigMap (the analytics-sink V1..Vn migrations) is applied here FIRST, on
 # every sync. Its /docker-entrypoint-initdb.d mount runs only when the data dir is empty, so on the
@@ -100,6 +101,20 @@ spec:
                 for f in /tmp/stmt*.sql; do
                   [ -e "$f" ] || continue
                   n=$((n + 1))
+                  # Apply these views only once their synthetic filter is available. V1 could
+                  # expose an unfiltered missing view and V8 could replace a protected view.
+                  # V9 adds the column, then installs all four protected definitions.
+                  case "${script##*/}" in
+                    01-bronze-silver.sql|08-fold-silver-layer-case.sql)
+                      view=$(sed -nE 's/^[[:space:]]*CREATE (OR REPLACE )?VIEW (IF NOT EXISTS )?openbank_analytics\.([a-z_]+) AS$/\3/p' "$f")
+                      case "$view" in
+                        silver_current_state|silver_history|silver_as_of|gold_daily_event_volume)
+                          echo "Skipping superseded definition of ${view} in ${script}"
+                          continue
+                          ;;
+                      esac
+                      ;;
+                  esac
                   total=$((total + 1))
                   echo "--- statement $n ($f) ---"
                   code="$(curl -sS -o /tmp/ch-apply.out -w '%{http_code}' \

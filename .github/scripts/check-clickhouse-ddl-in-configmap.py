@@ -53,7 +53,9 @@
 #   python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
 
 import argparse
+import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -63,6 +65,7 @@ import gatelib  # import after the path insert — checkers run as scripts from 
 
 SQL_GLOB = "openbank-analytics-sink/src/main/resources/clickhouse/V*.sql"
 CONFIGMAP = "openbank-infra/gitops/components/analytics/clickhouse-init-configmap.yaml"
+APPLY_JOB = "openbank-infra/gitops/components/analytics/ci-gate-runs-schema-apply-job.yaml"
 
 # CREATE [OR REPLACE] {VIEW|MATERIALIZED VIEW|TABLE|DICTIONARY} [IF NOT EXISTS] openbank_analytics.x
 CREATE_RE = re.compile(
@@ -212,6 +215,68 @@ kind: ConfigMap
 """
 
 
+def check_replay_prefix(root: Path) -> str | None:
+    """Capture the live hook's HTTP requests and reject any unfiltered write to a protected view."""
+    views = {"silver_current_state", "silver_history", "silver_as_of", "gold_daily_event_volume"}
+    job = gatelib.load_yaml(root / APPLY_JOB)
+    command = job["spec"]["template"]["spec"]["containers"][0]["command"][-1]
+    migrations = gatelib.load_yaml(root / CONFIGMAP)["data"]
+    with tempfile.TemporaryDirectory() as temporary:
+        work = Path(temporary)
+        for name, sql in migrations.items():
+            path = work / "sql" / "init" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(sql)
+        # These schemas share the hook but do not participate in warehouse view replay.
+        for name in ("ci/ci-gate-runs", "campaign/campaign-engagement", "finops/cloud-finops"):
+            path = work / "sql" / f"{name}.sql"
+            path.parent.mkdir()
+            path.write_text("SELECT 1;\n")
+        (work / "ch-apply.out").touch()
+        curl = work / "curl"
+        curl.write_text(
+            '#!/bin/sh\nfor arg; do\n  case "$arg" in\n'
+            '    @*) cat "${arg#@}" >> "$REPLAY_CAPTURE"; printf "\\000" >> "$REPLAY_CAPTURE";;\n'
+            '  esac\ndone\nprintf 200\n'
+        )
+        curl.chmod(0o755)
+        capture = work / "requests"
+        result = subprocess.run(
+            ["bash", "-c", command.replace("/tmp/", f"{work}/").replace("/sql/", f"{work}/sql/")],
+            env={
+                **os.environ,
+                "PATH": f"{work}:{os.environ['PATH']}",
+                "REPLAY_CAPTURE": str(capture),
+                "CLICKHOUSE_URL": "http://unused.invalid",
+                "CLICKHOUSE_USER": "test",
+                "CLICKHOUSE_PASSWORD": "test",
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode:
+            return f"schema apply hook failed: {result.stderr or result.stdout}"
+        if not capture.is_file():
+            return "schema apply hook sent no statements"
+        statements = capture.read_text().split("\0")
+
+    synthetic_column_added = False
+    seen: set[str] = set()
+    for statement in statements:
+        synthetic_column_added |= ("bronze_events", "synthetic") in added_columns(statement)
+        for definition, view in CREATE_STMT_RE.findall(live_sql(statement)):
+            view = view.lower()
+            if view not in views:
+                continue
+            if not synthetic_column_added or not re.search(r"\bsynthetic\s*=\s*0\b", definition, re.IGNORECASE):
+                return f"replay sends an unprotected definition for {view}"
+            seen.add(view)
+    if missing := views - seen:
+        return f"replay omitted protected definitions: {', '.join(sorted(missing))}"
+    return None
+
+
 def self_test() -> int:
     """Falsify the gate: it must FLAG a resource object missing from the ConfigMap, and must PASS
     when the two agree. A gate that has only ever passed is unfalsified."""
@@ -267,6 +332,10 @@ def self_test() -> int:
         if not check(root)[0]:
             print("SELF-TEST FAIL: an empty subject set reported clean")
             ok = False
+
+    if error := check_replay_prefix(Path(__file__).resolve().parents[2]):
+        print(f"SELF-TEST FAIL: {error}")
+        ok = False
 
     print("SELF-TEST PASS" if ok else "SELF-TEST FAILED")
     return 0 if ok else 1
