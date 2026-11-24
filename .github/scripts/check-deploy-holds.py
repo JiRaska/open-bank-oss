@@ -395,6 +395,10 @@ def _sanitise(stderr):
     return text[:300] or "<no stderr>"
 
 
+class ProtectionQuota(InvalidHold):
+    """Live branch rules could not be read because GitHub exhausted installation quota."""
+
+
 def read_live_protection(repo):
     """Return the successful `gh api` result for main's rules; fail closed."""
     started = time.monotonic()
@@ -411,6 +415,10 @@ def read_live_protection(repo):
             if not result.returncode:
                 return result
             reason = f"gh api exited {result.returncode}: {_sanitise(result.stderr)}"
+            if re.fullmatch(r"gh: API rate limit exceeded for installation\b[^\r\n]*"
+                            r"\(HTTP (?:403|429)\)", (result.stderr or "").strip()):
+                raise ProtectionQuota("cannot read live main protection: "
+                                      "GitHub installation API quota exhausted (not retried)")
             transient = bool(TRANSIENT.search(result.stderr or "")) and not PERMANENT.search(result.stderr or "")
         if not transient:
             raise InvalidHold(f"cannot read live main protection (not retried): {reason}")
@@ -632,6 +640,39 @@ def self_test():
             else:
                 raise AssertionError("persistent 403 passed")
         assert len(calls) == 1, f"403 was retried ({len(calls)} calls)"
+        quota = fail("gh: API rate limit exceeded for installation. Details (HTTP 403)")
+        with patch("subprocess.run", return_value=quota) as quota_read, \
+                patch("time.sleep", side_effect=AssertionError("installation quota was retried")):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold as error:
+                assert "installation API quota exhausted" in str(error)
+            else:
+                raise AssertionError("installation quota passed live protection")
+        quota_read.assert_called_once()
+        mixed_quota = fail(quota.stderr + "\ngh: Resource not accessible (HTTP 403)")
+        with patch("subprocess.run", return_value=mixed_quota) as mixed_read, \
+                patch("time.sleep", side_effect=AssertionError("mixed permission error was retried")):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except ProtectionQuota as error:
+                raise AssertionError("mixed permission error classified as quota only") from error
+            except InvalidHold:
+                pass
+            else:
+                raise AssertionError("mixed permission error passed live protection")
+        mixed_read.assert_called_once()
+
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+
+        for local_result in (0, 1):
+            output = StringIO()
+            with patch(__name__ + ".require_live_strict", side_effect=ProtectionQuota("quota")), \
+                    redirect_stdout(output), redirect_stderr(StringIO()):
+                assert enforce_protection(root, None, "example/repo", local_result) == 1
+            assert (output.getvalue().splitlines() == ["GATE_VERDICT=NOT_EVALUATED"]) == (local_result == 0)
+
         calls.clear()
         def outage(*_a, **_k):
             calls.append(1)
@@ -704,6 +745,17 @@ def approved_selftest(root, rule, manifest, original, base):
                    check=True)
 
 
+def enforce_protection(root, base, repo, local_result):
+    try:
+        require_live_strict(root, base, repo)
+    except ProtectionQuota as error:
+        print(f"::error::deploy hold check could not validate: {error}", file=sys.stderr)
+        if local_result == 0:
+            print("GATE_VERDICT=NOT_EVALUATED")
+        return 1
+    return local_result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -738,12 +790,12 @@ def main():
                 print(f"deploy holds: {len(entries)} service(s); push run has no PR diff")
                 drifted = report_approved_images(args.root.resolve(), entries)
                 if args.enforce_live_strict:
-                    require_live_strict(args.root.resolve(), None, args.repo)
+                    return enforce_protection(args.root.resolve(), None, args.repo, drifted)
                 return drifted
             raise InvalidHold("--base or PR_DIFF_BASE is required")
         result = check(args.root.resolve(), args.base)
         if args.enforce_live_strict:
-            require_live_strict(args.root.resolve(), args.base, args.repo)
+            return enforce_protection(args.root.resolve(), args.base, args.repo, result)
         return result
     except (InvalidHold, OSError, UnicodeError) as error:
         print(f"::error::deploy hold check could not validate: {error}", file=sys.stderr)

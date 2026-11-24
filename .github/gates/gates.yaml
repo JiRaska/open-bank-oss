@@ -4329,6 +4329,25 @@ gates:
     selftest_inputs: [".github/scripts/gen-card-capability-matrix.py", "openbank-libs/governance/card-capabilities.yaml"]
     run: python3 .github/scripts/gen-card-capability-matrix.py --check
 
+  # A change log written newest-first makes every PR insert at the same line, so parallel PRs on
+  # one service always conflict. Opted-in documents assemble that section from one file per entry
+  # (docs/threat-models/<doc>.d/YYYY-MM-DD-<slug>.md); this gate holds the block between the markers
+  # to what the directory renders, and rejects malformed or orphaned fragments.
+  - id: changelog-fragments-drift
+    name: "change-log sections match their fragment directories (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.1s locally
+    # 2 documents opted in today (mcp-service, delegation-service). The floor stops a renamed
+    # directory or marker turning the drift check into a green no-op over zero documents.
+    min_subjects: 2
+    review_after: "2027-11-21"
+    rationale: "The change log is where a reviewer learns what a trust-boundary change did. A block that is hand-edited, or a fragment that never renders, makes the document disagree with the entries it claims to contain."
+    selftest: python3 .github/scripts/gen-changelog-fragments.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-changelog-fragments.py"]
+    run: python3 .github/scripts/gen-changelog-fragments.py --check
+
   # The regulatory obligations register (ADR-0367) starts from the LAW and maps each duty onto the
   # admin-ui report catalogue. The inventory it replaces was built from the code, so a duty with no
   # code (CEÚ, GSFT) was invisible to it. This gate keeps the two views joined: every catalogue
