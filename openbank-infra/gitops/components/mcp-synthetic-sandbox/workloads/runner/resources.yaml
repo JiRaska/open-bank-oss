@@ -21,6 +21,7 @@ metadata:
   namespace: mcp-synthetic-sandbox
   annotations:
     argocd.argoproj.io/sync-wave: '4'
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   schedule: 17 3 * * *
   timeZone: Etc/UTC
@@ -76,11 +77,11 @@ spec:
             - name: MCP_HARNESS_ALLOWED_SUFFIXES
               value: sandbox.invalid
             - name: MCP_HARNESS_RESOURCE_URL
-              value: https://sandbox.sandbox.invalid/customer/mcp
+              value: SITE_OVERRIDE_REQUIRED
             - name: MCP_HARNESS_AUTH_SERVER
-              value: https://sandbox.sandbox.invalid/realms/openbank-customers
+              value: SITE_OVERRIDE_REQUIRED
             - name: MCP_HARNESS_CUSTOMER_EDGE_URL
-              value: https://sandbox.sandbox.invalid/customer/v1
+              value: SITE_OVERRIDE_REQUIRED
             - name: MCP_HARNESS_CLIENT_ID
               value: mcp-local-sandbox
             - name: MCP_HARNESS_SCOPE

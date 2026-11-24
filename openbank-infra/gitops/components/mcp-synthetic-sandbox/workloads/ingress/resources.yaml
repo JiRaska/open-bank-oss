@@ -69,6 +69,11 @@ metadata:
     argocd.argoproj.io/sync-wave: '3'
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels: &id001
       app.kubernetes.io/name: mcp-synthetic-router
@@ -95,11 +100,11 @@ spec:
         - name: MCP_ROUTER_CUSTOMER_REALM
           value: openbank-customers
         - name: MCP_ROUTER_MCP_ORIGIN
-          value: https://mcp-sandbox.sandbox.invalid:8443
+          value: SITE_OVERRIDE_REQUIRED
         - name: MCP_ROUTER_ISSUER_ORIGIN
-          value: https://sandbox-oidc.sandbox.invalid:8443
+          value: SITE_OVERRIDE_REQUIRED
         - name: MCP_ROUTER_CUSTOMER_EDGE_ORIGIN
-          value: https://customer-edge-sandbox.sandbox.invalid:8443
+          value: SITE_OVERRIDE_REQUIRED
         ports:
         - name: https
           containerPort: 8443

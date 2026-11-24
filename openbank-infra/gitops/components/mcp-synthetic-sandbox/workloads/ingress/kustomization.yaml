@@ -1,9 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-- resources.yaml
-configMapGenerator:
-- name: mcp-synthetic-router-code
-  files:
-  - router.mjs
+  - resources.yaml
+  - router-config.yaml
 namespace: mcp-synthetic-sandbox

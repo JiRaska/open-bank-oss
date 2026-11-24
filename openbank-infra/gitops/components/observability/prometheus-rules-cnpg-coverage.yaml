@@ -247,6 +247,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: mcp-synthetic-sandbox
+            cluster: mcp-synthetic-keycloak-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: messaging
             cluster: apicurio-db
             origin: manifest
@@ -667,6 +673,11 @@ spec:
           labels:
             namespace: loyalty
             cluster: loyalty-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: mcp-synthetic-sandbox
+            cluster: mcp-synthetic-keycloak-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:

@@ -915,6 +915,10 @@ def main():
     for (ns, wl_name), wl in sorted(workloads.items()):
         if ns in skip_ns:
             continue
+        if (ns, wl_name) == ("mcp-synthetic-sandbox", "mcp-synthetic-router"):
+            # The private router admits only the fixture runner on TLS. A generated
+            # same-namespace or Admin UI policy would add parallel ingress authority.
+            continue
         # The fleet PodMonitor scrapes the port NAMED "management" — 8085 by
         # convention, but some workloads expose it on a different number (e.g.
         # clearing-simulator on 8087). Resolve it by name so the management port is
