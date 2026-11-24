@@ -109,6 +109,8 @@ jobs:
 
       - name: Fold observations into the ledger and render the RCA log
         id: fold
+        env:
+          DIGEST_READER_ROLE: ${{ vars.ALERT_DIGEST_READER_ROLE_ARN }}
         run: |
           set -euo pipefail
           month="$(date -u +%Y-%m)"
@@ -118,6 +120,9 @@ jobs:
           observe_args=()
           if [ "${#envelopes[@]}" -gt 0 ]; then
             observe_args=(--observe "${envelopes[@]}")
+          fi
+          if [ -n "$DIGEST_READER_ROLE" ]; then
+            observe_args+=(--require-watchdog)
           fi
           # With zero envelopes the ledger is rendered UNCHANGED — the run must not
           # fold an empty observation, which observe() would read as "every open

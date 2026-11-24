@@ -186,13 +186,13 @@ def observe(
                 "source": source,
                 "granularitySeconds": granularity_seconds,
             }
-        elif existing.get("resolvedAt") is None:
+        elif existing.get("resolvedAt") is None and parse_time(existing["lastSeenAt"]) < observed_at:
             existing["lastSeenAt"] = fmt_time(observed_at)
     for key, record in by_key.items():
         if key in seen or record.get("resolvedAt") is not None:
             continue
-        # Never close a record with an observation that predates its last sighting.
-        if parse_time(record["lastSeenAt"]) <= observed_at:
+        # Only a newer observation can close a record.
+        if parse_time(record["lastSeenAt"]) < observed_at:
             record["resolvedAt"] = fmt_time(observed_at)
     return list(by_key.values())
 
@@ -422,6 +422,12 @@ def self_test() -> None:
     # a later observation must not reopen or re-close an already closed record
     led = observe(led, [], day(4, 8), 86400, "poll")
     assert led[0]["resolvedAt"] == "2026-08-03T08:00:00Z"
+    active = [_alert("LedgerLag", "ledger", "2026-08-01T00:00:00Z")]
+    latest = observe([], active, day(7, 8), 86400, "poll")
+    overlapping = [(day(n, 8), active if n != 2 else []) for n in range(1, 8)]
+    assert replay(latest, overlapping, 86400, "poll") == latest
+    assert observe(latest, [], day(7, 8), 86400, "poll") == latest
+    assert observe(latest, [], day(8, 8), 86400, "poll")[0]["resolvedAt"] == "2026-08-08T08:00:00Z"
     # a non-critical alert is never admitted
     assert observe([], [{"labels": {"severity": "warning", "alertname": "W"}, "startsAt": "2026-08-01T00:00:00Z"}], day(1), 86400, "poll") == []
 
@@ -586,6 +592,31 @@ def self_test() -> None:
         assert observed["observationCount"] == 6 and len(observed["missingDays"]) == 1
         assert cli(*strict_args, "--observe", *window) == EXIT_OK
 
+        # A legacy Actions envelope is usable there, but the S3 reader requires the
+        # relay heartbeat before it can use an empty snapshot to resolve alerts.
+        ledger_path = os.path.join(tmp, "l.jsonl")
+        active_at = dt.datetime.combine(last_day - dt.timedelta(days=7), dt.time(8, 30), dt.timezone.utc)
+        seed = observe([], [_alert("LedgerLag", "ledger", fmt_time(active_at))], active_at, 86400, "poll")
+        write_ledger(ledger_path, seed)
+        s3_args = (*strict_args, "--require-watchdog", "--observe", *window)
+        assert cli(*s3_args) == EXIT_NO_OBSERVATIONS
+        assert load_ledger(ledger_path) == seed
+        for index, path in enumerate(window):
+            with open(path, encoding="utf-8") as stream:
+                payload = json.load(stream)
+            payload["alertNoise"] = [{"labels": {"alertname": "Watchdog" if index else "AlertRuleFlapping"}}]
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream)
+        assert cli(*s3_args) == EXIT_NO_OBSERVATIONS
+        assert load_ledger(ledger_path) == seed
+        with open(window[0], encoding="utf-8") as stream:
+            payload = json.load(stream)
+        payload["alertNoise"] = [{"labels": {"alertname": "Watchdog"}}]
+        with open(window[0], "w", encoding="utf-8") as stream:
+            json.dump(payload, stream)
+        assert cli(*s3_args) == EXIT_OK
+        assert load_ledger(ledger_path)[0]["resolvedAt"] is not None
+
     # --- rendering never launders a refusal into a number -------------------
     doc = render_rca(led, now, covered)
     assert "Not reported" in doc and "granularity-coarser-than-target" in doc, doc
@@ -611,6 +642,8 @@ def main() -> int:
     parser.add_argument("--observe", metavar="OBSERVATION_JSON", nargs="*", default=[],
                         help="observation envelope(s) to fold into the ledger, replayed "
                              "in observedAt order")
+    parser.add_argument("--require-watchdog", action="store_true",
+                        help="exclude in-cluster observations without Watchdog evidence")
     parser.add_argument("--source", default="alertmanager-poll")
     parser.add_argument("--granularity-seconds", type=int, default=86400,
                         help="how precisely this source dates a resolution (daily poll = 86400)")
@@ -637,7 +670,18 @@ def main() -> int:
     for path in args.observe:
         try:
             with open(path, encoding="utf-8") as stream:
-                observations.append(read_observation(json.load(stream)))
+                payload = json.load(stream)
+                observation = read_observation(payload)
+                if args.require_watchdog:
+                    noise = payload.get("alertNoise")
+                    if not isinstance(noise, list) or not any(
+                        isinstance(alert, dict) and isinstance(alert.get("labels"), dict)
+                        and alert["labels"].get("alertname") == "Watchdog"
+                        for alert in noise
+                    ):
+                        print(f"WARNING: {path}: Watchdog evidence unavailable", file=sys.stderr)
+                        continue
+                observations.append(observation)
         except (OSError, ValueError) as exc:
             print(f"ERROR: {path}: {exc}", file=sys.stderr)
             return EXIT_USAGE
