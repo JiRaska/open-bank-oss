@@ -216,13 +216,14 @@ data class DelegationGrant(
             }
             DelegationGranteeType.MCP_CLIENT -> {
                 val clientId = requireNotNull(granteeClientId) { "an MCP_CLIENT grant must record the client id (azp)" }
-                val jkt = requireNotNull(granteeKeyThumbprint) {
-                    "an MCP_CLIENT grant must record the DPoP key thumbprint (cnf.jkt)"
+                val jkt = granteeKeyThumbprint
+                require(jkt != null || mcpConnectionId != null) {
+                    "an MCP_CLIENT grant without a DPoP thumbprint must record its approved MCP connection"
                 }
                 require(clientId.isNotBlank() && clientId.length <= CLIENT_ID_MAX_LENGTH) {
                     "MCP client id must be non-blank and at most $CLIENT_ID_MAX_LENGTH characters"
                 }
-                require(JKT_PATTERN.matches(jkt)) {
+                require(jkt == null || JKT_PATTERN.matches(jkt)) {
                     "DPoP key thumbprint must be a base64url SHA-256 JWK thumbprint (43 characters)"
                 }
                 require(granteePartyId == mcpClientGranteeId(clientId)) {

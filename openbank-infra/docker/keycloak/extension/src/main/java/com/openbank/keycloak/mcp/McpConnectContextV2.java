@@ -31,6 +31,8 @@ public final class McpConnectContextV2 {
     /**
      * The caller must derive the party from the authenticated connect session, the thumbprint
      * from Keycloak's verified PAR DPoP proof, and accounts from owner-validated app selections.
+     * An absent thumbprint represents PAR authenticated as a confidential hosted client, which
+     * the caller must establish from authorization-server state before constructing the context.
      * This method validates the canonical representation of those facts.
      */
     public static McpConnectContextV2 of(McpConnectContext base, String partyId, String parProofThumbprint,
@@ -39,7 +41,9 @@ public final class McpConnectContextV2 {
             throw new IllegalArgumentException("connect context and selected accounts are required");
         }
         requireCanonicalUuid(partyId);
-        requireCanonicalThumbprint(parProofThumbprint);
+        if (parProofThumbprint != null) {
+            requireCanonicalThumbprint(parProofThumbprint);
+        }
 
         var selected = new TreeMap<String, String>();
         for (AccountScope account : accounts) {
@@ -54,8 +58,12 @@ public final class McpConnectContextV2 {
         }
         StringBuilder result = new StringBuilder(VERSION)
                 .append(base.canonical().substring(McpConnectContext.VERSION.length()))
-                .append("\nparty_id=").append(partyId)
-                .append("\npar_jkt=").append(parProofThumbprint);
+                .append("\nparty_id=").append(partyId);
+        if (parProofThumbprint == null) {
+            result.append("\npar_binding=confidential_client");
+        } else {
+            result.append("\npar_jkt=").append(parProofThumbprint);
+        }
         selected.forEach((account, capabilities) -> result.append("\naccount_scope=").append(account)
                 .append(':').append(capabilities));
         return new McpConnectContextV2(result.toString());

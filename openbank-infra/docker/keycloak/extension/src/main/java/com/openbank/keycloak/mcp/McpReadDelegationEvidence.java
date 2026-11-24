@@ -78,9 +78,14 @@ final class McpReadDelegationEvidence {
         try {
             AccessToken token = session.tokens().decode(request.subjectToken(), AccessToken.class);
             long now = clock.instant().getEpochSecond();
-            String thumbprint = validateToken(session, token, now);
+            String thumbprint = validateToken(session, token, now, request.hostedReadId() != null);
             UUID partyId = McpReadDelegationRequest.canonicalUuid(token.getOtherClaims().get("party_id"));
             UUID connectionId = verifiedConnection(token, request.connectionId());
+            if (request.hostedReadId() != null) {
+                if (connectionId == null) throw invalid();
+                return new Verified(token.getSubject(), partyId, token.getIssuedFor(), null, request.hostedReadId().toString(),
+                        issuer, Instant.ofEpochSecond(token.getExp()), connectionId);
+            }
             JWSInput input = new JWSInput(request.resourceProof());
             String nonce = validateClaims(input, request.subjectToken(), thumbprint, now);
 
@@ -114,20 +119,25 @@ final class McpReadDelegationEvidence {
         return claim;
     }
 
-    private String validateToken(KeycloakSession session, AccessToken token, long now) throws VerificationException {
-        if (token == null || !issuer.equals(token.getIssuer()) || !DPoPUtil.DPOP_TOKEN_TYPE.equals(token.getType())
+    private String validateToken(KeycloakSession session, AccessToken token, long now, boolean hosted) throws VerificationException {
+        if (token == null || !issuer.equals(token.getIssuer())
                 || !Arrays.equals(new String[] {AUDIENCE}, token.getAudience()) || token.getExp() == null
                 || token.getExp() <= now || !token.isActive() || !nonBlank(token.getSubject())
-                || !nonBlank(token.getIssuedFor()) || token.getConfirmation() == null) {
+                || !nonBlank(token.getIssuedFor())) {
             throw invalid();
         }
         ClientModel client = session.getContext().getRealm().getClientByClientId(token.getIssuedFor());
-        String thumbprint = token.getConfirmation().getKeyThumbprint();
-        if (client == null || !client.isEnabled()
-                || !"L".equals(client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))
-                || thumbprint == null || !thumbprint.matches("[A-Za-z0-9_-]{43}")) {
-            throw invalid();
+        if (client == null || !client.isEnabled()) throw invalid();
+        String tier = client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE);
+        boolean hostedClient = "H".equals(tier) && McpConnectTokenPolicy.hostedClientAuthenticationAllowed(client);
+        if (hosted) {
+            if (!hostedClient || !"Bearer".equals(token.getType()) || token.getConfirmation() != null) throw invalid();
+            return null;
         }
+        if (!("L".equals(tier) || hostedClient) || !DPoPUtil.DPOP_TOKEN_TYPE.equals(token.getType())
+                || token.getConfirmation() == null) throw invalid();
+        String thumbprint = token.getConfirmation().getKeyThumbprint();
+        if (thumbprint == null || !thumbprint.matches("[A-Za-z0-9_-]{43}")) throw invalid();
         return thumbprint;
     }
 

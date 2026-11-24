@@ -13,7 +13,7 @@ import java.util.UUID
  * beyond what admission has already verified, and the party is part of it, so one customer's grant
  * can never answer for another customer of the same client.
  */
-data class GrantKey(val partyId: UUID, val clientId: String, val keyThumbprint: String, val connectionId: UUID? = null)
+data class GrantKey(val partyId: UUID, val clientId: String, val keyThumbprint: String?, val connectionId: UUID? = null)
 
 /** One ACTIVE `MCP_CLIENT` grant over one account, as delegation-service answered it. */
 data class CustomerGrant(

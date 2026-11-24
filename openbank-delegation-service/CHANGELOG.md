@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.3...delegation-service-v0.28.0) (2026-11-24)
+
+
+### Features
+
+* **mcp-service:** support hosted Tier H balance authorization ([#17232](https://github.com/JiRaska/open-bank-oss/issues/17232)) ([619f58b](https://github.com/JiRaska/open-bank-oss/commit/619f58bb7c49fd6a3aaf39d501f66acbc54d0a8e))
+
 ## [0.27.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.2...delegation-service-v0.27.3) (2026-11-24)
 
 
