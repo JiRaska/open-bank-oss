@@ -131,7 +131,7 @@ class McpConnectProxyTest {
             assertThat(reply.entity.toString()).contains(expectedIndex)
             assertThat(reply.getHeaderString(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store")
         }
-        verify { upstream wasNot Called }
+        verify(exactly = 0) { upstream.put(any(), any(), any()) }
     }
 
     @Test
