@@ -55,7 +55,6 @@ openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/out
 openbank-loyalty-service/src/main/kotlin/com/openbank/loyalty/infrastructure/outbox/LoyaltyOutboxDispatcher.kt	2
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/outbox/NotificationOutboxDispatcher.kt	2
 openbank-party-service/src/main/kotlin/com/openbank/party/infrastructure/outbox/PartyOutboxDispatcher.kt	2
-openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/outbox/PidOutboxDispatcher.kt	2
 openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/client/ResilientClients.kt	11
 openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/client/TppRegistryClient.kt	1
 openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/infrastructure/outbox/SanctionsOutboxDispatcher.kt	2

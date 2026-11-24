@@ -93,8 +93,8 @@ spec:
             # no-op after that).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            # Kafka broker for the outbox dispatcher (party-events-out → topic party.events,
-            # pid-events-out → topic openbank.pid.events). Strimzi bootstrap, mTLS port (ADR-0137).
+            # Kafka broker for party event publication and erasure consumption.
+            # Strimzi bootstrap, mTLS port (ADR-0137).
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: KAFKA_SECURITY_PROTOCOL

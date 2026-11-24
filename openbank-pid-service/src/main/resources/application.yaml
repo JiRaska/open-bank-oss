@@ -134,18 +134,6 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
-      # Transactional-outbox drain channel (PidOutboxDispatcher -> KafkaPidOutboxEventPublisher).
-      # Without this connector the @Channel("pid-events-out") emitter is unwired and the service
-      # CrashLoops at boot ("no connector for channel pid-events-out") — a latent defect that only
-      # surfaces on a real boot (guarded now by PidBootSmokeIT, issue #1163 class).
-      pid-events-out:
-        connector: smallrye-kafka
-        client.id: pid-outbox-${quarkus.uuid}
-        topic: openbank.pid.events
-        value:
-          serializer: org.apache.kafka.common.serialization.StringSerializer
-        key:
-          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
@@ -158,8 +146,6 @@ openbank:
     max-concurrent-requests: 100
   api:
     version: "1"
-  outbox:
-    dispatch-enabled: true
   build:
     time: "${BUILD_TIME:unknown}"
   git:
