@@ -13,7 +13,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 GUARDS = Path('openbank-admin-ui/src/test')
 LITERAL = re.compile(r"['\"](\.\./\.\./openbank-[^'\"]+)['\"]")
-SAFE_TEST = re.compile(r"[a-z0-9.-]+-rbac\.guard\.test\.ts")
+RBAC_TEST = re.compile(r'.+-rbac(?:-alignment)?\.guard\.test\.ts')
+SAFE_TEST = re.compile(r'[a-z0-9.-]+')
 GITOPS_PREFIX = 'openbank-infra/gitops/'
 
 
@@ -21,12 +22,16 @@ def dependencies(repo: Path) -> dict[str, set[str]]:
     """Read every RBAC guard's backend inputs; fail on dynamic backend paths."""
     selected: dict[str, set[str]] = {}
     resolved_repo = repo.resolve()
-    for test in sorted((repo / GUARDS).glob('*-rbac.guard.test.ts')):
+    for test in sorted((repo / GUARDS).glob('*.guard.test.ts')):
+        body = test.read_text()
+        paths = LITERAL.findall(body)
+        if not RBAC_TEST.fullmatch(test.name):
+            if paths:
+                raise ValueError(f'undeclared cross-package guard: {test.name}')
+            continue
         if not SAFE_TEST.fullmatch(test.name):
             raise ValueError(f'unsafe RBAC test name: {test.name}')
-        body = test.read_text()
         inputs = set()
-        paths = LITERAL.findall(body)
         if body.count('../../') != len(paths):
             raise ValueError(f'dynamic backend source in {test.name}')
         for path in paths:

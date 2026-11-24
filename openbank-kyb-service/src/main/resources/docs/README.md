@@ -55,3 +55,7 @@ signed the case's own agreement ceremony. A fixed quorum needs enough verified s
 the attested count and offices. Joint-all requires all register representatives.
 Delegation-service can verify that the exact source attestation remains current, including
 before KYB publishes its replacement to Party.
+
+## Operator logs
+
+Operator identities, screening subject identifiers and diagnostic exception text are sanitized before they enter operational logs. Control characters and Unicode line separators are replaced with underscores. Case records and emitted events retain their original values.

@@ -1,0 +1,56 @@
+---
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: customer-edge
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value:
+    name: sandbox-https
+    containerPort: 8443
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_PORT
+    value: "8443"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+    value: /tls/sandbox-https/tls.crt
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+    value: /tls/sandbox-https/tls.key
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_PROTOCOLS
+    value: TLSv1.3
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+    value: 1h
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_INSECURE_REQUESTS
+    value: enabled
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: sandbox-https-server
+    mountPath: /tls/sandbox-https
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: sandbox-https-server
+    secret:
+      secretName: customer-edge-mcp-sandbox-server-tls
+      items:
+        - key: tls.crt
+          path: tls.crt
+        - key: tls.key
+          path: tls.key

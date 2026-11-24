@@ -28,6 +28,7 @@ import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -62,6 +63,7 @@ internal class McpCustomerBranch(
 ) {
     private val log = Logger.getLogger(McpCustomerBranch::class.java)
 
+    /** Returns null only for an admitted protocol method that continues through MCP dispatch. */
     @Suppress("ReturnCount")
     fun handle(
         jwt: JsonWebToken,
@@ -76,16 +78,16 @@ internal class McpCustomerBranch(
                 .header(WWW_AUTHENTICATE, admission.missingTokenChallenge())
                 .build()
         }
-        if (!admission.isCustomerToken(jwt)) return null
+        if (!admission.isCustomerToken(jwt)) return refuseNonCustomerToken()
         val outcome = runBlocking { admission.admit(jwt, authorization, dpop, throttles) }
         return when (outcome) {
             is Outcome.Refused -> refuse(outcome, jwt.subject, method, params)
-            is Outcome.Admitted -> admitted(outcome, jwt, authorization, method, id, params)
+            is Outcome.Admitted -> admitted(outcome, jwt, authorization, dpop.singleOrNull(), method, id, params)
         }
     }
 
     /** #16847: on the customer root a staff (or any non-customers-realm) token is refused, never dispatched. */
-    fun refuseNonCustomerToken(): Response {
+    private fun refuseNonCustomerToken(): Response {
         log.info("customer root refused a token that is not a customers-realm token")
         return Response.status(Response.Status.UNAUTHORIZED)
             .header(WWW_AUTHENTICATE, admission.missingTokenChallenge())
@@ -145,6 +147,7 @@ internal class McpCustomerBranch(
         }
         val builder = Response.status(outcome.status)
         outcome.challenge?.let { builder.header(WWW_AUTHENTICATE, it) }
+        outcome.resourceNonce?.let { builder.header("DPoP-Nonce", it) }
         return builder.build()
     }
 
@@ -167,7 +170,7 @@ internal class McpCustomerBranch(
         }
         val party = claim?.takeIf { UUID_SHAPE.matches(it) }?.let(UUID::fromString)
             ?: return Grants.Unknown("token carries no party_id")
-        val key = GrantKey(party, outcome.client.clientId, outcome.keyThumbprint)
+        val key = GrantKey(party, outcome.client.clientId, outcome.keyThumbprint, outcome.connectionId)
         return try {
             Grants.Known(key, grantCache.grants(key))
         } catch (e: GrantLookupUnavailable) {
@@ -181,12 +184,14 @@ internal class McpCustomerBranch(
         outcome: Outcome.Admitted,
         jwt: JsonWebToken,
         authorization: String?,
+        resourceProof: String?,
         method: String,
         id: JsonNode,
         params: JsonNode,
     ): Response? {
         // initialize / ping / notifications and unknown methods carry no data: the shared dispatch answers them.
         if (method != TOOLS_LIST && method != TOOLS_CALL) return null
+        val startedAt = System.nanoTime()
         metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
         val ctx = outcome.context
         val grants = grantsFor(outcome, jwt)
@@ -201,8 +206,24 @@ internal class McpCustomerBranch(
         // The subject token of the D4 exchange is the customer's own token — the one admission just
         // matched against the DPoP proof's `ath`. Never any credential of mcp-service's.
         val subjectToken = jwt.rawToken ?: authorization?.substringAfter(DPOP_SCHEME, "").orEmpty()
-        val caller = CustomerReadTools.Caller(ctx.agentId, subjectToken, outcome.client.clientId)
-        return respond(tools.call(tool, args, caller, known.grants), known.key, ctx, tool, params, id)
+        val caller = CustomerReadTools.Caller(
+            ctx.agentId,
+            subjectToken,
+            outcome.client.clientId,
+            grantKey = known.key,
+            sessionId = sessionOf(jwt),
+            resourceProof = resourceProof,
+        )
+        val result = tools.call(tool, args, caller, known.grants)
+        val decision = result.auditDecision()
+        metrics.toolCallCompleted(
+            tool.takeIf { tools.capabilityOf(it) != null } ?: McpMetricsPort.UNMAPPED_TOOL,
+            decision,
+            if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED,
+            Duration.ofNanos(System.nanoTime() - startedAt),
+            McpMetricsPort.ChannelTags(McpMetricsPort.McpChannel.CUSTOMER, outcome.client.clientId),
+        )
+        return respond(result, known.key, ctx, tool, params, id)
     }
 
     @Suppress("LongParameterList")
@@ -229,9 +250,9 @@ internal class McpCustomerBranch(
         }
         is CustomerReadTools.Outcome.Refused -> {
             if (result.invalidateGrant) grantCache.invalidate(key)
-            val decision = if (result.unavailable) UNAVAILABLE else McpCallAuditor.Decision.DENY
+            val decision = result.auditDecision()
             audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
-            toolError(id, if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
+            toolError(id, result.message ?: if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
         }
         is CustomerReadTools.Outcome.DownstreamRejected -> {
             // The grant may have been revoked since it was cached: forget it, so the next call asks again.
@@ -250,7 +271,7 @@ internal class McpCustomerBranch(
     }
 
     private fun list(ctx: ConsentContext, grants: Grants, id: JsonNode): Response {
-        val offered = (grants as? Grants.Known)?.let { tools.list(it.grants) }.orEmpty()
+        val offered = (grants as? Grants.Known)?.let { tools.list(it.grants, it.key.connectionId != null) }.orEmpty()
         val reason = when {
             grants is Grants.Unknown -> grants.reason
             offered.isEmpty() -> NO_ACTIVE_GRANT
@@ -344,3 +365,25 @@ internal fun tokenlessRefusalSource(clientKey: () -> String): String =
 /** The refusal reason of an in-process [McpRateLimiter] outcome; null when the call is allowed. */
 private fun reason(outcome: McpRateLimiter.Outcome): String? =
     outcome.takeUnless { it == McpRateLimiter.Outcome.ALLOWED }?.let { it.reason ?: "rate limit exceeded" }
+
+private fun CustomerReadTools.Outcome.auditDecision(): McpCallAuditor.Decision = when (this) {
+    is CustomerReadTools.Outcome.Allowed -> McpCallAuditor.Decision.ALLOW
+    is CustomerReadTools.Outcome.Refused -> if (unavailable) {
+        McpCallAuditor.Decision.UNAVAILABLE
+    } else {
+        McpCallAuditor.Decision.DENY
+    }
+    is CustomerReadTools.Outcome.DownstreamRejected -> McpCallAuditor.Decision.DENY
+}
+
+private val SESSION_SHAPE = Regex("^[A-Za-z0-9._:-]{1,128}$")
+
+/** Only a bounded, verified token session may identify a proposal retry. */
+private fun sessionOf(jwt: JsonWebToken): String? {
+    val session = when (val claim = jwt.getClaim<Any?>("sid")) {
+        is String -> claim
+        is JsonString -> claim.string
+        else -> null
+    }
+    return session?.takeIf(SESSION_SHAPE::matches)
+}

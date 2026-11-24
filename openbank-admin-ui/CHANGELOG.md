@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.23.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.1...admin-ui-v4.23.2) (2026-11-23)
+
+
+### Security
+
+* **sca:** Keycloak MCP extension - withheld code, 72 h passkey floor, no token exchange (ADR-0385 C, [#16667](https://github.com/JiRaska/open-bank-oss/issues/16667)) ([#16672](https://github.com/JiRaska/open-bank-oss/issues/16672)) ([699eaf9](https://github.com/JiRaska/open-bank-oss/commit/699eaf9e7e0b3d2b0604d964d35497ab774367aa))
+
+## [4.23.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.0...admin-ui-v4.23.1) (2026-11-23)
+
+
+### Security
+
+* **mcp-service:** caller-scoped opaque accountRef for MCP tool chaining ([#16863](https://github.com/JiRaska/open-bank-oss/issues/16863)) ([cdd8413](https://github.com/JiRaska/open-bank-oss/commit/cdd8413840c923f2d5f56a80f5c9615b55a94ab9))
+
 ## [4.23.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.1...admin-ui-v4.23.0) (2026-11-22)
 
 

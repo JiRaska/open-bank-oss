@@ -106,13 +106,17 @@ that Secret) and the ref switched to `kind: ConfigMap`.
    that never becomes Ready is the guard failing safe.
 4. **Channel on.** `MCP_CUSTOMER_ENABLED=true`, `MCP_CUSTOMER_ISSUER`, and the real client
    allowlist (`MCP_CUSTOMER_ALLOWLIST`). Boot refuses a missing issuer or a malformed allowlist.
+   Reconcile the running Keycloak customers realm from the generated template first. Before opening
+   the route, verify that the registered resource and the deployed allowlist both equal
+   `https://mcp.open-bank.tech/customer/mcp`.
 5. **Route.** Add `httproute.yaml` to that `kustomization.yaml` (it carries the HTTPRoute, the
    `BackendTLSPolicy` `mcp-customer-backend`, and the edge policies). external-dns publishes
    `mcp.open-bank.tech` once the route is Accepted.
 6. **Verify by effect, from outside the cluster** (each must give the stated answer):
    - `curl -s -o /dev/null -w '%{http_code}' https://mcp.open-bank.tech/anything` -> 404 (only
      `/customer/mcp` and the metadata paths); `POST /mcp` (staff root) -> 404 too.
-   - `GET /.well-known/oauth-protected-resource/customer/mcp` -> 200, `resource` equals the allowlist's.
+   - `GET /.well-known/oauth-protected-resource/customer/mcp` -> 200, with the same canonical
+     `resource` as the deployed allowlist and Keycloak registration.
    - `POST /customer/mcp` with no token -> 401 with a `DPoP` challenge carrying `resource_metadata`.
    - A body over 64 KiB -> 413 at the edge.
    - 30 requests in one second from one address -> some 429.

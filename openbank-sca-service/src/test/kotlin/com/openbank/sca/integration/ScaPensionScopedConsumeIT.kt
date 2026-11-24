@@ -8,6 +8,8 @@ import com.openbank.sca.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -40,6 +42,13 @@ class ScaPensionScopedConsumeIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "openbank-pension-sa"),
+            Claim(key = "azp", value = "openbank-pension"),
+            Claim(key = "preferred_username", value = "service-account-openbank-pension"),
+        ],
+    )
     fun `pension spends its own approval once and cannot spend an ordinary one`() {
         val human = UUID.randomUUID()
         val keys = es256()
@@ -64,6 +73,13 @@ class ScaPensionScopedConsumeIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "openbank-services-sa"),
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "preferred_username", value = "service-account-openbank-services"),
+        ],
+    )
     fun `no other consumer can spend a customer's pension approval`() {
         val human = UUID.randomUUID()
         val keys = es256()

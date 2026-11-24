@@ -91,12 +91,16 @@ class CustomerGrantCacheTest {
     }
 
     @Test
-    fun `the cache is keyed by the whole triple`() {
+    fun `the cache is keyed by the whole triple and the optional connection`() {
         source.answer = { listOf(grant()) }
         cache.grants(key)
         cache.grants(key.copy(partyId = UUID.randomUUID()))
         cache.grants(key.copy(keyThumbprint = "B".repeat(43)))
-        assertThat(source.calls).isEqualTo(3)
+        val boundKey = key.copy(connectionId = UUID.randomUUID())
+        cache.grants(boundKey)
+        cache.grants(boundKey.copy(connectionId = UUID.randomUUID()))
+        cache.grants(boundKey)
+        assertThat(source.calls).isEqualTo(5)
     }
 
     @Test

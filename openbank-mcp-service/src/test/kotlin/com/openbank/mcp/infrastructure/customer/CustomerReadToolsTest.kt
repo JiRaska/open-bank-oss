@@ -16,6 +16,9 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.net.URI
+import java.util.Base64
+import java.util.Optional
 import java.util.UUID
 
 /** ADR-0383 D3/D4: a tool reaches data only for an account whose grant carries its capability. */
@@ -31,7 +34,17 @@ class CustomerReadToolsTest {
             return verdict()
         }
     }
-    private val tools = CustomerReadTools(pdp, exchange, downstream, McpPiiMasker(mapper), mapper)
+    private val proposer: CustomerPaymentProposer = mockk()
+    private val tools = CustomerReadTools(
+        pdp,
+        exchange,
+        downstream,
+        McpPiiMasker(mapper),
+        mapper,
+        proposer,
+        null,
+        boundProposalEnabled = false,
+    )
     private val caller = CustomerReadTools.Caller(
         "c0ffee00-0000-0000-0000-000000000001",
         "customer-token",
@@ -55,6 +68,37 @@ class CustomerReadToolsTest {
             },
         )
             .containsExactlyInAnyOrder(CustomerReadTools.LIST_ACCOUNTS, CustomerReadTools.LIST_TRANSACTIONS)
+    }
+
+    @Test
+    fun `scoped tools use the grant projection and refuse legacy routes at the call boundary`() {
+        val connection = GrantKey(UUID.randomUUID(), caller.clientId, "test-key", UUID.randomUUID())
+        val scoped = caller.copy(grantKey = connection, sessionId = "test-session")
+        val grants = listOf(
+            grant(
+                CustomerCapabilities.VIEW_DETAILS,
+                CustomerCapabilities.READ_BALANCES,
+                CustomerCapabilities.READ_TRANSACTIONS,
+                CustomerCapabilities.PROPOSE_PAYMENT,
+            ),
+        )
+        assertThat(tools.list(grants).map { it.name })
+            .containsExactly("list_accounts", "get_balance", "list_transactions", "propose_payment")
+        assertThat(tools.list(grants, connectionBound = true).map { it.name }).containsExactly("list_accounts")
+        val accounts = tools.call("list_accounts", args(), scoped, grants) as CustomerReadTools.Outcome.Allowed
+        assertThat(accounts.result.content.single().text)
+            .contains(account.toString())
+            .doesNotContain("get_balance", "list_transactions", "propose_payment")
+        for (tool in listOf("get_balance", "list_transactions", "propose_payment")) {
+            val result = tools.call(tool, args("accountId" to account.toString()), scoped, grants)
+            assertThat((result as CustomerReadTools.Outcome.Refused).reason)
+                .isEqualTo("tool not available for an MCP connection")
+        }
+        assertThat(queries.map { it.action }).containsExactly("query.account.readonly")
+        verify(exactly = 0) { proposer.propose(any(), any(), any()) }
+        verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
+        verify(exactly = 0) { downstream.balances(any(), any()) }
+        verify(exactly = 0) { downstream.transactions(any(), any(), any()) }
     }
 
     @Test
@@ -109,6 +153,88 @@ class CustomerReadToolsTest {
     }
 
     @Test
+    fun `bound balance uses the original proof and refuses a mismatched permit without legacy fallback`() {
+        val issuer = mockk<McpBoundBalanceIssuer>()
+        val balance = mockk<McpBoundBalanceEndpoint>()
+        val boundTools = boundBalanceTools(issuer, balance)
+        val g = grant(CustomerCapabilities.READ_BALANCES)
+        val claims = mapper.createObjectNode()
+            .put("aud", DownstreamAudience.BALANCE.clientId)
+            .put("scope", DownstreamAudience.BALANCE.scope)
+            .put("sub", caller.subject)
+            .put("azp", "openbank-mcp-read-delegation")
+            .put("account_id", account.toString())
+            .put("grant_id", g.grantId.toString())
+        claims.putObject("cnf").put("x5t#S256", "A".repeat(43))
+        every {
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, null)
+        } answers { boundPermit(claims) }
+        every { balance.read(account, match { it.startsWith("Bearer fixture.") }) } returns mapper.createObjectNode()
+        val args = args("accountId" to account.toString())
+        val boundCaller = caller.copy(resourceProof = "original-proof")
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, boundCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+
+        val connectionId = UUID.randomUUID()
+        val connectionClaim = CustomerChannelAdmission.CLAIM_CONNECTION_ID
+        val scopedKey = GrantKey(UUID.randomUUID(), caller.clientId, "test-key", connectionId)
+        val scopedCaller = boundCaller.copy(grantKey = scopedKey)
+        every {
+            issuer.issue(any(), any(), "customer-token", "original-proof", account, connectionId)
+        } answers { boundPermit(claims) }
+        assertThat(boundTools.list(listOf(g), connectionBound = true).map { it.name })
+            .containsExactly("get_balance")
+        claims.put(connectionClaim, connectionId.toString())
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Allowed::class.java)
+        claims.put(connectionClaim, UUID.randomUUID().toString())
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+        claims.remove(connectionClaim)
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, scopedCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+
+        claims.put("account_id", UUID.randomUUID().toString())
+        assertThat(boundTools.call(CustomerReadTools.GET_BALANCE, args, boundCaller, listOf(g)))
+            .isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
+        verify(exactly = 2) { balance.read(any(), any()) }
+        verify(exactly = 0) { exchange.exchange(any(), any(), any()) }
+        verify(exactly = 0) { downstream.balances(any(), any()) }
+    }
+
+    private fun boundBalanceTools(issuer: McpBoundBalanceIssuer, balance: McpBoundBalanceEndpoint): CustomerReadTools {
+        val tls = Optional.of("sandbox-workload")
+        val bound = McpBoundBalanceReader(
+            issuer,
+            balance,
+            mapper,
+            true,
+            URI.create("https://issuer.test"),
+            URI.create("https://balance.test"),
+            tls,
+            tls,
+        )
+        return CustomerReadTools(
+            pdp,
+            exchange,
+            downstream,
+            McpPiiMasker(mapper),
+            mapper,
+            proposer,
+            bound,
+            boundProposalEnabled = false,
+        )
+    }
+
+    private fun boundPermit(claims: JsonNode): JsonNode {
+        val payload = Base64.getUrlEncoder().withoutPadding().encodeToString(mapper.writeValueAsBytes(claims))
+        return mapper.createObjectNode()
+            .put("access_token", "fixture.$payload.signature")
+            .put("token_type", "Bearer")
+            .put("expires_in", 30)
+    }
+
+    @Test
     fun `a downstream refusal is reported so the caller can drop the cached grant`() {
         every { exchange.exchange(any(), any(), any()) } returns "exchanged"
         every { downstream.transactions(any(), any(), any()) } throws DownstreamRefused(403)
@@ -139,8 +265,8 @@ class CustomerReadToolsTest {
     }
 
     @Test
-    fun `a write tool is not on this channel`() {
-        val out = tools.call("propose_payment", args(), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
+    fun `a tool that is not on this channel is refused`() {
+        val out = tools.call("execute_payment", args(), caller, listOf(grant(CustomerCapabilities.READ_BALANCES)))
         assertThat(out).isInstanceOf(CustomerReadTools.Outcome.Refused::class.java)
     }
 

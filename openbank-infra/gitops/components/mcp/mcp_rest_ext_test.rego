@@ -32,8 +32,38 @@ test_no_grant_capability_denied if {
 	not allow with input as call("get_balance", "query.balance.readonly", [])
 }
 
-test_write_tool_denied_on_customer_channel if {
-	not allow with input as call("propose_payment", "propose.payment", ["ACCOUNT_PROPOSE_PAYMENT"])
+# ADR-0383 D6: the channel's one write is PROPOSE, and only with the grant's propose capability.
+test_propose_with_propose_capability_allowed if {
+	allow with input as call("propose_payment", "propose.payment", ["ACCOUNT_PROPOSE_PAYMENT"])
+}
+
+test_propose_without_propose_capability_denied if {
+	not allow with input as call("propose_payment", "propose.payment", ["ACCOUNT_READ_BALANCES", "ACCOUNT_READ_TRANSACTIONS"])
+}
+
+test_propose_with_no_capability_denied if {
+	not allow with input as call("propose_payment", "propose.payment", [])
+}
+
+# Approving or executing is never an MCP action, whatever the grant carries or the tool claims.
+test_approve_denied_on_customer_channel if {
+	not allow with input as call("propose_payment", "delegation.proposal.approve", ["ACCOUNT_PROPOSE_PAYMENT"])
+}
+
+test_execute_denied_on_customer_channel if {
+	not allow with input as call("propose_payment", "delegation.proposal.execution", ["ACCOUNT_PROPOSE_PAYMENT"])
+}
+
+test_payment_execute_denied_on_customer_channel if {
+	not allow with input as call("execute_payment", "payment.execute", ["ACCOUNT_PROPOSE_PAYMENT"])
+}
+
+test_propose_under_a_read_action_denied if {
+	not allow with input as call("propose_payment", "query.balance.readonly", ["ACCOUNT_PROPOSE_PAYMENT", "ACCOUNT_READ_BALANCES"])
+}
+
+test_propose_by_staff_roles_on_customer_channel_denied if {
+	not allow with input as object.union(call("propose_payment", "propose.payment", ["ACCOUNT_PROPOSE_PAYMENT"]), {"principal": object.union(customer, {"roles": ["ROLE_OPERATOR"]})})
 }
 
 test_tool_action_mismatch_denied if {

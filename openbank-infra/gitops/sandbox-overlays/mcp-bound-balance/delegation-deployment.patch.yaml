@@ -1,0 +1,50 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: delegation-service
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value:
+    name: https-native
+    containerPort: 8443
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+    value: /mnt/mcp-delegation-server/tls.crt
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+    value: /mnt/mcp-delegation-server/tls.key
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+    value: 1h
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_PORT
+    value: '8443'
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: QUARKUS_HTTP_SSL_PROTOCOLS
+    value: TLSv1.3
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-delegation-server
+    mountPath: /mnt/mcp-delegation-server
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-delegation-server
+    secret:
+      secretName: delegation-mcp-server-tls
+      items:
+      - key: tls.crt
+        path: tls.crt
+      - key: tls.key
+        path: tls.key

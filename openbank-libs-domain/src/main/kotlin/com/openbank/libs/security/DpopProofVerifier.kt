@@ -62,6 +62,7 @@ data class DpopProof(
     val iat: Instant?,
     val jti: String?,
     val ath: String?,
+    val nonce: String? = null,
 )
 
 /** JOSE front-end port. Implementations must never throw: anything unparsable is `null`. */
@@ -131,7 +132,9 @@ sealed interface DpopCheck {
      * [DpopProofVerifier.claim] can never be handed a value that skipped the checks.
      */
     @ConsistentCopyVisibility
-    data class Bound internal constructor(val jkt: String, val jti: String) : DpopCheck
+    data class Bound internal constructor(val jkt: String, val jti: String, val nonce: String? = null) : DpopCheck {
+        override fun toString(): String = "BoundDpopProof[redacted]"
+    }
 }
 
 /**
@@ -177,7 +180,7 @@ class DpopProofVerifier(
         val proof = parseSafely(values.single().trim()) ?: return DpopCheck.Rejected(DpopResult.MALFORMED)
         val rejection = structural(proof) ?: binding(proof, request, now)
         return rejection?.let(DpopCheck::Rejected)
-            ?: DpopCheck.Bound(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti))
+            ?: DpopCheck.Bound(checkNotNull(proof.jwkThumbprint), checkNotNull(proof.jti), proof.nonce)
     }
 
     /**

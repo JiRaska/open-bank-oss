@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.mcp.application.McpAccountRefs
 import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.McpUntrustedData
@@ -60,7 +61,13 @@ class PoisonedToolResultRedTeamTest {
     private val corpus: JsonNode = load("redteam/poisoned-corpus.json")
     private val knownGaps: JsonNode = load("redteam/known-gaps.json")
     private val sentinels: List<String> = corpus.path("piiSentinels").map { it.asText() }
-    private val ctx = ConsentContext("agent:mcp-redteam", "11111111-2222-3333-4444-555555555555", emptyList())
+    private val ctx = ConsentContext(
+        "agent:mcp-redteam",
+        "11111111-2222-3333-4444-555555555555",
+        emptyList(),
+        // A session id, so the rendered fixture shows the accountRef a real session's model sees.
+        sessionId = "redteam-session",
+    )
 
     @TestFactory
     fun `every poisoned record served through the real tool path`(): List<DynamicTest> =
@@ -192,6 +199,8 @@ class PoisonedToolResultRedTeamTest {
         marketingReach = StubMarketingReachPort(mapper),
         masker = McpPiiMasker(mapper),
         mapper = mapper,
+        // Fixed so the committed fixture is reproducible. A test-only constant, not a secret.
+        accountRefs = McpAccountRefs("test-only-redteam-account-ref-key-not-a-secret".toByteArray()),
     )
 
     // ---------------------------------------------------------------- checkers

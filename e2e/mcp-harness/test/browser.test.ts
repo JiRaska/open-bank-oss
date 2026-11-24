@@ -60,3 +60,18 @@ test('a login page that navigates to a non-allowed host is stopped by the target
     await assert.rejects(authorizeInBrowser(b.page, `http://localhost:${(srv.address() as AddressInfo).port}/`, 'http://127.0.0.1:53682/callback', { timeoutMs: 8_000 }), /mcp\.examplebank\.com is not loopback/)
   } finally { await b.close(); srv.close() }
 })
+
+test('app HTTPS callback is intercepted locally and the same authenticator can finish the MCP login', { skip: !enabled && 'no browser configured' }, async () => {
+  const appRedirect = 'https://open-bank.tech/app/oauth/callback'
+  const mcpRedirect = 'http://127.0.0.1:53682/callback'
+  // Both local pages share an RP ID. Only the first registers the virtual credential.
+  const app = await serve(true, appRedirect)
+  const mcp = await serve(false, mcpRedirect)
+  const browser = await openPasskeyBrowser({ headless: true })
+  try {
+    const appCode = await authorizeInBrowser(browser.page, app.url, appRedirect, { timeoutMs: 20_000 })
+    const mcpCode = await authorizeInBrowser(browser.page, mcp.url, mcpRedirect, { timeoutMs: 20_000 })
+    assert.equal(new URL(appCode).searchParams.get('code'), 'from-passkey')
+    assert.equal(new URL(mcpCode).searchParams.get('code'), 'from-passkey')
+  } finally { await browser.close(); app.close(); mcp.close() }
+})

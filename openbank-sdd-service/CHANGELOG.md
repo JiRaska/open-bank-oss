@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.8](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.7...sdd-service-v0.14.8) (2026-11-23)
+
+
+### Bug Fixes
+
+* **sdd:** enable mandate expiry sweep ([#16808](https://github.com/JiRaska/open-bank-oss/issues/16808)) ([3e1eb78](https://github.com/JiRaska/open-bank-oss/commit/3e1eb78ed1fab5136863d6962b26d52a6788a3bc))
+
 ## [0.14.7](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.6...sdd-service-v0.14.7) (2026-11-16)
 
 
