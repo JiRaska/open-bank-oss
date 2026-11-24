@@ -655,8 +655,8 @@ def self_test():
                 patch("time.sleep", side_effect=AssertionError("mixed permission error was retried")):
             try:
                 require_live_strict(root, None, "example/repo")
-            except ProtectionQuota:
-                raise AssertionError("mixed permission error classified as quota only")
+            except ProtectionQuota as error:
+                raise AssertionError("mixed permission error classified as quota only") from error
             except InvalidHold:
                 pass
             else:
