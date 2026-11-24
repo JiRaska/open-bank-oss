@@ -44,7 +44,8 @@
 #         present — an auth outage that looks nothing like a missing JSON field. Exempt:
 #         an ADR-0385 MCP client (attribute `openbank.mcp.tier`) with `clientAuthenticatorType:
 #         client-jwt` — it authenticates with its pinned key set and presents no secret. Any
-#         other client-jwt client still needs a placeholder secret.
+#         other client-jwt client still needs a placeholder secret. The dedicated, disabled
+#         MCP read delegation client in the customers realm uses client-x509 and no secret.
 #     R4  a `secret` or `credentials[].value` that is NOT a `__PLACEHOLDER__` token. This repo is
 #         PUBLIC; a literal secret in a realm template is a disclosure, not a style problem.
 #     R5  a login-capable user missing `firstName`/`lastName`/`email` — Keycloak 26 answers
@@ -87,11 +88,16 @@
 #         of the rule being written down in prose (ROLE_MARKETING, ROLE_MERGE_RECORDER).
 #         An ADR-0385 MCP client (attribute `openbank.mcp.tier`) is held to the opposite, stricter
 #         shape: exactly ['offline_access'], so no realm role ever reaches a third-party token.
+#         The two staff-realm M2M clients for certificate-bound balance reads require exactly
+#         ['ROLE_API'] so an unrelated assignment cannot appear in their tokens.
 #
 #     R12 a `defaultClientScopes` / `optionalClientScopes` entry that no `clientScopes[].name`
 #         declares. Keycloak logs "Referenced client scope ... doesn't exist" and silently drops
 #         the assignment. The reserved OIDC protocol scope `openid` is not a client scope: it must
 #         stay in the request's `scope` parameter and needs no definition or assignment here.
+#
+#     R13 the customers realm's app must carry signed edge and RUM audiences. Both are custom
+#         audiences because target resource IDs are outside the customers realm's client registry.
 #
 #   Measured on the pre-fix templates: 12 findings, covering R1 (×5), R2, R3 (×2), R7, R8 and R9.
 #   Each was independently confirmed against the real container — the customers realm needed all
@@ -131,6 +137,7 @@ REQUIRED_USER_FIELDS = ("firstName", "lastName", "email")
 
 # R8. AUTHENTICATION_EXECUTION.AUTHENTICATOR is VARCHAR(36) in Keycloak's Liquibase changelog.
 AUTHENTICATOR_MAX = 36
+MCP_SCOPED_M2M_CLIENTS = {"openbank-keycloak-mcp", "openbank-mcp-read-issuer", "openbank-balance-mcp-reader"}
 
 
 class DuplicateKey(ValueError):
@@ -195,6 +202,9 @@ def check_realm(name, realm):
             if ("secret" not in c and c.get("clientAuthenticatorType") == "client-jwt"
                     and "openbank.mcp.tier" in (c.get("attributes") or {})):
                 pass  # R3 carve-out: a private_key_jwt client authenticates with its key, never a secret
+            elif ("secret" not in c and name == "openbank-customers" and cid == "openbank-mcp-read-delegation"
+                  and c.get("clientAuthenticatorType") == "client-x509" and c.get("enabled") is False):
+                pass  # R3 carve-out: the dormant MCP workload must authenticate with a TLS certificate
             elif "secret" not in c:
                 findings.append(
                     f"[{name}] confidential client `{cid}` declares no `secret` (R3) — Keycloak "
@@ -289,13 +299,22 @@ def check_realm(name, realm):
     role_names = {r.get("name") for r in ((realm.get("roles") or {}).get("realm") or [])}
     client_ids = {c.get("clientId") for c in clients}
     mcp_ids = {c.get("clientId") for c in clients if "openbank.mcp.tier" in (c.get("attributes") or {})}
-    for m in realm.get("scopeMappings", []) or []:
+    scope_mappings = realm.get("scopeMappings", []) or []
+    for cid in sorted(client_ids & MCP_SCOPED_M2M_CLIENTS):
+        mappings = [m.get("roles") for m in scope_mappings if m.get("client") == cid]
+        if name != "openbank" or mappings != [["ROLE_API"]]:
+            findings.append(
+                f"[{name}] scopeMappings for `{cid}` must have one staff-realm entry with exactly ['ROLE_API'] (R11)."
+            )
+    for m in scope_mappings:
         cid = m.get("client")
         if cid not in client_ids:
             findings.append(
                 f"[{name}] scopeMappings names client `{cid}`, which the template does not "
                 f"declare (R11)."
             )
+        if cid in MCP_SCOPED_M2M_CLIENTS:
+            continue
         if cid in mcp_ids:
             # ADR-0385 D1: an MCP client is mapped to offline_access ONLY — no realm role reaches
             # its token. Stricter than the all-roles rule, not a hole in it.
@@ -324,6 +343,24 @@ def check_realm(name, realm):
                         f"The reserved OIDC protocol scope `openid` needs no client-scope "
                         f"definition or assignment."
                     )
+
+    for c in clients:
+        if name != "openbank-customers" or c.get("clientId") != "openbank-app":
+            continue
+        mappers = c.get("protocolMappers") or []
+        for audience in ("openbank-edge", "openbank-rum"):
+            matching = [m for m in mappers if m.get("name") == f"{audience}-audience"]
+            if len(matching) != 1:
+                findings.append(f"[{name}] app requires one {audience} audience mapper (R13).")
+                continue
+            mapper = matching[0]
+            config = mapper.get("config") or {}
+            if (mapper.get("protocolMapper") != "oidc-audience-mapper"
+                    or config.get("included.custom.audience") != audience
+                    or "included.client.audience" in config or config.get("access.token.claim") != "true"):
+                findings.append(
+                    f"[{name}] app audience {audience} must be a custom target in access tokens (R13)."
+                )
 
     return findings, (len(clients), len(users))
 
@@ -406,6 +443,20 @@ def self_test():
     d["clients"][1]["attributes"] = {"openbank.mcp.tier": "H"}
     f, _ = check_realm("t", d)
     cases.append(("R3 secret-less private_key_jwt MCP client NOT flagged (ADR-0385 Tier H)", f == [], f))
+
+    d = _clean()
+    d["clients"][1] = {"clientId": "openbank-mcp-read-delegation", "publicClient": False,
+                       "enabled": False, "clientAuthenticatorType": "client-x509"}
+    f, _ = check_realm("openbank-customers", d)
+    cases.append(("R3 dedicated dormant MCP X.509 client passes without a secret", f == [], f))
+    f, _ = check_realm("t", d)
+    cases.append(("R3 X.509 carve-out limited to the customers realm", any("declares no" in x for x in f), f))
+    d["clients"][1]["clientId"] = "another-workload"
+    f, _ = check_realm("openbank-customers", d)
+    cases.append(("R3 X.509 carve-out limited to the dedicated client", any("declares no" in x for x in f), f))
+    d["clients"][1].update(clientId="openbank-mcp-read-delegation", enabled=True)
+    f, _ = check_realm("openbank-customers", d)
+    cases.append(("R3 X.509 carve-out requires the realm client to stay dormant", any("declares no" in x for x in f), f))
 
     d = _clean()
     d["clients"][1]["secret"] = "s3cr3t-literal"
@@ -536,6 +587,20 @@ def self_test():
     d["scopeMappings"] = [{"client": "conf", "roles": ["offline_access", "A"]}]
     f, _ = check_realm("t", d)
     cases.append(("R11 MCP client mapped to a realm role flagged", any("(R11" in x and "MCP client" in x for x in f), f))
+    for cid in sorted(MCP_SCOPED_M2M_CLIENTS):
+        staff = copy.deepcopy(sm)
+        staff["realm"] = "openbank"
+        staff["clients"][1]["clientId"] = cid
+        staff["roles"]["realm"].append({"name": "ROLE_API"})
+        staff["scopeMappings"] = [{"client": cid, "roles": ["ROLE_API"]}]
+        f, _ = check_realm("openbank", staff)
+        cases.append((f"R11 {cid} mapped to ROLE_API passes", f == [], f))
+        staff["scopeMappings"][0]["roles"].append("A")
+        f, _ = check_realm("openbank", staff)
+        cases.append((f"R11 {cid} mapped to an extra realm role flagged", any(cid in x and "(R11)" in x for x in f), f))
+        staff["scopeMappings"] = []
+        f, _ = check_realm("openbank", staff)
+        cases.append((f"R11 {cid} missing the ROLE_API mapping flagged", any(cid in x and "(R11)" in x for x in f), f))
 
     # R12, both directions. `openid` is the reserved OIDC protocol scope, not a
     # client-scope definition; assigning it when clientScopes does not declare it
@@ -549,6 +614,22 @@ def self_test():
     d["clients"][0]["optionalClientScopes"] = ["openid"]
     f, _ = check_realm("t", d)
     cases.append(("R12 undeclared client scope reference flagged", any("(R12)" in x and "openid" in x for x in f), f))
+
+    app = _clean()
+    app["clients"][0]["clientId"] = "openbank-app"
+    mappers = [{
+        "name": f"{audience}-audience", "protocolMapper": "oidc-audience-mapper",
+        "config": {"included.custom.audience": audience, "access.token.claim": "true"},
+    } for audience in ("openbank-edge", "openbank-rum")]
+    app["clients"][0]["protocolMappers"] = mappers
+    f, _ = check_realm("openbank-customers", app)
+    cases.append(("R13 customer app publishes both custom access-token audiences", f == [], f))
+    mappers[0]["config"] = {"included.client.audience": "openbank-edge", "access.token.claim": "true"}
+    f, _ = check_realm("openbank-customers", app)
+    cases.append(("R13 unresolved client audience target flagged", any("openbank-edge" in x and "(R13)" in x for x in f), f))
+    del mappers[1]
+    f, _ = check_realm("openbank-customers", app)
+    cases.append(("R13 absent RUM audience flagged", any("openbank-rum" in x and "(R13)" in x for x in f), f))
 
     bad = 0
     for label, passed, detail in cases:
@@ -577,7 +658,7 @@ def main():
     findings, n_clients, n_users = run(paths)
     print(
         f"realm-template-importable: compared {len(paths)} template(s), "
-        f"{n_clients} client(s), {n_users} user(s) against 12 rules."
+        f"{n_clients} client(s), {n_users} user(s) against 13 rules."
     )
     for p in paths:
         print(f"  - {p}")

@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-balance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4ff58d484be308fc"
+        openbank.tech/policy-checksum: "8ce4ce24bde2ebd0"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: balance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-548fa683@sha256:893a348b6f69ff24c2cacdacbf99f68181cf04d2b558e3416467577ac678f92c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-b00243d9@sha256:6394a7cecf2fb233f70acf1b4fdc4f96799c74d4282201bc627b1d5c0eff6817
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -112,6 +112,13 @@ spec:
             # transaction-service's port — the wrong value made getPartyId time out → 500.
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # Live MCP grant check using the scoped Balance reader identity.
+            - name: BALANCE_MCP_DELEGATION_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: balance-mcp-read-origins
+                  key: delegation-url
+                  optional: true
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

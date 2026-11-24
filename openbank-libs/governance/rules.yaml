@@ -1752,6 +1752,7 @@ four_eyes:
       - service-account-openbank-edge                              # scaGate before every money-path forward
       - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
       - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
+      - service-account-openbank-keycloak-mcp                      # ADR-0385 D3: connect ceremony only, see scoped_sca_consumers
 
 # ---------------------------------------------------------------------------------------
 # Four-eyes ENFORCEMENT in the deployed manifest (#15748, ADR-0155). `four_eyes` above decides
@@ -3538,6 +3539,8 @@ delegation_exposure_delivery:
       role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpClientGrantResolver.kt
       role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpBalanceReadGrantCheck.kt
+      role: refusal
     - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
       role: historical_audit
 
@@ -4201,6 +4204,15 @@ scoped_sca_consumers:
     purposes: [APPROVAL]
     approval_request_prefix: "pension-"
     adr: ADR-0335
+  # ADR-0385 D3 — the authorization server's withheld-code authenticator (Keycloak extension,
+  # openbank realm client `openbank-keycloak-mcp`, ROLE_API only). It raises AND spends connect
+  # challenges; sca-service refuses it any purpose but MCP_CLIENT_CONNECT at initiate
+  # (requireInitiateScope) and any challenge outside `mcp-connect:` at consume (ConsumerScope).
+  - principal: service-account-openbank-keycloak-mcp
+    actions: [scaChallenge.initiate, scaChallenge.consume]
+    purposes: [MCP_CLIENT_CONNECT]
+    approval_request_prefix: "mcp-connect:"
+    adr: ADR-0385
 
 # ADR-0335 D5/D6 — scoped payment initiators. Same shape as scoped_sca_consumers: the policy
 # (gen-domestic-payment-opa-bundle.sh, sdd_rest_ext.rego) reads `principal`, `service` and
@@ -4832,6 +4844,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/domain/model/ExternalDisclosure.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/BusinessSigningClients.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/DocumentDisclosureClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/McpConnectScaReceiptClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
@@ -4915,6 +4928,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/account/application/usecase/SavingsProposalService.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/BalanceServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/PartyDirectoryClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ProductCatalogClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/SanctionsServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ScaChallengeClient.kt"
@@ -4925,6 +4939,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
     cardholder: []
   openbank-balance-service:
     auth_crypto_payment:
@@ -4951,6 +4966,9 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/McpBalanceGrantClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadIdentity.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadResource.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/LedgerTrialBalanceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"

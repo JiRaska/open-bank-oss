@@ -52,6 +52,10 @@ export function linkingPayload(c: PendingChallenge, d: Decision): string {
   return [c.id, d, c.amount ?? '', c.currency ?? '', c.creditorIban ?? '', c.reference ?? ''].join('|')
 }
 
+export function signDevicePayload(privateKey: KeyObject, payload: string): string {
+  return createSign('SHA256').update(payload, 'utf8').sign(privateKey).toString('base64')
+}
+
 export class SoftwareScaDevice implements ScaApprover {
   readonly credentialId = `mcp-harness-${randomUUID()}`
   private readonly privateKey: KeyObject
@@ -85,7 +89,7 @@ export class SoftwareScaDevice implements ScaApprover {
 
   /** DER ECDSA over the payload — the form JcaDeviceAssertionVerifier's SHA256withECDSA consumes. */
   sign(payload: string): string {
-    return createSign('SHA256').update(payload, 'utf8').sign(this.privateKey).toString('base64')
+    return signDevicePayload(this.privateKey, payload)
   }
 
   async pending(): Promise<PendingChallenge[]> {

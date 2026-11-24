@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.4...kyb-service-v0.11.5) (2026-11-23)
+
+
+### Security
+
+* **kyb:** repair scanner coverage and harden alert sources ([#17149](https://github.com/JiRaska/open-bank-oss/issues/17149)) ([ac0332b](https://github.com/JiRaska/open-bank-oss/commit/ac0332b9dc593ca12ed173898a21f9ef8277dbf8))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.3...kyb-service-v0.11.4) (2026-11-20)
 
 

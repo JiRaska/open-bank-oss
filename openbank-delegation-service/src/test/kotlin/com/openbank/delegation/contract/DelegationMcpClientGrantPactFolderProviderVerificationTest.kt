@@ -4,65 +4,27 @@
 
 package com.openbank.delegation.contract
 
-import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.Consumer
-import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
-import com.openbank.delegation.application.port.`in`.ResolveMcpClientGrantUseCase
-import com.openbank.delegation.domain.model.DelegationCapability
-import com.openbank.delegation.domain.model.DelegationGrant
-import com.openbank.delegation.domain.model.DelegationGranteeType
-import com.openbank.delegation.domain.model.DelegationResourceType
-import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.integration.SpendReservationOutboxWriteIT
 import com.openbank.delegation.it.PostgresTestResource
-import io.quarkus.redis.datasource.RedisDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
-import jakarta.enterprise.context.ApplicationScoped
-import jakarta.enterprise.inject.Alternative
-import jakarta.inject.Inject
-import org.eclipse.microprofile.config.ConfigProvider
-import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
-import java.sql.Connection
-import java.sql.DriverManager
-import java.time.OffsetDateTime
-import java.util.UUID
 
-/**
- * PR-time replay of mcp-service's HTTP pact against the REAL resource (ADR-0383 D3,
- * `POST /api/v1/delegations/mcp-client/resolve`): routing, the in-code identity guard, request
- * validation and the JSON shape all run; only the use case behind the port is substituted per
- * provider state (MCP_CLIENT grants cannot be persisted yet — the ADR-0383 dormancy guard).
- *
- * `@Consumer` scopes this class to mcp-service's pact; the event pacts stay with
- * [DelegationEventPactFolderProviderVerificationTest], which skips HTTP interactions.
- * The caller is presented as mcp-service's own verified service-account (azp + preferred_username),
- * the only identity the handler admits. The negative half (a non-mcp caller is refused 403) lives
- * in [McpClientGrantIdentityGuardIT]: a plain `@Test` here cannot resolve the
- * [PactVerificationContext] the `@BeforeEach` takes.
- *
- * One exception to the authenticated caller: an interaction whose expected response is 401 is, by
- * definition, the no-credential case, so [configureTarget] clears the test identity for it and the
- * request reaches the route anonymous — the real security layer, not a stub, must answer 401.
- * Keyed on the pact's own expected status rather than a hand-kept list of descriptions, so every
- * other interaction stays authenticated as mcp-service.
- */
+/** Replays the committed MCP HTTP pacts against the Delegation HTTP resources. */
 @QuarkusTest
-@TestProfile(DelegationMcpClientGrantPactFolderProviderVerificationTest.ResolverDouble::class)
+@TestProfile(McpClientGrantProviderFixture.ResolverDouble::class)
 @QuarkusTestResource(SpendReservationOutboxWriteIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-mcp", roles = ["ROLE_API"])
@@ -76,27 +38,9 @@ import java.util.UUID
 @Provider("openbank-delegation-service")
 @Consumer("openbank-mcp-service")
 @PactFolder("../pacts")
-@IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-class DelegationMcpClientGrantPactFolderProviderVerificationTest {
-
-    @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
-    lateinit var testPort: String
-
-    @Inject
-    lateinit var testIdentity: TestIdentityAssociation
-
-    @Inject
-    lateinit var redis: RedisDataSource
-
+class DelegationMcpClientGrantPactFolderProviderVerificationTest : McpClientGrantProviderFixture() {
     @BeforeEach
-    fun configureTarget(context: PactVerificationContext?) {
-        context?.target = HttpTestTarget("localhost", testPort.toInt())
-        // Runs after @TestSecurity installed the class identity; null delegates to the real
-        // (token-derived) identity, which with no Authorization header is anonymous.
-        if (context?.interaction?.asSynchronousRequestResponse()?.response?.status == UNAUTHENTICATED) {
-            testIdentity.setTestIdentity(null)
-        }
-    }
+    fun replayAnonymousWhenRequired(context: PactVerificationContext?) = configureTarget(context, anonymousStatus = 401)
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
@@ -104,124 +48,15 @@ class DelegationMcpClientGrantPactFolderProviderVerificationTest {
         context?.verifyInteraction()
     }
 
-    /** Enables [FakeResolver] for this class only (a Kotlin bean class is final, so no QuarkusMock). */
-    class ResolverDouble : QuarkusTestProfile {
-        override fun getEnabledAlternatives(): Set<Class<*>> = setOf(FakeResolver::class.java)
-    }
-
-    @Alternative
-    @ApplicationScoped
-    class FakeResolver : ResolveMcpClientGrantUseCase {
-        override suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String) =
-            if (grantorPartyId == PARTY && clientId == CLIENT && keyThumbprint == JKT) answer else emptyList()
-
-        companion object {
-            @Volatile
-            var answer: List<DelegationGrant> = emptyList()
-        }
-    }
-
-    private fun answer(grants: List<DelegationGrant>) {
-        FakeResolver.answer = grants
-    }
-
     @State("an active MCP_CLIENT grant exists for the pact party, client and key")
-    fun activeGrant() {
-        val now = OffsetDateTime.now()
-        answer(
-            listOf(
-                DelegationGrant(
-                    id = GRANT,
-                    grantorPartyId = PARTY,
-                    granteePartyId = DelegationGrant.mcpClientGranteeId(CLIENT),
-                    granteeType = DelegationGranteeType.MCP_CLIENT,
-                    granteeClientId = CLIENT,
-                    granteeKeyThumbprint = JKT,
-                    resourceType = DelegationResourceType.ACCOUNT,
-                    resourceId = ACCOUNT,
-                    capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
-                    validFrom = now.minusDays(1),
-                    validTo = now.plusDays(30),
-                    status = DelegationStatus.ACTIVE,
-                    createdAt = now,
-                    updatedAt = now,
-                ),
-            ),
-        )
-    }
+    fun activeGrant() = seedActiveGrant()
 
     @State("no MCP_CLIENT grant exists for the pact party, client and key")
-    fun noGrant() = answer(emptyList())
+    fun noGrant() = seedNoGrant()
 
-    /*
-     * Payment-proposal create (ADR-0383 D6). Unlike resolve, `PaymentProposalService` reads the
-     * grant straight from `DelegationRepository`, so these states seed the REAL table over JDBC —
-     * the write paths refuse an MCP_CLIENT grant (dormancy guard), the database does not. Every
-     * proposal runs the real service, hash and outbox.
-     *
-     * Both create interactions carry the same Idempotency-Key and body, so a key left in Redis by
-     * the first would replay its answer to the second; each state clears the create keys first.
-     * Previous grants for the pact party are revoked rather than deleted (DELETE is not a legal
-     * transition), so a fresh grant id is what the create finds and nothing deduplicates.
-     */
     @State("an active MCP_CLIENT propose grant exists for the pact party, client, key and account")
-    fun activeProposeGrant() {
-        resetProposeState()
-        val grant = UUID.randomUUID()
-        jdbc().use { c ->
-            c.prepareStatement(
-                """
-                insert into delegation_grants
-                    (id, grantor_party_id, grantee_party_id, resource_type, resource_id, valid_from, status,
-                     grantee_type, grantee_client_id, grantee_key_thumbprint)
-                values (?, ?, ?, 'ACCOUNT', ?, now() - interval '1 day', 'ACTIVE', 'MCP_CLIENT', ?, ?)
-                """.trimIndent(),
-            ).use { s ->
-                s.setObject(1, grant)
-                s.setObject(2, PARTY)
-                s.setObject(3, DelegationGrant.mcpClientGranteeId(CLIENT))
-                s.setObject(4, ACCOUNT)
-                s.setString(5, CLIENT)
-                s.setString(6, JKT)
-                s.executeUpdate()
-            }
-            c.prepareStatement(
-                "insert into delegation_capabilities (grant_id, capability) values (?, 'ACCOUNT_PROPOSE_PAYMENT')",
-            ).use { s ->
-                s.setObject(1, grant)
-                s.executeUpdate()
-            }
-        }
-    }
+    fun activeProposeGrant() = seedActiveProposeGrant()
 
     @State("no MCP_CLIENT propose grant exists for the pact party, client, key and account")
-    fun noProposeGrant() = resetProposeState()
-
-    private fun resetProposeState() {
-        val keys = redis.key().keys("*payment-proposal:create:*")
-        if (keys.isNotEmpty()) redis.key().del(*keys.toTypedArray())
-        jdbc().use { c ->
-            c.prepareStatement(
-                "update delegation_grants set status = 'REVOKED' where grantor_party_id = ? and status = 'ACTIVE'",
-            ).use { s ->
-                s.setObject(1, PARTY)
-                s.executeUpdate()
-            }
-        }
-    }
-
-    private fun jdbc(): Connection = DriverManager.getConnection(
-        ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java),
-        "openbank",
-        "openbank_secret",
-    )
-
-    companion object {
-        val PARTY: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000001")
-        val GRANT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000002")
-        val ACCOUNT: UUID = UUID.fromString("d3d3d3d3-0000-4000-8000-000000000003")
-        const val CLIENT = "mcp-local-reference"
-        const val JKT = "0000000000000000000000000000000000000000000"
-        private const val UNAUTHENTICATED = 401
-    }
+    fun noProposeGrant() = seedNoProposeGrant()
 }

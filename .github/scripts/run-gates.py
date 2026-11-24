@@ -127,10 +127,12 @@ BUDGET_DENY_ID_RE = re.compile(
     r"|gate-runner|agent-pr-guard|lock-integrity|gh-token|gate-invocation|gate-selftest"
     r"|gate-subject-floor|selftest-inputs|armed-prs|taint|synthetic|pg-extension"
 )
-# The `gates` job in ci.yml runs under `timeout-minutes: 15`; a scaled per-gate kill above that
+# The `gates` job in ci.yml runs under a 25-minute gate budget; a scaled per-gate kill above that
 # (minus a margin for setup/report) could never fire — the job would be cancelled first, which
 # reads as "not a verdict" rather than a timeout finding. The self-test pins this to ci.yml.
-GATES_JOB_TIMEOUT_SECONDS = 15 * 60
+GATES_JOB_TIMEOUT_SECONDS = 25 * 60
+# Preserve the per-gate ADR-0389 cap when the aggregate job gets extra tracing time.
+SCALED_GATE_TIMEOUT_CAP_SECONDS = 14 * 60
 GATES_JOB_TIMEOUT_MARGIN = 60
 
 
@@ -185,7 +187,7 @@ def apply_budget_multiplier(gates, m: float, default_timeout: int):
     The scaled timeout is clamped to MAX_TIMEOUT and to the gates job's own limit minus a margin,
     and the budget is clamped to that timeout so the pairing load() enforces stays enforceable."""
     exempt = []
-    cap = min(MAX_TIMEOUT, GATES_JOB_TIMEOUT_SECONDS - GATES_JOB_TIMEOUT_MARGIN)
+    cap = min(MAX_TIMEOUT, SCALED_GATE_TIMEOUT_CAP_SECONDS, GATES_JOB_TIMEOUT_SECONDS - GATES_JOB_TIMEOUT_MARGIN)
     for g in gates:
         if budget_multiplier_exempt(g):
             exempt.append(g["id"])
@@ -738,10 +740,18 @@ def _trace_mode() -> str:
 def _selftest_trace_file(gate, is_pr: bool):
     """(trace_file or None, note). Tracing is opt-in via OB_SELFTEST_TRACE (CI sets `require`)."""
     mode = _trace_mode()
-    # Pull requests only. A finding fails only there (see execute), and tracing costs ~2x the
-    # self-test time (measured over the estate: 420 s -> 919 s), which main need not pay to
-    # produce warnings: the PR that introduces an undeclared read is where it is caught.
-    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs") or not is_pr:
+    # Every event, push to main included (#16895). This used to be pull-request-only, on the
+    # argument that tracing costs ~2x the self-test time (estate: 420 s -> 919 s) and that the PR
+    # introducing an undeclared read is where it gets caught. The second half is false: a
+    # corpus-walking self-test starts reading a NEW file when an unrelated PR adds one (#16621
+    # added e2e/mcp-harness/; three self-tests read it), and that PR need not touch the gate, so
+    # its own run skips the self-test. main then stayed green while every later PR touching those
+    # shards went red, and the merge train blamed them. Red on main at the commit that caused
+    # the drift is the point. The cost is paid per shard, inside the 2x traced timeout already
+    # granted below, and is excluded from the budget comparison (traced_cost) -- the same
+    # envelope every PR touching run-gates.py already runs in, since that traces all self-tests.
+    del is_pr  # kept in the signature: callers pass it, and the event no longer decides
+    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs"):
         return None, ""
     # A self-test that drives Gradle (a daemon plus forked JVMs) does not finish under `strace -f`
     # within the shard timeout: test-provenance-cache's ran >10 min traced and the shard was
@@ -867,10 +877,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
             if trace_file and rc != 124 and (rc == 0) == want_pass:
                 found = _judge_trace(gate, root, trace_file, r, buf)
-                # Tracing happens only on a pull request (_selftest_trace_file), where a self-test
-                # runs because the gate or its declared inputs changed — the moment a new
-                # undeclared read is introduced. Never on main: there a scanning self-test's
-                # corpus grows with no one touching the gate, and that must not turn main red.
+                # Fails on every event, push to main included (#16895): a scanning self-test's
+                # corpus grows with no one touching the gate, and main must go red at the commit
+                # that grew it, not leave the red to whichever PR next runs the self-test.
                 undeclared_fail = found
         finally:
             if trace_file:
@@ -1441,16 +1450,19 @@ gates:
     name: "a gate whose CPU (and wall) time exceed its budget: real work, FAILS"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
   - id: wall-over-budget
     name: "a gate long in wall time but idle on CPU (a loaded runner): reported, PASSES"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "sleep 0.6"
   - id: not-evaluated
     name: "a gate that could not read its subject (#13400): red, never PASS, never a budget overrun"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "sleep 0.5; echo 'GATE_VERDICT=NOT_EVALUATED  # API timed out'; exit 1"
   - id: not-evaluated-exit-zero
     name: "the NOT EVALUATED line never turns a zero exit into anything but its own verdict"
@@ -1460,6 +1472,7 @@ gates:
     name: "a gate that found something AND was slow is a finding, not a budget overrun"
     group: t
     budget_seconds: 0.2
+    timeout_seconds: 60  # not the 2 s self-test --timeout: a starved runner stretches wall time, never CPU time
     run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'; exit 1"
   - id: within-budget
     name: "a gate inside its budget"
@@ -1724,7 +1737,7 @@ def self_test():
                   {"id": "x-money-path-y", "group": "lint", "budget_seconds": 30},
                   {"id": "new-group-gate", "group": "brand-new", "budget_seconds": 30}]
         ex = apply_budget_multiplier(scaled, 2.0, 420)
-        # 840 = min(MAX_TIMEOUT, 15 min job - 60 s margin); "big" keeps its declared 1800 (never lowered)
+        # 840 = the preserved scaled per-gate ceiling; "big" keeps its declared 1800 (never lowered)
         want = {"plain": (60, 840), "plain-tmo": (200, 840), "big": (800, 1800),
                 "sec": (30, None), "gitops-plain": (30, None), "x-money-path-y": (30, None),
                 "new-group-gate": (30, None)}
@@ -1767,23 +1780,23 @@ def self_test():
                     bad.append(f"gate `{gid}` was SCALED by the budget multiplier; it must stay exempt")
         ci_yml = real / ".github" / "workflows" / "ci.yml"
         for label, job, want in (
-            ("plain", {"timeout-minutes": 15}, None),
+            ("plain", {"timeout-minutes": 25}, None),
             ("plain wrong", {"timeout-minutes": 20}, "disagrees"),
-            ("per-slug exact", {"timeout-minutes": "${{ matrix.slug == 'x' && 47 || 15 }}",
+            ("per-slug exact", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 25 }}",
                                 "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
                                            "timeout-minutes": 32}]}, None),
             ("per-slug extra on a shard that does not fetch",
-             {"timeout-minutes": "${{ matrix.slug == 'gitops-api' && 47 || 15 }}",
+             {"timeout-minutes": "${{ matrix.slug == 'gitops-api' && 57 || 25 }}",
               "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'", "timeout-minutes": 32}]},
              "disagrees"),
-            ("per-slug extra exceeds fetch cap", {"timeout-minutes": "${{ matrix.slug == 'x' && 50 || 15 }}",
+            ("per-slug extra exceeds fetch cap", {"timeout-minutes": "${{ matrix.slug == 'x' && 60 || 25 }}",
                                                   "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
                                                              "timeout-minutes": 32}]},
              "disagrees"),
-            ("per-slug base wrong", {"timeout-minutes": "${{ matrix.slug == 'x' && 47 || 20 }}",
+            ("per-slug base wrong", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 20 }}",
                                      "steps": [{"id": "current-evidence", "if": "matrix.slug == 'x'",
                                                 "timeout-minutes": 32}]}, "disagrees"),
-            ("per-slug without capped fetch", {"timeout-minutes": "${{ matrix.slug == 'x' && 47 || 15 }}",
+            ("per-slug without capped fetch", {"timeout-minutes": "${{ matrix.slug == 'x' && 57 || 25 }}",
                                                "steps": []}, "disagrees"),
         ):
             got = gates_job_timeout_error(job)
@@ -2300,6 +2313,46 @@ def self_test():
                 bad.append("require mode fails a gate that opted out with selftest_trace: false")
             if not _trace_refused(g, None):
                 bad.append("require mode no longer fails a gate whose self-test could not be traced")
+            # #16895: a push to main traces too, and an undeclared read there FAILS the gate.
+            # Before the fix both held only on a pull request, so main stayed green over drift.
+            pushed, _ = _selftest_trace_file(g, False)
+            if not pushed:
+                bad.append("a self-test was not traced on a push event (main hides drift)")
+            else:
+                os.unlink(pushed)
+        finally:
+            sit.strace_usable = saved_usable
+            if saved_mode is None:
+                os.environ.pop(sit.TRACE_ENV, None)
+            else:
+                os.environ[sit.TRACE_ENV] = saved_mode
+
+        # #16895, kept OUTSIDE the block above so it runs whatever that block found: an
+        # undeclared self-test read must FAIL the gate on a push to main as on a pull request.
+        saved_mode = os.environ.get(sit.TRACE_ENV)
+        saved_usable = sit.strace_usable
+        try:
+            os.environ[sit.TRACE_ENV] = "require"
+            sit.strace_usable = lambda: (True, "")
+            saved_argv, saved_analyse = sit.strace_argv, sit.analyse
+            try:
+                sit.strace_argv = lambda _f: []
+                sit.analyse = lambda *_a, **_k: (["undeclared/read.txt"], [], [])
+                (tmp / "declared").mkdir(exist_ok=True)
+                (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                    "gates:\n  - id: u\n    name: u\n    group: t\n    run: \"true\"\n"
+                    "    selftest: \"true\"\n    selftest_expect: pass\n"
+                    "    selftest_inputs: [declared/]\n"
+                )
+                gu = load(tmp)[0]
+                for pr in (True, False):
+                    ru = execute(gu, tmp, is_pr=pr, timeout=5)
+                    if ru.status != "failed" or "undeclared/read.txt" not in ru.output:
+                        bad.append(f"undeclared self-test read did not fail the gate "
+                                   f"(is_pr={pr}): got {ru.status}")
+                man.write_text(SELF_TEST_MANIFEST)
+            finally:
+                sit.strace_argv, sit.analyse = saved_argv, saved_analyse
         finally:
             sit.strace_usable = saved_usable
             if saved_mode is None:

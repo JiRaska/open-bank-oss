@@ -70,6 +70,14 @@ and require a human operator plus OPA; client applications do not receive a bank
    `delegation.disclosure.release` for that identity, never the shared backend client. Every
    unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
 
+10. Keycloak, customer edge and balance-service → customer MCP consent and read-permit
+    APIs (ADR-0383, ADR-0385). Keycloak's verified service account alone stages and activates
+    a consent or asks for a balance-read permit, using distinct issuer actions and service
+    identities. The verified customer-edge service account forwards the customer party for
+    selecting accounts, listing connections and revoking them. The dedicated balance reader
+    can only recheck its live grant. Delegation reads the consumed SCA receipt over the configured
+    HTTPS client using the delegation-service workload credential. Consent endpoints default to disabled.
+
 ## Threats and mitigations
 
 | # | Threat | Mitigation |
@@ -230,6 +238,24 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
 
 ## Change log
 
+- **2026-11-23** — **Customer MCP consent, bound balance-read permit and proposal revocation**
+  (ADR-0383, ADR-0385, #16864).
+  - **Consent substitution or replay.** The issuer verifies the consumed SCA receipt against the
+    stored request, challenge, signed context hash, party, deciding party and expiry. Activation
+    rechecks ownership and atomically creates account-specific grants linked to the same party,
+    client, DPoP key and refresh family. The server owns the connection ID. The customer can only
+    select accounts it owns and revoke connections belonging to its verified party.
+  - **Reading after scope changes.** The balance-read permit requires the exact account and
+    balance capability on the active MCP grant, current account ownership and a first-use
+    issuer proof reference in PostgreSQL. The balance reader separately rechecks the live grant
+    before serving the account. The bound path requires the same connection ID throughout.
+  - **Proposal execution after revocation.** Revocation records the connection's revocation,
+    closes its grants and rejects pending proposals in one transaction. Proposal processing
+    checks the linked grant and locks it while applying the transition. Only a separately
+    authenticated customer decision can approve a proposal.
+  - **Residual boundary.** The issuer and edge remain trusted to attest their respective caller
+    contexts. A failed receipt, ownership or grant check closes the operation before issuance.
+
 - **2026-11-22** — **Payment-proposal idempotency: a 5xx is released, never stored** (ADR-0383 D6,
   #16845). `PaymentProposalResource.idempotent` previously saved whatever answer the handler
   returned under the reserved key; it now saves only a definitive (non-5xx) answer and releases the
@@ -243,6 +269,23 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
     on every transition), so a retry cannot apply a transition twice. Definitive answers (2xx/4xx)
     are still stored and replayed verbatim; a key reused for a different request is still 409.
     Tested by `PaymentProposalIdempotencyTest`.
+
+- **2026-11-21** — **New ingress edge: mcp-service -> delegation-service** (ADR-0383 D3).
+  `delegation-service-ingress-allow-list` now admits the `platform` namespace, where mcp-service
+  runs, so it can call `POST /api/v1/delegations/mcp-client/resolve`. The edge is derived by
+  `gen-network-policies.py` from `QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL` in the mcp-service
+  manifest, never hand-written. The lookup is read-only (`McpClientGrantResolver` queries ACTIVE
+  `MCP_CLIENT` grants for one party/client/key triple and writes nothing) and authenticated: the
+  caller is mcp-service's own `m2m` identity, and a tokenless request must be refused 401. The pact
+  interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json` states that
+  expectation but is NOT proof of it — a consumer mock answers whatever the pact says. Provider-side
+  proof lives with the route itself (#16793): `McpClientGrantIdentityGuardIT` drives it over HTTP
+  with no token (401), and the `@PactFolder` replay verifies the no-token interaction against the
+  real security layer (see the 2026-11-18 entry below).
+  Information disclosure is bounded by the triple: the party id comes from the verified customer
+  token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
+  Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the
+  endpoint's authn, not the NetworkPolicy, is the control that separates callers.
 
 - **2026-11-19** — **Customer MCP payment-proposal store** (ADR-0383 D6, #16590). New table
   `delegation_payment_proposals` (V38), REST family `/api/v1/payment-proposals` and topic

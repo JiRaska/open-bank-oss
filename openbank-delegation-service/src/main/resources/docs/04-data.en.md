@@ -107,6 +107,16 @@ V34) or `MCP_CLIENT`, a customer-admitted third-party MCP client.
   The answer carries only grant id, resource type and id, capabilities and `validTo`; an empty list
   is the refusal.
 
+The internal balance-read authorization component selects one active grant for the requested account
+and checks account ownership before recording the issuer proof claim. It returns the grant ID,
+account ID and validity deadline only after the first claim commits. The HTTP entry point requires the
+dedicated bank issuer service account. The issuer must independently verify the DPoP evidence, and
+the downstream balance route must enforce the account binding and current grant.
+
+The balance-service grant recheck is reserved to its dedicated reader identity. It re-reads the
+grant by ID and verifies the customer, MCP client, account, capability and current validity window
+before returning an empty success response.
+
 ## `delegation_payment_proposals` (V38, ADR-0383 D6)
 
 Payment **proposals** made by a customer-connected MCP client under an ACTIVE `MCP_CLIENT` grant.
@@ -117,3 +127,9 @@ one-way status: `PENDING → APPROVED | REJECTED | EXPIRED`, `APPROVED → EXECU
 A trigger pins the instruction columns and the state graph; DELETE raises. Proposals expire after
 24 h; at most 10 are open and 20 created per customer per 24 h. Lifecycle events go to
 `openbank.delegation.payment-proposal-events` (no payee IBAN, name or reference on the wire).
+
+The proposal store checks the payee IBAN's uppercase, unspaced form with
+`Iban.hasCanonicalShape` and retains that canonical value in the hashed instruction. The shape check
+does not validate the country, account structure or checksum. After customer approval, the
+customer edge submits the stored instruction through the usual payment initiation path, where
+the selected rail applies its own account validation.

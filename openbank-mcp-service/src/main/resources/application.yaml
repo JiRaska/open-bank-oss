@@ -116,6 +116,26 @@ quarkus:
       url: http://localhost:8116
       connect-timeout: 2000
       read-timeout: 5000
+    # ADR-0383 D3: the customer's MCP_CLIENT grant lookup (mcp-service's own m2m identity).
+    delegation-service:
+      url: http://localhost:8126
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0383 D4: the customers-realm token endpoint for the RFC 8693 exchange.
+    mcp-bound-issuer:
+      url: ${MCP_BOUND_ISSUER_URL:https://localhost:8443/realms/openbank-customers}
+      tls-configuration-name: ${MCP_BOUND_TLS_CONFIGURATION:}
+      connect-timeout: 2000
+      read-timeout: 3000
+    mcp-bound-balance:
+      url: ${MCP_BOUND_BALANCE_URL:https://localhost:8444}
+      tls-configuration-name: ${MCP_BOUND_TLS_CONFIGURATION:}
+      connect-timeout: 2000
+      read-timeout: 3000
+    customer-token-exchange:
+      url: ${MCP_CUSTOMER_OIDC_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
+      connect-timeout: 2000
+      read-timeout: 3000
   smallrye-openapi:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
@@ -170,6 +190,12 @@ mcp:
   # client-auth required.
   # ClientAddressResolver never uses Quarkus' leftmost X-Forwarded-For for the audit key.
   customer:
+    connection-binding:
+      enabled: ${MCP_CUSTOMER_CONNECTION_BINDING_ENABLED:false}
+      propose-enabled: ${MCP_CUSTOMER_BOUND_PROPOSAL_ENABLED:false}
+    bound-balance:
+      enabled: ${MCP_BOUND_BALANCE_ENABLED:false}
+      nonce-key: ${MCP_READ_NONCE_KEY:}
     enabled: ${MCP_CUSTOMER_ENABLED:false}
     issuer: ${MCP_CUSTOMER_ISSUER:https://kc.open-bank.tech/realms/openbank-customers}
     allowlist: ${MCP_CUSTOMER_ALLOWLIST:classpath:mcp-client-allowlist.yaml}
@@ -183,6 +209,15 @@ mcp:
     # Deployment secret (>= 32 bytes) that HMACs the customer subject and proof key in Valkey key
     # names, so no key names a customer in clear. Required with shared-store=valkey; never defaulted.
     key-hmac-secret: ${MCP_CUSTOMER_KEY_HMAC_SECRET:}
+    # ADR-0383 D2/D3: re-read the authoritative grant on the next call after revocation. A nonzero
+    # override delays revocation by its TTL (capped at PT30S) and is for diagnostics only.
+    grant-cache-ttl: ${MCP_CUSTOMER_GRANT_CACHE_TTL:PT0S}
+    # ADR-0383 D4: the customers-realm client that performs the RFC 8693 exchange (derived into the
+    # realm by gen-mcp-realm-clients.py). Its secret is read ONLY from the environment
+    # (MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET, OpenBao keycloak/mcp-service-customer-exchange); with
+    # none set, every customer read is refused rather than falling back to another credential.
+    exchange:
+      client-id: ${MCP_CUSTOMER_EXCHANGE_CLIENT_ID:openbank-mcp-service}
 
 # Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
 # (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`
@@ -202,12 +237,21 @@ openbank:
       anonymous-calls-per-minute: ${MCP_RATE_LIMIT_ANON_PER_MINUTE:10}
       # Concurrent in-flight tool calls per caller.
       max-in-flight: ${MCP_RATE_LIMIT_MAX_IN_FLIGHT:4}
+    # account-ref.secret (#16678): HMAC key for caller-scoped account handles. Deliberately NOT
+    # defined here for prod: it comes from env OPENBANK_MCP_ACCOUNT_REF_SECRET (gitops ExternalSecret),
+    # AccountRefKeyConfig falls back to a per-process key when absent and refuses boot when it is set
+    # but shorter than 32 bytes. Only the
+    # dev/test profiles below carry a fixed, non-secret value.
 
 "%dev":
   quarkus:
     oidc-client:
       tls:
         verification: none
+  openbank:
+    mcp:
+      account-ref:
+        secret: dev-only-account-ref-key-not-a-secret-0001
 
 "%test":
   quarkus:
@@ -216,6 +260,10 @@ openbank:
       tenant-enabled: false
     oidc-client:
       enabled: false
+  openbank:
+    mcp:
+      account-ref:
+        secret: test-only-account-ref-key-not-a-secret-001
 
 "%prod":
   quarkus:

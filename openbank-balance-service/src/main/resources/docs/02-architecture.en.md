@@ -104,3 +104,11 @@ On `Captured` reserved decreases and pending increases. The real transaction eve
 | `libs.web.ServiceInfoResource` | `/api/v1/info` |
 | `libs.docs.DocsResource` | **this documentation** (`/q/openbank/docs`) |
 | `libs.util.BuildInfo` | tech-stack snapshot |
+
+### Customer MCP balance reads
+
+The MCP identity verifier accepts an OIDC-verified token for this service with the dedicated
+balance-read scope and the exact requested account. It compares the certificate confirmation
+claim with the SHA-256 thumbprint of the peer certificate from the balance-service TLS connection.
+The dedicated route uses the verified binding to check current ownership and recheck the grant
+before reading. The route is disabled by default. Its service credential is scoped to grant checks.

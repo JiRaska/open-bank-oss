@@ -241,4 +241,11 @@ interface DelegationRecertificationUseCase {
  */
 interface ResolveMcpClientGrantUseCase {
     suspend fun resolve(grantorPartyId: UUID, clientId: String, keyThumbprint: String): List<DelegationGrant>
+
+    suspend fun resolveForConnection(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+        connectionId: UUID,
+    ): List<DelegationGrant> = emptyList()
 }

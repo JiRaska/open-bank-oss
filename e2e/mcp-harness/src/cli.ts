@@ -4,10 +4,10 @@
 //
 //   node src/cli.ts --list [--trace]             ACTIVE vs PENDING report; --trace maps ADR delivery-check lines
 //   node src/cli.ts --run [--include-pending] [--only <id>[,<id>]] [--json]
-//   node src/cli.ts --journey                    layer-2 connect → read → propose
+//   node src/cli.ts --journey [--read-only [--verify-revocation] | --verify-proposal]
 import { ATTACKS, contextFor, exitCodeFor, runAttacks } from './attacks.ts'
 import type { AttackCase } from './attacks.ts'
-import { loadConfig } from './config.ts'
+import { loadConfig, loadJourneyConfig } from './config.ts'
 import { traceReport } from './delivery-checks.ts'
 import { runJourney } from './journey.ts'
 
@@ -28,6 +28,19 @@ export function listReport(cases: AttackCase[]): string {
 }
 
 async function main(): Promise<number> {
+  if (has('--verify-proposal') && (!has('--journey') || has('--read-only') || has('--verify-revocation') ||
+      has('--run') || has('--list'))) {
+    process.stderr.write('--verify-proposal requires --journey and is a separate synthetic proposal check\n')
+    return 2
+  }
+  if (has('--verify-revocation') && !has('--read-only')) {
+    process.stderr.write('--verify-revocation requires --journey --read-only\n')
+    return 2
+  }
+  if (has('--read-only') && (!has('--journey') || has('--run') || has('--list'))) {
+    process.stderr.write('--read-only requires --journey\n')
+    return 2
+  }
   if (has('--list')) {
     if (has('--json')) {
       process.stdout.write(`${JSON.stringify(ATTACKS.map(({ run, ...c }) => ({ ...c, hasBody: Boolean(run) })), null, 2)}\n`)
@@ -37,9 +50,9 @@ async function main(): Promise<number> {
     }
     return 0
   }
-  const cfg = loadConfig()
   if (has('--journey')) {
     try {
+      const cfg = loadJourneyConfig(process.env, has('--read-only'), has('--verify-revocation'), has('--verify-proposal'))
       await runJourney(cfg, (r) => process.stdout.write(`${r.ok ? 'OK  ' : 'FAIL'} ${r.step}${r.detail ? ` — ${r.detail}` : ''}\n`))
       return 0
     } catch (e) {
@@ -51,14 +64,14 @@ async function main(): Promise<number> {
     const only = valueOf('--only')?.split(',')
     const cases = only ? ATTACKS.filter((c) => only.includes(c.id)) : ATTACKS
     if (only && cases.length !== only.length) throw new Error(`unknown case id in --only ${only.join(',')}`)
-    const results = await runAttacks(cases, contextFor(cfg), { includePending: has('--include-pending') })
+    const results = await runAttacks(cases, contextFor(loadConfig()), { includePending: has('--include-pending') })
     if (has('--json')) process.stdout.write(`${JSON.stringify(results, null, 2)}\n`)
     else for (const r of results) process.stdout.write(`${r.outcome.padEnd(18)} ${r.id}${r.detail ? ` — ${r.detail}` : ''}\n`)
     const n = (o: string) => results.filter((r) => r.outcome === o).length
     process.stdout.write(`\nPASS ${n('PASS')}  FAIL ${n('FAIL')}  SKIP ${n('SKIP')}  PENDING ${n('PENDING') + n('PENDING-WOULD-PASS') + n('PENDING-FAILS')}\n`)
     return exitCodeFor(results)
   }
-  process.stderr.write('usage: cli.ts --list | --run [--include-pending] [--only ids] [--json] | --journey\n')
+  process.stderr.write('usage: cli.ts --list | --run [--include-pending] [--only ids] [--json] | --journey [--read-only [--verify-revocation] | --verify-proposal]\n')
   return 2
 }
 

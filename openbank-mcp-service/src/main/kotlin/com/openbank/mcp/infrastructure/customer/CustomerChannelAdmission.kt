@@ -15,6 +15,7 @@ import jakarta.json.JsonString
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URI
 import java.time.Clock
+import java.util.UUID
 
 /**
  * Admission of one customer-realm call (ADR-0383 D1/D2, ADR-0385 D1). Pure apart from the replay
@@ -32,11 +33,13 @@ import java.time.Clock
  * Tier H bearer tokens (ADR-0385's recorded exception) are NOT admitted in this slice: every
  * customer token must be DPoP-bound until that exception path is built and reviewed.
  */
-class CustomerChannelAdmission(
+class CustomerChannelAdmission internal constructor(
     val issuer: String,
     val allowlist: McpClientAllowlist,
     private val verifier: DpopProofVerifier,
     private val clock: Clock,
+    private val nonce: McpResourceNonce? = null,
+    private val requireConnection: Boolean = false,
 ) {
     /**
      * The three ADR-0383 D5.3 budgets. Each returns the refusal reason, or null when within budget,
@@ -57,7 +60,13 @@ class CustomerChannelAdmission(
     }
 
     sealed interface Outcome {
-        data class Admitted(val context: ConsentContext, val client: McpClientAllowlist.Client) : Outcome
+        /** [keyThumbprint] is the token's verified `cnf.jkt`: the third member of the D3 grant-lookup key. */
+        data class Admitted(
+            val context: ConsentContext,
+            val client: McpClientAllowlist.Client,
+            val keyThumbprint: String,
+            val connectionId: UUID? = null,
+        ) : Outcome
 
         /** [status] is the HTTP status; [challenge] the `WWW-Authenticate` value (null for 429/503). */
         data class Refused(
@@ -65,6 +74,7 @@ class CustomerChannelAdmission(
             val challenge: String?,
             val reason: String,
             val throttled: Boolean = false,
+            val resourceNonce: String? = null,
         ) : Outcome
     }
 
@@ -93,6 +103,13 @@ class CustomerChannelAdmission(
         if (allowlist.audience !in audience(jwt)) return invalidToken("token audience does not include this server")
         val azp = jwt.getClaim<Any?>(CLAIM_AZP)?.let(::stringValue)
         val client = allowlist.admitted(azp) ?: return invalidToken("client is not admitted")
+        val connectionId = when {
+            requireConnection -> jwt.getClaim<Any?>(CLAIM_CONNECTION_ID)?.let(::stringValue)
+                ?.takeIf(CANONICAL_UUID::matches)?.let(UUID::fromString)
+                ?: return invalidToken("token has no valid MCP connection")
+            CLAIM_CONNECTION_ID in jwt.claimNames -> return invalidToken("MCP connection binding is unavailable")
+            else -> null
+        }
         val jkt = confirmationJkt(jwt) ?: return invalidToken("token is not DPoP-bound")
         val presented = dpopToken(authorization) ?: return invalidToken("DPoP authorization scheme required")
         // The proof's `ath` must be over the token Quarkus validated, not a different header value.
@@ -102,7 +119,7 @@ class CustomerChannelAdmission(
         // Fail closed (#16590): a shared replay store or bucket that cannot answer is a 503, never an
         // admission and never a 429 the client would read as "slow down and retry the same proof".
         return try {
-            admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders), throttles)
+            admitProof(ProofRequest(subject, client, presented, jkt, dpopHeaders, connectionId), throttles)
         } catch (_: SharedStoreUnavailableException) {
             storeUnavailable()
         }
@@ -115,6 +132,7 @@ class CustomerChannelAdmission(
         val presented: String,
         val jkt: String,
         val dpopHeaders: List<String>,
+        val connectionId: UUID?,
     )
 
     /**
@@ -130,47 +148,56 @@ class CustomerChannelAdmission(
         val dpopHeaders = req.dpopHeaders
         val now = clock.instant()
         val checked = verifier.check(DpopRequest(dpopHeaders, HTTP_METHOD, allowlist.resource, presented, jkt), now)
-        if (checked is DpopCheck.Rejected) return outcomeOf(checked.result, subject, client)
+        if (checked is DpopCheck.Rejected) return outcomeOf(checked.result, req)
         val bound = checked as DpopCheck.Bound
         // A captured proof replayed on the victim's token passes check(); refuse it before any budget,
         // so replays cannot drain the victim's proof-key bucket. claim() below stays the authority.
-        if (verifier.isReplayed(bound, now)) return outcomeOf(DpopResult.REPLAYED, subject, client)
+        if (verifier.isReplayed(bound, now)) return outcomeOf(DpopResult.REPLAYED, req)
+        nonce?.refreshIfRequired(bound.nonce, allowlist.resource, bound.jkt, now)?.let { replacement ->
+            return Outcome.Refused(
+                STATUS_UNAUTHORIZED,
+                challenge("use_dpop_nonce", "a current resource nonce is required"),
+                "dpop resource nonce required",
+                resourceNonce = replacement,
+            )
+        }
         // Only a proof signed by the token's own key reaches here; budgets keyed on it are the holder's.
         (throttles.proofKey(bound.jkt) ?: throttles.client(client.clientId))?.let { return throttled(it) }
         val result = verifier.claim(bound, now)
         if (result == DpopResult.VALID) {
             throttles.subject(subject, client.clientId)?.let { return throttled(it) }
         }
-        return outcomeOf(result, subject, client)
+        return outcomeOf(result, req)
     }
 
     private fun throttled(reason: String) = Outcome.Refused(STATUS_TOO_MANY, null, reason, throttled = true)
 
-    private fun outcomeOf(result: DpopResult, subject: String, client: McpClientAllowlist.Client): Outcome =
-        when (result) {
-            DpopResult.VALID -> Outcome.Admitted(
-                ConsentContext(
-                    agentId = subject,
-                    consentId = "",
-                    grantedAccounts = emptyList(),
-                    actChain = listOf(client.clientId),
-                    sessionId = null,
-                    principalType = PRINCIPAL_HUMAN,
-                    roles = emptyList(),
-                    serviceAccount = false,
-                    channel = CHANNEL,
-                ),
-                client,
-            )
-            DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
-            DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
-            DpopResult.REPLAY_STORE_UNAVAILABLE -> storeUnavailable()
-            else -> Outcome.Refused(
-                STATUS_UNAUTHORIZED,
-                challenge("invalid_dpop_proof", "dpop proof rejected"),
-                "dpop proof rejected: $result",
-            )
-        }
+    private fun outcomeOf(result: DpopResult, request: ProofRequest): Outcome = when (result) {
+        DpopResult.VALID -> Outcome.Admitted(
+            ConsentContext(
+                agentId = request.subject,
+                consentId = "",
+                grantedAccounts = emptyList(),
+                actChain = listOf(request.client.clientId),
+                sessionId = null,
+                principalType = PRINCIPAL_HUMAN,
+                roles = emptyList(),
+                serviceAccount = false,
+                channel = CHANNEL,
+            ),
+            request.client,
+            request.jkt,
+            request.connectionId,
+        )
+        DpopResult.JKT_MISMATCH -> invalidToken("proof key is not the token's key")
+        DpopResult.RATE_LIMITED -> Outcome.Refused(STATUS_TOO_MANY, null, "dpop proof quota exceeded")
+        DpopResult.REPLAY_STORE_UNAVAILABLE -> storeUnavailable()
+        else -> Outcome.Refused(
+            STATUS_UNAUTHORIZED,
+            challenge("invalid_dpop_proof", "dpop proof rejected"),
+            "dpop proof rejected: $result",
+        )
+    }
 
     /**
      * The ONE outcome for "the shared replay store / budgets could not answer", whichever of the
@@ -188,6 +215,13 @@ class CustomerChannelAdmission(
     companion object {
         val CHANNEL = McpMetricsPort.McpChannel.CUSTOMER
 
+        /**
+         * The channel as the PDP sees it. `mcp_rest_ext.rego` matches the literal string
+         * `"mcp-customer"`; [CHANNEL] is the metrics enum and would serialise as `CUSTOMER`, which
+         * the rule never matches, so every customer tool call would fall through to the default.
+         */
+        const val PDP_CHANNEL = "mcp-customer"
+
         /** Refusal reason of every store-unavailable 503 (see [storeUnavailable]). */
         const val REPLAY_STORE_UNAVAILABLE = "replay_store_unavailable"
         private const val PRINCIPAL_HUMAN = "HUMAN"
@@ -195,6 +229,8 @@ class CustomerChannelAdmission(
         private const val CLAIM_AZP = "azp"
         private const val CLAIM_AUD = "aud"
         private const val CLAIM_CNF = "cnf"
+        internal const val CLAIM_CONNECTION_ID = "openbank_mcp_connection_id"
+        private val CANONICAL_UUID = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         private const val STATUS_UNAUTHORIZED = 401
         private const val STATUS_TOO_MANY = 429
         private const val STATUS_UNAVAILABLE = 503

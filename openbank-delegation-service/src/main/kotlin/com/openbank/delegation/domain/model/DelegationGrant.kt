@@ -118,6 +118,7 @@ data class DelegationGrant(
      * client supplies. Null for PARTY grants, required for MCP_CLIENT grants.
      */
     val granteeKeyThumbprint: String? = null,
+    val mcpConnectionId: UUID? = null,
     /**
      * Counterparty labels SNAPSHOTTED at offer time from the eligibility lookup this service
      * already performs (issue #3604). Deliberately part of the authorisation record rather than a
@@ -190,6 +191,7 @@ data class DelegationGrant(
         }
         require(validTo == null || validTo.isAfter(validFrom)) { "validTo must be after validFrom" }
         require(lifecycleRevision >= 0) { "lifecycleRevision must not be negative" }
+        require(mcpConnectionId == null || granteeType == DelegationGranteeType.MCP_CLIENT)
         requireGranteeShape()
     }
 

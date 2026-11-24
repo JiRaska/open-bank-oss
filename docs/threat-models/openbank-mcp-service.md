@@ -18,6 +18,28 @@ call real downstream services behind a live-validated PSD2 consent.
   binding), ADR-0089 (customer-copilot propose-only regime), ADR-0086 (audit hash chain),
   ADR-0002 (hexagonal), ADR-0136 (AGPL carve-out for agent services)
 
+## Customer MCP V2 read boundary
+
+ADR-0383 D4 uses a bank-issued, certificate-bound token for balance reads. The assistant
+presents its customer token and a DPoP proof bound to the published MCP URL. MCP and the
+issuer independently verify the original evidence. A signed resource nonce binds the URL,
+client key and expiry. Delegation commits the issuer's first use of that proof in PostgreSQL.
+
+Keycloak authorizes one grant, account and read action. Its token expires within 60 seconds
+and carries the exact connection and workload certificate binding. Balance-service verifies
+the TLS peer certificate, account ownership and live grant. The live checks fail closed when
+authorization state is unavailable.
+
+V2 connect binds the grant and exact online refresh family before token delivery. Revocation
+closes that connection's grants and pending proposals atomically. Later reads and refreshes
+are denied. A separate app SCA ceremony governs payment approval.
+
+The isolated customer journey exercises PAR, a genuine WebAuthn assertion, app SCA, token
+issuance, a certificate-bound balance read, refresh rotation and revocation across the real
+services. The separate proposal journey verifies creation and owner access for a pending
+proposal. These checks use synthetic data. Shared sandbox enablement requires the reviewed
+realm, workload certificate trust and network policy.
+
 ## 0. Phase posture — read this before anything below
 
 **The phase-2 cutover (ADR-0195) has landed.** Caller identity and the read tools are both real now;
@@ -189,6 +211,20 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   (`McpEndpointTest`'s dedicated "no token → denied" case). The NetworkPolicy fence described in T-E1
   is now defense-in-depth rather than the only control.
 
+- **T-S3 — an MCP client connected by a stolen SSO session, a fresh passkey or an unapproved
+  request. [BUILT, #16672; live once the realm and Keycloak config are applied]** The customers-realm
+  flow `openbank-mcp-fresh-passkey` has no `auth-cookie` alternative (an SSO cookie never skips the
+  passkey) and ends in the bank's `openbank-mcp-withheld-code` authenticator (ADR-0385 D3): the
+  authorization code is issued only after sca-service CONSUMED an `MCP_CLIENT_CONNECT` challenge whose
+  `payloadSha256` is the canonical connect context recomputed from the PAR-held request (client,
+  redirect host, resource, scopes, party), single-use, for that party. The authenticator also refuses a
+  **passkey enrolled < 72 h** (ADR-0385's passkey-age rule, now enforced; the SCA device-age half was
+  already in sca-service), so an account takeover that enrols its own passkey cannot connect an
+  assistant for three days. Fail closed: unconfigured, or sca-service unreachable, no code is issued.
+  Residual: the customer approves an attacker-initiated connect on their device (ADR-0385 D5) — the
+  app must render only the signed context. Proof: `keycloak_mcp_client_admission_test.py`
+  (`test_code_not_issued_before_consume`, `test_young_passkey_refused`, `test_sso_cookie_*`).
+
 ### Tampering
 
 - **T-T1 — policy-bundle tampering.** The rego + charter + `rules.yaml` are baked into the
@@ -340,6 +376,24 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   directly, and the HITL + SCA guarantee must be enforced at the write boundary, not asserted in
   YAML.
 
+- **T-E5 — an MCP client's token turned into a broader one by token exchange. [BUILT, #16667]**
+  Keycloak's legacy token-exchange v1 does not fire the `grant-type` client-policy condition, so the
+  bank's `openbank-mcp-client-guard` executor is bound by an `any-client` policy and refuses, for
+  every exchange, (a) an MCP client as requester, (b) the MCP resource as target, and (c) a subject
+  token issued to an MCP client. Keycloak's built-in `pkce-enforcer`, `reject-implicit-grant`,
+  `reject-ropc-grant` (both tiers) and `dpop-bind-enforcer` (Tier L) are bound by tier-scoped
+  policies as a second layer under the per-client switches, so an admin-console edit of one client
+  cannot reopen those grants. Proof: `test_token_exchange_refused_for_mcp_client`,
+  `test_no_exchange_may_target_the_mcp_resource`,
+  `test_builtin_policies_hold_when_client_attributes_are_weakened` (each red with its control removed);
+  `check-mcp-client-realm-parity.py` holds the realm shape.
+- **T-E6 — a customer sets the `party_id` their MCP token asserts. [BUILT, #16672]** The token's
+  `party_id` claim and the withheld-code consume's `expectedPartyId` both come from the user attribute
+  `party_id`, so it is a declared user-profile attribute that only `admin` may view or edit (account
+  console, registration and update-profile cannot write it). customer-edge's service account still
+  writes it, and writes ONLY the profile fields — see customer-edge T-6. Proof:
+  `test_customer_cannot_set_party_id`, `test_edge_service_account_can_still_write_party_id`.
+
 ## 5. Documented-but-unenforced controls (summary)
 
 > **2026-07-31 — ADR-0224 D2 (agent sessions) landed.** The service is stateful now: the
@@ -460,6 +514,17 @@ a stub (T-T2/T-D2).
     and two real-HTTP cases in `McpStaffRootCustomerCredentialIT` (`DPoP<TAB>x` → 401,
     `Bearer a, DPoP b` → 400). Each guard was sabotaged (missing request read as no header, b64token
     loosened to `.*`, DPoP match ASCII-only) and its tests went red.
+
+- **2026-11-22 (ADR-0385 D3, #16667, review of #16672)** — The authorization server side of the
+  customer connect. *Spoofing:* T-S3 (withheld code + 72 h passkey age, now enforced).
+  *Elevation:* T-E5 (token exchange refused for and of MCP clients; Keycloak built-in executors bound
+  per tier) and T-E6 (`party_id` admin-only). *Deployment:* the authenticator's server-level config
+  (`KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__*`) is wired in `keycloak.yaml`, its client
+  secret from OpenBao `keycloak/keycloak-mcp` through the `keycloak-mcp-sca-client` ExternalSecret
+  (optional ref; the factory logs a WARN at boot when unconfigured, and every connect is refused).
+  The realm changes reach the live realm only by the owner step in
+  `openbank-infra/gitops/components/keycloak/README.md` — import runs on cold start only, so until
+  then nothing in this entry is live.
 - **2026-11-22 (ADR-0383 D1, #16590)** — Staff `/mcp` refuses customer credentials outright.
   - *Elevation / tenant confusion (defence in depth).* Before this change a customers-realm token
     on the staff root was not refused at the door: with the channel on, only the RFC 8707 audience
@@ -481,6 +546,12 @@ a stub (T-T2/T-D2).
     anonymous); the third stays green either way, because the OIDC layer already refuses it (the
     customers tenant is path-bound to `/customer/mcp`, and the staff tenant rejects its `iss`).
 
+- **2026-11-21 (ADR-0383 D4) — residual: the exchanged token's `act` claim is not asserted.**
+  `KeycloakCustomerTokenExchange.validated` checks `sub` (the customer), `aud` (one downstream),
+  `azp` (mcp-service's exchange client), the scope set and the lifetime, but not an RFC 8693 `act`
+  claim naming mcp-service as the actor. Keycloak's standard token exchange (V2) does not emit `act`,
+  so requiring it would refuse every real exchange; `azp` is today's actor binding. Revisit if the
+  realm gains actor-token support or a downstream starts reading `act`.
 - **2026-11-21 (ADR-0383 D5, #16847, owner decision)** — The edge hop is trusted by its mTLS
   IDENTITY, never by source IP; `quarkus.http.proxy.trusted-proxies` stays unset.
   - *Spoofing (forwarded headers).* `ProxyForwardingGuard` now refuses to boot with ANY
@@ -551,6 +622,92 @@ a stub (T-T2/T-D2).
     client-supplied `X-Forwarded-*`, set the edge client-address header, and restrict the
     NetworkPolicy on `:8150` to the gateway and known callers.
 
+- **2026-11-19 (ADR-0383 D6, #16590) — customer `propose_payment` writes a PENDING proposal to
+  delegation-service's store. Still behind `mcp.customer.enabled` (off).** This is the customer
+  channel only; the staff-path `propose_payment` still refuses (T-E4 unchanged).
+  - *Elevation of privilege.* The tool is offered and run only for the DEBTOR account an active
+    `MCP_CLIENT` grant carrying `ACCOUNT_PROPOSE_PAYMENT` covers; a read grant cannot propose, and a
+    propose grant over one account cannot propose from another. `mcp_rest_ext.rego` now admits
+    exactly one write on the channel, `propose.payment` with that capability; `approve`,
+    `execution` and every other action stay under the channel veto (`opa test` 17/17; removing the
+    tool entry, the capability check or the action match each turned the matching tests red). The
+    store call (`PaymentProposalStoreClient`) declares ONE method, create, on mcp-service's own
+    `m2m` identity, which the store admits to create and to nothing else; any answer other than
+    `PENDING` is refused, fail closed. No customer token is exchanged for it.
+  - *Tampering.* Arguments are model-composed and validated before any call to the store's own
+    rules: IBAN via `McpInputBounds.requireIban`, amount a plain decimal string (positive, <= 2
+    decimals, <= 1,000,000.00, never a JSON number), currency CZK|EUR fixing the rail (CZK needs a
+    CZ IBAN), creditor name and reference trimmed, NFC-normalised and REFUSED on Cc/Cf/Zl/Zp,
+    markup brackets, backtick or `://`; unknown arguments refused.
+  - *Repudiation / duplicates.* The store's `Idempotency-Key` is derived, never client-supplied:
+    SHA-256 over (party, `azp`, `cnf.jkt`, token `sid`, the model's `clientRequestId`), so an MCP
+    retry replays the first answer and two clients or customers cannot share a key. Every call is
+    audited and metered on `openbank_mcp_tool_calls` (unknown tool names as the unmapped label).
+  - *Information disclosure.* The result is the proposal id, PENDING, amount, currency, masked
+    creditor IBAN and a bank-rendered summary containing no model-composed text, through
+    `McpPiiMasker` then `McpUntrustedData.wrap`. Store refusals map to fixed texts (limit reached,
+    request id reused, in progress, invalid instruction, not permitted); a 403 also drops the cached
+    grant, so a revoked or expired grant is re-resolved on the next call.
+  - *Contract.* Consumer pact for `POST /api/v1/payment-proposals` (literal path, 201 PENDING and
+    403 no grant) in `pacts/openbank-mcp-service-openbank-delegation-service.json`. The
+    delegation-side HTTP replay covers proposal creation and refusal alongside grant resolution.
+
+- **2026-11-18 (ADR-0383 D3/D4, #16590) — customer grant lookup, exchanged downstream tokens, read
+  tools. Still behind `mcp.customer.enabled` (off).** An admitted customer now sees only the read
+  tools its active `MCP_CLIENT` grants allow, and every read runs on the customer's own exchanged
+  token.
+  - *Spoofing / confused deputy.* The grant is found from `(party_id of the verified token, admitted
+    azp, verified cnf.jkt)` — `CustomerGrantCache` -> `DelegationGrantSource` ->
+    delegation-service `POST /api/v1/delegations/mcp-client/resolve`. Nothing a client sends is a
+    lookup key, and the party is part of the key, so another customer's grant to the same client
+    never matches (unit + IT `a foreign party's grant ...`). A token with no UUID `party_id` is
+    refused before any lookup.
+  - *Elevation of privilege.* `CustomerReadTools` offers `list_accounts` / `get_balance` /
+    `list_transactions` only for capabilities a grant carries, and checks the ONE named account
+    against the grant carrying that tool's capability before anything else happens; a balance grant
+    cannot list transactions or reach another account, and no write tool exists on this channel
+    (`propose_payment` refused). The exchanged token asks the customers realm for ONE audience and ONE
+    read scope (`DownstreamAudience`), and its answer is checked: lifetime <= 60 s, `sub` == the
+    customer, `aud` contains the requested service. The customer-path REST clients
+    (`CustomerDownstream.kt`) carry no OIDC client filter, so mcp-service's own credential cannot
+    ride on them. The grant LOOKUP uses mcp-service's own `m2m` identity, which delegation-service
+    admits for that one action only (rego reason `mcp-client-grant-resolve` + an in-code client-id
+    check); it reads no account data.
+  - *Policy (D4.1).* After the grant check and before any exchange, every customer call is
+    evaluated by mcp-service's own PDP as principal HUMAN (id = customer `sub`, not a service
+    account, no roles) with `channel = mcp-customer`, `client = azp`, the tool and the grant's
+    server-resolved capabilities. `mcp_rest_ext.rego` admits only the three read tools under their
+    own action and matching capability, and VETOES every other action on the channel, so no base
+    reason (e.g. `operator-read-any`) can widen it. Deny or PDP error is a refusal. Proven by
+    `opa test` (10/10; veto and grant check each removed went red) and by `opa eval` against the
+    regenerated `mcp-opa-bundle` (must-ALLOW balance read; must-DENY scope escalation,
+    propose_payment, operator on the channel; control operator read off-channel ALLOW).
+  - *Unbound exchanged token (accepted, ADR-0383 D4).* The downstream token is a plain bearer, not
+    DPoP-bound, and it DOES leave mcp-service: it is sent as `Authorization: Bearer` to exactly one
+    downstream service over in-cluster HTTP. It never leaves the cluster and is never returned to the
+    MCP client. D4 accepts the missing sender binding on that basis ("in-cluster only ... does not
+    need to be sender-constrained"). The protections are: lifetime `expires_in` <= 60 s (refused
+    otherwise); a single audience, the one service it is sent to; a single read scope; `azp` = the
+    exchange client (each verified on the answer, any failure refuses); and the downstream PDP's
+    read-only rule. A capture from pod memory, from the receiving service, or from in-cluster traffic
+    therefore yields at most 60 s of reads of that one service for one customer. Residual: the
+    in-cluster hop is plain HTTP unless the mesh/mTLS posture of the target namespace encrypts it.
+  - *Fail-closed.* Lookup error, empty grant set, exchange failure (including an unconfigured
+    exchange secret), a downstream 401/403 and a downstream 5xx/timeout are all refusals, audited `DENIED`
+    (`UNAVAILABLE` for lookup/exchange outages). The grant lookup TTL defaults to zero so the next
+    call sees a committed revocation. With a nonzero diagnostic TTL only positive lookups are cached
+    for up to `mcp.customer.grant-cache-ttl` (capped at 30 s in code) and never past a grant's
+    `validTo`; a downstream 401/403 or 5xx/timeout drops the entry. With the channel OFF, a customers-realm token (and any `DPoP`-scheme credential) is refused 401 `invalid_token` and never served on the anonymous path. At the cache cap the oldest stored entry is evicted (insertion order, O(1)); storing a key already held evicts nothing; expired entries are dropped when next read. A lookup in flight across an invalidation does not re-cache its answer. Results pass `McpPiiMasker` then
+    `McpUntrustedData.wrap`, as on the staff path.
+  - **Residual, and why the channel stays off:** (1) downstream services validate only the STAFF
+    realm today, so an exchanged customers-realm token is refused by balance/transaction-service until
+    they accept that issuer and enforce party ownership on it (ADR-0383 P5) — the path fails closed
+    until then; (2) Keycloak standard exchange of a DPoP-bound subject token has not been run against
+    a live Keycloak of the deployed version (realm template checked statically only); (3) a nonzero
+    diagnostic cache TTL delays revocation and must stay disabled for customer use; (4) no deployed route, netpol or env wiring for
+    delegation-service / the token endpoint is added; the exchange secret must be provisioned in
+    OpenBao (`keycloak/mcp-service-customer-exchange`) before the channel can work.
+    Rollback: revert the commit; nothing is persisted.
 - **2026-11-18 (ADR-0383 P4 / D5.3, #16590)** — Shared, fail-closed customer-channel state. Still
   **off by default**; this closes the first residual of the entry below.
   - *Replay across replicas / pod rolls.* `mcp.customer.shared-store=valkey` puts the DPoP `jti`
@@ -780,3 +937,22 @@ a stub (T-T2/T-D2).
   dependency was added for it), so a look-alike outside the subset still passes. IBAN detection deliberately skips mod-97: an RF
   reference passes it and a mistyped IBAN fails it. Rollback: revert the commit. The red-team
   ratchet then fails until `known-gaps.json` is restored.
+- **2026-11-19** — **Caller-scoped account handles (#16678, refs #16590).** Since #16644 the read
+  tools took the account IBAN as `accountId`, while the masker returns it as `****1234`, so a model
+  could not chain `list_accounts` into `get_balance`. Results now carry `accountRef`, an HMAC-SHA256
+  under a server key over (agentId, consentId, session id, IBAN), and the tools accept it.
+  **STRIDE-I:** the IBAN stays masked towards the model (D7), and the ref names no account outside
+  MCP. **STRIDE-S/E:** a ref is never decoded. It is resolved only by recomputing the refs of the
+  caller's own consent-validated `list_accounts` for the caller's own scope. A token without a
+  session `sid` gets no ref and has every ref refused, so the sessions of one agent cannot share refs.
+  Each such case is counted (`openbank_mcp_account_ref_unavailable_total{reason="no_session"}`).
+  A ref replayed by
+  another agent, under another consent or in another session, or a tampered one, is refused with
+  `-32602` before any read port is called. The consent gate in the port still applies to the
+  resolved IBAN. The ref is attached after masking and sanitising, so no field is exempt from the
+  sanitiser: an upstream `accountRef` carrying an IBAN is masked like any other value. **Key:** `openbank.mcp.account-ref.secret`, generated in-cluster by an ESO `Password` generator (48 characters, `CreatedOnce`, no holder outside the cluster), at least 32 bytes,
+  checked at boot (`@Startup`); a set-but-short value refuses boot, an absent one falls back to a per-process random key (WARN + gauge `openbank_mcp_account_ref_ephemeral_key`), under which refs fail closed across pods/restarts (alert `McpAccountRefEphemeralKey`, warning, after 15m); never logged. A raw IBAN
+  `accountId` is still accepted, because D7 minimises what the bank sends, not what the caller
+  already holds. **Residual:** a leaked key lets someone forge a ref, but only for an IBAN they
+  already know and only usable by that same caller, whose consent still bounds the read. Rotation
+  invalidates all refs. Rollback: revert the commit (chaining breaks again, nothing else changes).
