@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.24.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.2...admin-ui-v4.24.0) (2026-11-24)
+
+
+### Features
+
+* **admin-ui:** spec conformance as a Test Intelligence dimension ([#16857](https://github.com/JiRaska/open-bank-oss/issues/16857)) ([1d1b2d8](https://github.com/JiRaska/open-bank-oss/commit/1d1b2d8ace146d82d29ff37353ffdece11b04108))
+
 ## [4.23.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.1...admin-ui-v4.23.2) (2026-11-23)
 
 
