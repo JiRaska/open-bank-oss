@@ -39,7 +39,7 @@ class PartyErasureIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in") +
-                InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out", "pid-events-out") +
+                InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out") +
                 // A real pepper, so tier-1 RČ resolution runs (the REJECT-block test needs it).
                 mapOf(
                     "openbank.pid.birth-number-pepper" to

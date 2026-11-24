@@ -142,7 +142,6 @@ BASELINE = {
     ("openbank-lending-service", "lending-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
     ("openbank-party-service", "party-outbox-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
     ("openbank-pid-service", "party-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
-    ("openbank-pid-service", "pid-events-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
     ("openbank-referral-service", "referral-qualified-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
     ("openbank-referral-service", "referral-reward-requested-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",
     ("openbank-referral-service", "referral-reward-outcome-out", "client.id"): "inert since added; fleet sweep pending (#12350 follow-up)",

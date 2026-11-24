@@ -9,7 +9,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 | Sekce | Publikum | Co najdete |
 |---|---|---|
 | [01 — Přehled](./01-overview.md) | Produkt, audit, management | Co služba dělá, kdo ji volá, kde sídlí v doméně |
-| [02 — Architektura](./02-architecture.md) | Engineering, tech leadi | C4 diagramy, hexagonální vrstvy, outbox tok |
+| [02 — Architektura](./02-architecture.md) | Engineering, tech leadi | C4 diagramy, hexagonální vrstvy, tok událostí |
 | [03 — API](./03-api.md) | Vývojáři služeb, integrátoři | REST kontrakt, chybový model, verzování |
 | [04 — Data](./04-data.md) | Data, analytika, DBA | Schéma, migrace, retence, PII pole |
 | [05 — Provoz](./05-operations.md) | DevOps, SRE, release inženýři | Build, deploy, runbooky, SLO |
@@ -20,7 +20,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 - **Tech stack:** Kotlin / Quarkus / JDK 25 / PostgreSQL / Hibernate Reactive (Panache) + reaktivní PG klient
 - **Port:** 8105 (aplikace), 8085 (management — health, metriky, OpenAPI, docs)
 - **Perzistence:** vyhrazená databáze `openbank_pid`, Flyway migrace V1..V4
-- **Outbox:** tabulka `pid_outbox`, odbavována každých 5 s s fault-tolerance (circuit breaker / retry / timeout); doménové události se navíc publikují přímo do Kafka topicu `party.events`
+- **Události:** doménové události se publikují do Kafka topicu `party.events`
 - **Idempotence:** dnes bez cache hlavičky `Idempotency-Key` (vytvoření je deduplikováno přes unikátní bankID `sub`); viz [03 — API](./03-api.md)
 - **Autentizace:** Keycloak OIDC (RS256 JWT), role `openbank-employee` / `openbank-admin` / `openbank-customer`; OPA `@Authorize` v advisory režimu (ADR-0034)
 - **Money-path:** NE — pid-service není v `rules.yaml: money_path_services`; jde o identitní / referenční službu (`dataClassification: restricted`)
