@@ -51,9 +51,6 @@ openbank-fraud-service/src/main/kotlin/com/openbank/fraud/infrastructure/ml/Onnx
 openbank-libs-runtime/src/main/kotlin/com/openbank/libs/authz/AuthorizeInterceptor.kt::enforce
 openbank-libs-runtime/src/main/kotlin/com/openbank/libs/authz/AuthorizeInterceptor.kt::fourEyesEnforce
 openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/mcp/CallerContextResolver.kt::oboEnabled
-openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/ratelimit/McpRateLimiter.kt::callsPerDay
-openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/ratelimit/McpRateLimiter.kt::callsPerMinute
-openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/ratelimit/McpRateLimiter.kt::enabled
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt::bundleId
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt::enabled
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt::keyId

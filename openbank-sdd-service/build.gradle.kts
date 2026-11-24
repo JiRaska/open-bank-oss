@@ -94,3 +94,10 @@ pitest {
 tasks.withType<Test>().configureEach {
     maxHeapSize = "1g"
 }
+
+// Quarkus test profiles retain distinct application classloaders in a reused worker.
+// Isolate SDD test classes to keep their heap and shutdown independent.
+tasks.named<Test>("test") {
+    maxParallelForks = 1
+    forkEvery = 1
+}

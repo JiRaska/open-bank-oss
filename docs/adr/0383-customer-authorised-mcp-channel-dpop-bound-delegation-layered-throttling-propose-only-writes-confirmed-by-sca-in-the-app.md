@@ -1,12 +1,13 @@
 ---
 date: 2026-11-17
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, authn, security, payments]
+followup: "#16590 — customer route, tenant, DPoP, grant lookup, proposal store and SCA approval not yet built"
 summary: "Customer MCP clients are MCP_CLIENT delegation grantees with read+propose only: allowlisted OAuth+PKCE, DPoP 5-min tokens, grant per party+client+key, throttled before OPA; MCP cannot write, the app authorises via SCA."
 ---
 
@@ -170,6 +171,8 @@ prerequisite below has landed. Until then no route to mcp-service is created.
   - lifetime is at most 60 s.
 - The exchanged token is in-cluster only and never leaves MCP, so it does not need to be
   sender-constrained. Its value is in the short lifetime and the per-service audience.
+  *(Premise corrected by the 2026-11-19 amendment below: the token does leave MCP, to one
+  downstream service.)*
 - Downstream services enforce party ownership themselves. A defect in an MCP read port can
   therefore no longer read another party. The shared `openbank-services` principal is not used on
   this channel.
@@ -250,6 +253,28 @@ Throttled and denied calls are audited and metered like any other deny.
   URL, query-expression or free-form filter argument.
 - Tool descriptions are static and versioned in the repository. `tools/list` is policy-filtered
   (ADR-0225).
+
+## Amendment — 2026-11-19: D4 exchanged-token premise corrected
+
+D4 said the exchanged token "never leaves MCP". That is false. mcp-service sends it as
+`Authorization: Bearer` to exactly one downstream service over in-cluster HTTP. It stays in the
+cluster and is never returned to the MCP client, but it does cross a process and network boundary.
+
+The decision not to sender-constrain it stands. It now rests on two groups of controls.
+
+Enforced by mcp-service at exchange time, where a token failing any check is refused:
+- lifetime `expires_in` at most 60 s;
+- a single audience: the one service the token is sent to;
+- a single read scope, with no other scope accepted;
+- `azp` equal to mcp-service's exchange client.
+
+Enforced downstream, by the receiving service:
+- its PDP's read-only rule for the MCP actor (D4 item 2);
+- its own party-ownership check.
+
+**Residual:** the in-cluster hop is plaintext HTTP unless the target namespace's mesh or mTLS
+encrypts it. A capture from pod memory, from the receiving service or from that hop yields at most
+60 s of reads of one service for one customer. Recorded in `docs/threat-models/openbank-mcp-service.md`.
 
 ## Alternatives considered
 

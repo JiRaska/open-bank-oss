@@ -72,7 +72,7 @@ info:
   #         POST /nostro/{account}/breaks/{breakId}/resolution (propose), .../resolution/approve and
   #         .../resolution/reject; NostroBreak gains resolutionKind, resolutionReason, resolvedBy,
   #         proposedBy and proposedAt.
-  version: 1.27.0
+  version: 1.28.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -93,6 +93,13 @@ info:
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
     again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior approver may record
     a bounded override with a reason; four-eyes separation still applies at booking.
+
+    **Funding** (#12115): a placement (an interbank one or the ČNB deposit facility) books only
+    against money the contra (nostro) account verifiably holds — the ledger's own balance, net of
+    every other booked-but-unsettled outflow whatever its value date, re-measured under the
+    funding line lock so concurrent bookings cannot jointly overdraw. A shortfall blocks booking
+    (422 `FUNDING_EXCEEDED`). Settlement moves what booking funded; a contra account driven negative
+    by a flow bypassing the check raises `TreasuryFundingExceeded`.
 
     **Product limits** (ADR-0315 D4) are the bank's mandate per product, declared in configuration:
     the currencies a product may be dealt in, the largest principal per deal in each, and the
@@ -285,11 +292,13 @@ paths:
             FOUR_EYES_VIOLATION (approver created or submitted the deal), LIMIT_BREACHED (counterparty
             limit, not covered by a senior override; also when the line moved past the vetted headroom
             before the locked write), PRODUCT_LIMIT_BREACHED (the deal is outside its product limit as
-            declared NOW — re-checked at approval; not overridable), or CONVERSION_FACTOR_MISSING /
+            declared NOW — re-checked at approval; not overridable), CONVERSION_FACTOR_MISSING /
             COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING (a derivative or repo whose credit
             measure has no effective reference record or collateral price: refused, never measured as
-            zero), or COLLATERAL_PRICE_OUT_OF_TOLERANCE (the deal's collateral price is outside the
-            tolerance of the bank's own)
+            zero), COLLATERAL_PRICE_OUT_OF_TOLERANCE (the deal's collateral price is outside the
+            tolerance of the bank's own), or FUNDING_EXCEEDED (#12115: a placement the contra account
+            does not verifiably fund — the ledger balance net of already-committed outflows, at
+            booking or under the locked re-measure when a concurrent booking committed in between)
           content:
             application/json:
               schema:

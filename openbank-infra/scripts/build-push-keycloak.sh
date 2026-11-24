@@ -29,7 +29,7 @@ PLATFORM="${PLATFORM:-linux/arm64}"   # cluster nodes are arm64 (Graviton)
 ECR_REPO="openbank-keycloak"
 DOCKERFILE="openbank-infra/docker/keycloak/Dockerfile"
 # Single source of truth for the version: the Dockerfile's pinned ARG.
-VERSION="$(grep -oE 'KEYCLOAK_VERSION=[0-9.]+' "$DOCKERFILE" | head -1 | cut -d= -f2)"
+VERSION="$(grep -E '^ARG KEYCLOAK_VERSION=[A-Za-z0-9._-]+$' "$DOCKERFILE" | head -1 | cut -d= -f2)"
 [ -n "$VERSION" ] || { echo "ERROR: could not read KEYCLOAK_VERSION from ${DOCKERFILE}" >&2; exit 1; }
 IMAGE="${ECR_REGISTRY}/${ECR_REPO}:${VERSION}-optimized"
 

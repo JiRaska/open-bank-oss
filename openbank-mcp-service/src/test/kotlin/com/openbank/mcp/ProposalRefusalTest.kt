@@ -127,20 +127,25 @@ class ProposalRefusalTest {
             override suspend fun allow(query: AuthzQuery) = AuthzDecision(allow = true)
         }
         val jwt = TestJsonWebToken(
-            mapOf("sub" to "agent:test-agent", "consent_id" to "11111111-1111-1111-1111-111111111111"),
+            mapOf(
+                "sub" to "agent:test-agent",
+                "aud" to "openbank-mcp-service",
+                "consent_id" to "11111111-1111-1111-1111-111111111111",
+            ),
         )
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
             auditor = McpCallAuditor(audit),
-            callerResolver = CallerContextResolver(jwt, false, NoSessions),
+            callerResolver = CallerContextResolver(jwt, false, NoSessions, customerIssuer = java.util.Optional.empty()),
             mapper = mapper,
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(meters)
-            rateLimiter = McpRateLimiter()
+            rateLimiter = McpRateLimiter.withDefaults()
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, 0)
         }
     }

@@ -22,7 +22,31 @@ import jakarta.enterprise.inject.Alternative
 @Alternative
 @Priority(1)
 class TestPolicyDecisionPoint : PolicyDecisionPoint {
-    override suspend fun allow(query: AuthzQuery): AuthzDecision = if (query.attributes["tool"] == ALLOWED_TOOL ||
+    override suspend fun allow(query: AuthzQuery): AuthzDecision = queryCount.incrementAndGet().let {
+        if (query.attributes["channel"] == CUSTOMER_CHANNEL) customer(query) else staff(query)
+    }
+
+    /**
+     * The customer channel (ADR-0383 D4.1): mirrors `mcp_rest_ext.rego` for the IT — the read tool
+     * under its own action, only with the matching granted capability; [customerOutage] / [customerDeny]
+     * let McpCustomerDelegationIT drive the PDP's failure and deny branches. Every query is recorded.
+     */
+    private fun customer(query: AuthzQuery): AuthzDecision {
+        customerQueries += query
+        if (customerOutage) error("opa unavailable")
+        val need = CUSTOMER_TOOLS[query.attributes["tool"]]
+        val granted = query.attributes["grantedCapabilities"] as? List<*> ?: emptyList<Any>()
+        val ok = !customerDeny &&
+            need != null &&
+            query.action == need.first &&
+            need.second in granted &&
+            !query.principal.serviceAccount &&
+            query.principal.roles.isEmpty()
+        return if (ok) AuthzDecision(allow = true) else AuthzDecision(allow = false, reason = "customer channel denied")
+    }
+
+    private fun staff(query: AuthzQuery): AuthzDecision = if (allowEverything ||
+        query.attributes["tool"] == ALLOWED_TOOL ||
         query.action.startsWith(SESSION_ACTION_PREFIX)
     ) {
         AuthzDecision(allow = true)
@@ -31,8 +55,35 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
     }
 
     companion object {
+        const val CUSTOMER_CHANNEL = "mcp-customer"
+        val CUSTOMER_TOOLS = mapOf(
+            "list_accounts" to ("query.account.readonly" to "ACCOUNT_VIEW_DETAILS"),
+            "propose_payment" to ("propose.payment" to "ACCOUNT_PROPOSE_PAYMENT"),
+            "get_balance" to ("query.balance.readonly" to "ACCOUNT_READ_BALANCES"),
+            "list_transactions" to ("query.transaction.readonly" to "ACCOUNT_READ_TRANSACTIONS"),
+        )
+        val customerQueries: MutableList<AuthzQuery> = java.util.concurrent.CopyOnWriteArrayList()
+
+        @Volatile
+        var customerDeny: Boolean = false
+
+        @Volatile
+        var customerOutage: Boolean = false
+
         const val ALLOWED_TOOL = "list_accounts"
         const val DENIED_TOOL = "list_consents"
         const val SESSION_ACTION_PREFIX = "mcp.session."
+
+        /**
+         * Opened ONLY by the wire-level fuzz test (McpToolCallWireFuzzIT), which sets it in
+         * `@BeforeEach` and resets it in `@AfterEach` (run even if setup failed), so that every
+         * tool's argument handling is reachable over real HTTP. Off by default: every
+         * other test keeps the deterministic allow-one/deny-rest behaviour described above.
+         */
+        @Volatile
+        var allowEverything: Boolean = false
+
+        /** Every PDP query this JVM made; a test proving "never dispatched" reads the delta. */
+        val queryCount = java.util.concurrent.atomic.AtomicInteger()
     }
 }

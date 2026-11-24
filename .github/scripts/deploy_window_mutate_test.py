@@ -170,9 +170,6 @@ if args[:2] == ['api', 'graphql']:
     print(json.dumps({'data': {'enablePullRequestAutoMerge': {'pullRequest': {'number': 7}}}}))
 elif args[:3] == ['pr', 'diff', '7']:
     print('')
-elif args[:2] == ['pr', 'view']:
-    # deploy-window-inputs.sh classifies every deploy PR (stuck / conflicted); this one is healthy.
-    print(json.dumps({'mergeStateStatus': 'CLEAN', 'statusCheckRollup': []}))
 elif args[0] == 'api':
     assert '-X' not in args and '--method' not in args
     path = next(arg for arg in args[1:] if arg.startswith('repos/'))
@@ -251,6 +248,13 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
         self.assertIsNone(error)
         self.assertEqual(sum(args[:2] == ("api", "graphql") for args in calls), 1)
         self.assertEqual(sum(args[-1].endswith("/git/ref/heads/main") for args in calls), 2)
+
+    def test_exact_head_with_a_confirmed_conflict_stays_unarmed(self):
+        for fields in ({"mergeable": False}, {"mergeable_state": "dirty"}):
+            with self.subTest(fields=fields):
+                error, calls, _ = self.execute(latest={**pull(), **fields})
+                self.assertIsNone(error)
+                self.assertFalse(any(args[:2] == ("api", "graphql") for args in calls))
 
     def test_clean_and_pending_statuses_only_arm(self):
         # Neither a green PR nor a pending one gives the flusher authority to merge.

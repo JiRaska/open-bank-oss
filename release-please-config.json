@@ -254,6 +254,12 @@
         "openbank-finrep-service/src/test"
       ]
     },
+    "openbank-fetch-broker": {
+      "component": "fetch-broker",
+      "exclude-paths": [
+        "openbank-fetch-broker/src/test"
+      ]
+    },
     "openbank-flaky-test-hunter": {
       "component": "flaky-test-hunter",
       "exclude-paths": [

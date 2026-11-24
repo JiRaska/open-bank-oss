@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.3...transaction-service-v2.2.4) (2026-11-22)
+
+
+### Bug Fixes
+
+* **ledger,transaction:** bound partition DDL lock wait with lock_timeout ([#17125](https://github.com/JiRaska/open-bank-oss/issues/17125)) ([411b33e](https://github.com/JiRaska/open-bank-oss/commit/411b33e3d5712baa3e99f53ad255036c4f971bd6))
+
+## [2.2.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.2...transaction-service-v2.2.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* **transaction:** roll transactions partitions forward before 2027 ([#17103](https://github.com/JiRaska/open-bank-oss/issues/17103)) ([594756a](https://github.com/JiRaska/open-bank-oss/commit/594756a98ad52b51eab11aea448e56f29996fbf8))
+
+## [2.2.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.1...transaction-service-v2.2.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **transaction:** keep outbox claims compatible with additive schema changes ([#15654](https://github.com/JiRaska/open-bank-oss/issues/15654)) ([a9eb09c](https://github.com/JiRaska/open-bank-oss/commit/a9eb09ce192df0251a5c16eca1bd9518e40a8fc3)), closes [#11652](https://github.com/JiRaska/open-bank-oss/issues/11652)
+
 ## [2.2.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v2.2.0...transaction-service-v2.2.1) (2026-11-16)
 
 

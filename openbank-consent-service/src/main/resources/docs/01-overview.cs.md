@@ -4,7 +4,7 @@
 
 `openbank-consent-service` je **systém záznamu pro souhlasy** v platformě OpenBank — explicitní oprávnění, která zákazník (party) dává třetí straně nebo agentovi pro přístup k datům účtu nebo iniciaci plateb. Drží:
 
-- **Agregát Consent** — kdo souhlas udělil (`partyId`), komu (`granteeId` + `granteeType`), množinu `scopes`, volitelný seznam `accountIbans` (null = všechny účty), okno platnosti (`validFrom`/`validTo`) a stav životního cyklu `status`.
+- **Agregát Consent** — kdo souhlas udělil (`partyId`), komu (`granteeId` + `granteeType`), množinu `scopes`, volitelný seznam `accountIbans` (pokryté jsou jen uvedené účty; bez seznamu nepokrývá žádný), okno platnosti (`validFrom`/`validTo`) a stav životního cyklu `status`.
 - **Scopy souhlasu** — PSD2 AISP (`ACCOUNTS_READ`, `BALANCES_READ`, `TRANSACTIONS_READ`, `STATEMENTS_READ` plus ČOBS-specifické `PAYMENT_ACCOUNTS_READ`, `STANDING_ORDERS_READ`, `DIRECT_DEBITS_READ`), PISP (`PAYMENTS_INITIATE`, `PAYMENTS_STATUS_READ`, `DOMESTIC_PAYMENT_INITIATE`, `SIPO_PAYMENT_INITIATE`), CBPII (`FUNDS_CONFIRMATION`) a rozšiřující scopy pro AI agenty (`AGENT_QUERY`, `AGENT_INITIATE`, `AGENT_NOTIFY`, `AGENT_ANALYZE`).
 - **Typy příjemce** — `TPP` (eIDAS-certifikovaný poskytovatel třetí strany), `BANK_AGENT`, `CUSTOMER_AGENT`, `INTERNAL_SERVICE`.
 - **Stavový automat životního cyklu** — `PENDING_SCA → ACTIVE → (EXPIRED | REVOKED)`, plus `REJECTED` a `SUPERSEDED`.

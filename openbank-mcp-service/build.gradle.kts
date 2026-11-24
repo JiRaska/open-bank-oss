@@ -25,6 +25,9 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.kotlinx.coroutines.core)
+    // ADR-0383 P4 (#16590): the customer channel's shared DPoP replay store and D5.3 budgets, so
+    // replicas share one replay window. The fleet's existing Valkey client (customer-edge, vop, ...).
+    implementation(libs.quarkus.redis.client)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     // Apache-2.0 shared libs — copyleft may consume permissive (ADR-0136). The shared ADR-0034 PDP
@@ -36,6 +39,11 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
     // Stubs the generated account-service client (#13169): it returns raw JAX-RS Responses.
     testImplementation(libs.mockk)
+    // Test-only (ADR-0384 D1): McpMetricsAdapterTest scrapes a real PrometheusMeterRegistry, because
+    // only Prometheus refuses a second tag-key set under one meter name — a SimpleMeterRegistry
+    // accepts it, so it cannot prove the agent placeholders are needed. Same artifact, version and
+    // CVE rationale as openbank-campaign-service's copy (1.17.0, GHSA-g3pr-3p32-fp23).
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
     // Consumer-driven contract tests (ADR-0063, issue #2255 dimension C3). mcp's read ports became
     // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
     // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).
@@ -47,6 +55,34 @@ dependencies {
     // Session-store integration tests against a real Postgres (ADR-0224 D2).
     testImplementation(libs.testcontainers.postgresql)
 }
+
+// The fuzz layer (#16617) deliberately sends 1 MiB and 11 MiB bodies; the harness, RestAssured and
+// the response capture each hold a copy, which does not fit the default 512 MiB worker heap.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
+// The customer-channel shared-store boot gate (#16590) is proved on the built fast-jar in
+// LaunchMode.NORMAL, so it needs quarkusBuild and runs in its own task, not in `test`.
+tasks.named<Test>("test") {
+    exclude("**/CustomerChannelBootGuardIT.class")
+}
+
+val customerBootGuardIT = tasks.register<Test>("customerBootGuardIT") {
+    description = "Verify the customer channel refuses to boot without a configured shared Valkey store"
+    group = "verification"
+    dependsOn(tasks.named("testClasses"), tasks.named("quarkusBuild"))
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform()
+    filter.includeTestsMatching("*CustomerChannelBootGuardIT")
+    systemProperty(
+        "openbank.test.mcp.runner",
+        layout.buildDirectory.file("quarkus-app/quarkus-run.jar").get().asFile.absolutePath,
+    )
+}
+
+tasks.named("check") { dependsOn(customerBootGuardIT) }
 
 kover {
     reports {

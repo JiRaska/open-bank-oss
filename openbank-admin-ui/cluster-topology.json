@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-11-17T05:35:14.000Z",
-  "inputFingerprint": "sha256:4ea2570f9688e8e9e49fe182db517424dd207720ac46b7d2955e48dd95477bb0",
+  "generatedAt": "2026-11-23T11:38:03.000Z",
+  "inputFingerprint": "sha256:5d1f9fe72a2e53afbfa02952bce9c0aef60dbb3c8c320a186c499d9d0bd712d3",
   "counts": {
-    "namespaces": 86,
-    "networkPolicies": 149,
-    "externalSecrets": 244,
+    "namespaces": 87,
+    "networkPolicies": 152,
+    "externalSecrets": 250,
     "clusterPolicies": 0
   },
   "groups": [
@@ -350,6 +350,15 @@
       "role": {
         "cs": "falco",
         "en": "falco"
+      },
+      "declared": true
+    },
+    {
+      "name": "fetch-broker",
+      "group": "domain",
+      "role": {
+        "cs": "fetch-broker",
+        "en": "fetch-broker"
       },
       "declared": true
     },
@@ -871,11 +880,11 @@
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 149 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
-        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 149 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 152 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 152 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy manifests (149)",
+        "NetworkPolicy manifests (152)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -977,12 +986,12 @@
         "en": "A time-locked vault — passwords never sit in the code."
       },
       "summary": {
-        "cs": "OpenBao drží tajemství; 244 ExternalSecret je sype do k8s. Žádný secret v gitu.",
-        "en": "OpenBao holds the secrets; 244 ExternalSecrets feed them into k8s. No secret in git."
+        "cs": "OpenBao drží tajemství; 250 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+        "en": "OpenBao holds the secrets; 250 ExternalSecrets feed them into k8s. No secret in git."
       },
       "controls": [
         "OpenBao",
-        "External Secrets (244)",
+        "External Secrets (250)",
         "KMS unseal"
       ],
       "adr": [
@@ -1124,8 +1133,8 @@
         "en": "Technical separation of workloads and legal entities"
       },
       "reality": {
-        "cs": "86 namespaců",
-        "en": "86 namespaces"
+        "cs": "87 namespaců",
+        "en": "87 namespaces"
       },
       "status": "live"
     },
@@ -1139,8 +1148,8 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "149 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
-        "en": "149 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
+        "cs": "152 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "152 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
       "status": "partial"
     },
@@ -1169,8 +1178,8 @@
         "en": "OpenBao + ESO, nothing in git"
       },
       "reality": {
-        "cs": "244 ExternalSecret",
-        "en": "244 ExternalSecrets"
+        "cs": "250 ExternalSecret",
+        "en": "250 ExternalSecrets"
       },
       "status": "live"
     },

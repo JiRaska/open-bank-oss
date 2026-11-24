@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.47.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.47.0...ledger-service-v1.47.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **ledger,transaction:** bound partition DDL lock wait with lock_timeout ([#17125](https://github.com/JiRaska/open-bank-oss/issues/17125)) ([411b33e](https://github.com/JiRaska/open-bank-oss/commit/411b33e3d5712baa3e99f53ad255036c4f971bd6))
+
+## [1.47.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.46.0...ledger-service-v1.47.0) (2026-11-18)
+
+
+### Features
+
+* **ledger:** adopt claim-fenced outbox v2 ([#15643](https://github.com/JiRaska/open-bank-oss/issues/15643)) ([6821f69](https://github.com/JiRaska/open-bank-oss/commit/6821f694badbc5834bf80b934f7659710000c836))
+
 ## [1.46.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.45.1...ledger-service-v1.46.0) (2026-11-13)
 
 

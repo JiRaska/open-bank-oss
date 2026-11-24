@@ -152,6 +152,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view', owner: 'pid' },
   { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view', owner: 'kyb' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view', owner: 'delegation' },
+  { nameCs: 'MCP kanál', nameEn: 'MCP channel', href: '/delegations/mcp-channel', icon: Bot, permission: 'delegations:view', owner: 'mcp' },
 ]
 
 const paymentsNav: NavItem[] = [
@@ -214,6 +215,7 @@ export const docsNav: NavItem[] = [
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
   { nameCs: 'QR fotoaparátem', nameEn: 'Camera QR',        href: '/docs/spayd-uri',   icon: QrCode,     permission: 'docs:view' },
+  { nameCs: 'Kanál MCP pro zákazníky', nameEn: 'Customer MCP channel', href: '/docs/mcp-channel', icon: Bot, permission: 'docs:view' },
   { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },

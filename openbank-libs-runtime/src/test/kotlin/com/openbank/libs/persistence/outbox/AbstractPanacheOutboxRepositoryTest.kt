@@ -8,8 +8,10 @@ import io.mockk.unmockkStatic
 import io.mockk.verify
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
+import jakarta.persistence.metamodel.Metamodel
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -27,6 +29,7 @@ class AbstractPanacheOutboxRepositoryTest {
     private val now = Instant.parse("2026-10-01T12:00:00Z")
     private val shape = OutboxTableShape("test_outbox")
     private val session = mockk<Mutiny.Session>()
+    private val metamodel = outboxMapping("test_outbox", "id")
     private val update = mockk<Mutiny.Query<Int>>()
     private val parameters = mutableMapOf<String, Any?>()
     private val repository = object : AbstractPanacheOutboxRepository<PanacheOutboxEntity>(
@@ -38,6 +41,8 @@ class AbstractPanacheOutboxRepositoryTest {
 
     @BeforeEach
     fun transactionBoundary() {
+        // Minimal mapping for the binding tests; the real-DB tests exercise full entity hydration.
+        every { session.factory.metamodel } returns metamodel
         mockkStatic(Panache::class)
         every { Panache.withTransaction(any<Supplier<Uni<Any>>>()) } answers {
             firstArg<Supplier<Uni<Any>>>().get()
@@ -104,7 +109,7 @@ class AbstractPanacheOutboxRepositoryTest {
 
     @Test
     fun `peek maps every persisted field and uses clock eligibility with safe limit`() {
-        selection(OutboxSql.listProcessable(shape))
+        selection(OutboxRowSql.listProcessable(shape, "id"))
         val entries = runBlocking { repository.listProcessable(0) }
         assertThat(entries).containsExactly(
             OutboxEntry(
@@ -135,7 +140,7 @@ class AbstractPanacheOutboxRepositoryTest {
 
     @Test
     fun `claim uses caller stale interval and preserves positive limit`() {
-        selection(OutboxSql.claim(shape))
+        selection(OutboxRowSql.claim(shape, "id"))
         val result = runBlocking { repository.claimProcessable(17, Duration.ofSeconds(23)) }
         assertThat(result).hasSize(1)
         assertThat(result.single().eventType).isEqualTo("test.changed")
@@ -149,6 +154,30 @@ class AbstractPanacheOutboxRepositoryTest {
                 "limit" to 17,
             ),
         )
+    }
+
+    @Test
+    fun `mapped projection is cached only within the same metamodel`() {
+        val replacement = outboxMapping("test_outbox", "id", "event_id")
+        every { session.factory.metamodel } returnsMany listOf(metamodel, metamodel, replacement)
+        selection(OutboxRowSql.listProcessable(shape, "id"))
+        selection(OutboxRowSql.listProcessable(shape, "id, event_id"))
+        runBlocking {
+            repository.listProcessable(1)
+            repository.listProcessable(1)
+            repository.listProcessable(1)
+        }
+        verify(exactly = 1) { metamodel.getEntityDescriptor(PanacheOutboxEntity::class.java) }
+        verify(exactly = 1) { replacement.getEntityDescriptor(PanacheOutboxEntity::class.java) }
+    }
+
+    @Test
+    fun `unsupported metadata fails before a native claim query is created`() {
+        every { session.factory.metamodel } returns mockk<Metamodel>()
+        assertThatThrownBy {
+            runBlocking { repository.claimProcessable(1, Duration.ofSeconds(1)) }
+        }.isInstanceOf(IllegalStateException::class.java)
+        verify(exactly = 0) { session.createNativeQuery(any<String>(), PanacheOutboxEntity::class.java) }
     }
 
     @Test

@@ -6,13 +6,16 @@ package com.openbank.mcp.infrastructure.mcp
 
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.McpMetricsPort
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.json.JsonString
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.time.Clock
 import java.time.Instant
+import java.util.Optional
 
 /**
  * Resolves the acting agent + presented PSD2 consent from the caller's validated OAuth 2.1 access
@@ -41,7 +44,22 @@ class CallerContextResolver @Inject constructor(
     private val oboEnabled: Boolean = false,
     private val sessions: AgentSessionRepository? = null,
     private val clock: Clock = Clock.systemUTC(),
+    /**
+     * The customers-realm issuer (ADR-0383 D1). A token from it is NEVER resolved here — not as an
+     * `agent:` token, not as OBO — whatever its `sub` or claims say; only the customer channel
+     * branch admits it. Absent means no customers tenant is configured.
+     */
+    @ConfigProperty(name = "mcp.customer.issuer")
+    private val customerIssuer: Optional<String>,
 ) {
+
+    /** The validated token, for the customer-channel branch (which reads `iss`, `azp`, `cnf`). */
+    val token: JsonWebToken get() = jwt
+
+    private fun isCustomerRealmToken(): Boolean {
+        val iss = jwt.issuer ?: return false
+        return customerIssuer.map { it.isNotBlank() && it == iss }.orElse(false)
+    }
 
     /**
      * @return the caller's [ConsentContext] when an `agent:` bearer token is present — or, with
@@ -51,7 +69,13 @@ class CallerContextResolver @Inject constructor(
      */
     suspend fun resolveOrNull(): ConsentContext? {
         val subject = jwt.subject ?: return null
+        // ADR-0383 D1.1/D1.2: issuer selects the path BEFORE the subject is inspected.
+        if (isCustomerRealmToken()) return null
         if (subject.startsWith(AGENT_PREFIX)) {
+            // RFC 8707 / ADR-0383 D1: an agent token must be issued FOR this server. Checked here as
+            // well as in McpEndpoint (which answers 401 first) so that a caller reaching the
+            // resolver by any other route still fails closed (#16622).
+            if (MCP_AUDIENCE !in audience()) return null
             val consentId = jwt.getClaim<String?>(CLAIM_CONSENT_ID)?.takeIf { it.isNotBlank() }
                 ?: error("agent token '$subject' carries no '$CLAIM_CONSENT_ID' claim")
             return ConsentContext(
@@ -60,11 +84,26 @@ class CallerContextResolver @Inject constructor(
                 grantedAccounts = emptyList(),
                 actChain = actChain(jwt.getClaim(CLAIM_ACT)),
                 sessionId = jwt.getClaim<String?>(CLAIM_SESSION_ID)?.takeIf { it.isNotBlank() },
+                channel = McpMetricsPort.McpChannel.AGENT,
             )
         }
         if (!oboEnabled) return null
         return resolveOboHuman(subject)
     }
+
+    /**
+     * True when a bearer token is present whose `aud` does not name this server (RFC 8707, ADR-0383
+     * D1). Such a token was issued for some other resource; accepting it would be token
+     * passthrough. No token at all (anonymous) is NOT foreign — that case keeps its existing
+     * deny-without-401 behaviour.
+     */
+    /**
+     * True when the presented token was issued by the customers realm (ADR-0383 D1). The staff root
+     * refuses such a token outright (#16590); [resolveOrNull] independently never resolves it.
+     */
+    fun presentsCustomerRealmToken(): Boolean = isCustomerRealmToken()
+
+    fun presentsForeignAudience(): Boolean = jwt.subject != null && MCP_AUDIENCE !in audience()
 
     /**
      * ADR-0224 phase 1b: a staff token minted by RFC 8693 exchange at Keycloak. Recognized by four
@@ -118,6 +157,7 @@ class CallerContextResolver @Inject constructor(
             principalType = "HUMAN",
             roles = bounded,
             serviceAccount = false,
+            channel = McpMetricsPort.McpChannel.OPERATOR,
         )
     }
 
@@ -127,10 +167,12 @@ class CallerContextResolver @Inject constructor(
         .filter { it.isNotBlank() }
         .toSet()
 
-    /** The `aud` claim is a single string or an array depending on the grant — accept both. */
+    /** The `aud` claim is a single string or an array depending on the grant and the JWT library — accept every shape. */
     private fun audience(): List<String> = when (val aud = jwt.getClaim<Any?>(CLAIM_AUD)) {
         is String -> listOf(aud)
-        is List<*> -> aud.filterIsInstance<String>()
+        is JsonString -> listOf(aud.string)
+        // Covers a List, the Set Quarkus OIDC builds, and a jakarta.json JsonArray.
+        is Iterable<*> -> aud.mapNotNull { (it as? String) ?: (it as? JsonString)?.string }
         else -> emptyList()
     }
 
@@ -153,22 +195,22 @@ class CallerContextResolver @Inject constructor(
         .map { it["sub"].toString() }
         .toList()
 
-    private companion object {
-        const val AGENT_PREFIX = "agent:"
-        const val CLAIM_CONSENT_ID = "consent_id"
-        const val CLAIM_ACT = "act"
-        const val CLAIM_SESSION_ID = "sid"
-        const val CLAIM_AZP = "azp"
-        const val CLAIM_JTI = "jti"
-        const val CLAIM_AUD = "aud"
-        const val CLAIM_REALM_ACCESS = "realm_access"
-        const val CLAIM_PREFERRED_USERNAME = "preferred_username"
-        const val ROLE_PREFIX = "ROLE_"
-
-        /** The audience client an OBO token must target (ADR-0224 D1; realm config from #2762). */
+    companion object {
+        /** The audience client every token on `/mcp` must target (ADR-0224 D1, ADR-0385 D1). */
         const val MCP_AUDIENCE = "openbank-mcp-service"
 
+        private const val AGENT_PREFIX = "agent:"
+        private const val CLAIM_CONSENT_ID = "consent_id"
+        private const val CLAIM_ACT = "act"
+        private const val CLAIM_SESSION_ID = "sid"
+        private const val CLAIM_AZP = "azp"
+        private const val CLAIM_JTI = "jti"
+        private const val CLAIM_AUD = "aud"
+        private const val CLAIM_REALM_ACCESS = "realm_access"
+        private const val CLAIM_PREFERRED_USERNAME = "preferred_username"
+        private const val ROLE_PREFIX = "ROLE_"
+
         /** Delegation beyond this depth is an issuer bug, not a real chain — stop walking. */
-        const val MAX_ACT_DEPTH = 8
+        private const val MAX_ACT_DEPTH = 8
     }
 }

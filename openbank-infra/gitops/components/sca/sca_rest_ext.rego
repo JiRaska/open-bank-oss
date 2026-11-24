@@ -113,7 +113,13 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 allowed_reasons contains "service-sca-scoped-consumer" if {
 	input.principal.type == "HUMAN"
 	some consumer in data.rules.scoped_sca_consumers
-	input.principal.id == consumer.principal
+	# The VERIFIED machine identity, never the display name: machine_named requires the PEP's
+	# service_account == true marker AND client_id bound to the fixed name, so a person (or an
+	# input without the marker) whose name happens to equal the principal gets nothing. The
+	# explicit marker check also closes machine_named's phase-1 (marker-absent) fallback here: a
+	# scoped consumer spends customer approvals, so it requires the current PEP ABI.
+	input.principal.service_account == true
+	machine_named(consumer.principal)
 	input.action in consumer.actions
 }
 

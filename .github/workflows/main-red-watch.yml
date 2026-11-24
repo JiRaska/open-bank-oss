@@ -58,6 +58,9 @@ on:
       - "Dependency submission"
       - "Gradle wrapper validation"
       - "Release Please"
+      # #16748: a red identifier-conformance run on main means a validator disagrees with the
+      # independent reference (or a known defect was fixed without removing its marker).
+      - "Identifier differential"
       # ADR-0279 #16/#20: the Semgrep IaC lane is a security gate; its red on main is a
       # container/manifest regression and must not stay silent.
       - "Semgrep IaC security"
@@ -96,6 +99,7 @@ on:
       # has no fallback for it during the next upstream outage.
       - "CI artifact mirror"
       - "Keycloak workload identity"
+      - "Keycloak MCP client admission"
       - "Agent charter registry"
       - "AI governance snapshot"
       - "API contract post-merge guard"

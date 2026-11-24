@@ -1,5 +1,59 @@
 # Changelog
 
+## [4.23.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.1...admin-ui-v4.23.2) (2026-11-23)
+
+
+### Security
+
+* **sca:** Keycloak MCP extension - withheld code, 72 h passkey floor, no token exchange (ADR-0385 C, [#16667](https://github.com/JiRaska/open-bank-oss/issues/16667)) ([#16672](https://github.com/JiRaska/open-bank-oss/issues/16672)) ([699eaf9](https://github.com/JiRaska/open-bank-oss/commit/699eaf9e7e0b3d2b0604d964d35497ab774367aa))
+
+## [4.23.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.0...admin-ui-v4.23.1) (2026-11-23)
+
+
+### Security
+
+* **mcp-service:** caller-scoped opaque accountRef for MCP tool chaining ([#16863](https://github.com/JiRaska/open-bank-oss/issues/16863)) ([cdd8413](https://github.com/JiRaska/open-bank-oss/commit/cdd8413840c923f2d5f56a80f5c9615b55a94ab9))
+
+## [4.23.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.1...admin-ui-v4.23.0) (2026-11-22)
+
+
+### Features
+
+* **fetch-broker:** gitops, egress policy and OPA host check (ADR-0387 S3) ([#16794](https://github.com/JiRaska/open-bank-oss/issues/16794)) ([69de3a7](https://github.com/JiRaska/open-bank-oss/commit/69de3a76661109ca7a70a22acba251cb79a1da96))
+
+
+### Security
+
+* **mcp-service:** shared fail-closed Valkey DPoP replay store and budgets ([#16791](https://github.com/JiRaska/open-bank-oss/issues/16791)) ([49b0b6c](https://github.com/JiRaska/open-bank-oss/commit/49b0b6cb70d888ef9cd468d203fb309f676b8789))
+
+## [4.22.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.0...admin-ui-v4.22.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** read merge-train knob defaults from repo-variable expressions ([#17047](https://github.com/JiRaska/open-bank-oss/issues/17047)) ([4cc61c7](https://github.com/JiRaska/open-bank-oss/commit/4cc61c799be149a5da040471b18a88d52f0b62a9)), closes [#17009](https://github.com/JiRaska/open-bank-oss/issues/17009)
+
+## [4.22.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.1...admin-ui-v4.22.0) (2026-11-21)
+
+
+### Features
+
+* **mcp-service:** ADR-0384 slice 1 — customer MCP channel metrics, alerts and admin view ([#16779](https://github.com/JiRaska/open-bank-oss/issues/16779)) ([c421931](https://github.com/JiRaska/open-bank-oss/commit/c4219319f7fa372e8899c4a775ce3fa99c626299))
+
+## [4.21.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.0...admin-ui-v4.21.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore security excellence evidence ([#16493](https://github.com/JiRaska/open-bank-oss/issues/16493)) ([19698b6](https://github.com/JiRaska/open-bank-oss/commit/19698b6dd1984e30799d59afd17418b699e744ca))
+
+## [4.21.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.20.0...admin-ui-v4.21.0) (2026-11-17)
+
+
+### Features
+
+* **admin-ui:** explain the customer MCP channel with repo-derived control status ([#16610](https://github.com/JiRaska/open-bank-oss/issues/16610)) ([88a1002](https://github.com/JiRaska/open-bank-oss/commit/88a10024593737e759ab70e8b95407657b8a1351))
+
 ## [4.20.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.19.1...admin-ui-v4.20.0) (2026-11-17)
 
 

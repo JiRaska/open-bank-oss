@@ -155,6 +155,7 @@ permissions:
 
 jobs:
   discover:
+    if: github.event_name != 'schedule' || (vars.AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: Find recent runs requiring reconciliation
     runs-on: ubuntu-latest
     # Hard ceiling shared by all HTTP retries and whole-snapshot rereads. Sustained
@@ -428,7 +429,9 @@ jobs:
   raise-issue:
     name: Raise issue on retry failure
     needs: [discover, retry]
-    if: ${{ failure() }}
+    if: >-
+      (github.event_name != 'schedule' || (vars.AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
+      (failure())
     runs-on: ubuntu-latest
     timeout-minutes: 5 # API calls only
     permissions:
