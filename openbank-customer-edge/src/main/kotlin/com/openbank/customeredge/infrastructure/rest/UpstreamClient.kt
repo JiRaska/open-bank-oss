@@ -318,6 +318,11 @@ class UpstreamClient {
     }
 
     private fun sendGet(url: String, partyId: String?, timeoutMs: Long): Response {
+        val destination = URI.create(url)
+        val host = requireNotNull(destination.host) { "upstream host is required" }
+        require(host == "localhost" || host == "127.0.0.1" || host.endsWith(".svc")) {
+            "refusing upstream call to disallowed host"
+        }
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
             .uri(validatedUri(url))
