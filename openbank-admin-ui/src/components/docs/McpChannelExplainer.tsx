@@ -79,11 +79,26 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable, asOf }: M
 
       <DeliveryBanner adr={adr} adrHref={adrHref} sourcesAvailable={sourcesAvailable} asOf={asOf} />
 
+      <Section title={t('Připojení ChatGPT a Claude', 'Connecting ChatGPT and Claude')}>
+        <p>{t(
+          'Integrace ChatGPT a Claude vychází z hostovaného OAuth toku Tier H podle ADR-0385. Klient zahájí připojení a zákazník v bankovní aplikaci vybere vlastní účty a schválí přístup pomocí SCA. Udělené připojení může v aplikaci odvolat.',
+          'The ChatGPT and Claude integrations follow the hosted Tier H OAuth design in ADR-0385. The client starts the connection, then the customer selects their own accounts and approves access using SCA in the banking app. The customer can revoke the connection in the app.',
+        )}</p>
+        <p>{t(
+          'Lokální klienti používají DPoP. U hostovaných klientů banka ověřuje registrovaného klienta a podepsanou vazbu tokenu na schválené připojení. Pro načtení zůstatku vydá bankovní autorizační server krátkodobý token pro konkrétní účet. Služba Balance ověřuje grant, vlastníka účtu a certifikát volající služby.',
+          'Local clients use DPoP. For hosted clients the bank verifies the registered client and the signed token binding to the approved connection. For a balance read, the bank authorization server issues a short-lived token for the selected account. Balance verifies the grant, account owner, and caller certificate.',
+        )}</p>
+        <p>{t(
+          'Stav zákaznického vydání ověřujeme ve sdíleném sandboxu. Dokladem je build v TestFlight a úspěšné schválení v mobilu s načtením testovacího zůstatku zvlášť v ChatGPT a Claude.',
+          'Customer release is verified in the shared sandbox. The evidence is a TestFlight build and a successful mobile approval and test balance read in both ChatGPT and Claude.',
+        )}</p>
+      </Section>
+
       {/* One-screen story */}
       <Section title={t('Příběh na jednu obrazovku', 'The story on one screen')}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
           <StoryCard status={statusOf('client-admission')} n={1} title={t('Připojí', 'Connect')} body={t('Zákazník připojí asistenta. Banka mu ukáže, co asistent smí, a zákazník to potvrdí v bance.', 'The customer connects the assistant. The bank shows what it may do, and the customer confirms at the bank.')} />
-          <StoryCard status={statusOf('dpop', 'grant', 'scoped-read')} n={2} title={t('Čte', 'Read')} body={t('Asistent čte jen data tohoto zákazníka, s tokenem, který bez klíče klienta nefunguje.', 'The assistant reads only this customer\'s data, with a token that does not work without the client\'s key.')} />
+          <StoryCard status={statusOf('dpop', 'grant', 'scoped-read')} n={2} title={t('Čte', 'Read')} body={t('Asistent čte jen data z vlastních účtů, které zákazník vybral při schválení.', 'The assistant reads only the accounts the customer selected during approval.')} />
           <StoryCard status={statusOf('proposal', 'policy', 'downstream-no-write')} n={3} title={t('Navrhne', 'Propose')} body={t('Asistent může platbu jen navrhnout. Peníze se tím nepohnou.', 'The assistant can only propose a payment. No money moves.')} />
           <StoryCard status={statusOf('sca', 'admission')} n={4} title={t('Zákazník schválí', 'Customer approves')} body={t('Platba odejde jen po schválení v bankovní aplikaci se SCA, stejně jako kdyby ji zákazník zadal sám.', 'The payment leaves only after approval in the banking app with SCA, exactly as if the customer had entered it.')} />
         </div>
@@ -210,8 +225,8 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable, asOf }: M
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '10px 0 0' }}>
           {t(
-            'Model hrozeb a runbook dnes popisují mcp-service pro řízené agenty; zákaznický kanál do modelu hrozeb přibude před vytvořením jakékoli cesty (#16590).',
-            'The threat model and runbook describe mcp-service for governed agents today; the customer channel is added to the threat model before any route exists (#16590).',
+            'Model hrozeb popisuje také zákaznické čtení, vazbu na schválený grant a odvolání přístupu.',
+            'The threat model also covers customer reads, the approved grant binding, and revocation.',
           )}
         </p>
       </Section>
@@ -223,12 +238,12 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable, asOf }: M
 
 function DeliveryBanner({ adr, adrHref, sourcesAvailable, asOf }: { adr: AdrFact | null; adrHref: string; sourcesAvailable: { gates: boolean; adrs: boolean }; asOf?: EvidenceAsOf }) {
   const { t } = useLanguage()
-  const decision = adr?.decision ?? null
+  const decision = adr?.decision.toLowerCase() ?? null
   const delivery = adr?.deliveryStatus ?? null
   const deliveryText = delivery === 'shipped' ? t('dodáno', 'shipped')
     : delivery === 'partial' ? t('částečně dodáno', 'partially delivered')
       : delivery === 'planned' ? t('plánováno', 'planned') : t('neznámý', 'unknown')
-  const decisionText = decision === 'Accepted' ? t('schváleno', 'accepted') : decision === 'Proposed' ? t('navrženo, v review', 'proposed, in review') : t('neznámý', 'unknown')
+  const decisionText = decision === 'accepted' ? t('schváleno', 'accepted') : decision === 'proposed' ? t('navrženo, v review', 'proposed, in review') : t('neznámý', 'unknown')
   return (
     <div role="note" className="card" style={{ padding: 14, marginBottom: 16, display: 'flex', gap: 10, alignItems: 'flex-start', background: delivery === 'shipped' ? 'var(--success-bg)' : 'var(--warning-bg)', border: `1px solid ${delivery === 'shipped' ? 'var(--success-border)' : 'var(--warning-border)'}` }}>
       <Info size={16} aria-hidden="true" style={{ color: delivery === 'shipped' ? 'var(--success-text)' : 'var(--warning-text)', flexShrink: 0, marginTop: 2 }} />
@@ -241,8 +256,8 @@ function DeliveryBanner({ adr, adrHref, sourcesAvailable, asOf }: { adr: AdrFact
         {delivery !== 'shipped' && (
           <div style={{ color: 'var(--text-secondary)' }}>
             {t(
-              'Tato stránka popisuje návrh. Podle ADR se ke mcp-service nevytvoří žádná cesta pro zákazníky, dokud nebudou hotové všechny předpoklady; jejich stav je níže u každé vrstvy.',
-              'This page describes the design. Per the ADR, no customer route to mcp-service is created until every prerequisite has landed; their status is shown below for each layer.',
+              'Rozsah implementace dokládají jednotlivé kontroly níže. Dostupnost pro zákazníky vyžaduje ověření nasazení a celého toku.',
+              'The controls below track implementation evidence. Customer availability requires a verified deployment and end-to-end journey.',
             )}
           </div>
         )}
