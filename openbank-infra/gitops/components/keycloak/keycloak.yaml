@@ -174,8 +174,12 @@ spec:
               value: https://kc.open-bank.tech/realms/openbank-customers
             - name: MCP_READ_RESOURCE_URL
               value: https://mcp.open-bank.tech/customer/mcp
+            # The Delegation component owns the pod-scoped 8443 ingress rule for Keycloak.
             - name: MCP_READ_DELEGATION_ORIGIN
-              value: https://delegation-service.delegation.svc:8443
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-mcp-authority-origins
+                  key: delegation-url
             - name: MCP_READ_ISSUER_TOKEN_URL
               value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token
             - name: MCP_READ_DEPLOYMENT

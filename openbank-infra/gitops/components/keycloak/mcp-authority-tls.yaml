@@ -29,3 +29,11 @@ spec:
       remoteRef:
         key: keycloak/mcp-authority-tls
         property: password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-mcp-authority-origins
+  namespace: iam
+data:
+  delegation-url: https://delegation-service.delegation.svc:8443
