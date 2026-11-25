@@ -15,15 +15,17 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.delegation.integration.PaymentProposalApiIT
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.http.TestHTTPResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.net.URL
 import java.util.UUID
 
 /** Verifies the Customer Edge payment-proposal Pact using the HTTP and PostgreSQL fixture. */
@@ -42,24 +44,28 @@ import java.util.UUID
 @Consumer("openbank-customer-edge")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "false")
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class DelegationProposalPactBrokerProviderVerificationTest : DelegationProposalProviderFixture() {
 
-    @TestTemplate
-    @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
-    @ExtendWith(PactVerificationInvocationContextProvider::class)
-    fun verifyPacts(context: PactVerificationContext?) {
-        context?.target = HttpTestTarget("localhost", testPort.toInt())
-        context?.verifyInteraction()
+    @TestHTTPResource
+    lateinit var applicationUrl: URL
+
+    @BeforeEach
+    fun configureTarget(context: PactVerificationContext?) {
+        context?.target = HttpTestTarget(applicationUrl.host, applicationUrl.port)
     }
 
-    @Test
-    fun `edge cannot read a proposal using a mismatched party header`() {
+    @TestTemplate
+    @ExtendWith(PactVerificationInvocationContextProvider::class)
+    fun verifyPacts(context: PactVerificationContext?) {
+        if (context == null) return
         seed("PENDING")
         given()
             .header("X-Customer-Party-Id", UUID.randomUUID())
             .get("/api/v1/payment-proposals/$PROPOSAL?partyId=$PARTY")
             .then()
             .statusCode(403)
+        context.verifyInteraction()
     }
 
     @State("a PENDING payment proposal exists for the customer")
