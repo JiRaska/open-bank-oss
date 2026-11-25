@@ -125,12 +125,56 @@ spec:
             # here: under --optimized, re-declaring a differing build option aborts
             # startup. KC_FEATURES had drifted out of gitops on the live pod; baking
             # it re-declares the feature set as code.
+            - name: KC_HTTPS_PORT
+              value: "8443"
+            - name: KC_HTTPS_CERTIFICATE_FILE
+              value: /tls/mcp-read-server/tls.crt
+            - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+              value: /tls/mcp-read-server/tls.key
+            - name: KC_HTTPS_PROTOCOLS
+              value: TLSv1.3
+            - name: KC_HTTPS_CLIENT_AUTH
+              value: required
+            - name: KC_HTTPS_TRUST_STORE_FILE
+              value: /tls/mcp-read-client-trust/truststore.p12
+            - name: KC_HTTPS_TRUST_STORE_TYPE
+              value: PKCS12
+            - name: KC_HTTPS_TRUST_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-mcp-read-client-truststore
+                  key: password
+            - name: MCP_READ_GRANT_ENABLED
+              value: "false"
+            - name: MCP_READ_ISSUER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-mcp-read-issuer-oidc
+                  key: MCP_READ_ISSUER_CLIENT_SECRET
+            - name: MCP_READ_NONCE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-read-nonce
+                  key: key
+            - name: MCP_READ_PROOF_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-read-proof
+                  key: key
           ports:
+            - name: mcp-read
+              containerPort: 8443
             - name: http
               containerPort: 8080
             - name: management
               containerPort: 9000
           volumeMounts:
+            - name: mcp-read-server
+              mountPath: /tls/mcp-read-server
+              readOnly: true
+            - name: mcp-read-client-trust
+              mountPath: /tls/mcp-read-client-trust
+              readOnly: true
             # Realm import dir: Keycloak reads every *.json here on --import-realm.
             - name: realm-import
               mountPath: /opt/keycloak/data/import
@@ -185,6 +229,15 @@ spec:
               cpu: "1"
               memory: 1Gi
       volumes:
+        - name: mcp-read-server
+          secret:
+            secretName: keycloak-mcp-read-server-tls
+        - name: mcp-read-client-trust
+          secret:
+            secretName: keycloak-mcp-read-client-truststore
+            items:
+              - key: truststore.p12
+                path: truststore.p12
         # projected: combine both realm JSONs into one /opt/keycloak/data/import dir so
         # Keycloak's --import-realm picks up both *.json files on cold start (ADR-0065).
         - name: realm-import
