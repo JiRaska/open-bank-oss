@@ -261,6 +261,7 @@ openbao:
     - keycloak/ledger-pension-co
     - keycloak/lending-service
     - keycloak/mcp-service
+    - keycloak/mcp-service-customer-exchange
     - keycloak/party-service
     - keycloak/pension-fund-service
     - keycloak/pension-service
