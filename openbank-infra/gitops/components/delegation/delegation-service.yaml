@@ -66,6 +66,8 @@ spec:
           image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-90b690e0@sha256:859d32bf0fd8f29470e52226d3b36b1b5a73a122feb771bf0b9226d274c3574b
           imagePullPolicy: IfNotPresent
           ports:
+            - name: https-native
+              containerPort: 8443
             # HTTP 8126 and management 8090 — both read off the service's own
             # application.yaml (quarkus.http.port / quarkus.management.port). The
             # management port is NOT the fleet-common 8085 here; probes below target
@@ -75,6 +77,16 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: "/mnt/mcp-delegation-server/tls.crt"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: "/mnt/mcp-delegation-server/tls.key"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: "1h"
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: "TLSv1.3"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -208,6 +220,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: mcp-delegation-server
+              mountPath: /mnt/mcp-delegation-server
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: party-tls-trust
@@ -297,6 +312,9 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: mcp-delegation-server
+          secret:
+            secretName: delegation-mcp-server-tls
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore
@@ -333,6 +351,9 @@ spec:
     - name: http
       port: 8126
       targetPort: http
+    - name: https-native
+      port: 8443
+      targetPort: https-native
     - name: management
       port: 8090
       targetPort: management
