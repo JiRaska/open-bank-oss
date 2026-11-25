@@ -79,7 +79,11 @@ one read scope, one account and one connection. Keycloak verifies the original c
 evidence and live grant, then binds the downstream token to the MCP workload certificate.
 Balance-service compares the token thumbprint to the authenticated native TLS peer and checks
 current account ownership and grant status before returning any balance. The balance reader
-uses its own identity for the grant check. The route starts disabled.
+uses its own identity for the grant check. The application defaults to disabled. The shared
+sandbox enables the issuer and Balance on their private listeners for verification before
+publishing the customer MCP route. Balance still requires the current connection-bound grant
+and a token bound to the native TLS peer. The private transport and authorization checks
+remain mandatory when the public MCP route is enabled.
 
 | Threat | Control | Verification |
 |--------|---------|--------------|

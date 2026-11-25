@@ -148,7 +148,7 @@ spec:
                   name: keycloak-mcp-read-client-truststore
                   key: password
             - name: MCP_READ_GRANT_ENABLED
-              value: "false"
+              value: "true"
             - name: MCP_READ_ISSUER_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
