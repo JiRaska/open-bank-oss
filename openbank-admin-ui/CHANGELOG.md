@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.26.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.4...admin-ui-v4.26.5) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** trust the MCP client CA in Keycloak OAuth ([#17309](https://github.com/JiRaska/open-bank-oss/issues/17309)) ([0a8fbfd](https://github.com/JiRaska/open-bank-oss/commit/0a8fbfd883ae4661376161cdf7e68c5f2dd1801a))
+
 ## [4.26.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.3...admin-ui-v4.26.4) (2026-11-25)
 
 
