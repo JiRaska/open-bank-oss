@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.26.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.1...admin-ui-v4.26.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** stage shared MCP issuer mTLS listener ([#17288](https://github.com/JiRaska/open-bank-oss/issues/17288)) ([fa4c587](https://github.com/JiRaska/open-bank-oss/commit/fa4c5874b9891e05a131ec029a2e766677173b18))
+
 ## [4.26.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.0...admin-ui-v4.26.1) (2026-11-25)
 
 
