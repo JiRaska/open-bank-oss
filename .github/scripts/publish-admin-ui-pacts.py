@@ -95,6 +95,28 @@ def contract_readback(received):
     return received
 
 
+def same_contract(expected, received):
+    if expected == received:
+        return True
+    expected_metadata = expected.get("metadata")
+    received_metadata = received.get("metadata")
+    # Broker 2.119.0 can reuse an older stored document for the same Pact identity.
+    # Generator version is excluded from that identity. Require both generator
+    # records to have the known shape and compare every other value exactly.
+    for metadata in (expected_metadata, received_metadata):
+        if not isinstance(metadata, dict):
+            return False
+        generator = metadata.get("pact-jvm")
+        if not isinstance(generator, dict) or set(generator) != {"version"}:
+            return False
+        version = generator["version"]
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+            return False
+    expected_metadata = {key: value for key, value in expected_metadata.items() if key != "pact-jvm"}
+    received_metadata = {key: value for key, value in received_metadata.items() if key != "pact-jvm"}
+    return (expected | {"metadata": expected_metadata}) == (received | {"metadata": received_metadata})
+
+
 def source(root, sha):
     try:
         actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
@@ -235,10 +257,10 @@ def publish(body, env):
             raise PublicationFailure("broker-readback-network", provider) from None
         expected = json.loads(base64.b64decode(contract["content"], validate=True))
         # The pinned broker adds HAL links, creation time, and per-interaction IDs.
-        # Compare every contract field after removing only that broker-owned metadata.
+        # Compare contract content and account for the broker reusing generator metadata.
         if not isinstance(received, dict):
             raise PublicationFailure("readback-shape", provider)
-        if contract_readback(received) != expected:
+        if not same_contract(expected, contract_readback(received)):
             raise PublicationFailure("readback-mismatch", provider,
                                      details=readback_difference_paths(expected, received))
     return sorted(contract["providerName"] for contract in body["contracts"])

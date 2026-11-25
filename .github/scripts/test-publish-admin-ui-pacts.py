@@ -483,6 +483,31 @@ class PublicationTest(unittest.TestCase):
         received["interactions"][0]["unexpected"] = "broker-added"
         self.assertNotEqual(publisher.contract_readback(received), expected)
 
+    def test_readback_allows_only_stale_pact_jvm_generator_version(self):
+        expected = {
+            "interactions": [{"description": "read", "response": {"status": 200}}],
+            "metadata": {
+                "pact-jvm": {"version": "4.7.7"},
+                "pactSpecification": {"version": "3.0.0"},
+            },
+        }
+        received = copy.deepcopy(expected)
+        received["metadata"]["pact-jvm"]["version"] = "4.7.3"
+        self.assertTrue(publisher.same_contract(expected, received))
+
+        for change in (
+            lambda pact: pact["metadata"].pop("pact-jvm"),
+            lambda pact: pact["metadata"]["pact-jvm"].update(version="invalid"),
+            lambda pact: pact["metadata"]["pact-jvm"].update(plugin="unexpected"),
+            lambda pact: pact["metadata"]["pactSpecification"].update(version="4.0.0"),
+            lambda pact: pact["metadata"].update(other={"version": "4.7.3"}),
+            lambda pact: pact["interactions"][0]["response"].update(status=500),
+        ):
+            with self.subTest(change=change):
+                changed = copy.deepcopy(received)
+                change(changed)
+                self.assertFalse(publisher.same_contract(expected, changed))
+
     def test_mismatched_readback_fails_closed(self):
         opener = MagicMock()
         opener.open.return_value.__enter__.return_value.status = 201
