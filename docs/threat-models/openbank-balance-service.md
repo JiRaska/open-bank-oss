@@ -92,6 +92,10 @@ Enablement requires a trusted workload certificate, approved routes and network 
 tested issuer and grant availability. A read admitted before revocation may finish. The next
 read checks the current grant.
 
+The Balance reader calls Delegation's private TLS 1.3 listener and validates its DNS identity
+and configured CA. Delegation still requires the dedicated reader's staff token and authorizes
+the live grant check separately from the issuer's request to mint a read permit.
+
 ## 4. STRIDE analysis
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |

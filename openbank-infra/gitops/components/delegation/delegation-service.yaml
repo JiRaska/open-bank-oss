@@ -75,6 +75,16 @@ spec:
             - name: management
               containerPort: 8090
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: "/mnt/mcp-delegation-server/tls.crt"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: "/mnt/mcp-delegation-server/tls.key"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: "1h"
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: "TLSv1.3"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -208,6 +218,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: mcp-delegation-server
+              mountPath: /mnt/mcp-delegation-server
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: party-tls-trust
@@ -297,6 +310,9 @@ spec:
             - name: opa-tmp
               mountPath: /tmp
       volumes:
+        - name: mcp-delegation-server
+          secret:
+            secretName: delegation-mcp-server-tls
         - name: tmp
           emptyDir: {}
         - name: kafka-keystore
@@ -333,6 +349,9 @@ spec:
     - name: http
       port: 8126
       targetPort: http
+    - name: https-native
+      port: 8443
+      targetPort: 8443
     - name: management
       port: 8090
       targetPort: management
