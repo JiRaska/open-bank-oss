@@ -260,6 +260,7 @@ openbao:
     - keycloak/kyb-service
     - keycloak/ledger-pension-co
     - keycloak/lending-service
+    - keycloak/mcp-authority-tls
     - keycloak/mcp-read-client-truststore
     - keycloak/mcp-read-issuer
     - keycloak/mcp-read-nonce

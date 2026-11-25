@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: keycloak-mcp-authority-tls
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2026-12-20"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-mcp-authority-tls
+    creationPolicy: Owner
+  data:
+    - secretKey: identity.p12
+      remoteRef:
+        key: keycloak/mcp-authority-tls
+        property: identity
+        decodingStrategy: Base64
+    - secretKey: trust.p12
+      remoteRef:
+        key: keycloak/mcp-authority-tls
+        property: trust
+        decodingStrategy: Base64
+    - secretKey: password
+      remoteRef:
+        key: keycloak/mcp-authority-tls
+        property: password

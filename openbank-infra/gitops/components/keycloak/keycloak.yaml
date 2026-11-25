@@ -164,6 +164,24 @@ spec:
                 secretKeyRef:
                   name: mcp-read-proof
                   key: key
+            - name: MCP_AUTHORITY_TLS_KEYSTORE
+              value: /tls/mcp-authority/identity.p12
+            - name: MCP_AUTHORITY_TLS_TRUSTSTORE
+              value: /tls/mcp-authority/trust.p12
+            - name: MCP_AUTHORITY_TLS_PASSWORD_FILE
+              value: /tls/mcp-authority/password
+            - name: MCP_READ_CUSTOMER_ISSUER_URL
+              value: https://kc.open-bank.tech/realms/openbank-customers
+            - name: MCP_READ_RESOURCE_URL
+              value: https://mcp.open-bank.tech/customer/mcp
+            - name: MCP_READ_DELEGATION_ORIGIN
+              value: https://delegation-service.delegation.svc:8443
+            - name: MCP_READ_ISSUER_TOKEN_URL
+              value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token
+            - name: MCP_READ_DEPLOYMENT
+              value: shared-sandbox
+            - name: MCP_READ_CONNECTION_BINDING_ENABLED
+              value: "true"
           ports:
             - name: mcp-read
               containerPort: 8443
@@ -172,6 +190,9 @@ spec:
             - name: management
               containerPort: 9000
           volumeMounts:
+            - name: mcp-authority-tls
+              mountPath: /tls/mcp-authority
+              readOnly: true
             - name: mcp-read-server
               mountPath: /tls/mcp-read-server
               readOnly: true
@@ -232,6 +253,9 @@ spec:
               cpu: "1"
               memory: 1Gi
       volumes:
+        - name: mcp-authority-tls
+          secret:
+            secretName: keycloak-mcp-authority-tls
         - name: mcp-read-server
           secret:
             secretName: keycloak-mcp-read-server-tls
