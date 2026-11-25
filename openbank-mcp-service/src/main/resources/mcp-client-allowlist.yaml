@@ -68,6 +68,32 @@ exchange:
       scope: mcp-customer-transaction-read
 
 clients:
+  - client_id: https://chatgpt.com/oauth/client.json
+    tier: H
+    enabled: false
+    display_name: "ChatGPT"
+    redirect_uris:
+      - https://chatgpt.com/connector_platform_oauth_redirect
+    auth:
+      method: private_key_jwt
+      signing_alg: RS256
+      jwks_file: mcp-clients/chatgpt.jwks.json
+      jwks_sha256: e92c2799a5b8d33b19231421ffe6609a2770edba72d0212bae10919472a26e4b
+
+  - client_id: mcp-claude-sandbox
+    tier: H
+    enabled: false
+    display_name: "Claude"
+    redirect_uris:
+      - https://claude.ai/api/mcp/auth_callback
+    auth:
+      method: client_secret
+      secret_placeholder: __MCP_CLAUDE_SANDBOX_CLIENT_SECRET__
+    secret_exception:
+      accepted: "2026-11-24"
+      expires: "2026-12-24"
+      risk_acceptance: "Owner-approved 30-day synthetic sandbox exception recorded in PR #17242"
+
   - client_id: mcp-hosted-reference
     tier: H
     enabled: false

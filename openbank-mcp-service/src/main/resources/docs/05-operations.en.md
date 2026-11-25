@@ -377,3 +377,9 @@ separately with valid synthetic accounts and the settlement boundary in place.
 ### Hosted customer credentials
 
 The customer MCP endpoint accepts bearer tokens for enabled Tier H clients with a signed connection claim. Local clients still need DPoP. Hosted balance reads require the bank read issuer and its dedicated mTLS identity. The issuer checks the original access token and obtains an account-scoped permit from Delegation before issuing a certificate-bound read token.
+
+### ChatGPT hosted client registration
+
+The allowlist declares ChatGPT's exact published OAuth client ID and callback. The generated realm client pins the reviewed RS256 key set and uses private-key JWT authentication. The declaration stays disabled until sandbox deployment verifies the hosted authorization and refresh flow. Review key rotation against the vendor's published JWKS before updating the pin.
+
+The Claude sandbox registration is disabled by default and uses a confidential client exception authorized for 30 days. Start the sandbox with a dedicated secret from the bank secret store and supply it only to the authorized connector operator. Keep the callback fixed to the published Claude URL. Remove the sandbox registration and revoke its token families when the exception ends.
