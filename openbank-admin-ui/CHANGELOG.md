@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.26.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.25.0...admin-ui-v4.26.0) (2026-11-25)
+
+
+### Features
+
+* **infra:** compose isolated MCP sandbox Keycloak runtime ([#17262](https://github.com/JiRaska/open-bank-oss/issues/17262)) ([1e7a246](https://github.com/JiRaska/open-bank-oss/commit/1e7a2463d1e90e46bdfec83ce706d2d07c87d192))
+
 ## [4.25.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.24.0...admin-ui-v4.25.0) (2026-11-24)
 
 
