@@ -59,7 +59,7 @@ class DelegationProposalPactBrokerProviderVerificationTest : DelegationProposalP
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         if (context == null) return
-        seed("PENDING")
+        // Pact has already seeded the interaction state. The 403 probe must preserve it.
         given()
             .header("X-Customer-Party-Id", UUID.randomUUID())
             .get("/api/v1/payment-proposals/$PROPOSAL?partyId=$PARTY")
