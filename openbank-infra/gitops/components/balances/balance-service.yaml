@@ -48,11 +48,43 @@ spec:
           image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-b00243d9@sha256:6394a7cecf2fb233f70acf1b4fdc4f96799c74d4282201bc627b1d5c0eff6817
           imagePullPolicy: IfNotPresent
           ports:
+            - name: https-native
+              containerPort: 8443
             - name: http
               containerPort: 8103
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/mcp-balance-server/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/mcp-balance-server/tls.key
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: '8443'
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/mcp-balance-client-trust/ca.crt
+            - name: BALANCE_MCP_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: balance-mcp-read-origins
+                  key: issuer-url
+                  optional: true
+            - name: BALANCE_MCP_SERVICE_OIDC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: balance-mcp-read-origins
+                  key: staff-oidc-url
+                  optional: true
+            - name: BALANCE_MCP_READER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: balance-mcp-reader-oidc
+                  key: BALANCE_MCP_READER_SECRET
+                  optional: true
             # One-shot Flyway repair: the live DB was created by the 0.1.0 image and
             # carries a V5 history row whose checksum predates the V4->V5
             # hibernate_sequences renumber. The DDL is equivalent, so repair the
@@ -115,10 +147,9 @@ spec:
             # Live MCP grant check using the scoped Balance reader identity.
             - name: BALANCE_MCP_DELEGATION_URL
               valueFrom:
-                configMapKeyRef:
+                secretKeyRef:
                   name: balance-mcp-read-origins
                   key: delegation-url
-                  optional: true
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -141,7 +172,7 @@ spec:
             # connector instead of silently falling back to quarkus.application.name.
             # Optional location: if the file is absent Quarkus warns and continues.
             - name: QUARKUS_CONFIG_LOCATIONS
-              value: /mnt/msg-config/override.properties
+              value: /mnt/msg-config/override.properties,/mnt/mcp-read-tls-config/runtime.properties
           startupProbe:
             tcpSocket:
               port: management
@@ -170,6 +201,18 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: mcp-balance-server
+              mountPath: /mnt/mcp-balance-server
+              readOnly: true
+            - name: mcp-balance-client-trust
+              mountPath: /mnt/mcp-balance-client-trust
+              readOnly: true
+            - name: mcp-delegation-trust
+              mountPath: /mnt/mcp-delegation-trust
+              readOnly: true
+            - name: mcp-read-tls-config
+              mountPath: /mnt/mcp-read-tls-config
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -263,6 +306,29 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: mcp-balance-server
+          secret:
+            secretName: balance-mcp-server-tls
+            items:
+            - key: tls.crt
+              path: tls.crt
+            - key: tls.key
+              path: tls.key
+        - name: mcp-balance-client-trust
+          secret:
+            secretName: balance-mcp-client-trust
+            items:
+            - key: ca.crt
+              path: ca.crt
+        - name: mcp-delegation-trust
+          secret:
+            secretName: balance-mcp-delegation-trust
+            items:
+            - key: ca.crt
+              path: ca.crt
+        - name: mcp-read-tls-config
+          configMap:
+            name: balance-mcp-read-tls
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -319,6 +385,9 @@ spec:
     - name: http
       port: 8103
       targetPort: http
+    - name: https-native
+      port: 8443
+      targetPort: https-native
 ---
 apiVersion: v1
 kind: Service
@@ -334,3 +403,6 @@ spec:
     - name: http
       port: 8103
       targetPort: http
+    - name: https-native
+      port: 8443
+      targetPort: https-native
