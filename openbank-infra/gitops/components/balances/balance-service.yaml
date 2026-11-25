@@ -65,6 +65,10 @@ spec:
               value: TLSv1.3
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
               value: /mnt/mcp-balance-client-trust/ca.crt
+            - name: BALANCE_MCP_ENABLED
+              value: "true"
+            - name: BALANCE_MCP_CONNECTION_BINDING_ENABLED
+              value: "true"
             - name: BALANCE_MCP_ISSUER
               valueFrom:
                 secretKeyRef:
