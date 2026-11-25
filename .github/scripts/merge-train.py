@@ -4383,8 +4383,9 @@ def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_si
                expedite: int | None = None) -> list[int]:
     base = live_base(gh, git)
     with planning_reads():           # build writes nothing to GitHub; publish re-plans live
-        _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
-        if expedite is not None:
+        if expedite is None:
+            _fast, batch, sizes = plan_batch(gh, git, repo, base, batch_size)
+        else:
             # Expedite lane: a one-member train, that PR alone, or nothing. Publish re-validates everything.
             _fast, train, sizes = plan_train(gh, git, repo, base)
             batch = [m for m in train if m.number == expedite][:1]
