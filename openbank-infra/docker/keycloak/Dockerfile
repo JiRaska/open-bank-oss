@@ -68,6 +68,8 @@ ENV KC_HEALTH_ENABLED=true
 ENV KC_METRICS_ENABLED=true
 ENV KC_CACHE=local
 ENV KC_FEATURES=token-exchange,admin-fine-grained-authz:v1
+# Persist native HTTPS mTLS for the private MCP listener. The existing HTTP port is independent.
+ENV KC_HTTPS_CLIENT_AUTH=required
 RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
