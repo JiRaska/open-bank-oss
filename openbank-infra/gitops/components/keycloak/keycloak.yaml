@@ -125,6 +125,9 @@ spec:
             # here: under --optimized, re-declaring a differing build option aborts
             # startup. KC_FEATURES had drifted out of gitops on the live pod; baking
             # it re-declares the feature set as code.
+            # Keep Kubernetes health probes on the private management HTTP port.
+            - name: KC_HTTP_MANAGEMENT_SCHEME
+              value: "http"
             - name: KC_HTTPS_PORT
               value: "8443"
             - name: KC_HTTPS_CERTIFICATE_FILE
