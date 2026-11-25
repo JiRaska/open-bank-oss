@@ -5,7 +5,7 @@ metadata:
   name: keycloak-mcp-read-issuer-oidc
   namespace: iam
   annotations:
-    open-bank.tech/rotation-deadline: '2027-02-22'
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -27,7 +27,7 @@ metadata:
   name: mcp-read-nonce
   namespace: iam
   annotations:
-    open-bank.tech/rotation-deadline: '2027-02-22'
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -49,7 +49,7 @@ metadata:
   name: mcp-read-proof
   namespace: iam
   annotations:
-    open-bank.tech/rotation-deadline: '2027-02-22'
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -71,7 +71,7 @@ metadata:
   name: keycloak-mcp-read-client-truststore
   namespace: iam
   annotations:
-    open-bank.tech/rotation-deadline: '2027-02-22'
+    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
   refreshInterval: 1h
   secretStoreRef:
