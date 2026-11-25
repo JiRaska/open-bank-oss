@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.19.0...mcp-service-v0.20.0) (2026-11-25)
+
+
+### Features
+
+* **mcp-service:** declare hosted ChatGPT and Claude registrations ([#17242](https://github.com/JiRaska/open-bank-oss/issues/17242)) ([8b6dcdb](https://github.com/JiRaska/open-bank-oss/commit/8b6dcdbf7b0e90a20decc645fa2a365a065ce7a6))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.18.7...mcp-service-v0.19.0) (2026-11-24)
 
 
