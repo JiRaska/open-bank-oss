@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  namespace: balances
+  name: allow-mcp-bound-balance-tls
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: balance-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: platform
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-service
+    ports:
+    - protocol: TCP
+      port: 8443

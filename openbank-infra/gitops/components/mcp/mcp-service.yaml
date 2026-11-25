@@ -60,6 +60,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/mcp-read-tls-config/runtime.properties
+            - name: MCP_BOUND_TLS_CONFIGURATION
+              value: mcp-bound-read
+            - name: MCP_READ_NONCE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-read-nonce
+                  key: key
             # ADR-0383 D5 / #16847 (owner decision 2026-11-21): the edge hop is trusted by its mTLS
             # IDENTITY, never by IP. NO QUARKUS_HTTP_PROXY_* and NO trusted-proxies (ProxyForwardingGuard
             # refuses both). The customer route (still disabled) must target the `https` port below; the
@@ -236,6 +245,15 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: mcp-bound-client
+              mountPath: /mnt/mcp-bound-client
+              readOnly: true
+            - name: mcp-bound-server-trust
+              mountPath: /mnt/mcp-bound-server-trust
+              readOnly: true
+            - name: mcp-read-tls-config
+              mountPath: /mnt/mcp-read-tls-config
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: internal-tls
@@ -309,6 +327,23 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
+        - name: mcp-bound-client
+          secret:
+            secretName: mcp-bound-read-client-tls
+            items:
+            - key: tls.crt
+              path: tls.crt
+            - key: tls.key
+              path: tls.key
+        - name: mcp-bound-server-trust
+          secret:
+            secretName: mcp-bound-read-server-trust
+            items:
+            - key: ca.crt
+              path: ca.crt
+        - name: mcp-read-tls-config
+          configMap:
+            name: mcp-bound-read-tls
         - name: tmp
           emptyDir: {}
         - name: internal-tls

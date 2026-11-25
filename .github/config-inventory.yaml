@@ -262,6 +262,9 @@ openbao:
     - keycloak/lending-service
     - keycloak/mcp-authority-tls
     - keycloak/mcp-read-client-truststore
+    - keycloak/mcp-balance-client-trust
+    - keycloak/mcp-balance-delegation-trust
+    - keycloak/mcp-bound-read-server-trust
     - keycloak/mcp-read-issuer
     - keycloak/mcp-read-nonce
     - keycloak/mcp-read-proof

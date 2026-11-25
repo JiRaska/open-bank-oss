@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: balances
+  name: balance-mcp-read-tls
+data:
+  runtime.properties: 'quarkus.rest-client.mcp-balance-grant.tls-configuration-name=mcp-delegation
+
+    quarkus.tls.mcp-delegation.trust-store.pem.certs=/mnt/mcp-delegation-trust/ca.crt
+
+    quarkus.tls.mcp-delegation.protocols=TLSv1.3
+
+    quarkus.tls.mcp-delegation.reload-period=1h
+
+    '
