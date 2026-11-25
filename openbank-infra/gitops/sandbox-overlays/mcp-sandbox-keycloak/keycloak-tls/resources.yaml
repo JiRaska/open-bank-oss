@@ -1,0 +1,175 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-synthetic-keycloak-frontchannel
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: '2'
+spec:
+  secretName: mcp-synthetic-keycloak-frontchannel
+  dnsNames:
+  - sandbox-oidc.sandbox.invalid
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+  - server auth
+  issuerRef:
+    name: mcp-synthetic-private-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-oidc
+  namespace: mcp-synthetic-sandbox
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+  - name: https
+    port: 8443
+    targetPort: sandbox-oauth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-synthetic-keycloak-native
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    argocd.argoproj.io/sync-wave: '2'
+spec:
+  secretName: mcp-synthetic-keycloak-native
+  dnsNames:
+  - sandbox-read-issuer.sandbox.invalid
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+  - server auth
+  issuerRef:
+    name: mcp-synthetic-private-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-read-issuer
+  namespace: mcp-synthetic-sandbox
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+  - name: https
+    port: 8443
+    targetPort: sandbox-read
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-synthetic-keycloak-private-input
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-synthetic-router
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: balance-sandbox
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-sandbox
+    ports:
+    - protocol: TCP
+      port: 8444
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: mcp-sandbox
+    ports:
+    - protocol: TCP
+      port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-synthetic-keycloak-dns
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: balance-sandbox-to-keycloak-private
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: balance-sandbox
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: keycloak
+    ports:
+    - protocol: TCP
+      port: 8444
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-sandbox-to-keycloak-private
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-sandbox
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: keycloak
+    ports:
+    - protocol: TCP
+      port: 8444
+    - protocol: TCP
+      port: 8443

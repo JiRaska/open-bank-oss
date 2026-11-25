@@ -1,92 +1,20 @@
----
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: sandbox-keycloak-settings
-  namespace: mcp-synthetic-sandbox
   annotations:
-    open-bank.tech/rotation-deadline: "2027-02-22"
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: vault-kv
-    kind: ClusterSecretStore
-  target:
-    name: sandbox-keycloak-settings
-    creationPolicy: Owner
-  data:
-  - secretKey: frontend-url
-    remoteRef:
-      key: mcp-synthetic-sandbox/sandbox-keycloak-settings
-      property: frontend-url
-  - secretKey: jdbc-url
-    remoteRef:
-      key: mcp-synthetic-sandbox/sandbox-keycloak-settings
-      property: jdbc-url
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: sandbox-keycloak-postgres-credentials
-  namespace: mcp-synthetic-sandbox
-  annotations:
-    open-bank.tech/rotation-deadline: "2027-02-22"
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: vault-kv
-    kind: ClusterSecretStore
-  target:
-    name: sandbox-keycloak-postgres-credentials
-    creationPolicy: Owner
-  data:
-  - secretKey: username
-    remoteRef:
-      key: mcp-synthetic-sandbox/sandbox-keycloak-postgres-credentials
-      property: username
-  - secretKey: password
-    remoteRef:
-      key: mcp-synthetic-sandbox/sandbox-keycloak-postgres-credentials
-      property: password
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
+    open-bank.tech/rotation-deadline: '2027-02-22'
   name: sandbox-keycloak-realm-import
   namespace: mcp-synthetic-sandbox
-  annotations:
-    open-bank.tech/rotation-deadline: "2027-02-22"
 spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: vault-kv
-    kind: ClusterSecretStore
-  target:
-    name: sandbox-keycloak-realm-import
-    creationPolicy: Owner
   data:
-  - secretKey: openbank-customers-realm.json
-    remoteRef:
+  - remoteRef:
       key: mcp-synthetic-sandbox/sandbox-keycloak-realm-import
       property: openbank-customers-realm.json
----
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: sandbox-keycloak-postgres-trust
-  namespace: mcp-synthetic-sandbox
-  annotations:
-    open-bank.tech/rotation-deadline: "2027-02-22"
-spec:
+    secretKey: openbank-customers-realm.json
   refreshInterval: 1h
   secretStoreRef:
-    name: vault-kv
     kind: ClusterSecretStore
+    name: vault-kv
   target:
-    name: sandbox-keycloak-postgres-trust
     creationPolicy: Owner
-  data:
-  - secretKey: ca.crt
-    remoteRef:
-      key: mcp-synthetic-sandbox/sandbox-keycloak-postgres-trust
-      property: ca.crt
+    name: sandbox-keycloak-realm-import

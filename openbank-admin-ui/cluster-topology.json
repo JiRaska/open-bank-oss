@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-11-24T20:54:51.000Z",
-  "inputFingerprint": "sha256:6ccd132ea71bd356d07bf55101b249ad69f0bf63dbbbb60ffb7ef3dd8ca4ffef",
+  "generatedAt": "2026-11-25T05:37:30.000Z",
+  "inputFingerprint": "sha256:dc5fc631f514bde3d07d72f95b3d49028e57cc7ca84224a6eef8d16f74a9dce1",
   "counts": {
     "namespaces": 88,
-    "networkPolicies": 163,
-    "externalSecrets": 263,
+    "networkPolicies": 167,
+    "externalSecrets": 261,
     "clusterPolicies": 0
   },
   "groups": [
@@ -889,11 +889,11 @@
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 163 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
-        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 163 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 167 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 167 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy manifests (163)",
+        "NetworkPolicy manifests (167)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -995,12 +995,12 @@
         "en": "A time-locked vault — passwords never sit in the code."
       },
       "summary": {
-        "cs": "OpenBao drží tajemství; 263 ExternalSecret je sype do k8s. Žádný secret v gitu.",
-        "en": "OpenBao holds the secrets; 263 ExternalSecrets feed them into k8s. No secret in git."
+        "cs": "OpenBao drží tajemství; 261 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+        "en": "OpenBao holds the secrets; 261 ExternalSecrets feed them into k8s. No secret in git."
       },
       "controls": [
         "OpenBao",
-        "External Secrets (263)",
+        "External Secrets (261)",
         "KMS unseal"
       ],
       "adr": [
@@ -1157,8 +1157,8 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "163 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
-        "en": "163 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
+        "cs": "167 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "167 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
       "status": "partial"
     },
@@ -1187,8 +1187,8 @@
         "en": "OpenBao + ESO, nothing in git"
       },
       "reality": {
-        "cs": "263 ExternalSecret",
-        "en": "263 ExternalSecrets"
+        "cs": "261 ExternalSecret",
+        "en": "261 ExternalSecrets"
       },
       "status": "live"
     },
