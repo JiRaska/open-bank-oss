@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.26.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.0...admin-ui-v4.26.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** wire shared sandbox MCP customer dependencies ([#17271](https://github.com/JiRaska/open-bank-oss/issues/17271)) ([9fdee4e](https://github.com/JiRaska/open-bank-oss/commit/9fdee4ea0b0f96e55cd519e77e8abc2fa9494e56))
+
 ## [4.26.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.25.0...admin-ui-v4.26.0) (2026-11-25)
 
 
