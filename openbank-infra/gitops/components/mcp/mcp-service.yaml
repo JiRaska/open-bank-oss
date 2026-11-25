@@ -115,6 +115,16 @@ spec:
             # secret are all set — a misconfigured pod never starts serving. The two secret refs
             # are optional so this pod runs (channel off) before ESO has generated the
             # mcp-customer-store-valkey / -hmac Secrets (customer-store-externalsecret.yaml, in-cluster generator).
+            - name: MCP_CUSTOMER_SHARED_STORE
+              value: valkey
+            # Reuse the exchange client registered in the existing customer realm.
+            # The customer read path refuses exchange when the credential is absent.
+            - name: MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-customer-exchange-oidc
+                  key: client_secret
+                  optional: true
             - name: QUARKUS_REDIS_HOSTS
               value: redis://mcp-valkey.platform.svc:6379
             - name: QUARKUS_REDIS_PASSWORD
