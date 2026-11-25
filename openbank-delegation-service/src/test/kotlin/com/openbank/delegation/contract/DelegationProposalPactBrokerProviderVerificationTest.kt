@@ -19,10 +19,12 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
-import org.junit.jupiter.api.BeforeEach
+import io.restassured.RestAssured.given
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.util.UUID
 
 /** Verifies the Customer Edge payment-proposal Pact using the HTTP and PostgreSQL fixture. */
 @QuarkusTest
@@ -40,18 +42,24 @@ import org.junit.jupiter.api.extension.ExtendWith
 @Consumer("openbank-customer-edge")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "false")
-@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class DelegationProposalPactBrokerProviderVerificationTest : DelegationProposalProviderFixture() {
 
-    @BeforeEach
-    fun configureTarget(context: PactVerificationContext?) {
-        context?.target = HttpTestTarget("localhost", testPort.toInt())
-    }
-
     @TestTemplate
+    @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.verifyInteraction()
+    }
+
+    @Test
+    fun `edge cannot read a proposal using a mismatched party header`() {
+        seed("PENDING")
+        given()
+            .header("X-Customer-Party-Id", UUID.randomUUID())
+            .get("/api/v1/payment-proposals/$PROPOSAL?partyId=$PARTY")
+            .then()
+            .statusCode(403)
     }
 
     @State("a PENDING payment proposal exists for the customer")
