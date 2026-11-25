@@ -617,3 +617,9 @@ traffic rather than widening it.
 ### Hosted MCP connection binding (ADR-0385)
 
 A bearer token must resolve to an active grant for the exact customer, client, approved connection and account. Hosted lookup matches only grants whose DPoP thumbprint is null; it cannot select a grant created with DPoP. Balance authorization is restricted to the dedicated issuer service account and requires a fresh proof reference and a current account ownership verdict. The resource endpoint refuses hosted requests without a connection ID. Revoking the connection invalidates its hosted grants and blocks refresh.
+
+The shared sandbox exposes a separate TLS 1.3 port on the internal Delegation Service for
+Keycloak and Balance workloads. The added cross-namespace rule is limited to those two pod
+identities. TLS authenticates the Delegation server. The issuer and reader still present
+distinct staff tokens and pass their existing action-specific authorization checks. The
+existing service and management listeners continue serving their current callers.
