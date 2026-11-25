@@ -308,10 +308,8 @@ openbao:
         - mcp-synthetic-sandbox/customer-edge-mcp-oidc-trust
         - mcp-synthetic-sandbox/mcp-customer-oidc-origins
         - mcp-synthetic-sandbox/mcp-customer-oidc-trust
-        - mcp-synthetic-sandbox/sandbox-keycloak-postgres-credentials
-        - mcp-synthetic-sandbox/sandbox-keycloak-postgres-trust
         - mcp-synthetic-sandbox/sandbox-keycloak-realm-import
-        - mcp-synthetic-sandbox/sandbox-keycloak-settings
+        - mcp-synthetic-sandbox/read-issuer-client-trust
       reason: "Site-owned private MCP sandbox bootstrap, discovery and trust inputs. The sandbox overlays are dormant until the owner provisions and verifies the exact synthetic inputs."
       issue: 16996
       review_by: 2027-01-31

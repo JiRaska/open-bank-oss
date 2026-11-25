@@ -6,3 +6,5 @@ resources:
 - keycloak-database-egress.yaml
 - keycloak-monitor.yaml
 - site-inputs.yaml
+components:
+- keycloak-tls

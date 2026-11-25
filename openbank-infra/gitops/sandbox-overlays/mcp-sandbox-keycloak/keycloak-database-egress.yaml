@@ -4,15 +4,16 @@ metadata:
   name: sandbox-keycloak-database-egress
   namespace: mcp-synthetic-sandbox
 spec:
+  egress:
+  - ports:
+    - port: 5432
+      protocol: TCP
+    to:
+    - podSelector:
+        matchLabels:
+          cnpg.io/cluster: mcp-synthetic-keycloak-db
   podSelector:
     matchLabels:
       app.kubernetes.io/name: keycloak
-  policyTypes: [Egress]
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: sandbox-keycloak-postgres
-      ports:
-        - protocol: TCP
-          port: 5432
+  policyTypes:
+  - Egress

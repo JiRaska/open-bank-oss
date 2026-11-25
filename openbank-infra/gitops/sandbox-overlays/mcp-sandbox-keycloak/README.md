@@ -1,35 +1,16 @@
-# Dormant Keycloak for the private MCP sandbox
+# Isolated Keycloak for the MCP sandbox
 
-Compose this component with the `mcp-synthetic-sandbox` namespace foundation. It starts at zero
-replicas with an inert image pin. Replace the placeholder with the reviewed optimized OpenBank
-Keycloak image digest. Use the provider build that matches the sandbox issuer contract. Startup
-uses the baked PostgreSQL and health configuration. The base exposes no Service or public route.
-The site TLS overlay owns proxy settings, the private backchannel and its peer policies.
+The runtime overlay composes this component with a zero-replica Keycloak
+Deployment, a private HTTPS relay, a native read-issuer listener and exact
+peer policies. Apply the namespace foundation and the isolated database
+workloads first. The source has placeholder addresses and images. Render the
+reviewed Keycloak and relay digests and exact site addresses through Argo before
+scaling the Deployment.
 
-## Required PostgreSQL and bootstrap inputs
-
-Provisioning is separate. Use an approved PostgreSQL service in `mcp-synthetic-sandbox` named
-`sandbox-keycloak-postgres` on TCP 5432, selecting only pods labeled
-`app.kubernetes.io/name: sandbox-keycloak-postgres`. The existing database owner must provide
-`keycloak_synthetic` and a scoped login that owns only that database or its dedicated schema.
-Allow ingress on 5432 from the sandbox `keycloak` pods. This component admits only the matching
-database pods. The dedicated listener overlay adds cluster DNS egress. If the approved PostgreSQL target uses different selectors or a
-different namespace, reconcile both network policy directions before using it.
-
-Supply these site-owned resources in the sandbox namespace.
-
-| Resource | Required keys or files |
-| --- | --- |
-| Secret `sandbox-keycloak-settings` | `frontend-url` for the canonical HTTPS issuer origin. `jdbc-url` for the exact Service DNS name, port 5432 and database `keycloak_synthetic`, with `sslmode=verify-full&sslrootcert=/mnt/sandbox-keycloak-postgres/ca.crt`. |
-| Secret `sandbox-keycloak-postgres-credentials` | `username`, `password` for the scoped database login. |
-| Secret `sandbox-keycloak-postgres-trust` | `ca.crt` that validates the database server certificate and exact JDBC DNS name. |
-| Secret `sandbox-keycloak-realm-import` | `openbank-customers-realm.json` for the isolated customer realm. Import only synthetic identities and site-owned sandbox client settings. |
-
-Keycloak imports realms at startup only when absent. The database retains realm signing keys and
-state across pod recreation. Use an independently approved realm-update mechanism after bootstrap.
-Keep these inputs separate from shared Keycloak and supply them before scaling or adding peer
-access. Management probes use the distinct port 9000. Check readiness and realm discovery after
-the attached TLS overlay and database connection are verified.
-
-Provision the matching OpenBao properties under the `mcp-synthetic-sandbox/` path
-listed in `site-inputs.yaml`. Verify ExternalSecret readiness before enabling workloads.
+Use the CNPG read-write Service and verify its certificate hostname. Keycloak
+mounts the generated application credentials and only the public CA certificate.
+Provision the isolated realm import and a PKCS12 truststore containing only
+the approved MCP read client issuer in OpenBao. Check ExternalSecret readiness,
+then verify issuer discovery and both listeners before admitting clients. Keep
+synthetic credentials, private addresses and registry details in the site
+configuration. The public MCP route is managed separately.
