@@ -140,6 +140,9 @@ spec:
               value: required
             - name: KC_HTTPS_TRUST_STORE_FILE
               value: /tls/mcp-read-client-trust/truststore.p12
+            # The OAuth X.509 authenticator validates the chain again using Keycloak's system trust.
+            - name: KC_TRUSTSTORE_PATHS
+              value: /tls/mcp-read-oauth-client-ca/ca.crt
             - name: KC_HTTPS_TRUST_STORE_TYPE
               value: PKCS12
             - name: KC_HTTPS_TRUST_STORE_PASSWORD
@@ -199,6 +202,9 @@ spec:
               readOnly: true
             - name: mcp-read-server
               mountPath: /tls/mcp-read-server
+              readOnly: true
+            - name: mcp-read-oauth-client-ca
+              mountPath: /tls/mcp-read-oauth-client-ca
               readOnly: true
             - name: mcp-read-client-trust
               mountPath: /tls/mcp-read-client-trust
@@ -263,6 +269,9 @@ spec:
         - name: mcp-read-server
           secret:
             secretName: keycloak-mcp-read-server-tls
+        - name: mcp-read-oauth-client-ca
+          secret:
+            secretName: keycloak-mcp-read-oauth-client-ca
         - name: mcp-read-client-trust
           secret:
             secretName: keycloak-mcp-read-client-truststore
