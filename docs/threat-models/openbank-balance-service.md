@@ -546,3 +546,19 @@ traffic rather than widening it.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `BALANCE_SERVICE_URL=http://balance-service.balances.svc:8103`. The read is the CRS/FATCA statement `asOf` balance under `service-account-openbank-tax-reporting` (ROLE_API), already admitted in `balance_rest_ext.rego`. **Residual risk, accepted and tracked:** balance-service has no private-CA mTLS listener, so this hop carries the bearer token in plaintext inside the cluster, like its five existing callers (customer-edge, agent, mcp, statements, payments). The new line is declared as V9.1 debt in `.github/asvs-l3-baseline.txt`. Retiring it means adding an 8443 client-auth-required, bearer-only listener (#16075). Mitigations in the meantime: the namespace-scoped ingress allow-list, an OPA decision pinned to the principal id, and a short-lived Keycloak token. A replayed token only reaches the reporting read it was issued for.
+
+## 2026-11-25 - Private TLS transport for MCP balance reads
+
+The shared sandbox adds a TLS 1.3 listener on TCP 8443 for MCP balance reads. The dedicated
+ingress policy selects only MCP service pods in the platform namespace. Balance requires a
+client certificate chained to the dedicated MCP client CA. MCP verifies the Balance server
+against its configured CA, and Balance uses separate trust material for the Delegation HTTPS
+connection. Certificate keys and nonce material are mounted or injected from managed Secrets.
+
+A client certificate authenticates the transport peer. Customer authorization still requires
+the application-level token and delegation checks. This rollout leaves the bound-read admission
+flags disabled and adds no public route. The legacy listener and its existing callers remain,
+so their recorded plaintext transport debt still applies. Missing or mismatched certificate
+material can interrupt the private path. Before activation, verify that the deployed listener
+rejects clients without the expected certificate and that the authenticated customer flow
+succeeds. Roll back through GitOps and keep admission disabled.
