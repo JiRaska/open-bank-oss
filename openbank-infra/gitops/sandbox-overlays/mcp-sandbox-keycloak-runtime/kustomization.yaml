@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+components:
+- ../mcp-sandbox-keycloak
+- keycloak-tls
+patches:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: keycloak
+  patch: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: keycloak\nspec:\n\
+    \  template:\n    spec:\n      containers:\n      - name: keycloak\n        env:\n\
+    \        - name: KC_DB_URL\n          value: jdbc:postgresql://database.sandbox.invalid:5432/keycloak?sslmode=verify-full&sslrootcert=/mnt/sandbox-keycloak-postgres/ca.crt\n\
+    \          valueFrom: null\n        - name: KC_DB_USERNAME\n          valueFrom:\n\
+    \            secretKeyRef:\n              name: mcp-synthetic-keycloak-db-app\n\
+    \              key: username\n        - name: KC_DB_PASSWORD\n          valueFrom:\n\
+    \            secretKeyRef:\n              name: mcp-synthetic-keycloak-db-app\n\
+    \              key: password\n      volumes:\n      - name: postgres-ca\n    \
+    \    secret:\n          secretName: mcp-synthetic-keycloak-db-ca\n          items:\n\
+    \          - key: ca.crt\n            path: ca.crt\n"
+- target:
+    group: networking.k8s.io
+    version: v1
+    kind: NetworkPolicy
+    name: sandbox-keycloak-database-egress
+  patch: "- op: replace\n  path: /spec/egress/0/to/0/podSelector/matchLabels\n  value:\n\
+    \    cnpg.io/cluster: mcp-synthetic-keycloak-db\n"
+- patch: "$patch: delete\napiVersion: external-secrets.io/v1\nkind: ExternalSecret\n\
+    metadata:\n  name: sandbox-keycloak-postgres-credentials\n  namespace: mcp-synthetic-sandbox\n"
+- patch: "$patch: delete\napiVersion: external-secrets.io/v1\nkind: ExternalSecret\n\
+    metadata:\n  name: sandbox-keycloak-postgres-trust\n  namespace: mcp-synthetic-sandbox\n"
+- target:
+    group: external-secrets.io
+    version: v1
+    kind: ExternalSecret
+    name: sandbox-keycloak-settings
+  patch: '[{"op":"remove","path":"/spec/data/1"}]'
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: keycloak
+  patch: '[{"op": "test", "path": "/spec/template/spec/containers/0/env/3/name", "value":
+    "KC_HOSTNAME"}, {"op": "remove", "path": "/spec/template/spec/containers/0/env/3/valueFrom"}]'
+- patch: "$patch: delete\napiVersion: external-secrets.io/v1\nkind: ExternalSecret\n\
+    metadata:\n  name: sandbox-keycloak-settings\n  namespace: mcp-synthetic-sandbox\n"

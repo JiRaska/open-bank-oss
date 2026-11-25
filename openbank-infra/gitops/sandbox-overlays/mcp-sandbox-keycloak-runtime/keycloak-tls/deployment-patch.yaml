@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: mcp-synthetic-sandbox
+spec:
+  template:
+    spec:
+      containers:
+      - name: keycloak
+        env:
+        - name: KC_HOSTNAME
+          value: https://sandbox.sandbox.invalid
+        - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+          value: 'true'
+        - name: KC_PROXY_HEADERS
+          value: xforwarded
+        - name: KC_PROXY_TRUSTED_ADDRESSES
+          value: 127.0.0.1
+        - name: KC_HTTP_ENABLED
+          value: 'true'
+        - name: KC_HTTP_PORT
+          value: '8080'
+        - name: KC_HTTP_MANAGEMENT_SCHEME
+          value: http
+        - name: KC_HTTPS_PORT
+          value: '8443'
+        - name: KC_HTTPS_CERTIFICATE_FILE
+          value: /tls/native/tls.crt
+        - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+          value: /tls/native/tls.key
+        - name: KC_HTTPS_PROTOCOLS
+          value: TLSv1.3
+        - name: KC_HTTPS_CLIENT_AUTH
+          value: required
+        - name: KC_HTTPS_TRUST_STORE_FILE
+          value: /tls/read-issuer-client-trust/truststore.p12
+        - name: KC_HTTPS_TRUST_STORE_TYPE
+          value: PKCS12
+        - name: KC_HTTPS_TRUST_STORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mcp-synthetic-read-issuer-client-trust
+              key: password
+        ports:
+        - name: sandbox-read
+          containerPort: 8443
+        volumeMounts:
+        - name: mcp-synthetic-keycloak-native
+          mountPath: /tls/native
+          readOnly: true
+        - name: read-issuer-client-trust
+          mountPath: /tls/read-issuer-client-trust
+          readOnly: true
+      - name: sandbox-oauth-frontchannel
+        image: registry.invalid/openbank-mcp-harness@sha256:769ba1d4df5a2c37ae29a107f7a3a5a706dd85f8d71993bfb453e13c8c66de10
+        command:
+        - node
+        - /app/keycloak-frontchannel.mjs
+        env:
+        - name: FRONTCHANNEL_HOST
+          value: sandbox.sandbox.invalid
+        - name: FRONTCHANNEL_SERVICE
+          value: sandbox-oidc.sandbox.invalid
+        - name: FRONTCHANNEL_CUSTOMER_REALM
+          value: openbank-customers
+        - name: FRONTCHANNEL_STAFF_REALM
+          value: ''
+        ports:
+        - name: sandbox-oauth
+          containerPort: 8444
+        readinessProbe:
+          tcpSocket:
+            port: sandbox-oauth
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 125m
+            memory: 96Mi
+        volumeMounts:
+        - name: mcp-synthetic-keycloak-frontchannel
+          mountPath: /tls/frontchannel
+          readOnly: true
+        - name: mcp-synthetic-keycloak-frontchannel-code
+          mountPath: /app
+          readOnly: true
+      volumes:
+      - name: mcp-synthetic-keycloak-frontchannel
+        secret:
+          secretName: mcp-synthetic-keycloak-frontchannel
+      - name: mcp-synthetic-keycloak-native
+        secret:
+          secretName: mcp-synthetic-keycloak-native
+      - name: read-issuer-client-trust
+        secret:
+          secretName: mcp-synthetic-read-issuer-client-trust
+          items:
+          - key: truststore.p12
+            path: truststore.p12
+      - name: mcp-synthetic-keycloak-frontchannel-code
+        configMap:
+          name: mcp-synthetic-keycloak-frontchannel-code
