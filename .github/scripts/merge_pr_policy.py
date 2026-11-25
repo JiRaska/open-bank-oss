@@ -149,6 +149,8 @@ REVIEWED_POLICY_BLOBS = frozenset({
     'dedc258eebfb37b502915e468a7f1cd144bfeda2',
     # merge-train.py of #17115's failed-only retry planner merged with #17123's `ui-e2e` receiver needs (validate keeps both), reviewed with #17115.
     'fe8935b2c51667dbc4da58a843e5928cba25f1fd',
+    # merge-train.py of #17281 (expedited builds plan once), reviewed with that PR.
+    'ec5a74a7ca4f3b40647827f74a132bc53fdbef59',
 })
 _SHA = re.compile(r'[0-9a-f]{40}')
 _BINDINGS = {'EXCLUDED_BRANCH_PREFIXES', 'OWNER_APPROVAL_CONTEXT'}
