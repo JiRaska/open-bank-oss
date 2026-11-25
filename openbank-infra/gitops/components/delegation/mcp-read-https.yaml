@@ -16,8 +16,9 @@ spec:
   usages:
   - server auth
   - digital signature
-  - key encipherment
   privateKey:
+    algorithm: ECDSA
+    size: 256
     rotationPolicy: Always
   duration: 2160h
   renewBefore: 720h
