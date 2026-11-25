@@ -1,0 +1,23 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: balance-mcp-server-tls
+  namespace: balances
+spec:
+  dnsNames:
+  - balance-service.balances.svc
+  - balance-service.balances.svc.cluster.local
+  duration: 2160h
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: openbank-ca
+  privateKey:
+    algorithm: ECDSA
+    rotationPolicy: Always
+    size: 256
+  renewBefore: 720h
+  secretName: balance-mcp-server-tls
+  usages:
+  - server auth
+  - digital signature

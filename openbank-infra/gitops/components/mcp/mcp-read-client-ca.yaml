@@ -1,0 +1,28 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-read-client-ca
+  namespace: platform
+spec:
+  isCA: true
+  commonName: openbank-sandbox-mcp-read-client-ca
+  secretName: mcp-read-client-ca
+  duration: 8760h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: mcp-read-client-ca
+  namespace: platform
+spec:
+  ca:
+    secretName: mcp-read-client-ca
+---

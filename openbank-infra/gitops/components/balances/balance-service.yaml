@@ -48,8 +48,6 @@ spec:
           image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-b00243d9@sha256:6394a7cecf2fb233f70acf1b4fdc4f96799c74d4282201bc627b1d5c0eff6817
           imagePullPolicy: IfNotPresent
           ports:
-            - name: https-native
-              containerPort: 8443
             - name: http
               containerPort: 8103
             - name: management
@@ -387,7 +385,7 @@ spec:
       targetPort: http
     - name: https-native
       port: 8443
-      targetPort: https-native
+      targetPort: 8443
 ---
 apiVersion: v1
 kind: Service
@@ -405,4 +403,4 @@ spec:
       targetPort: http
     - name: https-native
       port: 8443
-      targetPort: https-native
+      targetPort: 8443
