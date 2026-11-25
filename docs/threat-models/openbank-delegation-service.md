@@ -623,3 +623,9 @@ Keycloak and Balance workloads. The added cross-namespace rule is limited to tho
 identities. TLS authenticates the Delegation server. The issuer and reader still present
 distinct staff tokens and pass their existing action-specific authorization checks. The
 existing service and management listeners continue serving their current callers.
+
+The shared Keycloak issuer uses its dedicated MCP TLS context when calling this listener.
+It validates the Delegation service hostname and CA, then presents a staff token issued to
+the read issuer account. The explicit port 8443 policy admits the Keycloak and Balance pod
+identities. The authorization decision still requires the exact service account and a current
+customer grant.

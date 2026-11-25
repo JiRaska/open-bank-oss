@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.26.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.2...admin-ui-v4.26.3) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** wire private MCP authorization transport in Delegation ([#17297](https://github.com/JiRaska/open-bank-oss/issues/17297)) ([b2934f3](https://github.com/JiRaska/open-bank-oss/commit/b2934f3dabd0399f83aad8a21d4ba1e92ad8b571))
+
 ## [4.26.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.1...admin-ui-v4.26.2) (2026-11-25)
 
 
