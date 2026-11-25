@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.26.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.3...admin-ui-v4.26.4) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** connect the shared MCP issuer to Delegation TLS ([#17300](https://github.com/JiRaska/open-bank-oss/issues/17300)) ([beeba0d](https://github.com/JiRaska/open-bank-oss/commit/beeba0d05544445ef810cc8695af90ea27132e73))
+
 ## [4.26.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.2...admin-ui-v4.26.3) (2026-11-25)
 
 
