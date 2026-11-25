@@ -115,3 +115,25 @@ spec:
     rotationPolicy: Always
   duration: 2160h
   renewBefore: 720h
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: keycloak-mcp-read-oauth-client-ca
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-mcp-read-oauth-client-ca
+    creationPolicy: Owner
+  data:
+  - secretKey: ca.crt
+    remoteRef:
+      key: keycloak/mcp-balance-client-trust
+      property: ca.crt
+      decodingStrategy: None
