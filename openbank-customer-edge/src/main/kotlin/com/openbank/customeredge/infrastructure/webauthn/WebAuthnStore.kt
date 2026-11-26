@@ -45,21 +45,19 @@ class WebAuthnStore(private val redis: RedisDataSource, private val objectMapper
         values.set(key(credential.credentialId), objectMapper.writeValueAsString(credential))
     }
 
-    fun recordAssertion(credential: RegisteredCredential, signCount: Long): Boolean {
-        return redis.execute(
-            "EVAL",
-            UPDATE_ASSERTION,
-            "1",
-            key(credential.credentialId),
-            credential.partyId,
-            credential.keycloakUserId,
-            credential.attestedCredentialDataB64,
-            credential.signCount.toString(),
-            credential.firstVerifiedAtEpochMillis?.toString().orEmpty(),
-            signCount.toString(),
-            System.currentTimeMillis().toString(),
-        ).toInteger() == 1
-    }
+    fun recordAssertion(credential: RegisteredCredential, signCount: Long): Boolean = redis.execute(
+        "EVAL",
+        UPDATE_ASSERTION,
+        "1",
+        key(credential.credentialId),
+        credential.partyId,
+        credential.keycloakUserId,
+        credential.attestedCredentialDataB64,
+        credential.signCount.toString(),
+        credential.firstVerifiedAtEpochMillis?.toString().orEmpty(),
+        signCount.toString(),
+        System.currentTimeMillis().toString(),
+    ).toInteger() == 1
 
     fun find(credentialId: String): RegisteredCredential? {
         val json = values.get(key(credentialId)) ?: return null

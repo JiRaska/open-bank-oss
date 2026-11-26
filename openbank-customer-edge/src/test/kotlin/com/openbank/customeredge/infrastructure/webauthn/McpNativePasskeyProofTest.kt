@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.webauthn
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.webauthn4j.util.Base64UrlUtil
 import io.mockk.every
 import io.mockk.mockk
@@ -26,7 +27,7 @@ class McpNativePasskeyProofTest {
         UUID.fromString("80c16597-3f4a-44eb-8fcf-395bdef9ee06"),
         "synthetic-customer",
         "synthetic-mcp",
-        "A".repeat(43),
+        McpNativeParBinding.Dpop("A".repeat(43)),
         "2".repeat(64),
         now.plusSeconds(60).epochSecond,
     )
@@ -54,9 +55,20 @@ class McpNativePasskeyProofTest {
     @Test
     fun `completion requires the challenged connect and exact customer credential`() {
         every { challenges.claim(CHALLENGE) } returns binding andThen null
-        assertThat(service.complete(binding.copy(parJkt = "B".repeat(43)), assertion())).isNull()
+        assertThat(service.complete(binding.copy(parBinding = McpNativeParBinding.ConfidentialClient), assertion())).isNull()
         assertThat(service.complete(binding, assertion())).isNull()
         verify(exactly = 0) { credentials.find(any()) }
+    }
+
+    @Test
+    fun `Redis binding serialization distinguishes hosted PAR from DPoP without synthesizing a key`() {
+        val mapper = jacksonObjectMapper()
+        val hosted = binding.copy(parBinding = McpNativeParBinding.ConfidentialClient)
+        for (fixture in listOf(binding, hosted)) {
+            val wire = mapper.writeValueAsString(fixture)
+            assertThat(mapper.readValue(wire, McpNativePasskeyBinding::class.java)).isEqualTo(fixture)
+        }
+        assertThat(mapper.writeValueAsString(hosted)).contains("confidential_client").doesNotContain("thumbprint")
     }
 
     @Test

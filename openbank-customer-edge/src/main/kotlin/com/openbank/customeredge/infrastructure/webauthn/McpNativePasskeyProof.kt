@@ -4,6 +4,8 @@
 
 package com.openbank.customeredge.infrastructure.webauthn
 
+import com.fasterxml.jackson.annotation.JsonSubTypes
+import com.fasterxml.jackson.annotation.JsonTypeInfo
 import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.webauthn4j.util.Base64UrlUtil
@@ -20,19 +22,41 @@ import java.util.Base64
 import java.util.HexFormat
 import java.util.UUID
 
+/** An authority-authenticated PAR mode. Hosted assertions do not manufacture a DPoP thumbprint. */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes(
+    JsonSubTypes.Type(value = McpNativeParBinding.Dpop::class, name = "dpop"),
+    JsonSubTypes.Type(value = McpNativeParBinding.ConfidentialClient::class, name = "confidential_client"),
+)
+internal sealed interface McpNativeParBinding {
+    data class Dpop(val thumbprint: String) : McpNativeParBinding {
+        init {
+            require(PAR_THUMBPRINT.matches(thumbprint))
+            val decoded = Base64UrlUtil.decode(thumbprint)
+            require(decoded.size == SHA256_BYTES && Base64UrlUtil.encodeToString(decoded) == thumbprint)
+        }
+
+        private companion object {
+            const val SHA256_BYTES = 32
+            val PAR_THUMBPRINT = Regex("[A-Za-z0-9_-]{43}")
+        }
+    }
+
+    data object ConfidentialClient : McpNativeParBinding
+}
+
 /** Supplied by bank authority state and the authenticated app identity, never by the wire DTO. */
 internal data class McpNativePasskeyBinding(
     val requestRef: String,
     val partyId: UUID,
     val keycloakUserId: String,
     val clientId: String,
-    val parJkt: String,
+    val parBinding: McpNativeParBinding,
     val contextSha256: String,
     val expiresAtEpochSecond: Long,
 ) {
     init {
         require(REFERENCE.matches(requestRef) && REFERENCE.matches(contextSha256))
-        require(PAR_THUMBPRINT.matches(parJkt))
         require(keycloakUserId.isNotBlank() && keycloakUserId.length <= MAX_ID_LENGTH)
         require(clientId.isNotBlank() && clientId.length <= MAX_ID_LENGTH)
     }
@@ -40,7 +64,6 @@ internal data class McpNativePasskeyBinding(
     private companion object {
         const val MAX_ID_LENGTH = 255
         val REFERENCE = Regex("[0-9a-f]{64}")
-        val PAR_THUMBPRINT = Regex("[A-Za-z0-9_-]{43}")
     }
 }
 
