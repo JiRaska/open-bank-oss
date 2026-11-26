@@ -103,6 +103,7 @@ class McpOAuthHandoffStoreIT {
         assertThat(handoffs.markProven(binding.requestRef, owner, reference())).isFalse()
         assertThat(handoffs.consume(token, binding)).isNull()
         assertThat(handoffs.markProven(binding.requestRef, owner, digest)).isTrue()
+        assertThat(handoffs.attestSelectedContext(token, binding, digest)).isTrue()
         assertThat(handoffs.consume(token, binding)).isEqualTo(McpOAuthHandoffStore.Receipt(owner, digest))
         assertThat(handoffs.consume(token, binding)).isNull()
         assertThat(requests.findForParty(owner.partyId, binding.requestRef)?.contextSha256).isNull()
