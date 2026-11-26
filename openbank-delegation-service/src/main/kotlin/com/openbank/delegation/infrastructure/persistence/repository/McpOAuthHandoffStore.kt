@@ -163,6 +163,12 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         return Receipt(identity, row.getString("context_sha256"))
     }
 
+    /** Keep expired digests as replay tombstones before deleting them in small batches. */
+    suspend fun purgeExpired(limit: Int): Int {
+        require(limit in 1..MAX_PURGE_ROWS) { "handoff purge limit must be between 1 and $MAX_PURGE_ROWS" }
+        return pool.preparedQuery(PURGE).execute(Tuple.of(limit)).awaitSuspending().rowCount()
+    }
+
     private class RegistrationConflict : RuntimeException()
 
     private fun Row.connectRequest(party: UUID): McpConnectRequestStore.Request = McpConnectRequestStore.Request(
@@ -209,6 +215,7 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         .addOffsetDateTime(OffsetDateTime.ofInstant(Instant.ofEpochSecond(expiresAtEpochSecond), ZoneOffset.UTC))
 
     private companion object {
+        const val MAX_PURGE_ROWS = 1_000
         const val MAX_CLIENT_LENGTH = 255
         const val MAX_URI_LENGTH = 2048
         const val MAX_EXPIRES_AT = 253_402_300_799L // Last epoch second in ISO year 9999.
@@ -291,6 +298,19 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
                 AND h.expires_at > clock_timestamp() AND h.claimed_at IS NOT NULL
                 AND h.proved_at IS NULL AND h.consumed_at IS NULL AND h.selected_context_sha256 = $4
                 AND EXISTS (SELECT 1 FROM mcp_connect_requests AS r WHERE $CONNECT_MATCH)
+        """
+        // Retain the request reference beyond the full guarded OAuth session lifetime.
+        const val PURGE = """
+            WITH expired AS (
+                SELECT token_sha256 FROM mcp_oauth_handoffs
+                WHERE expires_at <= statement_timestamp() - INTERVAL '15 minutes'
+                ORDER BY expires_at, token_sha256
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+            )
+            DELETE FROM mcp_oauth_handoffs AS handoffs
+            USING expired
+            WHERE handoffs.token_sha256 = expired.token_sha256
         """
         const val CONSUME = """
             UPDATE mcp_oauth_handoffs AS h

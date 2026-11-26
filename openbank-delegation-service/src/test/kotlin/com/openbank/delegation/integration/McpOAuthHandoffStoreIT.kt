@@ -12,7 +12,10 @@ import com.openbank.libs.security.McpConnectContextV2
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
+import io.vertx.mutiny.sqlclient.Pool
+import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +36,9 @@ class McpOAuthHandoffStoreIT {
 
     @Inject
     lateinit var requests: McpConnectRequestStore
+
+    @Inject
+    lateinit var pool: Pool
 
     @Test
     fun `concurrent claims register one visible request and allow same owner retry`(): Unit = onEventLoop {
@@ -108,6 +114,43 @@ class McpOAuthHandoffStoreIT {
         assertThat(handoffs.consume(token, binding)).isEqualTo(McpOAuthHandoffStore.Receipt(owner, digest))
         assertThat(handoffs.consume(token, binding)).isNull()
         assertThat(requests.findForParty(owner.partyId, binding.requestRef)?.contextSha256).isNull()
+    }
+
+    @Test
+    fun `expiry cleanup is bounded and keeps replay tombstones and Connect rows`(): Unit = onEventLoop {
+        val older = binding()
+        val old = binding()
+        val recent = binding()
+        val active = binding()
+        val owner = claim()
+        val tokens = List(4) { reference() }
+        listOf(older, old, recent, active).forEachIndexed { index, candidate ->
+            assertThat(handoffs.issue(tokens[index], candidate)).isTrue()
+        }
+        assertThat(requests.register(older.request(owner.partyId))).isTrue()
+        agePendingHandoff(tokens[0], 30)
+        agePendingHandoff(tokens[1], 20)
+        agePendingHandoff(tokens[2], 5)
+
+        assertThat(handoffs.purgeExpired(limit = 1)).isEqualTo(1)
+        assertThat(handoffs.issue(tokens[0], older)).isTrue()
+        assertThat(handoffs.issue(tokens[1], old)).isFalse()
+        assertThat(handoffs.purgeExpired(limit = 1)).isEqualTo(1)
+        assertThat(handoffs.purgeExpired(limit = 1)).isEqualTo(0)
+        assertThat(handoffs.issue(tokens[2], recent)).isFalse()
+        assertThat(handoffs.issue(tokens[3], active)).isFalse()
+        assertThat(requests.findForParty(owner.partyId, older.requestRef)).isNotNull()
+    }
+
+    private suspend fun agePendingHandoff(token: String, minutes: Int) {
+        pool.preparedQuery(
+            """
+            UPDATE mcp_oauth_handoffs
+            SET created_at = statement_timestamp() - (($2::int + 1) * INTERVAL '1 minute'),
+                expires_at = statement_timestamp() - ($2::int * INTERVAL '1 minute')
+            WHERE token_sha256 = $1 AND claimed_at IS NULL
+            """.trimIndent(),
+        ).execute(Tuple.of(token, minutes)).awaitSuspending()
     }
 
     private fun reference() = UUID.randomUUID().toString().replace("-", "").repeat(2)
