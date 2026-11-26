@@ -393,3 +393,7 @@ The named TLS bucket reloads certificate material hourly. A matching `Certificat
 ## Synthetic transfer admission (#7284)
 
 The synthetic transfer admission requires the verified canary client and the authenticated taint decision. It resolves an active SYNTHETIC party and checks ownership of the configured account pair before calling Transaction. The customer supplies only the run date and direction.
+
+## Native MCP passkey verification
+
+The app presents an opaque handoff only through an authenticated own-party session. Edge resolves the selected accounts and request binding from Delegation. It consumes a dedicated one-use WebAuthn challenge, verifies user presence and user verification, and accepts only the stored credential for the same customer and Keycloak subject. Missing age evidence fails closed until the verified 72-hour lower bound is met. Successful proof is recorded only at the bank authority. The app still requires a separate SCA approval and receives no OAuth code or passkey evidence from Edge.
