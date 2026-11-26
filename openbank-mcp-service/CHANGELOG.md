@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.20.0...mcp-service-v0.21.0) (2026-11-26)
+
+
+### Features
+
+* **infra:** connect hosted MCP OAuth through the native bank passkey ([#17327](https://github.com/JiRaska/open-bank-oss/issues/17327)) ([ceb01bb](https://github.com/JiRaska/open-bank-oss/commit/ceb01bb689e593447527363b86b16f5a4439709b))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.19.0...mcp-service-v0.20.0) (2026-11-25)
 
 

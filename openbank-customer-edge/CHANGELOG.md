@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.1...customer-edge-v1.15.0) (2026-11-26)
+
+
+### Features
+
+* **infra:** connect hosted MCP OAuth through the native bank passkey ([#17327](https://github.com/JiRaska/open-bank-oss/issues/17327)) ([ceb01bb](https://github.com/JiRaska/open-bank-oss/commit/ceb01bb689e593447527363b86b16f5a4439709b))
+
 ## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.0...customer-edge-v1.14.1) (2026-11-26)
 
 
