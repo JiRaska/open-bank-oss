@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.21.0...mcp-service-v0.22.0) (2026-11-26)
+
+
+### Features
+
+* **mcp-service:** bridge hosted OAuth to native bank approval ([#17364](https://github.com/JiRaska/open-bank-oss/issues/17364)) ([125f689](https://github.com/JiRaska/open-bank-oss/commit/125f6898c3738fcab6fda6a1c71b296582551047))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.20.0...mcp-service-v0.21.0) (2026-11-26)
 
 
