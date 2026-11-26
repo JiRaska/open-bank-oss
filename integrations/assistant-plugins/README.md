@@ -96,13 +96,20 @@ The bank admits only two kinds of client:
 - a **Tier L** local client that uses **DPoP**, with a loopback redirect on `127.0.0.1` or
   `[::1]`. `localhost` is not accepted.
 
+The hosted ChatGPT package uses `https://mcp.open-bank.tech/customer/hosted-mcp`.
+The server's protected-resource metadata advertises the hosted OAuth issuer at
+`https://mcp.open-bank.tech/oauth/hosted`. The ChatGPT manifest relies on discovery
+for OAuth and carries no credentials. The Codex overlay uses the baseline server declaration. The hosted ChatGPT sandbox
+supports listing connected accounts and reading balances. Release requires the
+recorded vendor end-to-end checks.
+
 Dynamic client registration is off. **Pre-registration is the default.** CIMD is used only if
 ADR-0385 D7 item 9 shows that Keycloak 26.8.1 supports it, and then only from an allowlisted
 metadata URL, with a pinned hash. A changed document disables the client.
 
 | Platform path | Client identity | Verdict |
 |---|---|---|
-| ChatGPT, published directory app (this ZIP) | Default: a pre-registered ("predefined") client. Whether OpenAI's predefined client can use `private_key_jwt` is unverified. If P3 confirms CIMD: `https://chatgpt.com/oauth/client.json` with `private_key_jwt` and JWKS `https://chatgpt.com/oauth/jwks.json`. Redirect `https://chatgpt.com/connector_platform_oauth_redirect` | **Tier H candidate.** Bank side not built |
+| ChatGPT hosted sandbox (this package) | The hosted issuer advertises CIMD. Client ID `https://chatgpt.com/oauth/client.json`, authentication `private_key_jwt`, JWKS `https://chatgpt.com/oauth/jwks.json`, exact redirect `https://chatgpt.com/connector_platform_oauth_redirect`. | **Tier H candidate.** Vendor end-to-end qualification remains required. |
 | Claude Connectors Directory listing | `oauth_anthropic_creds`: a confidential client whose secret the owner enters in the portal; redirect `https://claude.ai/api/mcp/auth_callback`. The docs offer no `private_key_jwt` for a listing-held client | **Tier H only under the secret exception** (≤ 6 months, owner risk acceptance, expiry enforced, `invalid_client` after). Bank side not built |
 | Claude custom connector added by URL | Anthropic's CIMD as a public client, or DCR; the portal secret is never used | **Not supported by the bank** |
 | Claude Code plugin (`claude-code-plugin/`) | Claude Code's own CIMD, public client, loopback redirect on `localhost`, DPoP not documented | **Not supported by the bank** (Tier L needs DPoP and `127.0.0.1`/`[::1]`) |
