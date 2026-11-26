@@ -19,6 +19,6 @@ mcp_native_app_session if {
 }
 
 prohibited if {
-	input.action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select"}
+	input.action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select", "customer.mcp-native-connect.connections.read", "customer.mcp-native-connect.connections.revoke"}
 	not mcp_native_app_session
 }

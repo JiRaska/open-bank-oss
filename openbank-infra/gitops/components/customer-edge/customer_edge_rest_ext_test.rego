@@ -33,7 +33,7 @@ test_connect_denies_other_clients_or_exchanged_tokens if {
 }
 
 test_native_connect_allows_exact_first_party_app_clients if {
-	every action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select"} {
+	every action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select", "customer.mcp-native-connect.connections.read", "customer.mcp-native-connect.connections.revoke"} {
 		every client in {"openbank-app", "openbank-edge-webauthn"} {
 			rest.allow with input as connect_input(action, {"token_azp": client, "token_act": false})
 		}
@@ -41,7 +41,7 @@ test_native_connect_allows_exact_first_party_app_clients if {
 }
 
 test_native_connect_denies_other_clients_or_actor_context if {
-	every action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select"} {
+	every action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select", "customer.mcp-native-connect.connections.read", "customer.mcp-native-connect.connections.revoke"} {
 		every attrs in [
 			{"token_azp": "third-party-assistant", "token_act": false},
 			{"token_azp": "openbank-edge-webauthn", "token_act": true},

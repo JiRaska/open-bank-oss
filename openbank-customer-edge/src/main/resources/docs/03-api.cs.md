@@ -241,3 +241,9 @@ Bankovní aplikace převezme jednorázovou žádost přes
 Odpovídající endpoint `/native-passkey/complete` zaznamená ověření u bankovní autority
 a vrátí stav 204. Samostatné schválení SCA zůstává povinné. Nativní Connect je ve výchozím
 nastavení vypnutý.
+
+Po zapnutí nativního Connect může zákazník ve vlastní nativní relaci zobrazit svá připojení
+pomocí `GET /mcp/connections` a odvolat konkrétní připojení přes
+`POST /mcp/connections/{connectionId}/revoke`. Edge odvodí identitu zákazníka z ověřené relace
+a Delegation ověří vlastnictví připojení. Úspěšné odvolání vrací 204. Připojení mimo rozsah
+zákazníka vrací 404. Při opakování požadavku zůstává klíčem idempotence stejné ID připojení.
