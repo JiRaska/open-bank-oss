@@ -516,6 +516,7 @@ def self_test() -> int:
 
     run("committed allowlist + realm pass", expect_clean=True)
 
+    hosted_reference = "mcp-hosted-reference"
     native_id = decl0["native_flow"]["id"]
     native_alias = decl0["native_flow"]["alias"]
 
@@ -523,20 +524,20 @@ def self_test() -> int:
         next(c for c in d["clients"] if c["client_id"] == cid)["browser_flow"] = "native-passkey"
 
     opted_in = copy.deepcopy(decl0)
-    select_native(opted_in, H)
+    select_native(opted_in, hosted_reference)
     render = runpy.run_path(str(Path(__file__).with_name("gen-mcp-realm-clients.py")))["render"]
     generated = render(realm0, opted_in, base)
     expected = copy.deepcopy(realm0)
-    client(expected, H)["authenticationFlowBindingOverrides"]["browser"] = native_id
+    client(expected, hosted_reference)["authenticationFlowBindingOverrides"]["browser"] = native_id
     generated_clean = generated == expected and check(opted_in, generated, base, today) == []
     cases.append(("generator changes only the selected hosted client's browser flow", generated_clean))
     print(f"  {'PASS' if generated_clean else 'FAIL'}  {cases[-1][0]}")
 
-    run("native opt-in requires realm parity", mutate_decl=lambda d: select_native(d, H),
+    run("native opt-in requires realm parity", mutate_decl=lambda d: select_native(d, hosted_reference),
         needle="browser flow override")
     run("native opt-in rejects Tier L", mutate_decl=lambda d: select_native(d, L), needle="on a Tier H client")
     run("native override without declaration rejected",
-        mutate_realm=lambda r: client(r, H)["authenticationFlowBindingOverrides"].update(browser=native_id),
+        mutate_realm=lambda r: client(r, hosted_reference)["authenticationFlowBindingOverrides"].update(browser=native_id),
         needle="browser flow override")
     run("native flow cannot replace the realm browser default",
         mutate_realm=lambda r: r.update(browserFlow=native_alias), needle="only be bound to a declared Tier H client")
