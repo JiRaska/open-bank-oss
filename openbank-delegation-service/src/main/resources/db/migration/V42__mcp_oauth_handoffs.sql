@@ -18,6 +18,7 @@ CREATE TABLE mcp_oauth_handoffs (
     party_id UUID,
     keycloak_subject VARCHAR(255),
     claimed_at TIMESTAMPTZ,
+    selected_context_sha256 CHAR(64) CHECK (selected_context_sha256 ~ '^[0-9a-f]{64}$'),
     context_sha256 CHAR(64) CHECK (context_sha256 ~ '^[0-9a-f]{64}$'),
     proved_at TIMESTAMPTZ,
     consumed_at TIMESTAMPTZ,
@@ -26,7 +27,9 @@ CREATE TABLE mcp_oauth_handoffs (
     CHECK ((party_id IS NULL) = (claimed_at IS NULL)),
     CHECK ((keycloak_subject IS NULL) = (claimed_at IS NULL)),
     CHECK (claimed_at IS NULL OR (claimed_at >= created_at AND claimed_at < expires_at)),
+    CHECK (selected_context_sha256 IS NULL OR claimed_at IS NOT NULL),
     CHECK ((context_sha256 IS NULL) = (proved_at IS NULL)),
+    CHECK (context_sha256 IS NULL OR context_sha256 IS NOT DISTINCT FROM selected_context_sha256),
     CHECK (proved_at IS NULL OR (claimed_at IS NOT NULL AND proved_at >= claimed_at AND proved_at < expires_at)),
     CHECK (consumed_at IS NULL OR (proved_at IS NOT NULL AND consumed_at >= proved_at AND consumed_at < expires_at))
 );
