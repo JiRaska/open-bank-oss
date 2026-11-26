@@ -257,8 +257,10 @@ spec:
             # -> delegation call timed out for as long as this line was missing.
             - name: MCP_CONNECT_ENABLED
               value: "true"
-            # Private authority for the native passkey handoff. The feature remains off until
-            # the user-facing OAuth and mobile release are qualified.
+            # Enable the private native handoff transport in the shared sandbox.
+            # Hosted OAuth client binding is managed separately in Keycloak.
+            - name: MCP_NATIVE_CONNECT_ENABLED
+              value: "true"
             - name: MCP_NATIVE_CONNECT_AUTHORITY_URL
               value: https://delegation-service.delegation.svc:8443
             - name: DELEGATION_SERVICE_URL

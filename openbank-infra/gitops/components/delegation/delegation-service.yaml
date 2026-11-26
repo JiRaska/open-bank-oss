@@ -139,6 +139,8 @@ spec:
             # Connect receipt uses SCA's private mTLS listener and the mounted Delegation certificate.
             - name: DELEGATION_MCP_CONNECT_ENABLED
               value: "true"
+            - name: DELEGATION_MCP_NATIVE_HANDOFF_ENABLED
+              value: "true"
             - name: MCP_CONNECT_SCA_RECEIPT_URL
               value: https://sca-service.sca.svc:8443
             - name: MCP_CONNECT_SCA_TLS_CONFIGURATION
