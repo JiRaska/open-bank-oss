@@ -187,6 +187,10 @@ spec:
               value: $(MCP_READ_DELEGATION_ORIGIN)
             - name: MCP_CONNECT_V2_ENABLED
               value: "true"
+            # Reviewed inline public key digest for the customer-only static CIMD discovery provider.
+            # Promote the provider-bearing image before applying this pin.
+            - name: MCP_CHATGPT_CIMD_STATIC_JWKS_SHA256
+              value: "54142eab824791d7891f1eb448dda346420072ebbbd9294ee802a8f7b5a0244c"
             - name: MCP_READ_DEPLOYMENT
               value: shared-sandbox
             - name: MCP_READ_CONNECTION_BINDING_ENABLED

@@ -481,3 +481,15 @@ Before approving a ChatGPT static CIMD pin or key rotation, run
 `python3 .github/scripts/verify-chatgpt-cimd-pin.py` from an approved operator workstation.
 It reads the two exact public vendor documents, compares them with the reviewed registration
 and inline public key, and prints the digest to compare with the sandbox deployment pin.
+
+Promote and verify the signed, optimized Keycloak image containing the scoped static-CIMD
+provider before applying its digest pin in the shared sandbox Deployment. The exact registered
+ChatGPT client must independently pass the enabled, callback, native browser flow, confidential
+RS256, S256 and PAR checks. Vendor activation and a successful authenticated PAR remain separate
+from the pin rollout.
+
+After the new pod is Ready and the old pod is gone, GET the customers realm's OpenID
+configuration and issuer-rooted OAuth authorization-server metadata. Both omit CIMD while the
+exact client is disabled. During the approved pilot, both advertise CIMD with the same issuer,
+PAR endpoints and authentication methods. Confirm an unrelated realm still omits CIMD. Roll back
+by reverting only the pin and verifying omission after the replacement pod is Ready.
