@@ -566,3 +566,7 @@ so their recorded plaintext transport debt still applies. Missing or mismatched 
 material can interrupt the private path. Before activation, verify that the deployed listener
 rejects clients without the expected certificate and that the authenticated customer flow
 succeeds. Roll back through GitOps and keep admission disabled.
+
+## Shared Delegation authority listener
+
+The Delegation HTTPS listener also admits the Customer Edge workload for native MCP authorization handoff. Delegation separates the two call paths by the exact workload principals and permitted operations. Balance requests its grant checks over this private listener with the dedicated staff read identity. Rollback removes the Customer Edge peer without deleting the authority listener.
