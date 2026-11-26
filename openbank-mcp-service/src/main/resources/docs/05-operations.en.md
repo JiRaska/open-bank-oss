@@ -190,7 +190,7 @@ credential, not that the token was rejected.
 
 The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow by default. A reviewed Tier H registration can declare `browser_flow: native-passkey` to use the dedicated mobile handoff and withheld-code flow. The app verifies a passkey bound to the authorization request, and Keycloak withholds the code until separate SCA completes. The `mcp-client-realm-parity` gate verifies the client-specific binding and the required flow steps.
 
-While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order.
+While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order. The ChatGPT and Claude registrations select the native flow in the generated template. Activation in an existing sandbox realm requires a separate, targeted runtime reconciliation and a readback of the client bindings before enabling either registration.
 
 ## Customer channel admission (ADR-0385)
 

@@ -261,7 +261,7 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
 
     # Review of #16672 (6): Keycloak's built-in executors, bound per tier by the tier attribute.
     for tier in sorted({c.get("tier") for c in decl.get("clients") or []} & set(BUILTIN_EXECUTORS)):
-        have: set[str] = set()
+        executors: list[dict] = []
         for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
             if pol.get("enabled") is not True or len(pol.get("conditions") or []) != 1:
                 continue
@@ -274,8 +274,12 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             if (cond.get("condition") != "client-attributes" or conf.get("is_negative_logic") not in (None, False, "false")
                     or attrs != [{"key": TIER_ATTR, "value": tier}]):
                 continue
-            have |= {e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []}
-        missing = BUILTIN_EXECUTORS[tier] - have
+            executors.extend(e for name in pol.get("profiles") or []
+                             for e in (profiles.get(name) or {}).get("executors") or [])
+        missing = BUILTIN_EXECUTORS[tier] - {e.get("executor") for e in executors}
+        if any(e.get("executor") == "reject-ropc-grant"
+               and (e.get("configuration") or {}).get("auto-configure") != "false" for e in executors):
+            f.append(f"realm: {TIER_ATTR}={tier} reject-ropc-grant requires explicit auto-configure=false")
         if missing:
             f.append(f"realm: no enabled client-attributes policy on {TIER_ATTR}={tier} binds the built-in "
                      f"executor(s) {sorted(missing)} (review of #16672: a weakened client attribute must not reopen them)")
@@ -516,6 +520,7 @@ def self_test() -> int:
 
     run("committed allowlist + realm pass", expect_clean=True)
 
+    hosted_reference = "mcp-hosted-reference"
     native_id = decl0["native_flow"]["id"]
     native_alias = decl0["native_flow"]["alias"]
 
@@ -523,20 +528,20 @@ def self_test() -> int:
         next(c for c in d["clients"] if c["client_id"] == cid)["browser_flow"] = "native-passkey"
 
     opted_in = copy.deepcopy(decl0)
-    select_native(opted_in, H)
+    select_native(opted_in, hosted_reference)
     render = runpy.run_path(str(Path(__file__).with_name("gen-mcp-realm-clients.py")))["render"]
     generated = render(realm0, opted_in, base)
     expected = copy.deepcopy(realm0)
-    client(expected, H)["authenticationFlowBindingOverrides"]["browser"] = native_id
+    client(expected, hosted_reference)["authenticationFlowBindingOverrides"]["browser"] = native_id
     generated_clean = generated == expected and check(opted_in, generated, base, today) == []
     cases.append(("generator changes only the selected hosted client's browser flow", generated_clean))
     print(f"  {'PASS' if generated_clean else 'FAIL'}  {cases[-1][0]}")
 
-    run("native opt-in requires realm parity", mutate_decl=lambda d: select_native(d, H),
+    run("native opt-in requires realm parity", mutate_decl=lambda d: select_native(d, hosted_reference),
         needle="browser flow override")
     run("native opt-in rejects Tier L", mutate_decl=lambda d: select_native(d, L), needle="on a Tier H client")
     run("native override without declaration rejected",
-        mutate_realm=lambda r: client(r, H)["authenticationFlowBindingOverrides"].update(browser=native_id),
+        mutate_realm=lambda r: client(r, hosted_reference)["authenticationFlowBindingOverrides"].update(browser=native_id),
         needle="browser flow override")
     run("native flow cannot replace the realm browser default",
         mutate_realm=lambda r: r.update(browserFlow=native_alias), needle="only be bound to a declared Tier H client")
@@ -604,6 +609,10 @@ def self_test() -> int:
     run("built-in reject-ropc-grant dropped flagged",
         mutate_realm=lambda r: [p.update(executors=[e for e in p["executors"] if e["executor"] != "reject-ropc-grant"])
                                 for p in r["clientProfiles"]["profiles"]], needle="reject-ropc-grant")
+    run("reject-ropc-grant without explicit auto-configure flagged",
+        mutate_realm=lambda r: [e.update(configuration={}) for p in r["clientProfiles"]["profiles"]
+                                for e in p["executors"] if e["executor"] == "reject-ropc-grant"],
+        needle="reject-ropc-grant requires explicit auto-configure=false")
     run("Tier L DPoP profile unbound flagged",
         mutate_realm=lambda r: tier_policy(r, "L").update(profiles=["openbank-mcp-oauth-hardening"]), needle="dpop-bind-enforcer")
     run("tier condition with two values for one key (inert in Keycloak) flagged",

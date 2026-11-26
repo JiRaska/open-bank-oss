@@ -76,6 +76,7 @@ clients:
   - client_id: https://chatgpt.com/oauth/client.json
     tier: H
     enabled: false
+    browser_flow: native-passkey
     display_name: "ChatGPT"
     redirect_uris:
       - https://chatgpt.com/connector_platform_oauth_redirect
@@ -88,6 +89,7 @@ clients:
   - client_id: mcp-claude-sandbox
     tier: H
     enabled: false
+    browser_flow: native-passkey
     display_name: "Claude"
     redirect_uris:
       - https://claude.ai/api/mcp/auth_callback
