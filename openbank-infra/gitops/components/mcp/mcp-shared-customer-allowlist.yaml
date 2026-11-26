@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mcp-shared-customer-allowlist-v2
+  name: mcp-shared-customer-allowlist-v3
   namespace: platform
 data:
   allowlist.yaml: |
@@ -79,7 +79,7 @@ data:
     clients:
       - client_id: https://chatgpt.com/oauth/client.json
         tier: H
-        enabled: false
+        enabled: true
         display_name: "ChatGPT"
         redirect_uris:
           - https://chatgpt.com/connector_platform_oauth_redirect
