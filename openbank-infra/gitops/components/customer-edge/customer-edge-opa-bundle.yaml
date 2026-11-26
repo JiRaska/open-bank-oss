@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "d1b1742ff09d3604"
+    openbank.tech/policy-checksum: "2368c958ddbe8525"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -860,7 +860,7 @@ data:
     }
 
     prohibited if {
-        input.action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select"}
+        input.action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select", "customer.mcp-native-connect.connections.read", "customer.mcp-native-connect.connections.revoke"}
         not mcp_native_app_session
     }
   agents.rego: |
