@@ -8,6 +8,7 @@ import com.openbank.delegation.infrastructure.persistence.repository.McpOAuthHan
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import io.quarkus.security.identity.SecurityIdentity
+import io.vertx.core.http.HttpServerRequest
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
@@ -18,6 +19,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -32,6 +34,9 @@ class McpNativeHandoffIssuerResource(
     private val store: McpOAuthHandoffStore,
     private val identity: SecurityIdentity,
 ) {
+    @Context
+    lateinit var request: HttpServerRequest
+
     data class BindingRequest(val tokenSha256: String, val binding: McpOAuthHandoffStore.Binding)
 
     data class Attestation(
@@ -108,7 +113,7 @@ class McpNativeHandoffIssuerResource(
     }
 
     private fun requireIssuer(party: String?) {
-        settings.requireEnabled()
+        settings.requireEnabled(request)
         if (party != null || ServiceAccountIdentity.verifiedClientId(identity) != "openbank-keycloak-mcp") {
             throw ForbiddenException("native handoff issuance is reserved to Keycloak")
         }
@@ -122,7 +127,8 @@ class McpNativeHandoffSettings(
     @ConfigProperty(name = "openbank.delegation.mcp-native-handoff-enabled", defaultValue = "false")
     private val handoffEnabled: Boolean,
 ) {
-    fun requireEnabled() {
+    fun requireEnabled(request: HttpServerRequest) {
         if (!connectEnabled || !handoffEnabled) throw NotFoundException()
+        if (!request.isSSL) throw ForbiddenException("native handoff requires HTTPS")
     }
 }

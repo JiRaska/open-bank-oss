@@ -6,6 +6,7 @@ package com.openbank.delegation.infrastructure.rest
 
 import com.openbank.delegation.infrastructure.persistence.repository.McpOAuthHandoffStore
 import com.openbank.libs.authz.Authorize
+import io.vertx.core.http.HttpServerRequest
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -14,6 +15,7 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.util.UUID
@@ -27,6 +29,9 @@ class McpNativeHandoffCustomerResource(
     private val customerAccess: McpConnectCustomerAccess,
     private val store: McpOAuthHandoffStore,
 ) {
+    @Context
+    lateinit var request: HttpServerRequest
+
     data class ClaimRequest(val tokenSha256: String, val keycloakSubject: String)
 
     data class ClaimReceipt(val requestRef: String)
@@ -106,7 +111,7 @@ class McpNativeHandoffCustomerResource(
     }
 
     private fun requireCustomer(party: UUID?): UUID {
-        settings.requireEnabled()
+        settings.requireEnabled(request)
         return customerAccess.requireCustomer(party)
     }
 }
