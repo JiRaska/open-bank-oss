@@ -8847,3 +8847,17 @@ gates:
     min_subjects: 40   # 64 candidate sources derived 2026-11-18
     run: |
       python3 .github/scripts/check-identifier-validator-inventory.py
+
+  - id: repository-root-layout
+    name: "Repository root contains only declared entry points and Gradle modules"
+    group: lint
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 100
+    rationale: "Reject accidentally staged scratch files and unowned root directories, including force-added ignored output; keep module discovery aligned with Gradle."
+    review_after: "2027-04-03"
+    selftest: python3 .github/scripts/check-repository-root.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-repository-root.py"]
+    run: |
+      python3 .github/scripts/check-repository-root.py

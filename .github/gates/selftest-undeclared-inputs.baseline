@@ -69,7 +69,6 @@ gate-script-registration CODEOWNERS
 gate-script-registration CODE_OF_CONDUCT.md
 gate-script-registration CONTRIBUTING.md
 gate-script-registration DEPLOYMENT.md
-gate-script-registration Dockerfile.scanner
 gate-script-registration GOVERNANCE.md
 gate-script-registration LICENSE
 gate-script-registration LICENSES/

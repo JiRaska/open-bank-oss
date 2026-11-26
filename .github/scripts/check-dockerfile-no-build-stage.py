@@ -105,7 +105,6 @@ EXPOSE_LINE_RE = re.compile(r"^EXPOSE\s+\d+\s*\n", re.M)
 # base and so must track it. None is referenced by any workflow or script today —
 # they are declarations, same as the per-service ones, and drift the same way.
 EXTRA_FLEET_BASE = [
-    "Dockerfile.scanner",
     "openbank-security-scanner/Dockerfile.prebuilt",
     "openbank-notification-service/Dockerfile.runtime",
 ]
@@ -299,12 +298,14 @@ def self_test() -> int:
 
         # An EXTRA_FLEET_BASE file must be in scope too, not just the glob.
         drifted.write_text(prose + good + "\nEXPOSE 8101\n")
-        (tmp / EXTRA_FLEET_BASE[0]).write_text(prose + bad + "\nEXPOSE 8120\n")
+        extra = tmp / EXTRA_FLEET_BASE[0]
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text(prose + bad + "\nEXPOSE 8120\n")
         if not any(EXTRA_FLEET_BASE[0] in p for p in check_fleet_bases(tmp)):
             failures.append(f"{EXTRA_FLEET_BASE[0]} drift was NOT flagged (out of scope)")
 
         # A SELF_BUILT directory has its own base on purpose and must be exempt.
-        (tmp / EXTRA_FLEET_BASE[0]).unlink()
+        extra.unlink()
         exempt = tmp / next(iter(SELF_BUILT))
         exempt.mkdir()
         (exempt / "Dockerfile").write_text(prose + bad + "\nEXPOSE 3000\n")

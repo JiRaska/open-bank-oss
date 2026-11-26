@@ -29,7 +29,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Beta — status verified 2026-10-30.** M1 complete; M2 (resilience), M3 (compliance evidence), M4 (observability) and M5 (security) are all substantially delivered and in their long tail; M6/M7 (multi-region) not started. The intra-bank money path runs end-to-end on Temporal, the ISO 20022 pipeline, clearing simulator and net-settlement ledger leg are wired, and the platform has grown from a payments core into treasury/ALM, card processing, KYB, engagement and pensions. Live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Beta.** The [roadmap](docs/ROADMAP.md) tracks milestone status and separates implemented capabilities from sandbox evidence. The intra-bank money path runs end-to-end on Temporal, the ISO 20022 pipeline, clearing simulator and net-settlement ledger leg are wired, and the platform has grown from a payments core into treasury/ALM, card processing, KYB, engagement and pensions. Live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 **At a glance** (measured on `main`, 2026-10-30):
 
@@ -104,7 +104,7 @@ See the full list in [docs/ROADMAP.md — Known gaps](docs/ROADMAP.md#known-gaps
 
 ## Quick Start (Local Docker)
 
-**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (the full fleet is 70+ services — start a subset for day-to-day work).
+**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (start a subset for day-to-day work).
 
 ```bash
 cd openbank-infra

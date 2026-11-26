@@ -5,7 +5,7 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 # OpenBank — Architecture
 
-This is the contributor-facing technical map of OpenBank: how ~34 microservices, two
+This is the contributor-facing technical map of OpenBank: how the domain services, two
 front-ends, and a shared library fit into one banking platform, and which patterns you
 must follow when you add to it.
 
@@ -37,7 +37,7 @@ flowchart LR
   tpp["TPP / fintech<br/>(PSD2 XS2A)"] --> psd2["psd2-service<br/>+ developer-portal"]
   agent["AI agent<br/>(MCP client)"] --> agentsvc["agent-service<br/>(policy-gated MCP)"]
 
-  edge --> mesh[" Domain services<br/>(~34 Quarkus/Kotlin) "]
+  edge --> mesh[" Domain services<br/>(Quarkus/Kotlin) "]
   admin --> mesh
   psd2 --> mesh
   agentsvc --> mesh
@@ -80,7 +80,7 @@ Why it matters for contributors: business logic is testable without a container 
 tests with mocked ports), and a framework swap never reaches the domain. Shared runtime
 plumbing — `Money`, IBAN, idempotency, audit, outbox base entity, `ServiceInfo`,
 API-version filter, authz — lives in **`openbank-libs`** (being split into `openbank-libs-domain`
-and `openbank-libs-runtime` per ADR-0122) so the 33 services don't re-implement it
+and `openbank-libs-runtime` per ADR-0122) so services don't re-implement it
 (ADR-0013, ADR-0014, ADR-0049).
 
 Each service owns its **own Postgres database** (ADR-0009) — no shared schema, no

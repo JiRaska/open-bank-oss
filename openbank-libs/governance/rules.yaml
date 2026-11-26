@@ -5507,3 +5507,67 @@ outgoing_payment_rails_screening:
     - openbank-fx-service
     - openbank-swift-service
     - openbank-sdd-service
+
+repository_root_layout:
+  gate: repository-root-layout
+  enforced: block
+  ci_producer: .github/scripts/check-repository-root.py
+  files:
+    - .dockerignore
+    - .editorconfig
+    - .gitattributes
+    - .gitignore
+    - .gitleaks.toml
+    - .gitleaksignore
+    - .pre-commit-config.yaml
+    - .release-please-manifest.json
+    - .trivyignore
+    - AGENTS.md
+    - ARCHITECTURE.md
+    - CITATION.cff
+    - CLAUDE.md
+    - CODEOWNERS
+    - CODE_OF_CONDUCT.md
+    - CONTRIBUTING.md
+    - DEPLOYMENT.md
+    - GOVERNANCE.md
+    - LICENSE
+    - NOTICE
+    - README.md
+    - RELEASE_NOTES.md
+    - REUSE.toml
+    - SECURITY.md
+    - SPONSORS.md
+    - SUPPORT.md
+    - TRADEMARKS.md
+    - build.gradle.kts
+    - codecov.yml
+    - gradle.properties
+    - gradlew
+    - release-please-config.json
+    - settings.gradle.kts
+  directories:
+    - .clusterfuzzlite
+    - .devcontainer
+    - .github
+    - .security
+    - .semgrep
+    - LICENSES
+    - build-logic
+    - ci
+    - config
+    - docs
+    - e2e
+    - evals
+    - fuzz
+    - gradle
+    - integrations
+    - openbank-admin-ui
+    - openbank-api-gateway
+    - openbank-contracts
+    - openbank-developer-portal
+    - openbank-document-renderer
+    - openbank-infra
+    - pacts
+    - perf
+    - scripts
