@@ -90,7 +90,10 @@ class McpNativeConnectResourceTest {
         verify(exactly = 0) { proofs.begin(any()) }
         selected()
         every { proofs.complete(any(), ASSERTION) } returns null
-        assertThat(resource().complete(null, REQUEST, ASSERTION).status).isEqualTo(403)
+        val refused = resource().complete(null, REQUEST, ASSERTION)
+        assertThat(refused.status).isEqualTo(403)
+        assertThat(mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(refused.entity).toString())
+            .contains("Passkey proof refused")
         verify(exactly = 0) { upstream.postToService(ORIGIN, "$BASE/$REQUEST/mark-verified", PARTY, any(), REQUEST) }
     }
 

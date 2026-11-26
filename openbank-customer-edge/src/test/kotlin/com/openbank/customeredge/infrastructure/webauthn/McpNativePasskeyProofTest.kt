@@ -7,6 +7,7 @@ package com.openbank.customeredge.infrastructure.webauthn
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.webauthn4j.util.Base64UrlUtil
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
@@ -33,11 +34,13 @@ class McpNativePasskeyProofTest {
     )
     private val challenges = mockk<McpNativePasskeyChallengeStore>()
     private val credentials = mockk<WebAuthnStore>()
+    private val metrics = SimpleMeterRegistry()
     private val service = McpNativePasskeyProofService(
         challenges,
         credentials,
         ObjectMapper(),
         Clock.fixed(now, ZoneOffset.UTC),
+        metrics,
         RP,
         ORIGIN,
     )
@@ -59,6 +62,8 @@ class McpNativePasskeyProofTest {
         assertThat(service.complete(hosted, assertion())).isNull()
         assertThat(service.complete(binding, assertion())).isNull()
         verify(exactly = 0) { credentials.find(any()) }
+        assertReason("CONTEXT_MISMATCH")
+        assertReason("CHALLENGE_MISSING")
     }
 
     @Test
@@ -91,9 +96,18 @@ class McpNativePasskeyProofTest {
             assertThat(proof.credentialReference).hasSize(64)
             assertThat(proof.firstVerifiedAtEpochMillis).isEqualTo(old.firstVerifiedAtEpochMillis)
             assertThat(proof.assertedAtEpochMillis).isEqualTo(now.toEpochMilli())
+            assertReason("AGE_MISSING")
+            assertReason("AGE_TOO_YOUNG")
+            assertReason("ASSERTION_CONFLICT")
+            assertThat(metrics.meters.flatMap { it.id.tags }.map { it.key }.distinct()).containsExactly("reason")
         } finally {
             unmockkObject(WebAuthnAssertionVerifier)
         }
+    }
+
+    private fun assertReason(reason: String) {
+        val count = metrics.get("openbank.edge.mcp.native.proof.rejected").tag("reason", reason).counter().count()
+        assertThat(count).isEqualTo(1.0)
     }
 
     private fun credential(age: Long?) = RegisteredCredential(

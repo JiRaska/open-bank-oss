@@ -158,3 +158,19 @@ Porovnejte nárůst podle důvodu v testovacím okně s počty HTTP požadavků 
 Čítač pokrývá pouze ověření vlastní relace aplikace. Při HTTP 403 bez odpovídajícího nárůstu
 ověřte dřívější autorizaci nebo odpověď navazující služby. Hodnoty tokenů, atributů a hlaviček
 do diagnostiky neukládejte.
+
+## Odmítnutí ověření passkey pro nativní MCP
+
+Čítač `openbank_edge_mcp_native_proof_rejected_total` rozlišuje, kde se nativní Connect po ověření
+relace aplikace zastavil. Jediný nový štítek je pevně vymezený `reason`.
+
+- `EXPIRED`, `CHALLENGE_INVALID`, `CHALLENGE_MISSING` a `CONTEXT_MISMATCH` označují výzvu
+  nepoužitelnou pro aktuální připojení. Zahajte nové připojení v asistentovi.
+- `CREDENTIAL_UNKNOWN`, `OWNER_MISMATCH`, `ASSERTION_INVALID` a `ASSERTION_CONFLICT` označují
+  odmítnutí při kontrole klíče, vlastníka, podpisu nebo uložení výsledku ověření.
+- `AGE_MISSING`, `AGE_INVALID` a `AGE_TOO_YOUNG` označují neplatné nebo nedostatečné stáří klíče
+  ověřené serverem. U starších záznamů zapíše první čas běžné úspěšné ověření passkey.
+  Od tohoto ověření musí uplynout 72 hodin.
+
+Ověřte nárůst čítače ve stejném testovacím okně jako HTTP 403. Veřejná odpověď zůstává obecná.
+Metrika neobsahuje identifikátory klíčů, odkazy na požadavky ani hodnoty tokenů.
