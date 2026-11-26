@@ -465,6 +465,7 @@ class McpClientAdmission(unittest.TestCase):
         run("docker", "buildx", "build", "--target", "extension-jar", "--output", f"type=local,dest={providers}",
             str(ROOT / "openbank-infra/docker/keycloak"))
         providers.chmod(0o755)
+        cls.image, cls.features, cls.providers = image, features, providers
         cls.admin_password = secrets.token_urlsafe(18)
         cls.container = "ob-mcp-admission-test-" + secrets.token_hex(6)
         cls.addClassCleanup(lambda: run("docker", "rm", "-f", cls.container))
@@ -1029,6 +1030,83 @@ class McpClientAdmission(unittest.TestCase):
 class McpV2Admission(McpClientAdmission):
     V2 = True
 
+    def test_chatgpt_cimd_discovery_is_scoped(self):
+        template = json.loads((KC / "customers-realm-template.json").read_text())
+        client = next(c for c in template["clients"] if c["clientId"] == "https://chatgpt.com/oauth/client.json")
+        flow_id = client["authenticationFlowBindingOverrides"]["browser"]
+        flow = next(f for f in template["authenticationFlows"] if f.get("id") == flow_id)
+        pin = hashlib.sha256(client["attributes"]["jwks.string"].encode()).hexdigest()
+        # Clone only the reviewed public ChatGPT registration and its flow into an isolated server.
+        # This fixture never performs PAR on behalf of ChatGPT.
+        fixture_client = {key: value for key, value in client.items()
+                          if key not in {"secret", "protocolMappers", "optionalClientScopes", "defaultClientScopes"}}
+        fixture = {"realm": "openbank-customers", "enabled": True, "sslRequired": "none",
+                   "authenticationFlows": [{**flow, "authenticationExecutions": []}],
+                   "clients": [fixture_client]}
+        reads = {
+            "oidc": "/realms/{realm}/.well-known/openid-configuration",
+            "oauth": "/.well-known/oauth-authorization-server/realms/{realm}",
+        }
+        claim = "client_id_metadata_document_supported"
+
+        def metadata(container, endpoint):
+            response = run("docker", "exec", container, "bash", "-ceu",
+                           'exec 3<>/dev/tcp/127.0.0.1/8080; '
+                           'printf "GET %s HTTP/1.0\r\nHost: kc.open-bank.tech\r\nConnection: close\r\n\r\n" "$1" >&3; '
+                           'cat <&3', "--", endpoint)
+            headers, _, body = response.partition(b"\r\n\r\n")
+            self.assertEqual(headers.splitlines()[0].split()[1], b"200", endpoint)
+            document = json.loads(body)
+            # Scope enumeration order varies across independent realm imports.
+            document["scopes_supported"].sort()
+            return document
+
+        baseline, control = {}, {}
+        for case, client_enabled, deployment_pin in (
+            ("disabled", False, pin), ("missing-pin", True, None), ("approved", True, pin),
+        ):
+            with self.subTest(case=case):
+                fixture_client["enabled"] = client_enabled
+                realm_file = pathlib.Path(self.tmp.name) / f"cimd-{case}.json"
+                realm_file.write_text(json.dumps(fixture))
+                realm_file.chmod(0o644)
+                container = "ob-mcp-cimd-test-" + secrets.token_hex(6)
+                pin_option = [] if deployment_pin is None else [
+                    "-e", f"MCP_CHATGPT_CIMD_STATIC_JWKS_SHA256={deployment_pin}",
+                ]
+                run("docker", "run", "--detach", "--name", container, "--network", "none", "--memory=1g",
+                    "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2",
+                    "-v", f"{realm_file}:/opt/keycloak/data/import/cimd.json:ro",
+                    "-v", f"{self.providers}:/opt/keycloak/providers:ro", *pin_option, self.image,
+                    "start-dev", "--import-realm", f"--features={self.features}", "--hostname=https://kc.open-bank.tech")
+                try:
+                    deadline = time.monotonic() + 120
+                    while True:
+                        try:
+                            metadata(container, reads["oidc"].format(realm="master"))
+                            break
+                        except (RuntimeError, AssertionError, ValueError, IndexError):
+                            if time.monotonic() >= deadline:
+                                self.fail(f"Disposable CIMD Keycloak did not become ready: {case}")
+                            time.sleep(1)
+                    for kind, endpoint in reads.items():
+                        unrelated = metadata(container, endpoint.format(realm="master"))
+                        self.assertNotIn(claim, unrelated)
+                        customer = metadata(container, endpoint.format(realm="openbank-customers"))
+                        self.assertNotIn("none", customer["token_endpoint_auth_methods_supported"])
+                        if case == "disabled":
+                            self.assertNotIn(claim, customer)
+                            baseline[kind], control[kind] = customer, unrelated
+                        else:
+                            self.assertEqual(unrelated, control[kind])
+                            if case == "approved":
+                                self.assertIs(customer.pop(claim, None), True)
+                            else:
+                                self.assertNotIn(claim, customer)
+                            self.assertEqual(customer, baseline[kind])
+                finally:
+                    run("docker", "rm", "-f", container)
+
     def test_v2_code_and_refresh_family(self):
         browser, waiting, uri, verifier = self.connect(L, L_CB, scope="openid", resource=RESOURCE,
                                                        dpop_jkt=self.dpop.thumbprint())
@@ -1075,6 +1153,7 @@ def load_tests(loader, _suite, _pattern):
     return unittest.TestSuite((
         loader.loadTestsFromTestCase(McpClientAdmission),
         McpV2Admission("test_v2_code_and_refresh_family"),
+        McpV2Admission("test_chatgpt_cimd_discovery_is_scoped"),
     ))
 
 
