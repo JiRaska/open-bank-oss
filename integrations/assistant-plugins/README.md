@@ -18,7 +18,7 @@ listings.
 
 ```
 listing.json                 SINGLE SOURCE: name, logo, the one MCP URL, scopes, admission, tools
-assets/icon.svg, icon.png    the admin-ui brand mark (Sidebar.tsx), rendered at 512 px; no new brand
+assets/icon.svg, icon.png    the OpenBank brand mark from the verified 0.1.1 ChatGPT import, with a 512 px PNG
 scripts/generate.py          renders packages/ from listing.json (packages/ is never hand-edited)
 scripts/check.py             tool drift + structure + credential checks; --release; --selftest
 packages/
