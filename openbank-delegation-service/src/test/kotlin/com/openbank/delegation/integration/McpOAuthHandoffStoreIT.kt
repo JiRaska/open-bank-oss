@@ -80,7 +80,12 @@ class McpOAuthHandoffStoreIT {
         val accountId = UUID.randomUUID()
         val capabilities = setOf("ACCOUNT_READ_BALANCES")
         val base = McpConnectContext(
-            binding.clientId, "client.test", binding.resource, "openid", binding.requestRef, binding.expiresAtEpochSecond,
+            binding.clientId,
+            "client.test",
+            binding.resource,
+            "openid",
+            binding.requestRef,
+            binding.expiresAtEpochSecond,
         )
         val accounts = listOf(McpConnectContextV2.AccountScope(accountId.toString(), capabilities))
         val digest = McpConnectContextV2.of(base, owner.partyId.toString(), null, accounts).payloadSha256()

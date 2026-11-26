@@ -48,8 +48,8 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
                     BindingKind.DPOP -> parJkt != null && JKT.matches(parJkt)
                 },
             ) { "handoff client binding does not match its kind" }
-            require(scopes.isNotEmpty() && scopes.none { it.isBlank() }) { "invalid handoff scopes" }
-            require(expiresAtEpochSecond > 0) { "invalid handoff expiry" }
+            require(scopes.isNotEmpty() && scopes.none { it.isNullOrBlank() }) { "invalid handoff scopes" }
+            require(expiresAtEpochSecond in 1..MAX_EXPIRES_AT) { "invalid handoff expiry" }
         }
     }
 
@@ -178,7 +178,12 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         accounts: List<McpConnectContextV2.AccountScope>,
     ): String {
         val base = McpConnectContext(
-            clientId, redirectHost, resource, scopes.sorted().joinToString(" "), requestRef, expiresAt.toEpochSecond(),
+            clientId,
+            redirectHost,
+            resource,
+            scopes.sorted().joinToString(" "),
+            requestRef,
+            expiresAt.toEpochSecond(),
         )
         return McpConnectContextV2.of(base, partyId.toString(), parJkt, accounts).payloadSha256()
     }
@@ -199,6 +204,7 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
     private companion object {
         const val MAX_CLIENT_LENGTH = 255
         const val MAX_URI_LENGTH = 2048
+        const val MAX_EXPIRES_AT = 253_402_300_799L // Last epoch second in ISO year 9999.
         val SHA256 = Regex("^[0-9a-f]{64}$")
         val JKT = Regex("^[A-Za-z0-9_-]{43}$")
         val LOOPBACK = setOf("localhost", "127.0.0.1", "[::1]")
