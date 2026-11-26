@@ -5,15 +5,10 @@ ADR-0385, proposed, PR #16611) into
 the two largest hosted assistant platforms' official listings, so a customer never types the MCP
 URL by hand. Issue #16614, part of #16590.
 
-> **Status: not connectable today.** No route to `openbank-mcp-service` exists, and ADR-0383 says
-> none is created until all its prerequisites have landed. The packages are complete and they
-> validate, but `scripts/check.py --release` refuses to call them publishable until the
-> preconditions below hold, every ADR-0383 / ADR-0385 delivery check is recorded as `MET` in
-> `listing.json: deliveryChecks`, and the owner-only values are filled in.
->
-> Both ADRs are **proposed**, not accepted. Everything here mirrors those proposals and follows
-> them if they change. The listing text (`longDescription`, tool descriptions) states **target**
-> behaviour; `--release` is the control that stops it being published before that behaviour exists.
+> **Package version 0.1.2.** The [customer MCP endpoint](https://mcp.open-bank.tech/customer/mcp)
+> and its [RFC 9728 discovery document](https://mcp.open-bank.tech/.well-known/oauth-protected-resource/customer/mcp)
+> are live. Publishing the packages still requires the owner-supplied values and evidence for the
+> release checks in `listing.json`. The listing descriptions describe the target capabilities.
 
 This directory is **not a released component**. It has no `version.txt` and is not registered with
 release-please. `packageVersion` in `listing.json` is the package's own version for the vendor
@@ -54,13 +49,12 @@ claude plugin validate integrations/assistant-plugins/packages/claude-code-plugi
 claude plugin validate integrations/assistant-plugins/packages
 ```
 
-- **Tool drift.** `check.py` parses `McpToolRegistry.kt` and checks the capability, the input
-  properties and the required arguments of every packaged tool. It fails when a registry tool is
-  neither included nor excluded, and when a packaged capability is outside the ADR-0383 D4
-  customer-channel set (`query.*.readonly`, `propose.payment`). The customer-facing descriptions
-  live in `listing.json`, because the registry's current text describes the governed-agent PSD2
-  consent path, which this channel does not use (ADR-0383 D3). Excluded: `list_consents` (D3) and
-  `count_marketing_consents` (an operator aggregate).
+- **Tool drift.** `check.py` reads the MCP customer registry in `CustomerReadTools.kt` and
+  the argument constants in `CustomerPaymentProposer.kt`. It verifies each packaged tool's
+  action, input properties, required arguments and availability on a connection-bound session.
+  `list_transactions` is a legacy customer tool and is excluded. The hosted packages describe
+  `list_accounts`, `get_balance` and `propose_payment`. The bank enables the last two only
+  for connections with the corresponding grants.
 - **Tool hints.** Every `query.*.readonly` tool must declare `readOnlyHint: true`, and
   `propose.payment` must declare `readOnlyHint: false` and `destructiveHint: false`. It creates a
   proposal: it is neither a read nor destructive.
@@ -112,7 +106,7 @@ metadata URL, with a pinned hash. A changed document disables the client.
 The Claude Code plugin is still shipped, so the listing exists if a later client version meets
 Tier L. Its `.mcp.json` pins no `clientId` and carries no secret.
 
-## Preconditions for the demo (none hold today)
+## Preconditions for the directory demo
 
 From ADR-0383 and ADR-0385. Each one must be live before a single step below can work:
 
@@ -127,8 +121,8 @@ From ADR-0383 and ADR-0385. Each one must be live before a single step below can
    Until then `propose_payment` is refused.
 7. ADR-0385 D2/D3: PAR, a fresh passkey in the starting browser with no cookie alternative, and
    the context-linked `MCP_CLIENT_CONNECT` SCA challenge in the app before any code is issued.
-8. A route to mcp-service at the `listing.json` URL, the RFC 9728 document at
-   `server.protectedResourceMetadata`, and a `401` with `WWW-Authenticate: Bearer resource_metadata=...`.
+8. Verify the live route at `server.url` and discovery at `server.protectedResourceMetadata`.
+   An unauthenticated MCP call must return a `401` with a resource metadata challenge.
 9. Realm clients for the Tier H platforms, with the scope names in `listing.json` defined.
    They are proposed there and do not exist yet.
 
@@ -145,7 +139,7 @@ From ADR-0383 and ADR-0385. Each one must be live before a single step below can
    shows the same context:
    - the bank-assigned client name;
    - the redirect host;
-   - the exact resource URL (`https://customer.open-bank.tech/mcp`, the `listing.json` value);
+   - the exact resource URL (`https://mcp.open-bank.tech/customer/mcp`, the `listing.json` value);
    - capabilities: "reads your data and can propose payments; it can never pay by itself";
    - that data goes to the platform's own provider;
    - the expiry;
@@ -185,7 +179,7 @@ From ADR-0383 and ADR-0385. Each one must be live before a single step below can
   - **malware** on either device;
   - **a compromised hosted platform** can read within the per-client budget until it is suspended;
   - **prompt-injected exfiltration** of what the D4 defaults allow (90 days of transactions,
-    50 per page, 12 months of statements).
+    50 per page, 12 months of statements in the ADR's target design).
 - **What these packages do NOT provide:** they carry no credentials and no client identity. A
   listing is a discovery and anti-typosquatting control. It is not an authorisation control. Every
   control above is server-side and not built yet.

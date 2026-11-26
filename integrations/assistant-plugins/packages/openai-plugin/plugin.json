@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "openbank",
-  "version": "0.1.0",
-  "description": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
+  "version": "0.1.2",
+  "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
   "author": {
     "name": "OpenBank contributors",
     "url": "https://github.com/JiRaska/open-bank-oss"
@@ -21,7 +21,7 @@
       "interface": {
         "displayName": "OpenBank",
         "shortDescription": "Ask about your accounts",
-        "longDescription": "Connect your OpenBank account to ask about balances, recent transactions, closed statements and the confirmation details of payments you already made. The assistant can also draft a payment PROPOSAL. A proposal is never a payment: nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. The assistant can never pay, change limits, add trusted payees or change security settings. Data you ask about is sent to the assistant platform's own provider. You can see and revoke every connected assistant in the OpenBank app. Limitations: personal accounts only; IBANs and counterparty names are masked; transaction history is limited to 90 days and statements to 12 months.",
+        "longDescription": "Connect your personal OpenBank account to ask about the accounts you shared and their balances. The assistant can also draft a payment proposal. Nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. Data you ask about is sent to the assistant platform's provider. You can see and revoke every connected assistant in the OpenBank app.",
         "category": "Finance",
         "capabilities": [
           "Read",
@@ -30,7 +30,7 @@
         "websiteURL": "https://www.open-bank.tech",
         "defaultPrompt": [
           "What is the balance of my main OpenBank account?",
-          "Summarise my last closed OpenBank statement.",
+          "Which OpenBank accounts did I connect?",
           "Propose a payment of 25 EUR from my OpenBank account."
         ],
         "brandColor": "#5658E6",
@@ -60,22 +60,21 @@
               "expected_behavior": "States the balance and currency of that account."
             },
             {
-              "description": "Recent transactions",
-              "prompt": "Show my last 10 OpenBank transactions.",
+              "description": "Balances across accounts",
+              "prompt": "What are the balances of my shared OpenBank accounts?",
               "tools_triggered": [
                 "list_accounts",
-                "list_transactions"
+                "get_balance"
               ],
-              "expected_behavior": "Lists at most 10 recent transactions with masked counterparties."
+              "expected_behavior": "Shows the balance and currency for each account with a balance grant."
             },
             {
-              "description": "Statement summary",
-              "prompt": "Summarise my last closed OpenBank statement.",
+              "description": "No shared account",
+              "prompt": "Which accounts are available to this assistant?",
               "tools_triggered": [
-                "list_accounts",
-                "get_statement"
+                "list_accounts"
               ],
-              "expected_behavior": "Summarises the latest closed statement from its structured entries."
+              "expected_behavior": "Names shared accounts and explains when no accounts are available."
             },
             {
               "description": "Payment proposal",
