@@ -126,7 +126,7 @@ internal class McpNativeConnectResource(
 
     private fun withSelected(
         origin: String,
-        owner: Owner,
+        owner: NativeMcpOwner,
         requestRef: String?,
         call: (McpNativePasskeyBinding) -> Response,
     ): Response {
@@ -150,38 +150,41 @@ internal class McpNativeConnectResource(
         }
     }
 
-    private fun selectedBinding(raw: SelectedBinding, requestRef: String, owner: Owner): McpNativePasskeyBinding? =
-        runCatching {
-            require(raw.requestRef == requestRef)
-            val par = when (raw.parBinding) {
-                "dpop" -> McpNativeParBinding.Dpop(requireNotNull(raw.parJkt))
-                "confidential_client" -> {
-                    require(raw.parJkt == null)
-                    McpNativeParBinding.ConfidentialClient
-                }
-                else -> error("Unexpected PAR proof type")
+    private fun selectedBinding(
+        raw: SelectedBinding,
+        requestRef: String,
+        owner: NativeMcpOwner,
+    ): McpNativePasskeyBinding? = runCatching {
+        require(raw.requestRef == requestRef)
+        val par = when (raw.parBinding) {
+            "dpop" -> McpNativeParBinding.Dpop(requireNotNull(raw.parJkt))
+            "confidential_client" -> {
+                require(raw.parJkt == null)
+                McpNativeParBinding.ConfidentialClient
             }
-            McpNativePasskeyBinding(
-                requestRef,
-                owner.party,
-                owner.subject,
-                raw.clientId,
-                par,
-                raw.contextSha256,
-                raw.expiresAtEpochSecond,
-            )
-        }.getOrNull()
+            else -> error("Unexpected PAR proof type")
+        }
+        McpNativePasskeyBinding(
+            requestRef,
+            owner.partyId,
+            owner.subject,
+            raw.clientId,
+            par,
+            raw.contextSha256,
+            raw.expiresAtEpochSecond,
+        )
+    }.getOrNull()
 
     private fun authorityPost(
         origin: String,
         path: String,
-        owner: Owner,
+        owner: NativeMcpOwner,
         fields: Map<String, String>,
         idempotencyKey: String,
     ): Response = upstream.postToService(
         origin,
         path,
-        owner.party.toString(),
+        owner.partyId.toString(),
         mapper.writeValueAsString(fields),
         idempotencyKey,
     )
@@ -191,22 +194,12 @@ internal class McpNativeConnectResource(
         return runCatching { mapper.readValue(reply.entity as String, T::class.java) }.getOrNull()
     }
 
-    private fun ownApp(actingFor: String?, call: (String, Owner) -> Response): Response {
+    private fun ownApp(actingFor: String?, call: (String, NativeMcpOwner) -> Response): Response {
         if (!enabled) return error(Status.NOT_FOUND, "Connect is unavailable")
-        val owner = ownAppCustomer(actingFor) ?: return error(Status.FORBIDDEN, "Your own bank app session is required")
+        val owner = nativeMcpAppOwner(jwt, actingFor)
+            ?: return error(Status.FORBIDDEN, "Your own bank app session is required")
         val origin = authority ?: return unavailable()
         return call(origin, owner)
-    }
-
-    private fun ownAppCustomer(actingFor: String?): Owner? {
-        if (!actingFor.isNullOrBlank() || jwt.containsClaim("act")) return null
-        val client = jwt.getClaim<Any?>("azp") as? String ?: return null
-        if (client !in APP_CLIENTS || jwt.audience?.contains(EDGE_AUDIENCE) != true) return null
-        val subject = jwt.subject?.takeIf { it.isNotBlank() && it.length <= MAX_SUBJECT_LENGTH } ?: return null
-        val party = jwt.getClaim<String>("party_id")?.let { raw ->
-            runCatching { UUID.fromString(raw) }.getOrNull()?.takeIf { it.toString() == raw }
-        } ?: return null
-        return Owner(party, subject)
     }
 
     private fun handoffDigest(token: String): String? {
@@ -230,8 +223,6 @@ internal class McpNativeConnectResource(
     private fun response(status: Status, entity: Any? = null): Response =
         Response.status(status).header(HttpHeaders.CACHE_CONTROL, "no-store").entity(entity).build()
 
-    private data class Owner(val party: UUID, val subject: String)
-
     private data class SelectedBinding(
         val requestRef: String,
         val contextSha256: String,
@@ -243,10 +234,24 @@ internal class McpNativeConnectResource(
 
     private companion object {
         const val AUTHORITY_PATH = "/api/v1/delegations/mcp-connect/customer/native-handoffs"
-        const val EDGE_AUDIENCE = "openbank-edge"
-        const val MAX_SUBJECT_LENGTH = 255
-        val APP_CLIENTS = setOf("openbank-app", "openbank-edge-webauthn")
         val REFERENCE = Regex("[0-9a-f]{64}")
         val OPAQUE_TOKEN = Regex("[A-Za-z0-9_-]{43}")
     }
 }
+
+internal data class NativeMcpOwner(val partyId: UUID, val subject: String)
+
+internal fun nativeMcpAppOwner(jwt: JsonWebToken, actingFor: String?): NativeMcpOwner? {
+    if (!actingFor.isNullOrBlank() || jwt.containsClaim("act")) return null
+    val client = jwt.getClaim<Any?>("azp") as? String ?: return null
+    if (client !in APP_CLIENTS || jwt.audience?.contains(EDGE_AUDIENCE) != true) return null
+    val subject = jwt.subject?.takeIf { it.isNotBlank() && it.length <= MAX_SUBJECT_LENGTH } ?: return null
+    val party = jwt.getClaim<String>("party_id")?.let { raw ->
+        runCatching { UUID.fromString(raw) }.getOrNull()?.takeIf { it.toString() == raw }
+    } ?: return null
+    return NativeMcpOwner(party, subject)
+}
+
+private const val EDGE_AUDIENCE = "openbank-edge"
+private val APP_CLIENTS = setOf("openbank-app", "openbank-edge-webauthn")
+private const val MAX_SUBJECT_LENGTH = 255
