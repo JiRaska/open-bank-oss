@@ -60,7 +60,7 @@ class McpNativeHandoffIssuerResource(
         requireIssuer(party)
         val request = requireNotNull(body) { "native handoff binding is required" }
         requireMcpConnectIdempotencyKey(idempotencyKey, request.tokenSha256)
-        if (!store.issue(request.tokenSha256, request.binding)) throw WebApplicationException(409)
+        if (!store.issue(request.tokenSha256, request.binding)) throw WebApplicationException(Response.Status.CONFLICT)
         return Response.noContent().build()
     }
 
@@ -91,7 +91,7 @@ class McpNativeHandoffIssuerResource(
         val request = requireNotNull(body) { "native handoff attestation is required" }
         requireMcpConnectIdempotencyKey(idempotencyKey, request.tokenSha256)
         if (!store.attestSelectedContext(request.tokenSha256, request.binding, request.contextSha256)) {
-            throw WebApplicationException(409)
+            throw WebApplicationException(Response.Status.CONFLICT)
         }
         return Response.noContent().build()
     }

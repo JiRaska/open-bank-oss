@@ -201,19 +201,6 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         return McpConnectContextV2.of(base, request.partyId.toString(), request.parJkt, accounts).payloadSha256()
     }
 
-    private fun Binding.parameters(tokenSha256: String): Tuple = Tuple.tuple()
-        .addString(tokenSha256)
-        .addString(requestRef)
-        .addString(issuer)
-        .addString(clientId)
-        .addString(resource)
-        .addString(redirectUri)
-        .addString(sessionRef)
-        .addString(kind.name)
-        .addString(parJkt)
-        .addArrayOfString(scopes.sorted().toTypedArray())
-        .addOffsetDateTime(OffsetDateTime.ofInstant(Instant.ofEpochSecond(expiresAtEpochSecond), ZoneOffset.UTC))
-
     private companion object {
         const val MAX_PURGE_ROWS = 1_000
         const val MAX_CLIENT_LENGTH = 255
@@ -321,3 +308,16 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         """
     }
 }
+
+private fun McpOAuthHandoffStore.Binding.parameters(tokenSha256: String): Tuple = Tuple.tuple()
+    .addString(tokenSha256)
+    .addString(requestRef)
+    .addString(issuer)
+    .addString(clientId)
+    .addString(resource)
+    .addString(redirectUri)
+    .addString(sessionRef)
+    .addString(kind.name)
+    .addString(parJkt)
+    .addArrayOfString(scopes.sorted().toTypedArray())
+    .addOffsetDateTime(OffsetDateTime.ofInstant(Instant.ofEpochSecond(expiresAtEpochSecond), ZoneOffset.UTC))

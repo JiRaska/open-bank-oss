@@ -14,7 +14,7 @@ import java.time.Duration
 @Startup
 @ApplicationScoped
 class McpOAuthHandoffCleanupJob(private val handoffs: McpOAuthHandoffStore, domainMetrics: DomainMetrics) {
-    private val liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofMinutes(5))
+    private val liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofMinutes(INTERVAL_MINUTES))
 
     /** Retention continues while issuance is off so finished claims do not accumulate. */
     @Scheduled(
@@ -28,6 +28,7 @@ class McpOAuthHandoffCleanupJob(private val handoffs: McpOAuthHandoffStore, doma
     }
 
     private companion object {
+        const val INTERVAL_MINUTES = 5L
         const val WORKFLOW_NAME = "mcp-native-handoff-retention"
     }
 }
