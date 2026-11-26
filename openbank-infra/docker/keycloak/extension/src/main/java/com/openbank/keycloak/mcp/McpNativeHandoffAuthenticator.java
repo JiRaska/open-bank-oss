@@ -144,7 +144,10 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
 
     private static Response page(AuthenticationFlowContext ctx, McpNativeHandoff.Issued issued) throws WriterException, IOException {
         String action = McpWithheldCodeAuthenticator.escape(ctx.getActionUrl(ctx.generateAccessCode()).toString());
-        String client = McpWithheldCodeAuthenticator.escape(ctx.getAuthenticationSession().getClient().getClientId());
+        var registeredClient = ctx.getAuthenticationSession().getClient();
+        String clientName = registeredClient.getName();
+        String client = McpWithheldCodeAuthenticator.escape(
+                clientName == null || clientName.isBlank() ? registeredClient.getClientId() : clientName);
         String connect = "<p>If you have not opened the app yet, restart the connection in your assistant.</p>";
         String handoffInput = "";
         String scriptNonce = UUID.randomUUID().toString();
