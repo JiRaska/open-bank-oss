@@ -25,6 +25,8 @@ data class RegisteredCredential(
     val keycloakUserId: String,
     val attestedCredentialDataB64: String,
     val signCount: Long,
+    // Lower bound for credential age. Legacy records lack a server-observed registration time.
+    val firstVerifiedAtEpochMillis: Long? = null,
 )
 
 /**

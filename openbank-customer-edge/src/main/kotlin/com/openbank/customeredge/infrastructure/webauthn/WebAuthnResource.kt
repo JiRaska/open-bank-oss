@@ -174,6 +174,7 @@ class WebAuthnResource(
                     attestedCredentialDataConverter.convert(attestedCredentialData),
                 ),
                 signCount = authenticatorData.signCount,
+                firstVerifiedAtEpochMillis = System.currentTimeMillis(),
             ),
         )
 
@@ -270,7 +271,12 @@ class WebAuthnResource(
         // Persist the post-verify counter (webauthn4j clone-detection: a signature whose
         // embedded counter does not exceed the stored one throws above, before reaching here —
         // this line only ever advances it).
-        credentialStore.save(stored.copy(signCount = credentialRecord.counter))
+        credentialStore.save(
+            stored.copy(
+                signCount = credentialRecord.counter,
+                firstVerifiedAtEpochMillis = stored.firstVerifiedAtEpochMillis ?: System.currentTimeMillis(),
+            ),
+        )
         Log.debugf(
             "authComplete: verified assertion for credential=%s, newCounter=%d",
             credentialIdB64,

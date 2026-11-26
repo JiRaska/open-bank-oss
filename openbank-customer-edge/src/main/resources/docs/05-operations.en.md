@@ -137,6 +137,10 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 `GET` on the unified notification inbox fans out to the notification service once per party under a single aggregate deadline. The deadline is measured on a monotonic clock, and every wait (permit acquisition, completion polling, per-call HTTP timeout) shrinks with the budget that remains. When the budget is spent the endpoint answers `NOTIFICATIONS_UNAVAILABLE` instead of waiting out sequential timeouts. No configuration or wire contract changed.
 
+## Native passkey age evidence
+
+Customer Edge records when it first verifies the exact native credential. A new credential gets its timestamp after successful registration verification. An older record without a timestamp gets one only after a successful assertion. Later assertions preserve it. The timestamp is a lower bound for credential age and is independent of the account or device enrollment date.
+
 ## Diagnosing a failed passkey token exchange
 
 When the token exchange that completes a passkey sign-in is rejected by the identity provider, the service logs a warning with the pseudonymous identity-provider user id and the HTTP status of the response (`impersonate: token-exchange failed for kcUserId=... status=...`). The identity provider's own error event and the exception raised by the service carry no user id, so this line is what ties a failed sign-in to the customer affected. The id is the opaque user UUID, never a username, and no token or credential is logged. A rise in these warnings with a `403` or `400` status usually points to a token-exchange permission or client-configuration problem rather than customer error.
