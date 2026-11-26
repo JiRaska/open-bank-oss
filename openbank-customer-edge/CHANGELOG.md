@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.1...customer-edge-v1.15.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** meter native MCP app guard refusals ([#17378](https://github.com/JiRaska/open-bank-oss/issues/17378)) ([ecaadcb](https://github.com/JiRaska/open-bank-oss/commit/ecaadcb2e4dbeba60d926218d893c3393c384067))
+
 ## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.0...customer-edge-v1.15.1) (2026-11-26)
 
 
