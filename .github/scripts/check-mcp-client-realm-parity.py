@@ -45,6 +45,7 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -56,6 +57,7 @@ TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-tem
 TIER_ATTR = "openbank.mcp.tier"
 RESOURCE_ATTR = "openbank.mcp.resource"
 WITHHELD = "openbank-mcp-withheld-code"
+NATIVE_HANDOFF = "openbank-mcp-native-handoff"
 GUARD = "openbank-mcp-client-guard"
 EXCHANGE_ATTR = "openbank.mcp.exchange"
 EXCHANGE_MAX_LIFESPAN_S = 60
@@ -80,6 +82,11 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
             f.append(f"allowlist: `{key}` is required (ADR-0385 D1)")
     if not (decl.get("flow") or {}).get("id") or not (decl.get("flow") or {}).get("alias"):
         f.append("allowlist: `flow.id` and `flow.alias` are required")
+    native_flow = decl.get("native_flow") or {}
+    if not native_flow.get("id") or not native_flow.get("alias"):
+        f.append("allowlist: `native_flow.id` and `native_flow.alias` are required")
+    elif any(native_flow[key] == (decl.get("flow") or {}).get(key) for key in ("id", "alias")):
+        f.append("allowlist: native_flow must have a distinct ID and alias")
     seen = set()
     for c in decl.get("clients") or []:
         cid = c.get("client_id")
@@ -87,6 +94,8 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
             f.append(f"allowlist: client `{cid}` declared twice")
         seen.add(cid)
         tier = c.get("tier")
+        if "browser_flow" in c and (c["browser_flow"] != "native-passkey" or tier != "H"):
+            f.append(f"allowlist `{cid}`: browser_flow must be native-passkey on a Tier H client")
         uris = c.get("redirect_uris") or []
         if not uris:
             f.append(f"allowlist `{cid}`: no redirect_uris")
@@ -213,6 +222,31 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
                 f.append(f"realm: flow `{flow_alias}` execution {e.get('authenticator')} is "
                          f"{e.get('requirement')}, must be REQUIRED (no alternative path)")
 
+    native_flow = decl.get("native_flow") or {}
+    native_alias = native_flow.get("alias")
+    if native_alias and realm.get("browserFlow") == native_alias:
+        f.append("realm: native flow may only be bound to a declared Tier H client")
+    for cid, client in clients.items():
+        if cid not in declared and native_flow.get("id") and (
+            (client.get("authenticationFlowBindingOverrides") or {}).get("browser") == native_flow["id"]
+        ):
+            f.append(f"realm client `{cid}`: native flow may only be bound to a declared Tier H client")
+    matches = [x for x in realm.get("authenticationFlows") or [] if x.get("alias") == native_alias]
+    if len(matches) != 1:
+        f.append(f"realm: native flow `{native_alias}` must exist exactly once, found {len(matches)}")
+    else:
+        native = matches[0]
+        if native.get("id") != native_flow.get("id") or native.get("topLevel") is not True:
+            f.append(f"realm: native flow `{native_alias}` must match the declared ID and be top-level")
+        execs = native.get("authenticationExecutions") or []
+        ordered = sorted(execs, key=lambda e: e.get("priority") or 0)
+        if [e.get("authenticator") for e in ordered] != [NATIVE_HANDOFF, WITHHELD] or any(
+            e.get("requirement") != "REQUIRED" or e.get("authenticatorFlow") or e.get("flowAlias")
+            for e in ordered
+        ):
+            f.append(f"realm: native flow `{native_alias}` must contain exactly two REQUIRED flat steps, "
+                     f"{NATIVE_HANDOFF} then {WITHHELD}")
+
     # #16667: the guard executor must be bound to every client by an enabled any-client policy.
     profiles = {p.get("name"): p for p in (realm.get("clientProfiles") or {}).get("profiles") or []}
     bound = False
@@ -336,8 +370,10 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             f.append(f"{p}: fullScopeAllowed must be false")
         if mappings.get(cid) != ["offline_access"]:
             f.append(f"{p}: scopeMappings must be exactly ['offline_access'], got {mappings.get(cid)}")
-        if (c.get("authenticationFlowBindingOverrides") or {}).get("browser") != flow_id:
-            f.append(f"{p}: browser flow override must bind the MCP flow {flow_id} — that binding is the control (ADR-0385 D2.2)")
+        expected_flow_id = native_flow.get("id") if d.get("browser_flow") == "native-passkey" else flow_id
+        if (c.get("authenticationFlowBindingOverrides") or {}).get("browser") != expected_flow_id:
+            f.append(f"{p}: browser flow override must bind the MCP flow {expected_flow_id} — "
+                     "that binding is the control (ADR-0385 D2.2)")
         auds = [m for m in c.get("protocolMappers") or [] if m.get("protocolMapper") == "oidc-audience-mapper"]
         aud_values = sorted({(m.get("config") or {}).get("included.custom.audience") or
                              (m.get("config") or {}).get("included.client.audience") for m in auds})
@@ -479,6 +515,38 @@ def self_test() -> int:
     L = next(c["client_id"] for c in decl0["clients"] if c["tier"] == "L")
 
     run("committed allowlist + realm pass", expect_clean=True)
+
+    native_id = decl0["native_flow"]["id"]
+    native_alias = decl0["native_flow"]["alias"]
+
+    def select_native(d, cid):
+        next(c for c in d["clients"] if c["client_id"] == cid)["browser_flow"] = "native-passkey"
+
+    opted_in = copy.deepcopy(decl0)
+    select_native(opted_in, H)
+    render = runpy.run_path(str(Path(__file__).with_name("gen-mcp-realm-clients.py")))["render"]
+    generated = render(realm0, opted_in, base)
+    expected = copy.deepcopy(realm0)
+    client(expected, H)["authenticationFlowBindingOverrides"]["browser"] = native_id
+    generated_clean = generated == expected and check(opted_in, generated, base, today) == []
+    cases.append(("generator changes only the selected hosted client's browser flow", generated_clean))
+    print(f"  {'PASS' if generated_clean else 'FAIL'}  {cases[-1][0]}")
+
+    run("native opt-in requires realm parity", mutate_decl=lambda d: select_native(d, H),
+        needle="browser flow override")
+    run("native opt-in rejects Tier L", mutate_decl=lambda d: select_native(d, L), needle="on a Tier H client")
+    run("native override without declaration rejected",
+        mutate_realm=lambda r: client(r, H)["authenticationFlowBindingOverrides"].update(browser=native_id),
+        needle="browser flow override")
+    run("native flow cannot replace the realm browser default",
+        mutate_realm=lambda r: r.update(browserFlow=native_alias), needle="only be bound to a declared Tier H client")
+
+    def remove_native_withheld(r):
+        native = next(f for f in r["authenticationFlows"] if f["alias"] == native_alias)
+        native["authenticationExecutions"].pop()
+
+    run("native flow requires the final withheld-code step", mutate_realm=remove_native_withheld,
+        needle="exactly two REQUIRED flat steps")
     run("Tier H publicClient=true flagged", mutate_realm=lambda r: client(r, H).update(publicClient=True), needle="publicClient")
     run("Tier H without client authenticator flagged",
         mutate_realm=lambda r: client(r, H).pop("clientAuthenticatorType"), needle="client authenticator")

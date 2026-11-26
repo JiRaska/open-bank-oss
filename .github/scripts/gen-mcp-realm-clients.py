@@ -142,6 +142,12 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "frontchannel.logout.session.required": "false",
         "backchannel.logout.session.required": "true",
     }
+    flow = decl["flow"]
+    if "browser_flow" in c:
+        if c["browser_flow"] != "native-passkey" or tier != "H":
+            raise ValueError(f"{c['client_id']}: browser_flow must be native-passkey on a Tier H client")
+        flow = decl["native_flow"]
+
     client: dict = {
         "clientId": c["client_id"],
         "name": c["display_name"],
@@ -158,7 +164,7 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "fullScopeAllowed": False,
         "redirectUris": list(c["redirect_uris"]),
         "webOrigins": [],
-        "authenticationFlowBindingOverrides": {"browser": decl["flow"]["id"]},
+        "authenticationFlowBindingOverrides": {"browser": flow["id"]},
         "defaultClientScopes": [],
         "optionalClientScopes": ["offline_access"],
         "protocolMappers": [_mapper_sub(), _mapper_party_id(), _mapper_audience(decl["audience"])],
