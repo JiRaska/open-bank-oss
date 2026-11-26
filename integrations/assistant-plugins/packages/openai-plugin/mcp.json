@@ -10,7 +10,11 @@
             "type": "oauth",
             "client": {
               "mode": "cimd"
-            }
+            },
+            "baseScopes": [
+              "openid"
+            ],
+            "defaultScopes": []
           }
         }
       }

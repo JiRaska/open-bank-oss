@@ -130,7 +130,10 @@ def render(listing: dict) -> dict[str, bytes | str]:
         "mcpServers": {ident["slug"]: {
             "type": "streamable-http",
             "url": server["url"],
-            "extensions": {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}}}},
+            "extensions": {"com.openai": {"auth": {
+                    "type": "oauth", "client": {"mode": "cimd"},
+                    "baseScopes": ["openid"], "defaultScopes": [],
+                }}},
         }},
     }
     codex_plugin = drop_none({

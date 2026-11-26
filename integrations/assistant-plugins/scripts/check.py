@@ -367,7 +367,10 @@ def check_openai(rendered: dict, listing: dict) -> list[str]:
             allowed_keys = {"type", "url", "headers"}
             if portable:
                 allowed_keys.add("extensions")
-                expected = {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}}}}
+                expected = {"com.openai": {"auth": {
+                    "type": "oauth", "client": {"mode": "cimd"},
+                    "baseScopes": ["openid"], "defaultScopes": [],
+                }}}
                 if s.get("extensions") != expected:
                     errs.append(f"{rel}: server '{name}' requires the exact ChatGPT OAuth CIMD extension")
             if set(s) - allowed_keys:
@@ -621,6 +624,13 @@ def selftest(listing: dict, registry_text: tuple[str, str]) -> int:
         "missing ChatGPT OAuth extension": ("openai", with_rendered(
             "openai-plugin/mcp.json",
             lambda o: o["mcpServers"]["openbank"].pop("extensions"))),
+        "implicit ChatGPT OAuth default scopes": ("openai", with_rendered(
+            "openai-plugin/mcp.json",
+            lambda o: o["mcpServers"]["openbank"]["extensions"]["com.openai"]["auth"].pop("defaultScopes"))),
+        "broader ChatGPT OAuth base scopes": ("openai", with_rendered(
+            "openai-plugin/mcp.json",
+            lambda o: o["mcpServers"]["openbank"]["extensions"]["com.openai"]["auth"].update(
+                baseScopes=["openid", "profile"]))),
         "wrong ChatGPT OAuth registration mode": ("openai", with_rendered(
             "openai-plugin/mcp.json",
             lambda o: o["mcpServers"]["openbank"]["extensions"]["com.openai"]["auth"]["client"].update(
