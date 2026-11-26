@@ -474,3 +474,10 @@ tokens while the new release rolls out. Replace it with the optional assignment
 after every customer-edge instance requests the scope. Verify each workload's
 normal Admin REST operation with a fresh token before reopening traffic.
 Invalidate cached tokens minted before the upgrade by restarting the affected clients.
+
+### Verify the pinned ChatGPT client metadata
+
+Before approving a ChatGPT static CIMD pin or key rotation, run
+`python3 .github/scripts/verify-chatgpt-cimd-pin.py` from an approved operator workstation.
+It reads the two exact public vendor documents, compares them with the reviewed registration
+and inline public key, and prints the digest to compare with the sandbox deployment pin.

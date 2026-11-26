@@ -6,21 +6,26 @@ package com.openbank.keycloak.mcp;
 
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.RealmModel;
+import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
 
 import java.lang.reflect.Proxy;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiFunction;
 
 /**
@@ -80,6 +85,7 @@ public final class ExtensionTests {
         }
         policy();
         nativeHandoff();
+        scopedCimdMetadata();
         if (!FAILURES.isEmpty()) {
             FAILURES.forEach(f -> System.err.println("FAIL " + f));
             System.err.printf("%d of %d checks failed%n", FAILURES.size(), checks);
@@ -158,6 +164,64 @@ public final class ExtensionTests {
     private static <T> T testInterface(Class<T> type, BiFunction<String, Object[], Object> behavior) {
         return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
                 (proxy, method, args) -> behavior.apply(method.getName(), args)));
+    }
+
+    private static void scopedCimdMetadata() throws Exception {
+        String clientId = "https://chatgpt.com/oauth/client.json";
+        String callback = "https://chatgpt.com/connector_platform_oauth_redirect";
+        String issuer = "https://kc.open-bank.tech/realms/openbank-customers";
+        String jwks = "{\"keys\":[{\"kid\":\"synthetic-test-key\"}]}";
+        String pin = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(jwks.getBytes(StandardCharsets.UTF_8)));
+        Map<String, String> attributes = new HashMap<>(Map.of(
+                "openbank.mcp.tier", "H",
+                "openbank.mcp.resource", "https://mcp.open-bank.tech/customer/mcp",
+                "pkce.code.challenge.method", "S256",
+                "require.pushed.authorization.requests", "true",
+                "token.endpoint.auth.signing.alg", "RS256",
+                "use.jwks.string", "true",
+                "use.jwks.url", "false",
+                "jwks.string", jwks));
+        ClientModel client = testInterface(ClientModel.class, (method, args) -> switch (method) {
+            case "getClientId" -> clientId;
+            case "isEnabled", "isStandardFlowEnabled" -> true;
+            case "isPublicClient", "isImplicitFlowEnabled", "isDirectAccessGrantsEnabled",
+                    "isServiceAccountsEnabled" -> false;
+            case "getClientAuthenticatorType" -> "client-jwt";
+            case "getRedirectUris" -> Set.of(callback);
+            case "getAuthenticationFlowBindingOverride" -> "efd9751b-94d8-4ae5-80dc-3f078a671b2d";
+            case "getAttribute" -> attributes.get(args[0]);
+            default -> throw new UnsupportedOperationException(method);
+        });
+        RealmModel realm = testInterface(RealmModel.class, (method, args) -> switch (method) {
+            case "getName" -> "openbank-customers";
+            case "getClientByClientId" -> clientId.equals(args[0]) ? client : null;
+            default -> throw new UnsupportedOperationException(method);
+        });
+        RealmModel unrelated = testInterface(RealmModel.class, (method, args) -> "master");
+        check("scoped CIMD without deployment pin", advertisedCimd(realm, issuer, null) == null);
+        check("scoped CIMD with differing pin", advertisedCimd(realm, issuer, "f".repeat(64)) == null);
+        check("scoped CIMD does not claim another issuer", advertisedCimd(realm, "https://other.invalid", pin) == null);
+        check("scoped CIMD does not claim another realm", advertisedCimd(unrelated, issuer, pin) == null);
+        eq("exact static CIMD advertisement", true, advertisedCimd(realm, issuer, pin));
+        var inherited = new OIDCConfigurationRepresentation();
+        inherited.setClientIdMetadataDocumentSupported(true);
+        McpChatGptCimdDiscoveryFactory.advertise(inherited, unrelated, null);
+        eq("scoped CIMD leaves unrelated inherited metadata unchanged", true,
+                inherited.getClientIdMetadataDocumentSupported());
+        McpChatGptCimdDiscoveryFactory.advertise(inherited, realm, null);
+        check("scoped CIMD clears unsupported inherited advertisement",
+                inherited.getClientIdMetadataDocumentSupported() == null);
+        attributes.put("require.pushed.authorization.requests", "false");
+        check("scoped CIMD requires client PAR", advertisedCimd(realm, issuer, pin) == null);
+    }
+
+    private static Boolean advertisedCimd(RealmModel realm, String issuer, String pin) {
+        var config = new OIDCConfigurationRepresentation();
+        config.setIssuer(issuer);
+        config.setPushedAuthorizationRequestEndpoint(issuer + "/protocol/openid-connect/ext/par/request");
+        McpChatGptCimdDiscoveryFactory.advertise(config, realm, pin);
+        return config.getClientIdMetadataDocumentSupported();
     }
 
     private static void policy() {
