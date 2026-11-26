@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.0...customer-edge-v1.15.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** manage owned MCP connections from native app ([#17350](https://github.com/JiRaska/open-bank-oss/issues/17350)) ([c556334](https://github.com/JiRaska/open-bank-oss/commit/c55633439b9bfa8650f5d5c9dcf79b3b11a6da66))
+
 ## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.1...customer-edge-v1.15.0) (2026-11-26)
 
 
