@@ -19,6 +19,8 @@ from pathlib import Path
 
 import yaml
 
+from gatelib import hermetic_git_env
+
 POLICY = "openbank-libs/governance/rules.yaml"
 
 
@@ -84,6 +86,7 @@ def self_test() -> int:
     for name in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"):
         os.environ.pop(name, None)
     script = Path(__file__).resolve()
+    os.environ.update(hermetic_git_env())
     cases = 0
     with tempfile.TemporaryDirectory(prefix="root-layout-") as tmp:
         root = Path(tmp)
