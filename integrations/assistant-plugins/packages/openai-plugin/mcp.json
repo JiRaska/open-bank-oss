@@ -3,7 +3,17 @@
   "mcpServers": {
     "openbank": {
       "type": "streamable-http",
-      "url": "https://mcp.open-bank.tech/customer/mcp"
+      "url": "https://mcp.open-bank.tech/customer/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "cimd"
+            }
+          }
+        }
+      }
     }
   }
 }

@@ -347,9 +347,13 @@ def check_openai(rendered: dict, listing: dict) -> list[str]:
     for c in pos:
         if not all(c.get(k) for k in ("description", "prompt", "tools_triggered", "expected_behavior")):
             errs.append("openai positive test case missing a required field")
-        for t in c.get("tools_triggered", []):
-            if t not in tool_names:
-                errs.append(f"openai test case triggers unknown tool '{t}'")
+        triggered = c.get("tools_triggered")
+        if not isinstance(triggered, str):
+            errs.append("openai positive test case tools_triggered must be a comma-separated string")
+            continue
+        for name in (part.strip() for part in triggered.split(",")):
+            if name not in tool_names:
+                errs.append(f"openai test case triggers unknown tool '{name}'")
     for c in neg:
         if not all(c.get(k) for k in ("description", "prompt")):
             errs.append("openai negative test case missing a required field")
@@ -359,9 +363,15 @@ def check_openai(rendered: dict, listing: dict) -> list[str]:
         if len(servers) != 1:
             errs.append(f"{rel}: plugin-level review requires exactly one MCP server")
         for name, s in servers.items():
-            # agent-plugins.org mcp.schema.json: streamable-http entry allows only type/url/headers.
-            if set(s) - {"type", "url", "headers"}:
-                errs.append(f"{rel}: server '{name}' has keys outside type/url/headers")
+            portable = rel == "openai-plugin/mcp.json"
+            allowed_keys = {"type", "url", "headers"}
+            if portable:
+                allowed_keys.add("extensions")
+                expected = {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}}}}
+                if s.get("extensions") != expected:
+                    errs.append(f"{rel}: server '{name}' requires the exact ChatGPT OAuth CIMD extension")
+            if set(s) - allowed_keys:
+                errs.append(f"{rel}: server '{name}' has unsupported keys")
             if s.get("type") != "streamable-http" or not str(s.get("url", "")).startswith("https://"):
                 errs.append(f"{rel}: server '{name}' must be streamable-http over https")
             if s.get("headers"):
@@ -594,12 +604,27 @@ def selftest(listing: dict, registry_text: tuple[str, str]) -> int:
         "display name over 30 chars": ("openai", with_listing(
             lambda l: l["identity"].update(displayName="OpenBank Customer Assistant Connector"))),
         "brand color too light": ("openai", with_listing(lambda l: l["identity"].update(brandColor="#F5F5FF"))),
+        "array of triggered tools": ("openai", with_rendered(
+            "openai-plugin/plugin.json",
+            lambda o: o["extensions"]["com.openai"]["review"]["test_cases"]["positive"][0].update(
+                tools_triggered=["list_accounts"]))),
+        "unknown tool in a comma-separated review case": ("openai", with_rendered(
+            "openai-plugin/plugin.json",
+            lambda o: o["extensions"]["com.openai"]["review"]["test_cases"]["positive"][0].update(
+                tools_triggered="list_accounts, get_statement"))),
         "wrong number of test cases": ("openai", with_rendered(
             "openai-plugin/plugin.json",
             lambda o: o["extensions"]["com.openai"]["review"]["test_cases"]["negative"].pop())),
         "second URL in one package": ("claude", with_rendered(
             "claude-code-plugin/.mcp.json",
             lambda o: o["mcpServers"]["openbank"].update(url="https://api.open-bank.tech/mcp"))),
+        "missing ChatGPT OAuth extension": ("openai", with_rendered(
+            "openai-plugin/mcp.json",
+            lambda o: o["mcpServers"]["openbank"].pop("extensions"))),
+        "wrong ChatGPT OAuth registration mode": ("openai", with_rendered(
+            "openai-plugin/mcp.json",
+            lambda o: o["mcpServers"]["openbank"]["extensions"]["com.openai"]["auth"]["client"].update(
+                mode="dynamic"))),
         "header on openai server": ("openai", with_rendered(
             "openai-plugin/mcp.json",
             lambda o: o["mcpServers"]["openbank"].update(headers={"Authorization": "Bearer x"}))),

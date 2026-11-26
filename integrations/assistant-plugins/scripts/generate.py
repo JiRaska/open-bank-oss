@@ -88,19 +88,19 @@ def render(listing: dict) -> dict[str, bytes | str]:
         "test_cases": {
             "positive": [
                 {"description": "List connected accounts", "prompt": "Which OpenBank accounts can you see?",
-                 "tools_triggered": ["list_accounts"],
+                 "tools_triggered": "list_accounts",
                  "expected_behavior": "Lists the connected accounts with masked identifiers."},
                 {"description": "Read a balance", "prompt": "What is the balance of my main OpenBank account?",
-                 "tools_triggered": ["list_accounts", "get_balance"],
+                 "tools_triggered": "list_accounts, get_balance",
                  "expected_behavior": "States the balance and currency of that account."},
                 {"description": "Balances across accounts", "prompt": "What are the balances of my shared OpenBank accounts?",
-                 "tools_triggered": ["list_accounts", "get_balance"],
+                 "tools_triggered": "list_accounts, get_balance",
                  "expected_behavior": "Shows the balance and currency for each account with a balance grant."},
                 {"description": "No shared account", "prompt": "Which accounts are available to this assistant?",
-                 "tools_triggered": ["list_accounts"],
+                 "tools_triggered": "list_accounts",
                  "expected_behavior": "Names shared accounts and explains when no accounts are available."},
                 {"description": "Payment proposal", "prompt": "Propose paying 25 EUR to the IBAN I give you, reference rent.",
-                 "tools_triggered": ["list_accounts", "propose_payment"],
+                 "tools_triggered": "list_accounts, propose_payment",
                  "expected_behavior": "Creates a proposal and tells the user to approve it in the OpenBank app; states that no money has moved."},
             ],
             "negative": [
@@ -127,7 +127,11 @@ def render(listing: dict) -> dict[str, bytes | str]:
     })
     mcp_json = {
         "$schema": AGENT_PLUGINS_MCP_SCHEMA,
-        "mcpServers": {ident["slug"]: {"type": "streamable-http", "url": server["url"]}},
+        "mcpServers": {ident["slug"]: {
+            "type": "streamable-http",
+            "url": server["url"],
+            "extensions": {"com.openai": {"auth": {"type": "oauth", "client": {"mode": "cimd"}}}},
+        }},
     }
     codex_plugin = drop_none({
         "name": ident["slug"],
