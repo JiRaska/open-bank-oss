@@ -340,7 +340,8 @@ spec:
       volumes:
         - name: customer-site-allowlist
           configMap:
-            name: mcp-shared-customer-allowlist
+            # The allowlist is loaded at boot. A new name couples config with the pod rollout.
+            name: mcp-shared-customer-allowlist-v2
             items:
               - key: allowlist.yaml
                 path: allowlist.yaml
