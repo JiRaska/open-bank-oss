@@ -255,6 +255,8 @@ spec:
             # gen-network-policies.py derives the ingress allow-list from DECLARED env URLs and an
             # undeclared caller does not exist as far as the generator is concerned. Every edge
             # -> delegation call timed out for as long as this line was missing.
+            - name: MCP_CONNECT_ENABLED
+              value: "true"
             - name: DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
             # #10281 multi-signature hold on payments under X-Acting-For. Fail-closed (a policy that
