@@ -321,6 +321,11 @@ describe('content contract', () => {
     expect(component).toContain('DocsPageHeader')
   })
 
+  it('links to the in-app channel observability page', () => {
+    renderPage({ gates: null, adrs: null })
+    expect(screen.getByRole('link', { name: /Channel observability/ })).toHaveAttribute('href', '/delegations/mcp-channel')
+  })
+
   it('labels the customer screens as illustrative', () => {
     renderPage({ gates: null, adrs: null })
     expect(screen.getByText(/Illustrative mock, not real screens/)).toBeInTheDocument()
