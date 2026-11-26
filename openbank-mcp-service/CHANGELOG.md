@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.22.0...mcp-service-v0.22.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **mcp-service:** admit scoped ChatGPT OAuth registration ([#17377](https://github.com/JiRaska/open-bank-oss/issues/17377)) ([3c22575](https://github.com/JiRaska/open-bank-oss/commit/3c225753d9ee64f8b0a8ecadf2b856d78b91759e))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.21.0...mcp-service-v0.22.0) (2026-11-26)
 
 
