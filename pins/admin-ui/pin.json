@@ -1,9 +1,9 @@
 {
   "component": "admin-ui",
-  "digest": "sha256:fbaa1d98f5d47eebcded3f040c0d1edde5a9944016ca002dda9ae474a71a235a",
+  "digest": "sha256:2288e693d27d73ec67133793d6d558a23fa11fc2db7d0311a9501cbd892f156e",
   "image": "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui",
-  "image_source_sha": "2e2c7eb9470b340d225827b746649bdd0839fcda",
-  "manifest_sha": "2e2c7eb9470b340d225827b746649bdd0839fcda",
+  "image_source_sha": "acb255d87a9e497f440d8521d829071536771746",
+  "manifest_sha": "acb255d87a9e497f440d8521d829071536771746",
   "rollback": false,
-  "tag": "sandbox-2e2c7eb94-run45795800983"
+  "tag": "sandbox-acb255d87-run45810321997"
 }
