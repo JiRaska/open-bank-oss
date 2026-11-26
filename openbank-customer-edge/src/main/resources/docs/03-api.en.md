@@ -248,3 +248,12 @@ selection is forwarded to Delegation over its internal authenticated route. Revo
 uses the connection ID as the idempotency key across the Edge and Delegation boundary.
 
 The MCP connection request endpoints with the `-v2` suffix also return hosted approval requests. A hosted request without a DPoP key carries `parBinding: confidential_client`. The original request endpoints retain the DPoP response and selection behavior for existing app versions. Both variants enforce the authenticated customer's party ID.
+
+## Native passkey for MCP Connect V2
+
+The first-party app claims an opaque handoff at
+`POST /mcp/connect-requests-v2/native-handoff/claim`. After the account selection is fixed,
+`POST /mcp/connect-requests-v2/{requestRef}/native-passkey/begin` returns a short-lived
+WebAuthn challenge. Completing it at the matching `/native-passkey/complete` endpoint records
+the verified step in the bank authority and returns 204. The app still completes its separate
+SCA confirmation. Native Connect is disabled by default.

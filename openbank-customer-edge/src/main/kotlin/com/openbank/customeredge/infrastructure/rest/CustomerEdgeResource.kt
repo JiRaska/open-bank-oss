@@ -14,6 +14,7 @@ import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
 import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
+import com.openbank.customeredge.infrastructure.webauthn.nativeMcpAppOwner
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.domain.account.CzechPaymentSymbol
@@ -247,6 +248,9 @@ class CustomerEdgeResource(
     ) {
         mcpConnectEnabled = enabled
     }
+
+    @field:ConfigProperty(name = "openbank.edge.mcp-native-connect-enabled", defaultValue = "false")
+    internal var mcpNativeConnectEnabled: Boolean = false
 
     // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created
     // through domestic-payment's reservation-bound route and its reservation is settled by the
@@ -3356,7 +3360,7 @@ class CustomerEdgeResource(
 
     @GET
     @Path("/mcp/connect-requests-v2/{requestRef}")
-    @Authorize(action = "customer.mcp-connect.read")
+    @Authorize(action = "customer.mcp-native-connect.read")
     @Blocking
     fun getMcpConnectRequestV2(@PathParam("requestRef") requestRef: String): Response =
         withMcpConnectRequest(requestRef, includeHosted = true) { path, party ->
@@ -3366,7 +3370,7 @@ class CustomerEdgeResource(
 
     @POST
     @Path("/mcp/connect-requests-v2/{requestRef}/selection")
-    @Authorize(action = "customer.mcp-connect.select")
+    @Authorize(action = "customer.mcp-native-connect.select")
     @Blocking
     fun selectMcpConnectAccountsV2(
         @PathParam("requestRef") requestRef: String,
@@ -3421,22 +3425,25 @@ class CustomerEdgeResource(
     private fun mcpConnectionsUrl(): String =
         "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/connections"
 
-    private fun withMcpConnectCustomer(call: (UUID) -> Response): Response {
+    private fun withMcpConnectCustomer(allowNative: Boolean = false, call: (UUID) -> Response): Response {
         val response = when {
             !mcpConnectEnabled -> notFound("MCP connect is unavailable")
             this::requestHeaders.isInitialized && !requestHeaders.getHeaderString(ACTING_FOR_HEADER).isNullOrBlank() ->
                 forbidden("MCP connect requires the customer's own app session")
-            else -> appSessionCustomer()?.let { call(it.partyId) }
+            else -> (appSessionCustomer()?.partyId ?: nativeMcpConnectParty(allowNative))?.let(call)
                 ?: forbidden("MCP connect requires the customer's own app session")
         }
         return Response.fromResponse(response).header("Cache-Control", "no-store").build()
     }
 
+    private fun nativeMcpConnectParty(allowNative: Boolean): UUID? =
+        if (allowNative && mcpNativeConnectEnabled) nativeMcpAppOwner(jwt, actingFor = null)?.partyId else null
+
     private fun withMcpConnectRequest(
         requestRef: String,
         includeHosted: Boolean = false,
         call: (String, UUID) -> Response,
-    ): Response = withMcpConnectCustomer { party ->
+    ): Response = withMcpConnectCustomer(allowNative = includeHosted) { party ->
         if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
             call("${mcpConnectRequestsPath(includeHosted)}/$requestRef", party)
         } else {

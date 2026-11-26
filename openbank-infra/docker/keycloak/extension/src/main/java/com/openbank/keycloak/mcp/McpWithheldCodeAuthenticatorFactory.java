@@ -71,6 +71,10 @@ public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory
         }
     }
 
+    long connectLifespanSeconds() {
+        return lifespanSeconds;
+    }
+
     McpConnectAuthorityClient tokenAuthority() {
         if (!connectV2 || !settings.complete()) {
             throw new IllegalStateException("MCP connect V2 is unavailable");

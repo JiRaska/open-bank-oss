@@ -91,6 +91,19 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
             refuse(ctx, AuthenticationFlowError.INVALID_USER, "no party, or required actions pending");
             return;
         }
+        if (auth.getAuthNote(McpNotes.NATIVE_PROOF) != null) {
+            if (!connectV2 || !party.get().equals(auth.getAuthNote(McpNotes.PARTY_ID))) {
+                burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "native connect identity mismatch");
+                return;
+            }
+            try {
+                auth.setAuthNote(McpNotes.CONNECT_V2, "1");
+                pollV2(ctx, auth, contextOf(auth, started), party.get(), null);
+            } catch (IllegalArgumentException e) {
+                burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "native connect context incomplete");
+            }
+            return;
+        }
         Optional<CredentialModel> passkey = assertedPasskey(ctx, user);
         if (passkey.isEmpty()) {
             refuse(ctx, AuthenticationFlowError.INVALID_CREDENTIALS, "no passkey asserted in this request");
@@ -240,6 +253,10 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
                 return;
             }
             String digest = McpConnectContextV2.of(context, party, request.parJkt(), accounts).payloadSha256();
+            String nativeProof = auth.getAuthNote(McpNotes.NATIVE_PROOF);
+            if (nativeProof != null && !digest.equals(nativeProof)) {
+                throw new IllegalArgumentException("native proof does not bind the selected accounts");
+            }
             if (challengeId == null) {
                 String id = sca.initiate(party, request.approvalRequestId(), digest);
                 authority.bindChallenge(request, new McpConnectAuthorityClient.Challenge(id, digest));

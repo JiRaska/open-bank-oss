@@ -250,6 +250,53 @@ prohibited if {
     not mcp_connect_customer_edge
 }
 
+mcp_native_handoff_issuer_action if {
+    input.action in {
+        "delegation.mcp-connect.issuer.native-issue",
+        "delegation.mcp-connect.issuer.native-claimed-party",
+        "delegation.mcp-connect.issuer.native-attest-selection",
+        "delegation.mcp-connect.issuer.native-consume",
+    }
+}
+
+mcp_native_handoff_customer_action if {
+    input.action in {
+        "delegation.mcp-connect.customer.native-claim",
+        "delegation.mcp-connect.customer.native-selected-binding",
+        "delegation.mcp-connect.customer.native-mark-verified",
+    }
+}
+
+allow_native_handoff_issuer if {
+    mcp_connect_issuer
+    "ROLE_API" in input.principal.roles
+}
+
+allow_native_handoff_edge if {
+    mcp_connect_customer_edge
+    "ROLE_OPERATOR" in input.principal.roles
+}
+
+allowed_reasons contains "mcp-native-handoff-issuer" if {
+    mcp_native_handoff_issuer_action
+    allow_native_handoff_issuer
+}
+
+allowed_reasons contains "mcp-native-handoff-edge" if {
+    mcp_native_handoff_customer_action
+    allow_native_handoff_edge
+}
+
+prohibited if {
+    mcp_native_handoff_issuer_action
+    not allow_native_handoff_issuer
+}
+
+prohibited if {
+    mcp_native_handoff_customer_action
+    not allow_native_handoff_edge
+}
+
 # Only the authenticated customer edge may record a customer's review, regardless of other roles.
 prohibited if {
     input.action == "delegation.recertification.confirm"

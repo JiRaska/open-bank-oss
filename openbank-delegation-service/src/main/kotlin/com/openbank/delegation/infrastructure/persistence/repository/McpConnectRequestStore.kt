@@ -230,6 +230,10 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
      * No caller can overwrite it or extend its authorization window.
      */
     suspend fun register(request: Request): Boolean = pool.withTransaction { connection ->
+        register(connection, request)
+    }.awaitSuspending()
+
+    internal fun register(connection: SqlConnection, request: Request): Uni<Boolean> {
         val binding = Tuple.tuple()
             .addString(request.requestRef)
             .addUUID(request.partyId)
@@ -239,10 +243,10 @@ class McpConnectRequestStore(private val pool: Pool, private val proposals: Paym
             .addString(request.resource)
             .addArrayOfString(request.scopes.sorted().toTypedArray())
             .addOffsetDateTime(request.expiresAt)
-        connection.preparedQuery(REGISTER).execute(binding)
+        return connection.preparedQuery(REGISTER).execute(binding)
             .flatMap { connection.preparedQuery(READ).execute(Tuple.of(request.requestRef)) }
             .map { rows -> rows.firstOrNull()?.matches(request) == true }
-    }.awaitSuspending()
+    }
 
     private fun Row.matches(expected: Request): Boolean = getUUID("party_id") == expected.partyId &&
         getString("client_id") == expected.clientId &&

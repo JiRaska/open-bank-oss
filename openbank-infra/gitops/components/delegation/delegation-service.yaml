@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a81819b798c644fa"
+        openbank.tech/policy-checksum: "c5c1facd647e7e47"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -138,6 +138,8 @@ spec:
               value: http://sca-service.sca.svc:8110
             # Connect receipt uses SCA's private mTLS listener and the mounted Delegation certificate.
             - name: DELEGATION_MCP_CONNECT_ENABLED
+              value: "true"
+            - name: DELEGATION_MCP_NATIVE_HANDOFF_ENABLED
               value: "true"
             - name: MCP_CONNECT_SCA_RECEIPT_URL
               value: https://sca-service.sca.svc:8443

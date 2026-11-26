@@ -12,3 +12,13 @@ prohibited if {
 	startswith(input.action, "customer.mcp-connect.")
 	not customer_app_session
 }
+
+mcp_native_app_session if {
+	input.attributes.token_azp in {"openbank-app", "openbank-edge-webauthn"}
+	input.attributes.token_act == false
+}
+
+prohibited if {
+	input.action in {"customer.mcp-native-connect.claim", "customer.mcp-native-connect.prove", "customer.mcp-native-connect.read", "customer.mcp-native-connect.select"}
+	not mcp_native_app_session
+}

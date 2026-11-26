@@ -327,6 +327,7 @@ openbank:
     # revisions and its operation-snapshot/decision-ledger health checks are green.
     n-of-m-enabled: ${DELEGATION_N_OF_M_ENABLED:false}
     mcp-connect-enabled: ${DELEGATION_MCP_CONNECT_ENABLED:false}
+    mcp-native-handoff-enabled: ${DELEGATION_MCP_NATIVE_HANDOFF_ENABLED:false}
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
     # Existing neutral reservations and exact replays retain their established behavior.

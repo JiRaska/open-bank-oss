@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "82c28ee66794802f"
+        openbank.tech/policy-checksum: "d1b1742ff09d3604"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -257,6 +257,12 @@ spec:
             # -> delegation call timed out for as long as this line was missing.
             - name: MCP_CONNECT_ENABLED
               value: "true"
+            # Enable the private native handoff transport in the shared sandbox.
+            # Hosted OAuth client binding is managed separately in Keycloak.
+            - name: MCP_NATIVE_CONNECT_ENABLED
+              value: "true"
+            - name: MCP_NATIVE_CONNECT_AUTHORITY_URL
+              value: https://delegation-service.delegation.svc:8443
             - name: DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
             # #10281 multi-signature hold on payments under X-Acting-For. Fail-closed (a policy that

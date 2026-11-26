@@ -48,6 +48,12 @@ spec:
       podSelector:
         matchLabels:
           app.kubernetes.io/name: keycloak
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: customer-edge
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: customer-edge
     ports:
     - protocol: TCP
       port: 8443
