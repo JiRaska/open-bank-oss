@@ -138,3 +138,23 @@ pro izolovanou sandboxovou sadu. Subjekt musí být ve službě Party aktivní s
 a vlastnit oba účty. `GET /customer/v1/synthetic/transfers` vrací ověřené sadě aktuální datum
 účtování v zóně Europe/Prague. POST na stejné cestě přijímá toto datum a směr převodu. Vyhrazená
 trasa Transaction vyžaduje ověřený Edge a stejný syntetický původ.
+
+## Diagnostika odmítnutí relace aplikace při připojení MCP
+
+Prometheus čítač `openbank_edge_mcp_native_app_rejected_total` se zvýší, když zapnutá nativní
+cesta Connect odmítne relaci aplikace před voláním služby Delegation. Odpověď zůstává obecná
+HTTP 403. Přidává se pouze pevně vymezený štítek `reason`.
+
+| Důvod | Kontrola |
+| --- | --- |
+| `ACTING_FOR` | Požadavek obsahoval neprázdnou hlavičku pro zastupování. Ověřte osobní profil v aplikaci. |
+| `ACTOR` | Token obsahoval údaj o zastupujícím aktérovi. Ověřte, že požadavek používá vlastní relaci zákazníka. |
+| `CLIENT` | Klient tokenu neodpovídal vlastní bankovní aplikaci. Ověřte přihlašovací tok aplikace. |
+| `AUDIENCE` | V publiku tokenu chybělo `openbank-edge`. Ověřte mapování v zákaznickém realmu a tok, který token vystavil. |
+| `SUBJECT` | Identita relace chyběla, byla prázdná nebo příliš dlouhá. Ověřte formát tokenu na syntetickém účtu. |
+| `PARTY` | Identifikátor klienta chyběl nebo nebyl v kanonickém formátu UUID. Ověřte mapování a atribut syntetického účtu. |
+
+Porovnejte nárůst podle důvodu v testovacím okně s počty HTTP požadavků v Customer Edge a Delegation.
+Čítač pokrývá pouze ověření vlastní relace aplikace. Při HTTP 403 bez odpovídajícího nárůstu
+ověřte dřívější autorizaci nebo odpověď navazující služby. Hodnoty tokenů, atributů a hlaviček
+do diagnostiky neukládejte.

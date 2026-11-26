@@ -7,6 +7,7 @@ package com.openbank.customeredge.infrastructure.webauthn
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import com.openbank.libs.authz.Authorize
+import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -39,6 +40,7 @@ internal class McpNativeConnectResource(
     private val proofs: McpNativePasskeyProofService,
     private val jwt: JsonWebToken,
     private val mapper: ObjectMapper,
+    private val metrics: MeterRegistry,
     @ConfigProperty(name = "openbank.edge.mcp-native-connect-enabled", defaultValue = "false")
     private val enabled: Boolean,
     @ConfigProperty(name = "openbank.edge.mcp-native-connect-authority-url")
@@ -158,10 +160,12 @@ internal class McpNativeConnectResource(
         require(raw.requestRef == requestRef)
         val par = when (raw.parBinding) {
             "dpop" -> McpNativeParBinding.Dpop(requireNotNull(raw.parJkt))
+
             "confidential_client" -> {
                 require(raw.parJkt == null)
                 McpNativeParBinding.ConfidentialClient
             }
+
             else -> error("Unexpected PAR proof type")
         }
         McpNativePasskeyBinding(
@@ -196,8 +200,9 @@ internal class McpNativeConnectResource(
 
     private fun ownApp(actingFor: String?, call: (String, NativeMcpOwner) -> Response): Response {
         if (!enabled) return error(Status.NOT_FOUND, "Connect is unavailable")
-        val owner = nativeMcpAppOwner(jwt, actingFor)
-            ?: return error(Status.FORBIDDEN, "Your own bank app session is required")
+        val owner = nativeMcpAppOwner(jwt, actingFor) { reason ->
+            metrics.counter("openbank.edge.mcp.native.app.rejected", "reason", reason.name).increment()
+        } ?: return error(Status.FORBIDDEN, "Your own bank app session is required")
         val origin = authority ?: return unavailable()
         return call(origin, owner)
     }
@@ -241,14 +246,35 @@ internal class McpNativeConnectResource(
 
 internal data class NativeMcpOwner(val partyId: UUID, val subject: String)
 
-internal fun nativeMcpAppOwner(jwt: JsonWebToken, actingFor: String?): NativeMcpOwner? {
-    if (!actingFor.isNullOrBlank() || jwt.containsClaim("act")) return null
-    val client = jwt.getClaim<Any?>("azp") as? String ?: return null
-    if (client !in APP_CLIENTS || jwt.audience?.contains(EDGE_AUDIENCE) != true) return null
-    val subject = jwt.subject?.takeIf { it.isNotBlank() && it.length <= MAX_SUBJECT_LENGTH } ?: return null
+internal enum class NativeMcpAppRejection {
+    ACTING_FOR,
+    ACTOR,
+    CLIENT,
+    AUDIENCE,
+    SUBJECT,
+    PARTY,
+}
+
+internal fun nativeMcpAppOwner(
+    jwt: JsonWebToken,
+    actingFor: String?,
+    onReject: (NativeMcpAppRejection) -> Unit = {},
+): NativeMcpOwner? {
+    fun reject(reason: NativeMcpAppRejection): NativeMcpOwner? {
+        onReject(reason)
+        return null
+    }
+
+    if (!actingFor.isNullOrBlank()) return reject(NativeMcpAppRejection.ACTING_FOR)
+    if (jwt.containsClaim("act")) return reject(NativeMcpAppRejection.ACTOR)
+    val client = jwt.getClaim<Any?>("azp") as? String
+    if (client !in APP_CLIENTS) return reject(NativeMcpAppRejection.CLIENT)
+    if (jwt.audience?.contains(EDGE_AUDIENCE) != true) return reject(NativeMcpAppRejection.AUDIENCE)
+    val subject = jwt.subject?.takeIf { it.isNotBlank() && it.length <= MAX_SUBJECT_LENGTH }
+        ?: return reject(NativeMcpAppRejection.SUBJECT)
     val party = jwt.getClaim<String>("party_id")?.let { raw ->
         runCatching { UUID.fromString(raw) }.getOrNull()?.takeIf { it.toString() == raw }
-    } ?: return null
+    } ?: return reject(NativeMcpAppRejection.PARTY)
     return NativeMcpOwner(party, subject)
 }
 
