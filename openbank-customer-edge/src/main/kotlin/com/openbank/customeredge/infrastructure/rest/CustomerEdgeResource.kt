@@ -249,7 +249,7 @@ class CustomerEdgeResource(
         mcpConnectEnabled = enabled
     }
 
-    @ConfigProperty(name = "openbank.edge.mcp-native-connect-enabled", defaultValue = "false")
+    @field:ConfigProperty(name = "openbank.edge.mcp-native-connect-enabled", defaultValue = "false")
     internal var mcpNativeConnectEnabled: Boolean = false
 
     // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created

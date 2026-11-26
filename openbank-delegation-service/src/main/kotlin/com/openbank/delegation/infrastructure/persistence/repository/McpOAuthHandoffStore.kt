@@ -299,6 +299,7 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
                 AND h.proved_at IS NULL AND h.consumed_at IS NULL AND h.selected_context_sha256 = $4
                 AND EXISTS (SELECT 1 FROM mcp_connect_requests AS r WHERE $CONNECT_MATCH)
         """
+
         // Retain the request reference beyond the full guarded OAuth session lifetime.
         const val PURGE = """
             WITH expired AS (
