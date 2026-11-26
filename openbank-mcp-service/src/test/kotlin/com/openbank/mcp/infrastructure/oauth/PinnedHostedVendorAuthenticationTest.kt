@@ -31,17 +31,28 @@ class PinnedHostedVendorAuthenticationTest {
         val digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(jwks))
         val now = Instant.parse("2026-11-26T16:00:00Z")
         val mapper = ObjectMapper()
+        val scopedClientId = "https://chatgpt.com/oauth/fixture/client.json"
+        val scoped = HostedOAuthAdmission.Registration(
+            Vendor.CHATGPT,
+            scopedClientId,
+            "https://chatgpt.com/fixture/callback",
+        )
         val authentication = PinnedHostedVendorAuthentication(
             jwks,
             digest,
             mapper,
             InMemoryDpopReplayStore(),
             Clock.fixed(now, ZoneOffset.UTC),
+            scopedChatGpt = PinnedHostedVendorAuthentication.ScopedChatGpt(scoped, jwks, digest),
         )
-        fun credential(audience: String): HostedVendorAuthentication.Credentials {
+        fun credential(
+            audience: String,
+            id: String = Vendor.CHATGPT.clientId,
+            issuer: String = id,
+        ): HostedVendorAuthentication.Credentials {
             val payload = mapper.createObjectNode()
-                .put("iss", Vendor.CHATGPT.clientId)
-                .put("sub", Vendor.CHATGPT.clientId)
+                .put("iss", issuer)
+                .put("sub", issuer)
                 .put("aud", audience)
                 .put("iat", now.epochSecond)
                 .put("exp", now.plusSeconds(30).epochSecond)
@@ -53,7 +64,7 @@ class PinnedHostedVendorAuthenticationTest {
                 this.payload = payload.toString()
             }.compactSerialization
             return HostedVendorAuthentication.Credentials(
-                Vendor.CHATGPT.clientId,
+                id,
                 TokenAuthentication.PRIVATE_KEY_JWT,
                 signed,
             )
@@ -62,5 +73,8 @@ class PinnedHostedVendorAuthenticationTest {
         val verified = credential("${HostedOAuthComplete.ISSUER}/token")
         assertThat(authentication.authenticate(verified)).isEqualTo(Vendor.CHATGPT)
         assertThat(authentication.authenticate(verified)).isNull()
+        val endpoint = "${HostedOAuthComplete.ISSUER}/token"
+        assertThat(authentication.authenticate(credential(endpoint, scopedClientId, Vendor.CHATGPT.clientId))).isNull()
+        assertThat(authentication.authenticate(credential(endpoint, scopedClientId))).isEqualTo(Vendor.CHATGPT)
     }
 }

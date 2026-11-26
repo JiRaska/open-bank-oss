@@ -49,6 +49,8 @@ internal class HostedOAuthRuntimeProducer(
     private fun create(site: HostedOAuthSiteConfiguration, channel: CustomerChannel): HostedOAuthRuntime {
         val clock = Clock.systemUTC()
         val openBao = openBao(site)
+        val scopedChatGpt = site.scopedChatGpt()
+        val registrations = HostedOAuthAdmission.Registrations(scopedChatGpt?.registration)
         val authentication = PinnedHostedVendorAuthentication(
             site.chatGptJwks,
             site.chatGptJwksSha256,
@@ -56,6 +58,7 @@ internal class HostedOAuthRuntimeProducer(
             channel.hostedReplayStore(),
             clock,
             if (Vendor.CLAUDE in enabledVendors) site.claudeCredential() else null,
+            scopedChatGpt,
         )
         val custody = HostedBankCustody(
             HostedBankJwtVerifier(mapper, site.bankKeys, clock),
@@ -69,7 +72,7 @@ internal class HostedOAuthRuntimeProducer(
             .connectTimeout(Duration.ofSeconds(BANK_CONNECT_TIMEOUT_SECONDS)).build()
         val token = HostedBankTokenClient(http, mapper, openBao.signer, custody)
         val bankAccess = HostedBankAccess(custody, HostedBankDpopBinding(openBao.signer::thumbprint), token)
-        return compose(site, openBao, authentication, http, token, bankAccess)
+        return compose(site, openBao, authentication, http, token, bankAccess, registrations)
     }
 
     private fun compose(
@@ -79,6 +82,7 @@ internal class HostedOAuthRuntimeProducer(
         http: HttpClient,
         token: HostedBankTokenClient,
         bankAccess: HostedBankAccess,
+        registrations: HostedOAuthAdmission.Registrations,
     ): HostedOAuthRuntime {
         val availability = HostedActiveConnection { vendor, id -> bankAccess.load(vendor, id) != null }
         val grants = HostedVendorGrants(
@@ -87,10 +91,11 @@ internal class HostedOAuthRuntimeProducer(
             availability,
             availability,
             enabledVendors,
+            registrations,
         )
         val transactions = PgHostedOAuthTransactions(pool)
         val bankPar = HostedBankParClient(http, mapper, openBao.signer)
-        val start = HostedOAuthStart(transactions, bankPar, openBao.custody, mapper, enabledVendors)
+        val start = HostedOAuthStart(transactions, bankPar, openBao.custody, mapper, enabledVendors, registrations)
         val complete = HostedOAuthComplete(
             transactions,
             token,
@@ -99,6 +104,7 @@ internal class HostedOAuthRuntimeProducer(
             openBao.custody,
             mapper,
             enabledVendors,
+            registrations,
         )
         return ComposedHostedOAuthRuntime(
             enabledVendors,
