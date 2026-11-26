@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mcp-shared-customer-allowlist
+  name: mcp-shared-customer-allowlist-v2
   namespace: platform
 data:
   allowlist.yaml: |
@@ -79,7 +79,7 @@ data:
     clients:
       - client_id: https://chatgpt.com/oauth/client.json
         tier: H
-        enabled: true
+        enabled: false
         display_name: "ChatGPT"
         redirect_uris:
           - https://chatgpt.com/connector_platform_oauth_redirect
@@ -91,7 +91,7 @@ data:
 
       - client_id: mcp-claude-sandbox
         tier: H
-        enabled: true
+        enabled: false
         display_name: "Claude"
         redirect_uris:
           - https://claude.ai/api/mcp/auth_callback
