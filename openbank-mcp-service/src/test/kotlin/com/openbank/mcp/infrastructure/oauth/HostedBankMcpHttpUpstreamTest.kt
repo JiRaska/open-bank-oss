@@ -59,7 +59,7 @@ class HostedBankMcpHttpUpstreamTest {
             assertThat(calls).hasSize(4)
             assertThat(calls.take(2).map(Call::proof)).containsExactly("first-proof", "nonce-proof")
             assertThat(calls.take(2)).allSatisfy { call ->
-                assertThat(call.uri).isEqualTo(HostedOAuthAdmission.RESOURCE)
+                assertThat(call.uri).isEqualTo(HostedOAuthAdmission.BANK_RESOURCE)
                 assertThat(call.authorization).isEqualTo("DPoP bank-token")
                 assertThat(call.accept).isEqualTo("application/json")
                 assertThat(call.protocol).isEqualTo(PROTOCOL)

@@ -6,12 +6,7 @@ package com.openbank.mcp.infrastructure.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.mcp.infrastructure.customer.CustomerChannel
-import com.openbank.mcp.infrastructure.oauth.HostedMcpDispatch.Outcome
-import com.openbank.mcp.infrastructure.oauth.HostedOAuthRuntime
-import com.openbank.mcp.infrastructure.oauth.HostedOpaqueCredential
-import io.smallrye.common.annotation.Blocking
 import io.vertx.core.http.HttpServerRequest
-import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -19,8 +14,6 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
-import jakarta.ws.rs.core.Response.Status
-import kotlinx.coroutines.runBlocking
 
 /**
  * The customer MCP channel's own path root (#16847, owner decision 2026-11-21, option b).
@@ -47,33 +40,10 @@ class CustomerMcpEndpoint(private val endpoint: McpEndpoint) {
     @Inject
     lateinit var httpRequest: HttpServerRequest
 
-    @Inject
-    internal lateinit var hosted: Instance<HostedOAuthRuntime>
-
     @POST
-    @Blocking
-    fun handle(body: JsonNode): Response {
-        val admission = channel.admission?.takeIf { httpRequest.isSSL }
-            ?: return Response.status(Status.NOT_FOUND).build()
-        val token = HostedOpaqueCredential.extract(httpRequest.headers().getAll("Authorization"))
-            ?: return endpoint.handleCustomer(body)
-        val challenge = admission.resourceMetadataUrl
-        val runtime = hosted.takeIf { it.isResolvable }?.get()?.takeIf { it.enabledVendors.isNotEmpty() }
-            ?: return invalidHostedToken(challenge)
-        val versions = httpRequest.headers().getAll("Mcp-Protocol-Version")
-        if (versions.size > 1) return Response.status(Status.BAD_REQUEST).build()
-        val outcome = runBlocking { runtime.dispatch.dispatch(token, body, versions.singleOrNull()) }
-        return when (outcome) {
-            is Outcome.Forwarded -> Response.status(outcome.reply.status).entity(outcome.reply.body).build()
-            Outcome.Refused.INVALID_TOKEN -> invalidHostedToken(challenge)
-            Outcome.Refused.INVALID_REQUEST -> Response.status(Status.BAD_REQUEST).build()
-            Outcome.Refused.OUTSIDE_SCOPE -> Response.status(Status.FORBIDDEN).build()
-            Outcome.Refused.BANK_UNAVAILABLE -> Response.status(Status.BAD_GATEWAY).build()
-        }
+    fun handle(body: JsonNode): Response = if (channel.admission == null || !httpRequest.isSSL) {
+        Response.status(Response.Status.NOT_FOUND).build()
+    } else {
+        endpoint.handleCustomer(body)
     }
-
-    private fun invalidHostedToken(metadataUrl: String): Response = Response.status(Status.UNAUTHORIZED)
-        .header("WWW-Authenticate", "Bearer error=\"invalid_token\", resource_metadata=\"$metadataUrl\"")
-        .header("Cache-Control", "no-store")
-        .build()
 }

@@ -120,7 +120,7 @@ class HostedBankTransitProofTest {
         assertEquals(chatgpt.dpopThumbprint, exchangeProof.dpopThumbprint)
         assertEquals(issuer.toString(), claims(mapper, exchangeProof.clientAssertion).path("aud").asText())
         val resource = claims(mapper, signin.signResource(Vendor.CHATGPT, "bank-token", "resource.nonce"))
-        assertEquals(HostedOAuthAdmission.RESOURCE, resource.path("htu").asText())
+        assertEquals(HostedOAuthAdmission.BANK_RESOURCE, resource.path("htu").asText())
         assertEquals("resource.nonce", resource.path("nonce").asText())
         assertEquals(HostedOAuthStart.digest("bank-token"), resource.path("ath").asText())
         assertNotEquals(tokenDpop.path("jti").asText(), resource.path("jti").asText())

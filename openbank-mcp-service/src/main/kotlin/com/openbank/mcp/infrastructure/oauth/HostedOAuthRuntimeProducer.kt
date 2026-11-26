@@ -35,7 +35,7 @@ internal class HostedOAuthRuntimeProducer(
     private val runtime = if (enabledVendors.isEmpty()) {
         null
     } else {
-        check(channel.admission?.allowlist?.resource == HostedOAuthAdmission.RESOURCE) {
+        check(channel.admission?.allowlist?.resource == HostedOAuthAdmission.BANK_RESOURCE) {
             "Hosted OAuth requires the canonical customer MCP channel"
         }
         create(HostedOAuthSiteConfiguration.load(Path.of(siteFile.orElseThrow()), mapper), channel)

@@ -6,6 +6,7 @@ package com.openbank.mcp.infrastructure.oauth
 
 import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.OpenBaoTokenSource
 import com.openbank.libs.security.OpenBaoTransport
 import com.openbank.mcp.infrastructure.oauth.HostedOAuthAdmission.Vendor
@@ -27,7 +28,6 @@ import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
 import java.time.Clock
 import java.util.Base64
-import java.util.UUID
 
 /** Runtime inputs contain public keys and version pins. The four private keys stay in Transit. */
 internal class HostedBankTransitProof(
@@ -92,7 +92,7 @@ internal class HostedBankTransitProof(
                 "aud" to ISSUER.toString(),
                 "iat" to sampledAt,
                 "exp" to sampledAt + ASSERTION_LIFETIME,
-                "jti" to UUID.randomUUID().toString(),
+                "jti" to Ids.randomId().toString(),
             ),
         )
         val proof = signDpop(vendor, endpoint, nonce, null)
@@ -115,7 +115,7 @@ internal class HostedBankTransitProof(
                 put("htm", "POST")
                 put("htu", endpoint.toString())
                 put("iat", clock.instant().epochSecond)
-                put("jti", UUID.randomUUID().toString())
+                put("jti", Ids.randomId().toString())
                 if (nonce != null) put("nonce", nonce)
                 if (accessHash != null) put("ath", accessHash)
             },
@@ -189,7 +189,7 @@ internal class HostedBankTransitProof(
     private companion object {
         val ISSUER = URI.create("https://kc.open-bank.tech/realms/openbank-customers")
         val PAR = URI.create("$ISSUER/protocol/openid-connect/ext/par/request")
-        val RESOURCE = URI.create(HostedOAuthAdmission.RESOURCE)
+        val RESOURCE = URI.create(HostedOAuthAdmission.BANK_RESOURCE)
         val TOKEN = URI.create("$ISSUER/protocol/openid-connect/token")
         val NONCE = Regex("[!-~]{1,1024}")
         val P256 = AlgorithmParameters.getInstance("EC").run {

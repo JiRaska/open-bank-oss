@@ -631,8 +631,21 @@ def _walk_client(root: pathlib.Path, rel: pathlib.Path, client: Iface, resolver:
 
 
 # Companion check: a raw HTTP client bypasses every rule above, because it is not an interface this
-# gate can read. (relative path, pattern name) -> reason. Empty by decision.
-RAW_HTTP_ALLOWLIST: dict[tuple[str, str], str] = {}
+# gate can read. (relative path, pattern name) -> reason. Keep these exceptions at
+# the hosted OAuth transport boundary. No business REST client is allowed here.
+_HOSTED_OAUTH = "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/oauth"
+RAW_HTTP_ALLOWLIST: dict[tuple[str, str], str] = {
+    (f"{_HOSTED_OAUTH}/HostedBankMcpHttpUpstream.kt", "vertx-http-client"):
+        "Dedicated mTLS and DPoP to the fixed bank MCP resource. HostedMcpDispatch limits methods and tools to read access.",
+    (f"{_HOSTED_OAUTH}/HostedBankParClient.kt", "java.net.http"):
+        "POST to the fixed bank authorization server PAR endpoint with signed client authentication.",
+    (f"{_HOSTED_OAUTH}/HostedBankTokenClient.kt", "java.net.http"):
+        "POST to the fixed bank token endpoint for code exchange and connection-bound refresh.",
+    (f"{_HOSTED_OAUTH}/HostedBankTransitProof.kt", "java.net.http"):
+        "POST to the scoped internal OpenBao Transit signing keys only.",
+    (f"{_HOSTED_OAUTH}/HostedOAuthRuntimeProducer.kt", "java.net.http"):
+        "Constructs the redirect-disabled HTTP client for the PAR and token components. No outbound request here.",
+}
 RAW_HTTP_PATTERNS: dict[str, re.Pattern] = {
     "java.net.http": re.compile(r"\bjava\.net\.http\b|\bHttpClient\.new(?:Builder|HttpClient)\b"),
     "HttpURLConnection": re.compile(r"\bHttpURLConnection\b|\.openConnection\s*\("),
@@ -667,7 +680,12 @@ def check_raw_http(root: pathlib.Path, allowlist: dict | None = None) -> list[st
     return findings
 
 
-def check(root: pathlib.Path, allowlist: dict | None = None, baseline: dict | None = None) -> tuple[list[str], int]:
+def check(
+    root: pathlib.Path,
+    allowlist: dict | None = None,
+    baseline: dict | None = None,
+    raw_allowlist: dict | None = None,
+) -> tuple[list[str], int]:
     allowlist = ALLOWLIST if allowlist is None else allowlist
     baseline = INHERITED_BASELINE if baseline is None else baseline
     used_allow: set = set()
@@ -688,7 +706,7 @@ def check(root: pathlib.Path, allowlist: dict | None = None, baseline: dict | No
             )
         for client in parsed:
             findings += _walk_client(root, rel, client, resolver, allowlist, baseline, used_allow, used_base)
-    findings += check_raw_http(root)
+    findings += check_raw_http(root, raw_allowlist)
     findings += [f"stale ALLOWLIST entry {k}: matches no non-GET method. Delete it" for k in sorted(set(allowlist) - used_allow)]
     findings += [f"stale INHERITED_BASELINE entry {k}: matches no inherited write. Delete it" for k in sorted(set(baseline) - used_base)]
     return findings, clients
@@ -856,7 +874,7 @@ def self_test() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _materialise(root, files)
-            findings, _ = check(root, allowlist={}, baseline={})
+            findings, _ = check(root, allowlist={}, baseline={}, raw_allowlist={})
         ok = any(must_flag in f for f in findings) if isinstance(must_flag, str) else bool(findings) == must_flag
         report(ok, f"{name} (expect {must_flag if isinstance(must_flag, str) else ('findings' if must_flag else 'clean')})", findings)
 
@@ -864,19 +882,19 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, allow_src)
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={}, raw_allowlist={})
     report(not findings, "allow-listed POST is clean", findings)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, {"kotlin/x/A.kt": _kt("x", '@RegisterRestClient(configKey = "x")\ninterface A {\n    @PUT\n    fun ok(): String\n}\n')})
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={}, raw_allowlist={})
     report(len(findings) == 2, "allow-listed method whose verb changed POST->PUT is a finding (+ stale entry)", findings)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, {"kotlin/x/A.kt": _kt(
             "x", '@RegisterRestClient(configKey = "x")\n@Path("/api/v1/things")\ninterface A {\n'
                  '    @POST\n    @Path("/{id}/delete")\n    fun ok(): String\n}\n')})
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/api/v1/things/{id}/read"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/api/v1/things/{id}/read"): "reason"}, baseline={}, raw_allowlist={})
     report(len(findings) == 2 and any("/api/v1/things/{id}/delete" in f for f in findings),
            "allow-listed method whose @Path was retargeted to another route is a finding (+ stale entry)", findings)
     with tempfile.TemporaryDirectory() as tmp:
@@ -884,12 +902,12 @@ def self_test() -> int:
         _materialise(root, {"kotlin/x/A.kt": _kt(
             "x", '@RegisterRestClient(configKey = "x")\ninterface A {\n    @POST\n    fun ok(): String\n\n'
                  '    @POST\n    fun ok(body: String): String\n}\n')})
-        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={})
+        findings, _ = check(root, allowlist={("x.A", "ok", "POST", "/"): "reason"}, baseline={}, raw_allowlist={})
     report(any("overload" in f for f in findings), "an overload of an allow-listed method is a finding", findings)
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         _materialise(root, {"kotlin/x/Reads.kt": GET_ONLY_KT})
-        findings, _ = check(root, allowlist={("x.Gone", "m", "POST", "/p"): "r"}, baseline={("x.Gone", "POST", "/p"): "r"})
+        findings, _ = check(root, allowlist={("x.Gone", "m", "POST", "/p"): "r"}, baseline={("x.Gone", "POST", "/p"): "r"}, raw_allowlist={})
     report(sum("stale" in f for f in findings) == 2, "stale allow-list and baseline entries are findings", findings)
 
     for write_tag, must_flag in (("Cards", True), ("Other", False)):
@@ -909,8 +927,15 @@ def self_test() -> int:
             )
             _materialise(root, {"kotlin/x/C.kt": _kt(
                 "x", 'import com.openbank.clients.fake.api.CardsApi\n@RegisterRestClient(configKey = "c")\ninterface C : CardsApi\n')})
-            findings, _ = check(root, allowlist={}, baseline={})
+            findings, _ = check(root, allowlist={}, baseline={}, raw_allowlist={})
         report(bool(findings) == must_flag, f"generated supertype, write tagged {write_tag}", findings)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        raw_client = "package x\nimport java.net.http.HttpClient\n"
+        _materialise(root, {"kotlin/x/Designated.kt": raw_client, "kotlin/x/Other.kt": raw_client})
+        designated = (str(MCP_SRC / "kotlin/x/Designated.kt"), "java.net.http")
+        findings, _ = check(root, allowlist={}, baseline={}, raw_allowlist={designated: "fixture"})
+    report(len(findings) == 1 and "Other.kt" in findings[0], "raw exception is confined to its exact file", findings)
     # The real tree is NOT read here. The gate's own run covers it, so the self-test touches only its
     # fixtures and its declared input is exactly this script.
     print("self-test PASSED" if failures == 0 else f"self-test FAILED ({failures})")

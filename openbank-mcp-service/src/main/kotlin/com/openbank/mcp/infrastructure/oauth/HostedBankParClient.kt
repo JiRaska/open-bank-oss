@@ -44,7 +44,7 @@ internal class HostedBankParClient(
                 "client_assertion" to proof.clientAssertion,
                 "response_type" to "code",
                 "redirect_uri" to HostedOAuthAdmission.BANK_CALLBACK,
-                "resource" to HostedOAuthAdmission.RESOURCE,
+                "resource" to HostedOAuthAdmission.BANK_RESOURCE,
                 "scope" to HostedOAuthAdmission.BANK_SCOPE,
                 "state" to bankState,
                 "code_challenge_method" to "S256",

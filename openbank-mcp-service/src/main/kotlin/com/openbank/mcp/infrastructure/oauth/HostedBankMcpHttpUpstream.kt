@@ -122,7 +122,7 @@ internal class HostedBankMcpHttpUpstream private constructor(
     }
 
     companion object {
-        private val RESOURCE = URI.create(HostedOAuthAdmission.RESOURCE)
+        private val RESOURCE = URI.create(HostedOAuthAdmission.BANK_RESOURCE)
         private val NONCE = Regex("[A-Za-z0-9_.~-]{1,1024}")
         private val NONCE_ERROR = Regex("""(?:^|[ ,])error="use_dpop_nonce"(?:,|$)""")
         private const val JSON = "application/json"

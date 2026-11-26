@@ -386,7 +386,7 @@ The Claude sandbox registration is disabled by default and uses a confidential c
 
 ### Hosted OAuth adapter
 
-The adapter exposes its own authorization server metadata on the MCP origin. It starts a bank
+The adapter serves `/customer/hosted-mcp` and publishes its own authorization-server metadata. It starts a bank
 PAR transaction for the registered client and returns through the existing native approval flow.
 The issued session exposes account listing and balance reads. The bank token remains in encrypted
 OpenBao-backed custody and the balance call uses the existing customer authorization boundary.

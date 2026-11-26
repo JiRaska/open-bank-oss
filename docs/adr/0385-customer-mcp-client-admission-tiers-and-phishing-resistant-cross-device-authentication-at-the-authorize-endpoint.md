@@ -205,10 +205,13 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
      confirms the approved connection belongs to the expected provider. Provider and bank
      credentials have distinct issuers and audiences. Provider access and refresh must
      resolve to the active bank connection and fail after revocation.
-   - The adapter publishes OAuth authorization-server metadata (RFC 8414) with
-     `mcp:balance:read` as the pilot scope. On both tool discovery and dispatch, this
-     scope authorizes only `list_accounts` and `get_balance` for accounts approved
-     in the app. The adapter uses `openid` for the internal Keycloak flow.
+   - The hosted resource is `/customer/hosted-mcp`. Its protected-resource metadata
+     advertises the adapter as its sole authorization server. The existing `/customer/mcp`
+     resource continues to advertise the bank issuer and validate bank tokens. The adapter
+     uses that existing resource for its internal DPoP-bound requests.
+   - The adapter's OAuth metadata (RFC 8414) advertises `mcp:balance:read` as the pilot
+     scope. On discovery and dispatch, the scope permits only `list_accounts` and
+     `get_balance` for accounts approved in the app. The internal Keycloak flow uses `openid`.
 2. **A fresh passkey in the browser that started the flow.**
    - Every MCP client is bound per client to a dedicated authentication flow override with
      **no `auth-cookie` alternative**. That binding is the control.

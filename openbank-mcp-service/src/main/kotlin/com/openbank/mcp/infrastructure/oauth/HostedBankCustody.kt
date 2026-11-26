@@ -4,6 +4,7 @@ package com.openbank.mcp.infrastructure.oauth
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.FieldProtector
 import com.openbank.mcp.infrastructure.customer.CustomerCapabilities
 import com.openbank.mcp.infrastructure.customer.CustomerGrantSource
@@ -184,7 +185,7 @@ internal class HostedBankCustody(
         dpopThumbprint: String,
         bank: HostedBankRefreshExchange,
     ): Boolean {
-        val operation = UUID.randomUUID()
+        val operation = Ids.randomId()
         val sealed = store.claim(vendor, connectionId, operation) ?: return false
         var replaced = false
         var exchangeStarted = false

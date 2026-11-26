@@ -15,7 +15,11 @@ import java.util.Base64
  * parameters before constructing an authorization request.
  */
 internal object HostedOAuthAdmission {
-    const val RESOURCE = "https://mcp.open-bank.tech/customer/mcp"
+    const val RESOURCE = "https://mcp.open-bank.tech/customer/hosted-mcp"
+    const val BANK_RESOURCE = "https://mcp.open-bank.tech/customer/mcp"
+    const val RESOURCE_PATH = "/customer/hosted-mcp"
+    const val METADATA_PATH = "/.well-known/oauth-protected-resource/customer/hosted-mcp"
+    const val METADATA_URL = "https://mcp.open-bank.tech$METADATA_PATH"
     const val BANK_CALLBACK = "https://mcp.open-bank.tech/oauth/hosted/callback"
     const val OUTER_SCOPE = "mcp:balance:read"
     const val BANK_SCOPE = "openid"

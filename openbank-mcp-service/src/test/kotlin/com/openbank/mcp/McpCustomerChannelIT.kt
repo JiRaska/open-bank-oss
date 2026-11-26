@@ -5,8 +5,17 @@ package com.openbank.mcp
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.mcp.infrastructure.customer.DpopTestProofs
+import com.openbank.mcp.infrastructure.oauth.HostedMcpDispatch
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthAdmission
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthComplete
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthRuntimeProducer
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -35,6 +44,9 @@ class McpCustomerChannelIT {
             "mcp.customer.shared-store" to "memory",
             "mcp.customer.issuer" to "https://kc.test.example/realms/openbank-customers",
             "mcp.customer.allowlist" to "classpath:test-mcp-client-allowlist.yaml",
+            "quarkus.http.auth.permission.hosted-mcp.paths" to "/customer/hosted-mcp",
+            "quarkus.http.auth.permission.hosted-mcp.policy" to "permit",
+            "quarkus.http.auth.permission.hosted-mcp.auth-mechanism" to "hosted-mcp",
             // Every test below spends this window; the throttle test uses its own subject.
             "openbank.mcp.rate-limit.calls-per-minute" to "8",
         ) + GatewayTls.listener()
@@ -113,13 +125,44 @@ class McpCustomerChannelIT {
     }
 
     @Test
-    fun `an unissued hosted credential cannot discover tools on the mTLS listener`() {
+    fun `hosted credentials cannot use the direct route and the disabled hosted resource is absent`() {
+        val opaque = "obat1_${"A".repeat(43)}"
         GatewayTls.spec().contentType(ContentType.JSON)
             .header("Host", "mcp.test.example")
+            .header("Authorization", "Bearer $opaque")
+            .body(LIST).post("/customer/mcp").then().statusCode(401)
+        GatewayTls.spec().contentType(ContentType.JSON)
+            .body(LIST).post("/customer/hosted-mcp").then().statusCode(404)
+        GatewayTls.spec().get("/.well-known/oauth-protected-resource/customer/hosted-mcp").then().statusCode(404)
+    }
+
+    @Test
+    fun `enabled hosted resource advertises only facade and verifies opaque grant independently`() {
+        val runtime = mockk<HostedOAuthRuntimeProducer>()
+        val dispatch = mockk<HostedMcpDispatch>()
+        every { runtime.enabledVendors } returns setOf(HostedOAuthAdmission.Vendor.CHATGPT)
+        every { runtime.dispatch } returns dispatch
+        coEvery { dispatch.dispatch(any(), any(), null) } returns HostedMcpDispatch.Outcome.Refused.INVALID_TOKEN
+        QuarkusMock.installMockForType(runtime, HostedOAuthRuntimeProducer::class.java)
+
+        GatewayTls.spec().get(HostedOAuthAdmission.METADATA_PATH).then().statusCode(200)
+            .body("resource", equalTo(HostedOAuthAdmission.RESOURCE))
+            .body("authorization_servers", equalTo(listOf(HostedOAuthComplete.ISSUER)))
+            .body("bearer_methods_supported", equalTo(listOf("header")))
+            .body("scopes_supported", equalTo(listOf(HostedOAuthAdmission.OUTER_SCOPE)))
+        GatewayTls.spec().get("/.well-known/oauth-protected-resource/customer/mcp").then().statusCode(200)
+            .body("authorization_servers", equalTo(listOf(DpopTestProofs.ISSUER)))
+            .body("dpop_bound_access_tokens_required", equalTo(true))
+        GatewayTls.spec().contentType(ContentType.JSON).body(LIST).post(HostedOAuthAdmission.RESOURCE_PATH)
+            .then().statusCode(401).header(
+                "WWW-Authenticate",
+                equalTo("Bearer resource_metadata=\"${HostedOAuthAdmission.METADATA_URL}\""),
+            )
+        GatewayTls.spec().contentType(ContentType.JSON)
             .header("Authorization", "Bearer obat1_${"A".repeat(43)}")
-            .body(LIST).post("/customer/mcp").then()
-            .statusCode(401)
-            .header("WWW-Authenticate", containsString("Bearer error=\"invalid_token\""))
+            .body(LIST).post(HostedOAuthAdmission.RESOURCE_PATH).then().statusCode(401)
+            .header("WWW-Authenticate", containsString("error=\"invalid_token\""))
+        coVerify(exactly = 1) { dispatch.dispatch(any(), any(), null) }
     }
 
     @Test

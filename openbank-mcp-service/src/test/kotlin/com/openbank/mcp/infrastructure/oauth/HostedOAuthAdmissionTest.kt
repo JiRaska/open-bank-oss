@@ -30,6 +30,7 @@ class HostedOAuthAdmissionTest {
             request(state = ""),
             request(state = "a\nb"),
             request(resource = HostedOAuthAdmission.RESOURCE + "/"),
+            request(resource = HostedOAuthAdmission.BANK_RESOURCE),
             request(scope = "openid offline_access"),
         )
         assertThat(invalidRequests).allMatch { HostedOAuthAdmission.admit(it, Vendor.entries.toSet()) == null }

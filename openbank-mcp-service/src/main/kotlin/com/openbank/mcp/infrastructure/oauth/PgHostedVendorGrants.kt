@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.mcp.infrastructure.oauth
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.mcp.infrastructure.oauth.HostedOAuthAdmission.Vendor
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
@@ -25,7 +26,7 @@ internal class PgHostedVendorGrants(private val pool: PgPool) {
             SELECT $5, 'REFRESH', family_id, generation, expires_at FROM family
             """.trimIndent(),
         ).execute(
-            Tuple.of(UUID.randomUUID(), identity.connectionId, identity.vendor.name, accessDigest, refreshDigest),
+            Tuple.of(Ids.newId(), identity.connectionId, identity.vendor.name, accessDigest, refreshDigest),
         ).awaitSuspending()
     }
 
