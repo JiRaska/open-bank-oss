@@ -433,17 +433,21 @@ customer channel.
 
 - **Client spoofing.** Authorization and token exchange pin the client identity, callback, canonical
   resource, and read scope. ChatGPT authenticates with a pinned client assertion key and replay
-  check. Claude's sandbox client secret has a fixed expiry. Both vendors have distinct bank client
+  check. The optional private ChatGPT registration uses its own exact identifier, callback and
+  site-pinned assertion key. The assertion issuer and subject identify that registration.
+  Claude's sandbox client secret has a fixed expiry. Both vendors have distinct bank client
   identities and distinct Transit keys for assertions and DPoP.
 - **Callback substitution and replay.** A secure browser binding and one-time, expiring PostgreSQL
   state link the bank callback to the outer PKCE request. The adapter exchanges an approved bank
-  code before issuing an outer code. Outer codes are short lived and consumed atomically.
+  code before issuing an outer code. The sealed request records the original client and callback.
+  A scoped outer code is consumed only by the matching registration and PKCE verifier.
 - **Token theft and privilege expansion.** The adapter stores only hashes of outer tokens and
   returns them for the canonical MCP resource. Bank tokens stay encrypted in custody and
   are sent only on the dedicated bank-side DPoP and mTLS transport. Discovery and dispatch
   restrict the outer grant to account listing and balance reading.
 - **Refresh races and stale consent.** Refresh rotation is fenced in the database. A replay of
-  a spent outer refresh credential revokes its family. Bank refresh must preserve the approved
+  a spent outer refresh credential revokes its family. Rotation requires the same outer client
+  registration as issuance. Bank refresh must preserve the approved
   connection, vendor client and DPoP binding. The bank grant authority is checked before issuing
   or using the credential.
 - **Operations.** Keep adapter activation disabled until the scoped OpenBao identity, public

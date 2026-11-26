@@ -25,6 +25,7 @@ internal class HostedOAuthStart(
     private val protector: FieldProtector,
     private val mapper: ObjectMapper,
     private val enabled: Set<Vendor> = emptySet(),
+    private val registrations: HostedOAuthAdmission.Registrations = HostedOAuthAdmission.Registrations(),
 ) {
     private val random = SecureRandom()
 
@@ -36,13 +37,15 @@ internal class HostedOAuthStart(
     class Pending(val browserBinding: String, val bankAuthorize: URI)
 
     suspend fun authorize(request: AuthorizationRequest, browserBinding: String?): Pending? {
-        val vendorRequest = HostedOAuthAdmission.admit(request, enabled) ?: return null
+        val vendorRequest = HostedOAuthAdmission.admit(request, enabled, registrations) ?: return null
         val binding = browserBinding?.takeIf(BINDING_FORMAT::matches) ?: newHandle()
         val bankState = newHandle()
         val bankVerifier = newHandle()
         val stateDigest = digest(bankState)
         val bindingDigest = digest(binding)
         val data = mapper.createObjectNode()
+            .put("vendorClientId", vendorRequest.registration.clientId)
+            .put("vendorCallback", vendorRequest.registration.callback)
             .put("vendorState", vendorRequest.state)
             .put("vendorChallenge", vendorRequest.challenge)
             .put("bankVerifier", bankVerifier)

@@ -5,6 +5,7 @@
 package com.openbank.mcp.infrastructure.oauth
 
 import com.openbank.mcp.infrastructure.oauth.HostedOAuthStart.Companion.MAX_VENDOR_STATE_LENGTH
+import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
@@ -65,11 +66,43 @@ internal object HostedOAuthAdmission {
         val resource: String?,
     )
 
-    class Authorization internal constructor(val vendor: Vendor, val state: String, val challenge: String)
+    class Registration(val vendor: Vendor, val clientId: String, val callback: String)
 
-    fun admit(request: AuthorizationRequest, enabled: Set<Vendor> = emptySet()): Authorization? {
-        val vendor = enabled.singleOrNull { it.clientId == request.clientId && it.callback == request.redirectUri }
-            ?: return null
+    class Registrations(private val scopedChatGpt: Registration? = null) {
+        init {
+            if (scopedChatGpt != null) {
+                require(scopedChatGpt.vendor == Vendor.CHATGPT && scopedChatGpt.clientId != Vendor.CHATGPT.clientId)
+                require(isExactChatGptUri(scopedChatGpt.clientId) && isExactChatGptUri(scopedChatGpt.callback))
+            }
+        }
+
+        fun find(clientId: String?): Registration? {
+            if (clientId != null && scopedChatGpt?.clientId == clientId) return scopedChatGpt
+            return Vendor.entries.singleOrNull {
+                it.clientId == clientId
+            }?.let { Registration(it, it.clientId, it.callback) }
+        }
+
+        private fun isExactChatGptUri(value: String): Boolean {
+            val uri = URI.create(value)
+            val approvedOrigin = uri.scheme == "https" && uri.rawAuthority == "chatgpt.com"
+            val cleanPath = !uri.rawPath.isNullOrBlank() && '*' !in value && uri.normalize() == uri
+            val cleanSuffix = uri.rawQuery == null && uri.rawFragment == null
+            return approvedOrigin && cleanPath && cleanSuffix
+        }
+    }
+
+    class Authorization internal constructor(val registration: Registration, val state: String, val challenge: String) {
+        val vendor get() = registration.vendor
+    }
+
+    fun admit(
+        request: AuthorizationRequest,
+        enabled: Set<Vendor> = emptySet(),
+        registrations: Registrations = Registrations(),
+    ): Authorization? {
+        val registration = registrations.find(request.clientId) ?: return null
+        if (registration.vendor !in enabled || registration.callback != request.redirectUri) return null
         val state = request.state?.takeIf { it.length in 1..MAX_VENDOR_STATE_LENGTH && it.all { c -> c in '!'..'~' } }
             ?: return null
         val challenge = request.codeChallenge?.takeIf(s256Challenge::matches) ?: return null
@@ -78,7 +111,7 @@ internal object HostedOAuthAdmission {
         if (canonicalChallenge != challenge) return null
         if (request.responseType != "code" || request.codeChallengeMethod != "S256") return null
         if (request.resource != RESOURCE || request.scope != OUTER_SCOPE) return null
-        return Authorization(vendor, state, challenge)
+        return Authorization(registration, state, challenge)
     }
 
     /**
@@ -91,8 +124,14 @@ internal object HostedOAuthAdmission {
         redirectUri: String?,
         resource: String?,
         verifier: String?,
+        authenticatedClientId: String = authenticatedVendor.clientId,
     ): Boolean {
-        if (authorization.vendor != authenticatedVendor || redirectUri != authenticatedVendor.callback) return false
+        if (authorization.vendor != authenticatedVendor ||
+            authorization.registration.clientId != authenticatedClientId
+        ) {
+            return false
+        }
+        if (redirectUri != authorization.registration.callback) return false
         if (resource != RESOURCE || verifier == null || !pkceVerifier.matches(verifier)) return false
         val hash = MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(StandardCharsets.US_ASCII))
         return MessageDigest.isEqual(Base64.getUrlDecoder().decode(authorization.challenge), hash)

@@ -10,14 +10,16 @@ import io.vertx.mutiny.sqlclient.Tuple
 import java.util.UUID
 
 internal class PgHostedVendorGrants(private val pool: PgPool) {
-    class Identity(val vendor: Vendor, val connectionId: UUID)
+    class Identity(val vendor: Vendor, val connectionId: UUID, val clientId: String = vendor.clientId) {
+        val scopedClientId: String? get() = clientId.takeUnless { it == vendor.clientId }
+    }
 
     suspend fun create(identity: Identity, accessDigest: String, refreshDigest: String) {
         pool.preparedQuery(
             """
             WITH family AS (
-                INSERT INTO mcp_hosted_vendor_families (family_id, connection_id, vendor, expires_at)
-                VALUES ($1, $2, $3, statement_timestamp() + interval '30 days')
+                INSERT INTO mcp_hosted_vendor_families (family_id, connection_id, vendor, expires_at, scoped_client_id)
+                VALUES ($1, $2, $3, statement_timestamp() + interval '30 days', $6)
                 RETURNING family_id, generation, expires_at
             )
             INSERT INTO mcp_hosted_vendor_tokens (token_digest, kind, family_id, generation, expires_at)
@@ -26,30 +28,39 @@ internal class PgHostedVendorGrants(private val pool: PgPool) {
             SELECT $5, 'REFRESH', family_id, generation, expires_at FROM family
             """.trimIndent(),
         ).execute(
-            Tuple.of(Ids.newId(), identity.connectionId, identity.vendor.name, accessDigest, refreshDigest),
+            Tuple.of(
+                Ids.newId(),
+                identity.connectionId,
+                identity.vendor.name,
+                accessDigest,
+                refreshDigest,
+                identity.scopedClientId,
+            ),
         ).awaitSuspending()
     }
 
     suspend fun accessIdentity(digest: String): Identity? = pool.preparedQuery(
         """
-        SELECT f.vendor, f.connection_id
+        SELECT f.vendor, f.connection_id, f.scoped_client_id
         FROM mcp_hosted_vendor_tokens t
         JOIN mcp_hosted_vendor_families f ON f.family_id = t.family_id
         WHERE t.kind = 'ACCESS' AND t.token_digest = $1 AND f.revoked_at IS NULL
             AND f.expires_at > statement_timestamp() AND t.expires_at > statement_timestamp()
         """.trimIndent(),
     ).execute(Tuple.of(digest)).awaitSuspending().firstOrNull()?.let {
-        Identity(Vendor.valueOf(it.getString("vendor")), it.getUUID("connection_id"))
+        val vendor = Vendor.valueOf(it.getString("vendor"))
+        Identity(vendor, it.getUUID("connection_id"), it.getString("scoped_client_id") ?: vendor.clientId)
     }
 
     /** A used generation revokes its family before we consult any remote grant authority. */
-    suspend fun refreshIdentity(digest: String, vendor: Vendor): Identity? = pool.preparedQuery(
+    suspend fun refreshIdentity(digest: String, vendor: Vendor, clientId: String): Identity? = pool.preparedQuery(
         """
         WITH candidate AS (
             SELECT f.family_id, f.connection_id, f.generation, t.generation AS presented, t.expires_at
             FROM mcp_hosted_vendor_tokens t
             JOIN mcp_hosted_vendor_families f ON f.family_id = t.family_id
             WHERE t.kind = 'REFRESH' AND t.token_digest = $1 AND f.vendor = $2
+                AND f.scoped_client_id IS NOT DISTINCT FROM $3
                 AND f.revoked_at IS NULL AND f.expires_at > statement_timestamp()
             FOR UPDATE OF f
         ), revoked AS (
@@ -61,8 +72,16 @@ internal class PgHostedVendorGrants(private val pool: PgPool) {
         SELECT connection_id FROM candidate
         WHERE presented = generation AND expires_at > statement_timestamp()
         """.trimIndent(),
-    ).execute(Tuple.of(digest, vendor.name)).awaitSuspending().firstOrNull()?.let {
-        Identity(vendor, it.getUUID("connection_id"))
+    ).execute(
+        Tuple.of(
+            digest,
+            vendor.name,
+            clientId.takeUnless {
+                it == vendor.clientId
+            },
+        ),
+    ).awaitSuspending().firstOrNull()?.let {
+        Identity(vendor, it.getUUID("connection_id"), clientId)
     }
 
     /** Lock serializes rotations, including a concurrent reuse of the same prior refresh. */
@@ -79,6 +98,7 @@ internal class PgHostedVendorGrants(private val pool: PgPool) {
             JOIN mcp_hosted_vendor_families f ON f.family_id = t.family_id
             WHERE t.token_digest = $1 AND t.kind = 'REFRESH'
                 AND f.vendor = $2 AND f.connection_id = $3 AND f.revoked_at IS NULL
+                AND f.scoped_client_id IS NOT DISTINCT FROM $6
                 AND f.expires_at > statement_timestamp()
                 AND (t.generation <> f.generation OR t.expires_at > statement_timestamp())
             FOR UPDATE OF f
@@ -100,7 +120,14 @@ internal class PgHostedVendorGrants(private val pool: PgPool) {
         SELECT $5, 'REFRESH', family_id, generation, expires_at FROM rotated
         """.trimIndent(),
     ).execute(
-        Tuple.of(refreshDigest, identity.vendor.name, identity.connectionId, nextAccessDigest, nextRefreshDigest),
+        Tuple.of(
+            refreshDigest,
+            identity.vendor.name,
+            identity.connectionId,
+            nextAccessDigest,
+            nextRefreshDigest,
+            identity.scopedClientId,
+        ),
     ).awaitSuspending().rowCount() == 2
 
     suspend fun revoke(identity: Identity): Int = pool.preparedQuery(

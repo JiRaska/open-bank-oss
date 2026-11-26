@@ -30,13 +30,17 @@ internal class HostedVendorGrants(
     private val connections: HostedActiveConnection,
     private val usableBankGrant: HostedActiveConnection,
     private val enabled: Set<Vendor> = emptySet(),
+    private val registrations: HostedOAuthAdmission.Registrations = HostedOAuthAdmission.Registrations(),
 ) : HostedVendorGrantIssuer {
     private val random = SecureRandom()
 
-    override suspend fun issue(vendor: Vendor, connectionId: UUID): HostedVendorTokens? {
-        val identity = Identity(vendor, connectionId)
+    suspend fun issue(vendor: Vendor, connectionId: UUID): HostedVendorTokens? =
+        issue(vendor, connectionId, vendor.clientId)
+
+    override suspend fun issue(vendor: Vendor, connectionId: UUID, clientId: String): HostedVendorTokens? {
+        val identity = Identity(vendor, connectionId, clientId)
         if (!active(identity)) return null
-        val tokens = newTokens()
+        val tokens = newTokens(identity.scopedClientId != null)
         store.create(identity, digest(tokens.accessToken), digest(tokens.refreshToken))
         return tokens
     }
@@ -50,9 +54,9 @@ internal class HostedVendorGrants(
         if (!REFRESH.matches(token) || resource != HostedOAuthAdmission.RESOURCE) return null
         if (scope != null && scope != HostedOAuthAdmission.OUTER_SCOPE) return null
         val vendor = authentication.authenticate(credentials) ?: return null
-        val existing = store.refreshIdentity(digest(token), vendor) ?: return null
+        val existing = store.refreshIdentity(digest(token), vendor, credentials.clientId) ?: return null
         if (vendor !in enabled || !usableBankGrant.isActive(vendor, existing.connectionId)) return null
-        val tokens = newTokens()
+        val tokens = newTokens(existing.scopedClientId != null)
         val rotated = store.rotate(digest(token), existing, digest(tokens.accessToken), digest(tokens.refreshToken))
         return tokens.takeIf { rotated }
     }
@@ -68,17 +72,21 @@ internal class HostedVendorGrants(
         store.revoke(Identity(vendor, connectionId))
     }
 
-    private suspend fun active(identity: Identity): Boolean =
-        identity.vendor in enabled && connections.isActive(identity.vendor, identity.connectionId)
+    private suspend fun active(identity: Identity): Boolean = identity.vendor in enabled &&
+        registrations.find(identity.clientId)?.vendor == identity.vendor &&
+        connections.isActive(identity.vendor, identity.connectionId)
 
-    private fun newTokens() = HostedVendorTokens("obat1_${randomValue()}", "obrt1_${randomValue()}")
+    private fun newTokens(scoped: Boolean): HostedVendorTokens {
+        val version = if (scoped) "2" else "1"
+        return HostedVendorTokens("obat${version}_${randomValue()}", "obrt${version}_${randomValue()}")
+    }
 
     private fun randomValue(): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(HANDLE_BYTES).also(random::nextBytes))
 
     companion object {
-        private val ACCESS = Regex("obat1_[A-Za-z0-9_-]{43}")
-        private val REFRESH = Regex("obrt1_[A-Za-z0-9_-]{43}")
+        private val ACCESS = Regex("obat[12]_[A-Za-z0-9_-]{43}")
+        private val REFRESH = Regex("obrt[12]_[A-Za-z0-9_-]{43}")
         val TOOLS = setOf("list_accounts", "get_balance")
 
         fun allowsTool(name: String): Boolean = name in TOOLS

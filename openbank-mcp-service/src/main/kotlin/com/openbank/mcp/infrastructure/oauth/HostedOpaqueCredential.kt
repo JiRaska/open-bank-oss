@@ -5,7 +5,7 @@ package com.openbank.mcp.infrastructure.oauth
 /** Selects the hosted dispatcher. The returned opaque token still needs live grant admission. */
 internal object HostedOpaqueCredential {
     private const val BEARER_PREFIX = "Bearer "
-    private val tokenFormat = Regex("obat1_[A-Za-z0-9_-]{43}")
+    private val tokenFormat = Regex("obat[12]_[A-Za-z0-9_-]{43}")
 
     fun extract(headers: List<String>): String? {
         val header = headers.singleOrNull() ?: return null

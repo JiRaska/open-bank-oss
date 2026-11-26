@@ -12,7 +12,11 @@ import java.time.Instant
 import java.util.Base64
 
 /** Site configuration is projected by the deployment and read once when hosted OAuth is enabled. */
-internal class HostedOAuthSiteConfiguration private constructor(private val settings: JsonNode) {
+internal class HostedOAuthSiteConfiguration private constructor(
+    private val settings: JsonNode,
+    private val source: Path,
+    private val mapper: ObjectMapper,
+) {
     val baoAddress: URI get() = URI.create(required("openBaoAddress"))
     val baoCa: Path get() = path("openBaoCaFile")
     val serviceAccountToken: Path get() = path("serviceAccountTokenFile")
@@ -24,6 +28,22 @@ internal class HostedOAuthSiteConfiguration private constructor(private val sett
     val bankKeys get() = HostedOAuthKeyPins.bank(settings.path("bankSigningKeys"))
     val chatGptJwks: ByteArray get() = Files.readAllBytes(path("chatGptJwksFile"))
     val chatGptJwksSha256: String get() = required("chatGptJwksSha256")
+
+    fun scopedChatGpt(): PinnedHostedVendorAuthentication.ScopedChatGpt? {
+        val file = source.resolveSibling("chatgpt-scoped.json")
+        if (Files.notExists(file)) return null
+        val scoped = load(file, mapper)
+        val registration = HostedOAuthAdmission.Registration(
+            Vendor.CHATGPT,
+            scoped.required("clientId"),
+            scoped.required("callback"),
+        )
+        return PinnedHostedVendorAuthentication.ScopedChatGpt(
+            registration,
+            Base64.getDecoder().decode(scoped.required("jwksBase64")),
+            scoped.required("jwksSha256"),
+        )
+    }
 
     fun custodyPepper(): ByteArray = Base64.getDecoder().decode(Files.readString(path("custodyPepperFile")).trim())
         .also { require(it.size >= MIN_PEPPER_BYTES) { "Hosted OAuth custody pepper is too short" } }
@@ -52,7 +72,7 @@ internal class HostedOAuthSiteConfiguration private constructor(private val sett
             require(Files.size(path) in 1..MAX_SITE_FILE_BYTES) { "Invalid hosted OAuth site configuration size" }
             val settings = Files.newInputStream(path).use { mapper.readTree(it) }
             require(settings.isObject) { "Invalid hosted OAuth site configuration" }
-            return HostedOAuthSiteConfiguration(settings)
+            return HostedOAuthSiteConfiguration(settings, path, mapper)
         }
 
         fun vendors(descriptor: String): Set<Vendor> = when (descriptor) {
