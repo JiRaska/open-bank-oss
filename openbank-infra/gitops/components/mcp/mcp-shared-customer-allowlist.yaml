@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mcp-shared-customer-allowlist-v3
+  name: mcp-shared-customer-allowlist-v4
   namespace: platform
 data:
   allowlist.yaml: |
@@ -122,3 +122,11 @@ data:
         redirect_uris:
           - http://127.0.0.1/callback
           - http://[::1]/callback
+
+    # Site-only admission for the bank OAuth adapter identities.
+      - client_id: mcp-bank-hosted-chatgpt
+        tier: H
+        enabled: true
+      - client_id: mcp-bank-hosted-claude
+        tier: H
+        enabled: true
