@@ -3396,9 +3396,9 @@ class CustomerEdgeResource(
 
     @GET
     @Path("/mcp/connections")
-    @Authorize(action = "customer.mcp-connect.read")
+    @Authorize(action = "customer.mcp-native-connect.connections.read")
     @Blocking
-    fun listMcpConnections(): Response = withMcpConnectCustomer { party ->
+    fun listMcpConnections(): Response = withMcpConnectCustomer(allowNative = true) { party ->
         val response = upstream.get(mcpConnectionsUrl(), party.toString())
         mcpConnectResult(response, CustomerMcpConnections::class.java) { view ->
             view.connections.all { it.partyId == party }
@@ -3407,11 +3407,11 @@ class CustomerEdgeResource(
 
     @POST
     @Path("/mcp/connections/{connectionId}/revoke")
-    @Authorize(action = "customer.mcp-connect.revoke")
+    @Authorize(action = "customer.mcp-native-connect.connections.revoke")
     @Blocking
     fun revokeMcpConnection(@PathParam("connectionId") connectionId: UUID): Response {
         val revokeUrl = "${mcpConnectionsUrl()}/$connectionId/revoke"
-        return withMcpConnectCustomer { party ->
+        return withMcpConnectCustomer(allowNative = true) { party ->
             val response = upstream.post(revokeUrl, party.toString(), "", idempotencyKey = connectionId.toString())
             when (response.status) {
                 Response.Status.NO_CONTENT.statusCode -> Response.noContent().build()

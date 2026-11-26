@@ -397,3 +397,10 @@ The synthetic transfer admission requires the verified canary client and the aut
 ## Native MCP passkey verification
 
 The app presents an opaque handoff only through an authenticated own-party session. Edge resolves the selected accounts and request binding from Delegation. It consumes a dedicated one-use WebAuthn challenge, verifies user presence and user verification, and accepts only the stored credential for the same customer and Keycloak subject. Missing age evidence fails closed until the verified 72-hour lower bound is met. Successful proof is recorded only at the bank authority. The app still requires a separate SCA approval and receives no OAuth code or passkey evidence from Edge.
+
+With the same feature enabled, the app can list and revoke its owned MCP connections from a native
+session. Edge requires the exact first-party WebAuthn client, Edge audience, canonical party and
+subject claims, and an absent actor context. It forwards only the authenticated party and the
+existing idempotency key to Delegation. Delegation enforces ownership against the connection
+record, and Edge rejects a list response containing another party. The pending-request collection,
+OAuth approval and payment approval continue to use their existing authorization rules.

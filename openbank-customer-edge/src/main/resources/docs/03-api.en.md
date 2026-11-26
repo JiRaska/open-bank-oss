@@ -257,3 +257,9 @@ The first-party app claims an opaque handoff at
 WebAuthn challenge. Completing it at the matching `/native-passkey/complete` endpoint records
 the verified step in the bank authority and returns 204. The app still completes its separate
 SCA confirmation. Native Connect is disabled by default.
+
+When Native Connect is enabled, a customer's own native app session can list their
+connections at `GET /mcp/connections` and revoke one at `POST /mcp/connections/{connectionId}/revoke`.
+Edge derives the party from the authenticated app session. Delegation checks that the connection
+belongs to that party. A successful revocation returns 204, and a connection outside that party's
+scope returns 404. The same connection ID remains the idempotency key on retries.
