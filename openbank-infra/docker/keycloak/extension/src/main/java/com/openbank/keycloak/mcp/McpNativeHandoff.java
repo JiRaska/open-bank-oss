@@ -28,11 +28,15 @@ final class McpNativeHandoff {
         }
 
         String tokenSha256() {
-            return McpConnectContext.sha256Hex(Base64.getUrlDecoder().decode(token));
+            return digest(token);
         }
 
         String appLink() {
             return APP_LINK + token;
+        }
+
+        String formValue() {
+            return token;
         }
     }
 
@@ -43,6 +47,14 @@ final class McpNativeHandoff {
         var entropy = new byte[32];
         RANDOM.nextBytes(entropy);
         return new Issued(BASE64_URL.encodeToString(entropy));
+    }
+
+    static Issued recover(String token, String expectedDigest) {
+        return canonicalSha256(token) && digest(token).equals(expectedDigest) ? new Issued(token) : null;
+    }
+
+    private static String digest(String token) {
+        return McpConnectContext.sha256Hex(Base64.getUrlDecoder().decode(token));
     }
 
     static Binding binding(AuthenticationSessionModel auth, String issuer, long nowEpochSecond, long lifespanSeconds) {

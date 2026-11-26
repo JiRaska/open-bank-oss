@@ -95,6 +95,12 @@ public final class ExtensionTests {
         eq("handoff host", "open-bank.tech", uri.getHost());
         eq("handoff path", "/app/mcp/connect", uri.getPath());
         check("handoff has no query", uri.getRawQuery() == null);
+        check("early browser poll can keep the original QR with the expected digest",
+                first.appLink().equals(McpNativeHandoff.recover(token, first.tokenSha256()).appLink()));
+        check("a different browser handoff cannot be recovered",
+                McpNativeHandoff.recover(token, McpNativeHandoff.issue().tokenSha256()) == null);
+        check("malformed retry token cannot be reflected",
+                McpNativeHandoff.recover("<script>", first.tokenSha256()) == null);
         check("handoff has exactly 32 opaque bytes", Base64.getUrlDecoder().decode(token).length == 32);
         eq("handoff state stores the raw 32-byte token digest",
                 McpConnectContext.sha256Hex(Base64.getUrlDecoder().decode(token)), first.tokenSha256());

@@ -13,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.UUID;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
@@ -39,7 +40,7 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
                 return;
             }
             var issued = McpNativeHandoff.issue();
-            var page = page(ctx, issued.appLink());
+            var page = page(ctx, issued);
             factory.tokenAuthority().issueNativeHandoff(issued.tokenSha256(), binding);
             auth.setAuthNote(McpNotes.NATIVE_HANDOFF, issued.tokenSha256());
             ctx.challenge(page);
@@ -58,17 +59,18 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
             refuse(ctx);
             return;
         }
+        var issued = McpNativeHandoff.recover(form == null ? null : form.getFirst("handoff"), handoffDigest);
         try {
             long now = System.currentTimeMillis();
             String last = auth.getAuthNote(McpNotes.LAST_POLL);
             if (last != null && McpConnectPolicy.pollTooSoon(Long.parseLong(last), now)) {
-                ctx.challenge(page(ctx, null));
+                ctx.challenge(page(ctx, issued));
                 return;
             }
             auth.setAuthNote(McpNotes.LAST_POLL, Long.toString(now));
             var factory = factory(ctx.getSession());
             var binding = binding(ctx, auth, factory);
-            poll(ctx, auth, factory.tokenAuthority(), binding, handoffDigest);
+            poll(ctx, auth, factory.tokenAuthority(), binding, handoffDigest, issued);
         } catch (IOException | WriterException | RuntimeException e) {
             refuse(ctx);
         }
@@ -76,10 +78,10 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
 
     private static void poll(AuthenticationFlowContext ctx, AuthenticationSessionModel auth,
                              McpConnectAuthorityClient authority, McpNativeHandoff.Binding binding,
-                             String handoffDigest) throws IOException, WriterException {
+                             String handoffDigest, McpNativeHandoff.Issued issued) throws IOException, WriterException {
         String party = authority.claimedNativeParty(handoffDigest, binding);
         if (party == null) {
-            ctx.challenge(page(ctx, null));
+            ctx.challenge(page(ctx, issued));
             return;
         }
         var base = new McpConnectContext(binding.clientId(), McpConnectContext.redirectHost(binding.redirectUri()),
@@ -140,11 +142,15 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
         ctx.failure(AuthenticationFlowError.ACCESS_DENIED);
     }
 
-    private static Response page(AuthenticationFlowContext ctx, String link) throws WriterException, IOException {
+    private static Response page(AuthenticationFlowContext ctx, McpNativeHandoff.Issued issued) throws WriterException, IOException {
         String action = McpWithheldCodeAuthenticator.escape(ctx.getActionUrl(ctx.generateAccessCode()).toString());
         String client = McpWithheldCodeAuthenticator.escape(ctx.getAuthenticationSession().getClient().getClientId());
-        String connect = "";
-        if (link != null) {
+        String connect = "<p>If you have not opened the app yet, restart the connection in your assistant.</p>";
+        String handoffInput = "";
+        String scriptNonce = UUID.randomUUID().toString();
+        if (issued != null) {
+            String link = issued.appLink();
+            handoffInput = "<input type=\"hidden\" name=\"handoff\" value=\"" + issued.formValue() + "\">";
             var out = new ByteArrayOutputStream();
             var matrix = new MultiFormatWriter().encode(link, BarcodeFormat.QR_CODE, 240, 240);
             MatrixToImageWriter.writeToStream(matrix, "PNG", out);
@@ -159,16 +165,20 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
                 <title>Continue in OpenBank</title></head><body><main>
                 <h1>Continue in OpenBank</h1><p>Assistant: %s</p>
                 <p>Open the bank app or scan the code. Review the accounts and verify your passkey.</p>%s
-                <form method="post" action="%s">
+                <form id="native-mcp-check" method="post" action="%s">%s
                 <button type="submit" name="check" value="1">Continue</button>
                 <button type="submit" name="cancel" value="1">Cancel</button></form>
+                <script nonce="%s">setTimeout(function(){
+                document.getElementById('native-mcp-check').requestSubmit();
+                },3000);</script>
                 </main></body></html>
-                """.formatted(client, connect, action);
+                """.formatted(client, connect, action, handoffInput, scriptNonce);
         return Response.ok(html, MediaType.TEXT_HTML_TYPE.withCharset("utf-8"))
                 .header("Cache-Control", "no-store")
                 .header("Referrer-Policy", "no-referrer")
                 .header("Content-Security-Policy",
-                        "default-src 'none'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+                        "default-src 'none'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                                + "script-src 'nonce-" + scriptNonce + "'")
                 .build();
     }
 
