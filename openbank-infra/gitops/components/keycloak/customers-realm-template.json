@@ -1244,7 +1244,9 @@
           },
           {
             "executor": "reject-ropc-grant",
-            "configuration": {}
+            "configuration": {
+              "auto-configure": "false"
+            }
           }
         ]
       },

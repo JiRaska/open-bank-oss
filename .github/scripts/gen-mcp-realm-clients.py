@@ -64,7 +64,8 @@ HARDENING_POLICY_PREFIX = "openbank-mcp-tier-"
 HARDENING_EXECUTORS = [
     {"executor": "pkce-enforcer", "configuration": {"auto-configure": "false"}},
     {"executor": "reject-implicit-grant", "configuration": {"auto-configure": "false"}},
-    {"executor": "reject-ropc-grant", "configuration": {}},
+    # Keycloak 26.8.2 unboxes this Boolean when validating an admin client update.
+    {"executor": "reject-ropc-grant", "configuration": {"auto-configure": "false"}},
 ]
 # Only Tier L is DPoP-bound (Tier H is private_key_jwt-confidential, dpop.bound=false), so the
 # DPoP enforcer is its own profile, bound for Tier L alone.

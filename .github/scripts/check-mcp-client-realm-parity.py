@@ -261,7 +261,7 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
 
     # Review of #16672 (6): Keycloak's built-in executors, bound per tier by the tier attribute.
     for tier in sorted({c.get("tier") for c in decl.get("clients") or []} & set(BUILTIN_EXECUTORS)):
-        have: set[str] = set()
+        executors: list[dict] = []
         for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
             if pol.get("enabled") is not True or len(pol.get("conditions") or []) != 1:
                 continue
@@ -274,8 +274,12 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             if (cond.get("condition") != "client-attributes" or conf.get("is_negative_logic") not in (None, False, "false")
                     or attrs != [{"key": TIER_ATTR, "value": tier}]):
                 continue
-            have |= {e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []}
-        missing = BUILTIN_EXECUTORS[tier] - have
+            executors.extend(e for name in pol.get("profiles") or []
+                             for e in (profiles.get(name) or {}).get("executors") or [])
+        missing = BUILTIN_EXECUTORS[tier] - {e.get("executor") for e in executors}
+        if any(e.get("executor") == "reject-ropc-grant"
+               and (e.get("configuration") or {}).get("auto-configure") != "false" for e in executors):
+            f.append(f"realm: {TIER_ATTR}={tier} reject-ropc-grant requires explicit auto-configure=false")
         if missing:
             f.append(f"realm: no enabled client-attributes policy on {TIER_ATTR}={tier} binds the built-in "
                      f"executor(s) {sorted(missing)} (review of #16672: a weakened client attribute must not reopen them)")
@@ -605,6 +609,10 @@ def self_test() -> int:
     run("built-in reject-ropc-grant dropped flagged",
         mutate_realm=lambda r: [p.update(executors=[e for e in p["executors"] if e["executor"] != "reject-ropc-grant"])
                                 for p in r["clientProfiles"]["profiles"]], needle="reject-ropc-grant")
+    run("reject-ropc-grant without explicit auto-configure flagged",
+        mutate_realm=lambda r: [e.update(configuration={}) for p in r["clientProfiles"]["profiles"]
+                                for e in p["executors"] if e["executor"] == "reject-ropc-grant"],
+        needle="reject-ropc-grant requires explicit auto-configure=false")
     run("Tier L DPoP profile unbound flagged",
         mutate_realm=lambda r: tier_policy(r, "L").update(profiles=["openbank-mcp-oauth-hardening"]), needle="dpop-bind-enforcer")
     run("tier condition with two values for one key (inert in Keycloak) flagged",
