@@ -145,6 +145,26 @@ Customer Edge records when it first verifies the exact native credential. A new 
 
 When the token exchange that completes a passkey sign-in is rejected by the identity provider, the service logs a warning with the pseudonymous identity-provider user id and the HTTP status of the response (`impersonate: token-exchange failed for kcUserId=... status=...`). The identity provider's own error event and the exception raised by the service carry no user id, so this line is what ties a failed sign-in to the customer affected. The id is the opaque user UUID, never a username, and no token or credential is logged. A rise in these warnings with a `403` or `400` status usually points to a token-exchange permission or client-configuration problem rather than customer error.
 
+## Diagnosing native MCP app session refusals
+
+The Prometheus counter `openbank_edge_mcp_native_app_rejected_total` increments when the enabled
+native Connect route rejects the first-party app session before calling Delegation. The response
+remains a generic HTTP 403. Only the fixed `reason` label is added.
+
+| Reason | Check |
+| --- | --- |
+| `ACTING_FOR` | A request included a nonblank acting-for header. Confirm the app is in the personal profile. |
+| `ACTOR` | The token included an actor claim. Confirm the request uses the customer's own app session. |
+| `CLIENT` | The authorized client did not match a first-party app client. Check the app's sign-in flow. |
+| `AUDIENCE` | The token did not include `openbank-edge` in its audiences. Check the customer realm audience mapper and the flow issuing the app token. |
+| `SUBJECT` | The first-party session had an absent, blank or oversized subject. Check the issued token shape using a synthetic account. |
+| `PARTY` | The party claim was absent or did not use the canonical UUID format. Check the realm mapper and synthetic account attribute. |
+
+Compare the increase by reason over the test window with the Customer Edge and Delegation HTTP
+counts. This counter covers the first-party app session guard only. An HTTP 403 without a matching
+increase needs separate investigation of earlier authorization or the downstream response.
+Keep values of claims, tokens and headers out of diagnostic records.
+
 ## Synthetic own-account transfer fixture (#7284)
 
 The dedicated customer route verifies the synthetic request and the `openbank-synthetic-transfer`
