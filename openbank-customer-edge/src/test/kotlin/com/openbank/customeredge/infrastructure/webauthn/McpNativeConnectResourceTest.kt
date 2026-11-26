@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -105,6 +106,28 @@ class McpNativeConnectResourceTest {
         }
     }
 
+    @Test
+    fun `native app rejection uses bounded metric reasons and the same response`() {
+        val metrics = SimpleMeterRegistry()
+        val cases = listOf(
+            "ACTING_FOR" to resource(metrics = metrics).claim(PARTY, null),
+            "ACTOR" to resource(actor = true, metrics = metrics).claim(null, null),
+            "CLIENT" to resource(azp = "assistant", metrics = metrics).claim(null, null),
+            "AUDIENCE" to resource(tokenAudience = "openbank-app", metrics = metrics).claim(null, null),
+            "SUBJECT" to resource(tokenSubject = "", metrics = metrics).claim(null, null),
+            "PARTY" to resource(party = null, metrics = metrics).claim(null, null),
+        )
+        val name = "openbank.edge.mcp.native.app.rejected"
+        for ((reason, response) in cases) {
+            assertThat(response.status).isEqualTo(403)
+            assertThat(mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.entity).toString())
+                .contains("Your own bank app session is required")
+            assertThat(metrics.get(name).tag("reason", reason).counter().count()).isEqualTo(1.0)
+        }
+        assertThat(metrics.meters.flatMap { it.id.tags }.map { it.key }.distinct()).containsExactly("reason")
+        verify(exactly = 0) { upstream.postToService(any(), any(), any(), any(), any()) }
+    }
+
     private fun assertHostedBinding(binding: McpNativePasskeyBinding) {
         assertThat(binding.partyId.toString()).isEqualTo(PARTY)
         assertThat(binding.keycloakUserId).isEqualTo(SUBJECT)
@@ -118,15 +141,26 @@ class McpNativeConnectResourceTest {
         azp: String = "openbank-edge-webauthn",
         tokenAudience: String = "openbank-edge",
         actor: Boolean = false,
+        tokenSubject: String = SUBJECT,
+        party: String? = PARTY,
+        metrics: SimpleMeterRegistry = SimpleMeterRegistry(),
     ): McpNativeConnectResource {
         val jwt = mockk<JsonWebToken> {
             every { getClaim<Any?>("azp") } returns azp
             every { containsClaim("act") } returns actor
             every { audience } returns setOf(tokenAudience)
-            every { subject } returns SUBJECT
-            every { getClaim<String>("party_id") } returns PARTY
+            every { subject } returns tokenSubject
+            every { getClaim<String?>("party_id") } returns party
         }
-        return McpNativeConnectResource(upstream, proofs, jwt, mapper, enabled, Optional.of(URI.create(ORIGIN)))
+        return McpNativeConnectResource(
+            upstream,
+            proofs,
+            jwt,
+            mapper,
+            metrics,
+            enabled,
+            Optional.of(URI.create(ORIGIN)),
+        )
     }
 
     private fun openApi() = requireNotNull(javaClass.classLoader.getResourceAsStream("openapi.yaml")).use {
