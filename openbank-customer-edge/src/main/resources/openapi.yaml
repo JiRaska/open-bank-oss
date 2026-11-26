@@ -69,7 +69,7 @@ info:
   # approve with SCA bound to the proposal's payload hash). App session only.
   # 1.97.0 -> 1.98.0 (ADR-0385, #16650): additive app-only MCP connect review and account selection.
   # 1.98.0 -> 1.99.0 (#16650): additive app-only MCP connection list and customer revocation.
-  version: 1.101.0
+  version: 1.101.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
