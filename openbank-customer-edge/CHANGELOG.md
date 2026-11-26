@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.2...customer-edge-v1.15.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** meter native MCP passkey proof refusals ([#17385](https://github.com/JiRaska/open-bank-oss/issues/17385)) ([0649d1b](https://github.com/JiRaska/open-bank-oss/commit/0649d1b0b065b69b072c3f15c0d50b82662ce820))
+
 ## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.1...customer-edge-v1.15.2) (2026-11-26)
 
 
