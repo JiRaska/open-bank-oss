@@ -43,7 +43,11 @@ public class McpWithheldCodeAuthenticatorFactory implements AuthenticatorFactory
                 get(config, "token-url", "tokenUrl"),
                 get(config, "client-id", "clientId"),
                 get(config, "client-secret", "clientSecret"));
-        String versionFlag = get(config, "connect-v2-enabled", "connectV2Enabled");
+        // Keycloak persists SPI options ending in "-enabled" at build time for optimized images.
+        String versionFlag = System.getenv("MCP_CONNECT_V2_ENABLED");
+        if (versionFlag == null) {
+            versionFlag = get(config, "connect-v2-enabled", "connectV2Enabled");
+        }
         if (versionFlag != null && !"true".equalsIgnoreCase(versionFlag) && !"false".equalsIgnoreCase(versionFlag)) {
             throw new IllegalArgumentException("connect-v2-enabled must be true or false");
         }

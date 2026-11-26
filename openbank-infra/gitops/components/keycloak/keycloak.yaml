@@ -185,7 +185,7 @@ spec:
               value: $(MCP_READ_ISSUER_TOKEN_URL)
             - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CONNECT_AUTHORITY_URL
               value: $(MCP_READ_DELEGATION_ORIGIN)
-            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CONNECT_V2_ENABLED
+            - name: MCP_CONNECT_V2_ENABLED
               value: "true"
             - name: MCP_READ_DEPLOYMENT
               value: shared-sandbox
