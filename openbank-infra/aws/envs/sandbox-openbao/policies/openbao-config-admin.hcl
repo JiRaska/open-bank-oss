@@ -70,3 +70,53 @@ path "auth/kubernetes/role/billing-ir-verify" {
 path "auth/kubernetes/role/interest-ir-verify" {
   capabilities = ["create", "read", "update"]
 }
+
+# Hosted OAuth administration follows the scoped first apply procedure in runbook 0027.
+
+path "sys/policies/acl/mcp-hosted-oauth" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "auth/kubernetes/role/mcp-hosted-oauth" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-chatgpt-assertion" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-chatgpt-assertion/config" {
+  capabilities = ["create", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-chatgpt-dpop" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-chatgpt-dpop/config" {
+  capabilities = ["create", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-claude-assertion" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-claude-assertion/config" {
+  capabilities = ["create", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-claude-dpop" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "transit/keys/mcp-bank-hosted-claude-dpop/config" {
+  capabilities = ["create", "update"]
+}
+
+path "transit/keys/mcp-hosted-oauth-custody" {
+  capabilities = ["create", "read", "update"]
+}
+
+path "transit/keys/mcp-hosted-oauth-custody/config" {
+  capabilities = ["create", "update"]
+}

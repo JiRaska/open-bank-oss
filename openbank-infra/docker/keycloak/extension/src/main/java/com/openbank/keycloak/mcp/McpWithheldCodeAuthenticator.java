@@ -308,6 +308,9 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
         String proof = auth.getAuthNote(McpNotes.PAR_PROOF_JKT);
         if (Arrays.asList(base.scopes().split(" ")).contains("offline_access")
                 || ("L".equals(tier) && proof == null)
+                || (McpConnectPolicy.bankAdapterReserved(client)
+                    && (!McpConnectPolicy.bankAdapterAllowed(client) || proof == null
+                        || auth.getAuthNote(McpNotes.NATIVE_PROOF) == null))
                 || ("H".equals(tier) && !McpConnectTokenPolicy.hostedClientAuthenticationAllowed(client))
                 || !McpConnectPolicy.isMcpClient(tier)) {
             throw new IllegalArgumentException("V2 requires an authenticated online MCP connection");

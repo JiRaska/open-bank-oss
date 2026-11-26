@@ -294,6 +294,17 @@ openbank:
             paths: /mcp,/mcp/*,/api/v1/mcp/sessions,/api/v1/mcp/sessions/*,/.well-known/oauth-protected-resource,/.well-known/oauth-protected-resource/*
             policy: permit
             auth-mechanism: bearer
+          # These endpoints validate their own OAuth requests and client authentication.
+          # Their TLS peer certificate is transport authentication only.
+          hosted-oauth:
+            paths: /oauth/hosted,/oauth/hosted/*,/.well-known/oauth-authorization-server/oauth/hosted,/.well-known/oauth-authorization-server/oauth/hosted/*,/customer/hosted-mcp/*
+            policy: permit
+            auth-mechanism: bearer
+          # The hosted resource verifies opaque tokens in its dedicated handler.
+          hosted-mcp:
+            paths: /customer/hosted-mcp
+            policy: permit
+            auth-mechanism: hosted-mcp
           # Bind both customer OAuth schemes to OIDC, never to the Gateway certificate.
           customer-oidc:
             paths: /customer/mcp,/customer/mcp/*

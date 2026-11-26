@@ -1,0 +1,13 @@
+{
+  "keys": [
+    {
+      "kty": "EC",
+      "crv": "P-256",
+      "use": "sig",
+      "alg": "ES256",
+      "kid": "mcp-bank-hosted-claude-synthetic-reference",
+      "x": "A3fENPXLgnCPXdjgAdGgfUUm22pTlGsYg0weVINs8GI",
+      "y": "9MhAaHP8InbvtM9gsjeX0ZTUldGnnQ9Xgx3hHkFUadI"
+    }
+  ]
+}

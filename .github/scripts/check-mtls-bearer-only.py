@@ -117,11 +117,14 @@ def uses_token_auth(flat: dict, name: str, module: str) -> bool:
         return True
     # CustomerOidcAuthentication delegates exclusively to Quarkus OIDC. Its
     # scope is limited to the two configured customer MCP path patterns.
-    return (
-        module == "openbank-mcp-service"
-        and mechanism == "customer-oidc"
-        and set(_permission_paths(flat, name)) == {"/customer/mcp", "/customer/mcp/*"}
-    )
+    if module != "openbank-mcp-service":
+        return False
+    paths = set(_permission_paths(flat, name))
+    if mechanism == "customer-oidc":
+        return paths == {"/customer/mcp", "/customer/mcp/*"}
+    # HostedMcpAuthentication excludes certificate identity on this exact path.
+    # HostedCustomerMcpEndpoint independently verifies the hosted bearer grant before dispatch.
+    return mechanism == "hosted-mcp" and paths == {"/customer/hosted-mcp"}
 
 
 def bearer_paths(flat: dict, module: str = "") -> list[str]:
@@ -384,7 +387,20 @@ def self_test() -> int:
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
     customer_oidc = yaml.safe_load(yaml.safe_dump(dpop_root).replace("DPoP", "customer-oidc"))
+    hosted = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /customer/hosted-mcp/*\n            auth-mechanism: bearer\n"
+        "          hosted:\n            paths: /customer/hosted-mcp\n            auth-mechanism: hosted-mcp\n"
+    )
     checks = [
+        ("hosted mechanism accepts only its exact MCP resource",
+         findings_for(hosted, ["/customer/hosted-mcp"], "openbank-mcp-service") == []
+         and len(findings_for(hosted, ["/customer/hosted-mcp"], "other-service")) == 1
+         and not uses_token_auth(
+             {f"{PERMISSION}.hosted.auth-mechanism": "hosted-mcp",
+              f"{PERMISSION}.hosted.paths": "/customer/hosted-mcp,/staff"},
+             "hosted", "openbank-mcp-service")),
         ("client-auth required without bearer-only flagged", len(findings_for(vuln, api)) == 1),
         ("client-auth request without bearer-only flagged", len(findings_for(request, api)) == 1),
         ("#12506 pattern passes", findings_for(fixed, api) == []),

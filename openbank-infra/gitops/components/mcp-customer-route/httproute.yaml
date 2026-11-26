@@ -43,8 +43,8 @@
 #   body cap 64Ki           -> requestBuffer, same as the service's quarkus.http.limits
 #   per-IP rate 10/s        -> local rate limit per distinct client address, per proxy replica
 #   request timeout 30s     -> JSON-RPC calls are short; nothing on this host streams
-#   paths                   -> exactly `/customer/mcp` and its RFC 9728 metadata (root and the
-#                              path-suffixed form); staff `/mcp` never routes here
+#   paths                   -> customer MCP, its RFC 9728 metadata, and the exact hosted OAuth
+#                              endpoints; staff `/mcp` never routes here
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -69,6 +69,30 @@ spec:
         - path:
             type: Exact
             value: /.well-known/oauth-protected-resource/customer/mcp
+        - method: POST
+          path:
+            type: Exact
+            value: /customer/hosted-mcp
+        - method: GET
+          path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource/customer/hosted-mcp
+        - method: GET
+          path:
+            type: Exact
+            value: /.well-known/oauth-authorization-server/oauth/hosted
+        - method: GET
+          path:
+            type: Exact
+            value: /oauth/hosted/authorize
+        - method: GET
+          path:
+            type: Exact
+            value: /oauth/hosted/callback
+        - method: POST
+          path:
+            type: Exact
+            value: /oauth/hosted/token
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:

@@ -77,6 +77,10 @@ class CustomerChannel @Inject constructor(
 
     val enabled: Boolean get() = admission != null
 
+    internal fun hostedReplayStore(): DpopReplayStore = checkNotNull(shared?.takeIf { it.mode == STORE_VALKEY }) {
+        "Hosted OAuth requires the shared customer replay store"
+    }.replayStore
+
     /** Where replay claims and budgets live, chosen once at boot. */
     internal class SharedState(
         val mode: String,

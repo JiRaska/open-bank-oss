@@ -133,6 +133,31 @@ public final class ExtensionTests {
         expectThrow("handoff expiry is exclusive",
                 () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
                         1120, 120));
+        var attributes = Map.of(
+                "openbank.mcp.tier", "H", "openbank.mcp.profile", "bank-hosted-v2",
+                "use.jwks.string", "true", "use.jwks.url", "false",
+                "token.endpoint.auth.signing.alg", "ES256", "dpop.bound.access.tokens", "true",
+                "require.pushed.authorization.requests", "true", "pkce.code.challenge.method", "S256");
+        String callback = "https://mcp.open-bank.tech/oauth/hosted/callback";
+        notes.put(McpNotes.REDIRECT_URI, callback);
+        var chatgpt = adapterClient("mcp-bank-hosted-chatgpt", attributes, callback, true);
+        var claude = adapterClient("mcp-bank-hosted-claude", attributes, callback, true);
+        for (ClientModel client : List.of(chatgpt, claude)) {
+            var host = McpNativeHandoff.binding(handoffSession(notes, "tab-a", client),
+                    "https://bank.example/realms/test", 1001, 120);
+            eq("adapter handoff binds vendor identity", client.getClientId(), host.clientId());
+            eq("adapter handoff preserves verified DPoP", "DPOP", host.kind());
+        }
+        notes.remove(McpNotes.PAR_PROOF_JKT);
+        expectThrow("bank adapter cannot fall back to bearer PAR",
+                () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a", chatgpt),
+                        "https://bank.example/realms/test", 1001, 120));
+        check("unregistered vendor cannot copy the adapter profile", !McpConnectPolicy.bankAdapterAllowed(
+                adapterClient("mcp-unknown-vendor", attributes, callback, true)));
+        check("disabled adapter stays unavailable", !McpConnectPolicy.bankAdapterAllowed(
+                adapterClient(chatgpt.getClientId(), attributes, callback, false)));
+        check("adapter callback must match exactly", !McpConnectPolicy.bankAdapterAllowed(
+                adapterClient(claude.getClientId(), attributes, callback + "/other", true)));
         notes.remove(McpNotes.PKCE_CHALLENGE);
         expectThrow("handoff refuses a missing guarded PKCE challenge",
                 () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
@@ -149,6 +174,23 @@ public final class ExtensionTests {
             case "getClientId" -> "hosted-fixture";
             default -> throw new UnsupportedOperationException(method);
         });
+        return handoffSession(notes, tab, client);
+    }
+
+    private static ClientModel adapterClient(String clientId, Map<String, String> attributes, String callback,
+                                             boolean enabled) {
+        return testInterface(ClientModel.class, (method, args) -> switch (method) {
+            case "getAttribute" -> attributes.get(args[0]);
+            case "isEnabled" -> enabled;
+            case "isPublicClient" -> false;
+            case "getClientAuthenticatorType" -> "client-jwt";
+            case "getId", "getClientId" -> clientId;
+            case "getRedirectUris" -> Set.of(callback);
+            default -> throw new UnsupportedOperationException(method);
+        });
+    }
+
+    private static AuthenticationSessionModel handoffSession(Map<String, String> notes, String tab, ClientModel client) {
         var root = testInterface(RootAuthenticationSessionModel.class, (method, args) -> "browser-root");
         var realm = testInterface(RealmModel.class, (method, args) -> "realm-id");
         return testInterface(AuthenticationSessionModel.class, (method, args) -> switch (method) {
