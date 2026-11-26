@@ -169,8 +169,13 @@ def parse_customer_registry(text: str, proposer_text: str) -> dict[str, dict]:
     proposal_start = find(kotlin_tokens("private fun proposeSchema(): Map<String, Any> ="))
     proposal = call_at(tokens, proposal_start, "schema")
     tool_start = find(kotlin_tokens("private val tools: Map<String, Tool> ="))
+    tool_list = call_at(tokens, tool_start, "listOf")
+    tool_end = tool_start + len(tool_list)
+    catalog_suffix = kotlin_tokens(".associateBy { it.definition.name } fun list(")
+    if tokens[tool_end:tool_end + len(catalog_suffix)] != catalog_suffix:
+        raise ValueError("expected customer catalog association followed by the list declaration")
     registry = {}
-    for call in literal_call(call_at(tokens, tool_start, "listOf"), "listOf"):
+    for call in literal_call(tool_list, "listOf"):
         definition, _, action = literal_call(call, "Tool")
         fields = {}
         for arg in literal_call(definition, "ToolDefinition"):
@@ -196,8 +201,13 @@ def parse_customer_registry(text: str, proposer_text: str) -> dict[str, dict]:
             raise ValueError(f"duplicate customer tool or schema key: {name}")
         registry[name] = {"properties": sorted(props), "required": sorted(required), "capability": resolve(action)}
 
-    bound_start = find(kotlin_tokens("return when (tool) {"))
+    bound_start = find(kotlin_tokens(
+        "private fun toolAvailable(tool: String, connectionBound: Boolean): Boolean { "
+        "if (!connectionBound) return true return when (tool) {"
+    ))
     end = tokens.index("}", bound_start)
+    if tokens[end:end + 2] != ["}", "}"]:
+        raise ValueError("expected toolAvailable to end after the connection-bound policy")
     bound = tokens[bound_start:end]
     branches = [i for i in range(len(bound)) if bound[i:i + 2] == ["-", ">"]]
     if not branches or bound[branches[-1] - 1:] != ["else", "-", ">", "false"]:

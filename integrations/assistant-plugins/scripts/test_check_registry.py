@@ -10,8 +10,10 @@ def source(schema):
         Tool(ToolDefinition(name = "sample", inputSchema = ''' + schema + '''),
             SAMPLE_CAPABILITY, "query.sample.readonly"),
     ).associateBy { it.definition.name }
+    fun list() = tools.values
     private fun proposeSchema(): Map<String, Any> = schema(emptyMap(), emptyList())
-    fun toolAvailable(tool: String): Boolean {
+    private fun toolAvailable(tool: String, connectionBound: Boolean): Boolean {
+        if (!connectionBound) return true
         return when (tool) {
             "sample" -> true
             else -> false
@@ -67,6 +69,25 @@ class RegistryTests(unittest.TestCase):
         ):
             with self.subTest(schema=schema), self.assertRaises(ValueError):
                 parse(source(schema))
+
+    def test_catalog_rejects_filter_before_or_after_association(self):
+        original = source("schema(emptyMap(), emptyList())")
+        for old, new in (
+            (").associateBy", ").filter { false }.associateBy"),
+            (".associateBy { it.definition.name }", ".associateBy { it.definition.name }.filterKeys { false }"),
+        ):
+            with self.subTest(expression=new), self.assertRaisesRegex(ValueError, "catalog association"):
+                parse(original.replace(old, new))
+
+    def test_availability_rejects_earlier_guard(self):
+        original = source("schema(emptyMap(), emptyList())")
+        for old, new in (
+            ("if (!connectionBound)", 'if (tool == "sample") return false\n        if (!connectionBound)'),
+            ("return when (tool)", 'if (tool == "sample") return false\n        return when (tool)'),
+            ("if (!connectionBound) return true", "if (connectionBound) return false"),
+        ):
+            with self.subTest(statement=new), self.assertRaisesRegex(ValueError, "toolAvailable"):
+                parse(original.replace(old, new))
 
     def test_required_drift_still_detected(self):
         registry = parse(source('schema(mapOf("id" to strProp()), listOf("id"))'))
