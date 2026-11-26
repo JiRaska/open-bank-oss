@@ -26,8 +26,17 @@ internal class PinnedHostedVendorAuthentication(
     private val replayStore: DpopReplayStore,
     private val clock: Clock,
     private val claude: ClaudeCredential? = null,
+    scopedChatGpt: ScopedChatGpt? = null,
 ) : HostedVendorAuthentication {
-    private val chatGptKey = parsePinnedKey(chatGptJwks, chatGptSha256)
+    private val chatGptKeys = buildMap {
+        put(Vendor.CHATGPT.clientId, parsePinnedKey(chatGptJwks, chatGptSha256))
+        if (scopedChatGpt != null) {
+            require(scopedChatGpt.registration.clientId != Vendor.CHATGPT.clientId)
+            put(scopedChatGpt.registration.clientId, parsePinnedKey(scopedChatGpt.jwks, scopedChatGpt.sha256))
+        }
+    }
+
+    class ScopedChatGpt(val registration: HostedOAuthAdmission.Registration, val jwks: ByteArray, val sha256: String)
 
     class ClaudeCredential(secret: String, val expiresAt: Instant) {
         init {
@@ -44,18 +53,24 @@ internal class PinnedHostedVendorAuthentication(
 
     override suspend fun authenticate(credentials: HostedVendorAuthentication.Credentials): Vendor? =
         when (credentials.clientId) {
-            Vendor.CHATGPT.clientId -> authenticateChatGpt(credentials)
             Vendor.CLAUDE.clientId -> authenticateClaude(credentials)
-            else -> null
+            else -> authenticateChatGpt(credentials)
         }
 
     private suspend fun authenticateChatGpt(credentials: HostedVendorAuthentication.Credentials): Vendor? {
         if (credentials.method != TokenAuthentication.PRIVATE_KEY_JWT) return null
         if (credentials.proof.length !in MIN_ASSERTION_LENGTH..MAX_ASSERTION_LENGTH) return null
-        val verified = runCatching { verifyAssertion(credentials.proof) }.getOrNull() ?: return null
+        val key = chatGptKeys[credentials.clientId] ?: return null
+        val verified = runCatching { verifyAssertion(credentials.proof, key) }.getOrNull() ?: return null
         val now = clock.instant()
-        val jti = verifiedJti(verified, now) ?: return null
-        val replay = replayStore.firstUse("hosted-oauth:chatgpt", HostedOAuthStart.digest(jti), REPLAY_LIFETIME, now)
+        val jti = verifiedJti(verified, now, credentials.clientId) ?: return null
+        val replayKey = if (credentials.clientId == Vendor.CHATGPT.clientId) jti else "${credentials.clientId}:$jti"
+        val replay = replayStore.firstUse(
+            "hosted-oauth:chatgpt",
+            HostedOAuthStart.digest(replayKey),
+            REPLAY_LIFETIME,
+            now,
+        )
         return Vendor.CHATGPT.takeIf { replay == ReplayClaim.FIRST_USE }
     }
 
@@ -67,19 +82,19 @@ internal class PinnedHostedVendorAuthentication(
         return Vendor.CLAUDE
     }
 
-    private fun verifyAssertion(assertion: String): JsonNode {
+    private fun verifyAssertion(assertion: String, key: Pair<String, RSAPublicKey>): JsonNode {
         val jws = JsonWebSignature()
         jws.setAlgorithmConstraints(AlgorithmConstraints(AlgorithmConstraints.ConstraintType.PERMIT, "RS256"))
         jws.compactSerialization = assertion
-        check(jws.keyIdHeaderValue == chatGptKey.first)
-        jws.key = chatGptKey.second
+        check(jws.keyIdHeaderValue == key.first)
+        jws.key = key.second
         check(jws.verifySignature())
         return mapper.readTree(jws.payload)
     }
 
-    private fun verifiedJti(claims: JsonNode, now: Instant): String? {
-        if (claims.path("iss").textValue() != Vendor.CHATGPT.clientId) return null
-        if (claims.path("sub").textValue() != Vendor.CHATGPT.clientId) return null
+    private fun verifiedJti(claims: JsonNode, now: Instant, clientId: String): String? {
+        if (claims.path("iss").textValue() != clientId) return null
+        if (claims.path("sub").textValue() != clientId) return null
         val aud = claims.path("aud")
         val audience = if (aud.isArray && aud.size() == 1) aud[0].textValue() else aud.textValue()
         if (audience !in AUDIENCES) return null

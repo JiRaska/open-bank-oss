@@ -47,7 +47,11 @@ class PgHostedOAuthTransactionsIT {
                 val pool = PgPool.pool(vertx, connect, PoolOptions())
                 try {
                     verifyStore(pool)
-                    verifyApprovedCallback(pool)
+                    verifyApprovedCallback(
+                        pool,
+                        checkNotNull(HostedOAuthAdmission.Registrations().find(Vendor.CHATGPT.clientId)),
+                    )
+                    verifyApprovedCallback(pool, SCOPED)
                     verifyGrantRotation(pool)
                 } finally {
                     pool.close().awaitSuspending()
@@ -62,6 +66,7 @@ class PgHostedOAuthTransactionsIT {
             "V3__hosted_oauth_transactions.sql",
             "V4__hosted_bank_grant_custody.sql",
             "V5__hosted_oauth_vendor_grants.sql",
+            "V6__hosted_oauth_client_registration.sql",
         )
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { jdbc ->
             jdbc.createStatement().use { statement ->
@@ -79,18 +84,21 @@ class PgHostedOAuthTransactionsIT {
         var active = true
         var usable = true
         val store = PgHostedVendorGrants(pool)
+        val registrations = HostedOAuthAdmission.Registrations(SCOPED)
         val grants = HostedVendorGrants(
             store,
-            { incoming -> vendor.takeIf { incoming.clientId == vendor.clientId && incoming.proof == "verified" } },
+            { incoming -> registrations.find(incoming.clientId)?.vendor?.takeIf { incoming.proof == "verified" } },
             { id, current -> active && id == vendor && current == connection },
             { id, current -> active && usable && id == vendor && current == connection },
             setOf(vendor),
+            registrations,
         )
         val credentials = HostedVendorAuthentication.Credentials(
             vendor.clientId,
             TokenAuthentication.PRIVATE_KEY_JWT,
             "verified",
         )
+        verifyScopedRefresh(grants, connection, credentials)
         val original = checkNotNull(grants.issue(vendor, connection))
         assertThat(grants.admit(original.accessToken)?.connectionId).isEqualTo(connection)
         assertThat(grants.admit(original.refreshToken)).isNull()
@@ -128,7 +136,24 @@ class PgHostedOAuthTransactionsIT {
         assertThat(grants.admit(next.accessToken)).isNull()
     }
 
-    private suspend fun verifyApprovedCallback(pool: PgPool) {
+    private suspend fun verifyScopedRefresh(
+        grants: HostedVendorGrants,
+        connection: UUID,
+        credentials: HostedVendorAuthentication.Credentials,
+    ) {
+        val scopedCredentials = HostedVendorAuthentication.Credentials(
+            SCOPED.clientId,
+            TokenAuthentication.PRIVATE_KEY_JWT,
+            "verified",
+        )
+        val scopedGrant = checkNotNull(grants.issue(Vendor.CHATGPT, connection, SCOPED.clientId))
+        assertThat(scopedGrant.accessToken).startsWith("obat2_")
+        assertThat(grants.refresh(scopedGrant.refreshToken, credentials, HostedOAuthAdmission.RESOURCE, null)).isNull()
+        assertThat(grants.refresh(scopedGrant.refreshToken, scopedCredentials, HostedOAuthAdmission.RESOURCE, null))
+            .isNotNull()
+    }
+
+    private suspend fun verifyApprovedCallback(pool: PgPool, registration: HostedOAuthAdmission.Registration) {
         val store = PgHostedOAuthTransactions(pool)
         val protector = LocalAesGcmFieldProtector(mapOf(1 to ByteArray(32) { 9 }), ByteArray(32) { 7 })
         val mapper = ObjectMapper()
@@ -144,8 +169,8 @@ class PgHostedOAuthTransactionsIT {
             expectedAuthorize
         }
         val requestToStart = AuthorizationRequest(
-            vendor.clientId,
-            vendor.callback,
+            registration.clientId,
+            registration.callback,
             "code",
             digest(vendorVerifier),
             "S256",
@@ -153,7 +178,8 @@ class PgHostedOAuthTransactionsIT {
             HostedOAuthAdmission.OUTER_SCOPE,
             HostedOAuthAdmission.RESOURCE,
         )
-        val start = HostedOAuthStart(store, par, protector, mapper, setOf(vendor))
+        val registrations = HostedOAuthAdmission.Registrations(SCOPED)
+        val start = HostedOAuthStart(store, par, protector, mapper, setOf(vendor), registrations)
         val pending = checkNotNull(start.authorize(requestToStart, null))
         val browser = pending.browserBinding
         assertThat(pending.bankAuthorize).isEqualTo(expectedAuthorize)
@@ -170,39 +196,60 @@ class PgHostedOAuthTransactionsIT {
                 HostedBankCodeExchange.VerifiedConnection(connection, vendor)
             },
             { credentials -> Vendor.CHATGPT.takeIf { credentials.proof == "verified-assertion" } },
-            { vendor, id ->
+            { vendor, id, clientId ->
                 HostedVendorTokens("synthetic-opaque-grant", "synthetic-refresh")
-                    .takeIf { vendor == Vendor.CHATGPT && id == connection }
+                    .takeIf { vendor == Vendor.CHATGPT && id == connection && clientId == registration.clientId }
             },
             protector,
             mapper,
             setOf(Vendor.CHATGPT),
+            registrations,
         )
         assertThat(complete.callback(bankState, "D".repeat(43), "approved-bank-code")).isNull()
         val redirect = checkNotNull(complete.callback(bankState, browser, "approved-bank-code"))
         assertThat(redirect.query).contains("state=vendor-state")
-        verifyRedemption(complete, redirect, vendorVerifier)
+        assertThat(redirect.toString()).startsWith(registration.callback + "?")
+        verifyRedemption(complete, redirect, vendorVerifier, registration)
         assertThat(complete.callback(bankState, browser, "approved-bank-code")).isNull()
     }
 
-    private suspend fun verifyRedemption(complete: HostedOAuthComplete, redirect: URI, vendorVerifier: String) {
+    private suspend fun verifyRedemption(
+        complete: HostedOAuthComplete,
+        redirect: URI,
+        vendorVerifier: String,
+        registration: HostedOAuthAdmission.Registration,
+    ) {
         val code = redirect.query.substringAfter("code=").substringBefore("&")
         val credentials = HostedVendorAuthentication.Credentials(
-            Vendor.CHATGPT.clientId,
+            registration.clientId,
             TokenAuthentication.PRIVATE_KEY_JWT,
             "verified-assertion",
         )
         val request = HostedOAuthComplete.Redemption(
             code,
             vendorVerifier,
-            Vendor.CHATGPT.callback,
+            registration.callback,
             HostedOAuthAdmission.RESOURCE,
         )
         val wrongProof = HostedVendorAuthentication.Credentials(
-            Vendor.CHATGPT.clientId,
+            registration.clientId,
             TokenAuthentication.PRIVATE_KEY_JWT,
             "wrong",
         )
+        val other = if (registration.clientId == SCOPED.clientId) Vendor.CHATGPT.clientId else SCOPED.clientId
+        val otherRegistration = checkNotNull(HostedOAuthAdmission.Registrations(SCOPED).find(other))
+        val otherRequest = HostedOAuthComplete.Redemption(
+            code,
+            vendorVerifier,
+            otherRegistration.callback,
+            request.resource,
+        )
+        val otherClient = HostedVendorAuthentication.Credentials(
+            other,
+            TokenAuthentication.PRIVATE_KEY_JWT,
+            "verified-assertion",
+        )
+        assertThat(complete.redeem(otherRequest, otherClient)).isNull()
         assertThat(complete.redeem(request, wrongProof)).isNull()
         assertThat(complete.redeem(request, credentials)?.accessToken).isEqualTo("synthetic-opaque-grant")
         assertThat(complete.redeem(request, credentials)).isNull()
@@ -234,5 +281,12 @@ class PgHostedOAuthTransactionsIT {
         pool.query("UPDATE mcp_hosted_oauth_transactions SET expires_at = now()").execute().awaitSuspending()
         assertThat(store.consumeVendorCode(handle, binding, Vendor.CHATGPT)).isNull()
         assertThat(store.deleteExpiredBatch()).isEqualTo(1)
+    }
+    private companion object {
+        val SCOPED = HostedOAuthAdmission.Registration(
+            Vendor.CHATGPT,
+            "https://chatgpt.com/oauth/fixture/client.json",
+            "https://chatgpt.com/connector/oauth/fixture",
+        )
     }
 }

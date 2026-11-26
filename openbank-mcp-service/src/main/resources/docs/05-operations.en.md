@@ -411,3 +411,15 @@ Confirm both ChatGPT and Claude can display the bank approval, return to the ori
 list the test account, read its known balance after token renewal, and lose access after revocation.
 To roll back, disable hosted OAuth and revoke the hosted test grants through the supported
 connection-management flow.
+
+For a private ChatGPT MCP registration, add an optional `chatgpt-scoped.json` file next to
+`site.json` in the projected Secret. It contains `clientId`, `callback`, `jwksBase64` and `jwksSha256`. Use the
+exact HTTPS client identifier and single callback from the approved client metadata document.
+Encode the exact reviewed JWKS bytes from the document as base64 and pin their SHA-256.
+Startup reads the projected file and verifies the digest. The generic ChatGPT registration retains its
+original client and key configuration.
+
+Before rolling back to an older release, remove the scoped site registration. The additive
+`scoped_client_id` database field remains in place. Tokens issued for the scoped client use a
+separate format that the older runtime refuses. Re-enable the same registration to preserve its
+unexpired sessions, or revoke the associated connections before changing the registration.
