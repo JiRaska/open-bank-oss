@@ -175,3 +175,19 @@ Party, and it must own both accounts. `GET /customer/v1/synthetic/transfers` ret
 Europe/Prague booking date for the authenticated fixture. Submit that date and the direction via
 POST on the same path. The dedicated Transaction route requires the authenticated edge and the
 same synthetic origin.
+
+## Native MCP passkey proof refusals
+
+Use `openbank_edge_mcp_native_proof_rejected_total` to check where native Connect stopped after
+admitting the app session. The only added label is the fixed `reason`.
+
+- `EXPIRED`, `CHALLENGE_INVALID`, `CHALLENGE_MISSING` and `CONTEXT_MISMATCH` indicate that the
+  challenge was unusable for the current connection. Start a new connection in the assistant.
+- `CREDENTIAL_UNKNOWN`, `OWNER_MISMATCH`, `ASSERTION_INVALID` and `ASSERTION_CONFLICT` indicate
+  refusal during credential, ownership, assertion or credential-store verification.
+- `AGE_MISSING`, `AGE_INVALID` and `AGE_TOO_YOUNG` indicate unusable or insufficient
+  server-verified credential age. A successful ordinary passkey assertion records the initial
+  timestamp on legacy credentials. A verified credential must reach 72 hours before use.
+
+Confirm the counter increases in the same test interval as the HTTP 403. The public response
+stays generic. The metric contains no credential identifiers, request references or token values.

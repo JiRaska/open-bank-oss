@@ -10,6 +10,7 @@ import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.webauthn4j.util.Base64UrlUtil
 import com.webauthn4j.verifier.exception.VerificationException
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.redis.datasource.RedisDataSource
 import io.quarkus.redis.datasource.value.SetArgs
 import jakarta.enterprise.context.ApplicationScoped
@@ -97,6 +98,7 @@ internal class McpNativePasskeyProofService(
     private val credentials: WebAuthnStore,
     private val mapper: ObjectMapper,
     private val clock: Clock,
+    private val metrics: MeterRegistry,
     @ConfigProperty(name = "openbank.webauthn.rp-id", defaultValue = "open-bank.tech")
     private val rpId: String,
     @ConfigProperty(name = "openbank.webauthn.origin", defaultValue = "https://open-bank.tech")
@@ -112,25 +114,46 @@ internal class McpNativePasskeyProofService(
     }
 
     fun complete(binding: McpNativePasskeyBinding, assertion: AuthCompleteRequestDto): McpNativePasskeyProof? {
-        if (binding.expiresAtEpochSecond <= clock.instant().epochSecond) return null
-        val challenge = verifiedChallenge(assertion.clientDataJson) ?: return null
-        if (challenges.claim(challenge) != binding) return null
-        val credential = credentials.find(assertion.credentialId) ?: return null
-        if (!belongsTo(credential, binding, assertion)) return null
-        val counter = verify(assertion, credential, challenge) ?: return null
-        if (!credentials.recordAssertion(credential, counter)) return null
+        if (binding.expiresAtEpochSecond <= clock.instant().epochSecond) return reject(Refusal.EXPIRED)
+        val challenge = verifiedChallenge(assertion.clientDataJson) ?: return reject(Refusal.CHALLENGE_INVALID)
+        val challenged = challenges.claim(challenge) ?: return reject(Refusal.CHALLENGE_MISSING)
+        if (challenged != binding) return reject(Refusal.CONTEXT_MISMATCH)
+        val credential = credentials.find(assertion.credentialId) ?: return reject(Refusal.CREDENTIAL_UNKNOWN)
+        if (!belongsTo(credential, binding, assertion)) return reject(Refusal.OWNER_MISMATCH)
+        val counter = verify(assertion, credential, challenge) ?: return reject(Refusal.ASSERTION_INVALID)
+        if (!credentials.recordAssertion(credential, counter)) return reject(Refusal.ASSERTION_CONFLICT)
         return proof(binding, credential)
     }
 
     private fun proof(binding: McpNativePasskeyBinding, credential: RegisteredCredential): McpNativePasskeyProof? {
         val now = clock.instant()
-        if (binding.expiresAtEpochSecond <= now.epochSecond) return null
-        val firstVerified = credential.firstVerifiedAtEpochMillis ?: return null
-        if (firstVerified <= 0 || firstVerified > now.toEpochMilli() - MIN_AGE.toMillis()) return null
+        if (binding.expiresAtEpochSecond <= now.epochSecond) return reject(Refusal.EXPIRED)
+        val firstVerified = credential.firstVerifiedAtEpochMillis ?: return reject(Refusal.AGE_MISSING)
+        if (firstVerified <= 0) return reject(Refusal.AGE_INVALID)
+        if (firstVerified > now.toEpochMilli() - MIN_AGE.toMillis()) return reject(Refusal.AGE_TOO_YOUNG)
         val attestedCredential = Base64.getDecoder().decode(credential.attestedCredentialDataB64)
         val digest = MessageDigest.getInstance("SHA-256").digest(attestedCredential)
         val credentialReference = HexFormat.of().formatHex(digest)
         return McpNativePasskeyProof(binding, credentialReference, firstVerified, now.toEpochMilli())
+    }
+
+    private fun reject(reason: Refusal): McpNativePasskeyProof? {
+        metrics.counter("openbank.edge.mcp.native.proof.rejected", "reason", reason.name).increment()
+        return null
+    }
+
+    private enum class Refusal {
+        EXPIRED,
+        CHALLENGE_INVALID,
+        CHALLENGE_MISSING,
+        CONTEXT_MISMATCH,
+        CREDENTIAL_UNKNOWN,
+        OWNER_MISMATCH,
+        ASSERTION_INVALID,
+        ASSERTION_CONFLICT,
+        AGE_MISSING,
+        AGE_INVALID,
+        AGE_TOO_YOUNG,
     }
 
     private fun verifiedChallenge(clientData: String): String? = try {
