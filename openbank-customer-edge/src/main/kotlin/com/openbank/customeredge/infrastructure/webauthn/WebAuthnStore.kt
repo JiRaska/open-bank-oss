@@ -45,6 +45,15 @@ class WebAuthnStore(redis: RedisDataSource, private val objectMapper: ObjectMapp
         values.set(key(credential.credentialId), objectMapper.writeValueAsString(credential))
     }
 
+    fun recordAssertion(credential: RegisteredCredential, signCount: Long) {
+        save(
+            credential.copy(
+                signCount = signCount,
+                firstVerifiedAtEpochMillis = credential.firstVerifiedAtEpochMillis ?: System.currentTimeMillis(),
+            ),
+        )
+    }
+
     fun find(credentialId: String): RegisteredCredential? {
         val json = values.get(key(credentialId)) ?: return null
         return runCatching { objectMapper.readValue(json, RegisteredCredential::class.java) }.getOrElse { e ->
