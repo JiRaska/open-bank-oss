@@ -383,3 +383,31 @@ The customer MCP endpoint accepts bearer tokens for enabled Tier H clients with 
 The allowlist declares ChatGPT's exact published OAuth client ID and callback. The generated realm client pins the reviewed RS256 key set and uses private-key JWT authentication. The declaration stays disabled until sandbox deployment verifies the hosted authorization and refresh flow. Review key rotation against the vendor's published JWKS before updating the pin.
 
 The Claude sandbox registration is disabled by default and uses a confidential client exception authorized for 30 days. Start the sandbox with a dedicated secret from the bank secret store and supply it only to the authorized connector operator. Keep the callback fixed to the published Claude URL. Remove the sandbox registration and revoke its token families when the exception ends.
+
+### Hosted OAuth adapter
+
+The adapter exposes its own authorization server metadata on the MCP origin. It starts a bank
+PAR transaction for the registered client and returns through the existing native approval flow.
+The issued session exposes account listing and balance reads. The bank token remains in encrypted
+OpenBao-backed custody and the balance call uses the existing customer authorization boundary.
+
+Hosted OAuth starts disabled. To activate it in the shared sandbox, configure the customer channel,
+its shared replay store and the approved projected site file. The site file selects explicit public
+key pins and references the OpenBao CA, service account token, dedicated bank client TLS pair,
+bank TLS CA and any confidential client secret. Mount those references read-only through the
+site configuration. Register the bank-owned identities before enabling their corresponding hosted
+vendor. Verify the issuer and token endpoint in discovery before testing the connector.
+
+The site-managed Secret supplies the `vendors` selector and `site.json`. Deployments project
+the service account token to `/mnt/mcp-hosted-oauth-identity/token` and the adapter client key
+pair under `/mnt/mcp-hosted-oauth-client`. The JSON describes those absolute paths and the
+approved CA and public key files. The `vendors` selector accepts `disabled`, `chatgpt`, `claude`,
+or `chatgpt,claude`. Change the selector through GitOps and roll the pod to pick up the new
+configuration.
+
+Verify gateway access logs with a synthetic query marker before enabling real authorization.
+Application events report the vendor and a derived correlation value for the PAR and callback stages.
+Confirm both ChatGPT and Claude can display the bank approval, return to the original session,
+list the test account, read its known balance after token renewal, and lose access after revocation.
+To roll back, disable hosted OAuth and revoke the hosted test grants through the supported
+connection-management flow.

@@ -71,7 +71,8 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
     }
 
     static boolean isMcp(ClientModel client) {
-        return client != null && McpConnectPolicy.isMcpClient(client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE));
+        return client != null && (McpConnectPolicy.isMcpClient(client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))
+                || McpConnectPolicy.bankAdapterReserved(client));
     }
 
     private void refuseExchange(TokenExchangeRequestContext context) throws ClientPolicyException {
@@ -184,6 +185,11 @@ public class McpClientGuardExecutor implements ClientPolicyExecutorProvider<Clie
             auth.removeAuthNote(McpNotes.PKCE_CHALLENGE);
         }
         String parProof = session.getAttribute(PAR_DPOP_PROOF_JKT, String.class);
+        if (McpConnectPolicy.bankAdapterReserved(client)
+                && (!McpConnectPolicy.bankAdapterAllowed(client) || parProof == null)) {
+            throw new ClientPolicyException(OAuthErrorException.INVALID_REQUEST,
+                    "bank adapter requires verified PAR proof");
+        }
         if (parProof == null) {
             auth.removeAuthNote(McpNotes.PAR_PROOF_JKT);
         } else {

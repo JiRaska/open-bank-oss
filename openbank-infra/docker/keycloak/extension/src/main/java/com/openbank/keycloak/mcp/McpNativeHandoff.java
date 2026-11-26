@@ -85,6 +85,10 @@ final class McpNativeHandoff {
             throw new IllegalArgumentException("native handoff only supports online connections");
         }
         String parJkt = auth.getAuthNote(McpNotes.PAR_PROOF_JKT);
+        if (McpConnectPolicy.bankAdapterReserved(client)
+                && (!McpConnectPolicy.bankAdapterAllowed(client) || parJkt == null)) {
+            throw new IllegalArgumentException("bank adapter requires independently verified PAR proof");
+        }
         if (parJkt != null && !canonicalSha256(parJkt)) {
             throw new IllegalArgumentException("invalid guarded PAR proof binding");
         }

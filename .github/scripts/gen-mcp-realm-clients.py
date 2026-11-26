@@ -127,6 +127,7 @@ def _mapper_sub() -> dict:
 
 def build_client(decl: dict, c: dict, base: Path) -> dict:
     tier = c["tier"]
+    hosted = c.get("profile") == "bank-hosted-v2"
     attrs = {
         TIER_ATTR: tier,
         RESOURCE_ATTR: decl["resource"],
@@ -139,7 +140,7 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "client_credentials.use_refresh_token": "false",
         "access.token.lifespan": str(ACCESS_TOKEN_LIFESPAN_S),
         "exclude.session.state.from.auth.response": "false",
-        "dpop.bound.access.tokens": "true" if tier == "L" else "false",
+        "dpop.bound.access.tokens": "true" if tier == "L" or hosted else "false",
         "frontchannel.logout.session.required": "false",
         "backchannel.logout.session.required": "true",
     }
@@ -167,9 +168,11 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "webOrigins": [],
         "authenticationFlowBindingOverrides": {"browser": flow["id"]},
         "defaultClientScopes": [],
-        "optionalClientScopes": ["offline_access"],
+        "optionalClientScopes": [] if hosted else ["offline_access"],
         "protocolMappers": [_mapper_sub(), _mapper_party_id(), _mapper_audience(decl["audience"])],
     }
+    if hosted:
+        attrs["openbank.mcp.profile"] = "bank-hosted-v2"
     if tier == "H":
         auth = c["auth"]
         client["publicClient"] = False
@@ -353,6 +356,16 @@ def build_hardening() -> tuple[list[dict], list[dict]]:
             "conditions": [_tier_condition(tier)],
             "profiles": names,
         })
+    policies.append({
+        "name": f"{HARDENING_POLICY_PREFIX}bank-hosted-v2",
+        "description": "Require DPoP for the dedicated confidential bank hosted adapter.",
+        "enabled": True,
+        "conditions": [{"condition": "client-attributes", "configuration": {
+            "is_negative_logic": False,
+            "attributes": json.dumps([{"key": "openbank.mcp.profile", "value": "bank-hosted-v2"}]),
+        }}],
+        "profiles": [DPOP_PROFILE],
+    })
     return profiles, policies
 
 
@@ -399,13 +412,14 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     out["clientScopes"] = [s for s in out.get("clientScopes", []) if not _owned(s)] + ex_scopes
     # fullScopeAllowed=false, and the offline_access client scope's own role mapping does NOT make
     # the role reachable (measured on Keycloak 26.8.1: "Offline tokens not allowed for the user or
-    # client"). So each MCP client is scope-mapped to offline_access and NOTHING else: the token
+    # client"). Legacy MCP clients are scope-mapped to offline_access and NOTHING else: the token
     # carries no realm role mcp-service could mistake for a grant (realm-template-importable R11
-    # holds MCP clients to exactly this mapping).
+    # holds MCP clients to exactly this mapping). Online-only bank adapters have no role mapping.
     owned = {c["client_id"] for c in decl["clients"]} | {
         c["clientId"] for c in template.get("clients", []) if TIER_ATTR in (c.get("attributes") or {})}
     out["scopeMappings"] = [m for m in out.get("scopeMappings", []) if m.get("client") not in owned] + [
-        {"client": c["client_id"], "roles": ["offline_access"]} for c in decl["clients"]]
+        {"client": c["client_id"], "roles": ["offline_access"]}
+        for c in decl["clients"] if c.get("profile") != "bank-hosted-v2"]
     alias = decl["flow"]["alias"]
     flows = [f for f in out.get("authenticationFlows", []) if f.get("alias") != alias]
     out["authenticationFlows"] = flows + [build_flow(decl)]

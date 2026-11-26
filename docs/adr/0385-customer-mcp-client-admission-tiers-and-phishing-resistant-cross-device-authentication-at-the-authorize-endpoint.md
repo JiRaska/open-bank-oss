@@ -193,6 +193,22 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
    - Parameters sent beside the `request_uri` that differ from the stored request are rejected.
    - A `request_uri` presented by another `client_id` is rejected.
    - PKCE that is absent or `plain` is rejected.
+   - **Proposed hosted interoperability profile (pending review and live verification).**
+     A hosted assistant may initiate standard OAuth at a bank-operated adapter. Keycloak
+     remains a separate authorization server and requires PAR for every adapter request.
+     The adapter selects a dedicated bank client and key per admitted provider. It validates
+     the exact provider client, redirect and resource, and requires S256 PKCE and authenticated
+     code exchange. It builds a fresh, bank-authenticated PAR request from the validated
+     transaction. The provider cannot supply bank-side redirect or authentication controls.
+   - The existing QR or app link, native passkey and transaction-bound SCA apply to the
+     same bank transaction. The adapter may issue a short-lived, single-use code after it
+     confirms the approved connection belongs to the expected provider. Provider and bank
+     credentials have distinct issuers and audiences. Provider access and refresh must
+     resolve to the active bank connection and fail after revocation.
+   - The adapter publishes OAuth authorization-server metadata (RFC 8414) with
+     `mcp:balance:read` as the pilot scope. On both tool discovery and dispatch, this
+     scope authorizes only `list_accounts` and `get_balance` for accounts approved
+     in the app. The adapter uses `openid` for the internal Keycloak flow.
 2. **A fresh passkey in the browser that started the flow.**
    - Every MCP client is bound per client to a dedicated authentication flow override with
      **no `auth-cookie` alternative**. That binding is the control.
@@ -422,6 +438,15 @@ exists. Fixing `openbank-app` `http://localhost:*` is tracked in #16612.
 - Rotating the client key or secret → existing grants still refresh.
 - Realm assertion over `customers-realm-template.json`, for every MCP client: no direct grant,
   implicit grant, device grant or service account; exact redirects; `refreshTokenMaxReuse` = 0.
+
+**Hosted adapter pilot**
+- ChatGPT and Claude independently connect through their registered clients, reach the bank
+  QR or native handoff, and return from an approved TestFlight request.
+- Each assistant reads only the chosen synthetic account and can reuse the connection in
+  a new chat. Unapproved accounts and payment proposals are rejected.
+- Wrong client, browser binding, redirect or PKCE, expired state, and replay are rejected.
+- After revocation in the app, both the previous access token and refresh fail. A repeated
+  refresh token invalidates its family without affecting the other assistant.
 
 **PAR and authorize**
 - `request_uri` reused, older than 60 s, used by another `client_id`, or with differing parameters

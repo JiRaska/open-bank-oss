@@ -6,7 +6,10 @@ package com.openbank.mcp.infrastructure.customer
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.openbank.libs.security.DpopProofVerifier
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthComplete
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthRuntime
 import io.vertx.core.http.HttpServerRequest
+import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -33,6 +36,9 @@ class ProtectedResourceMetadataResource(private val channel: CustomerChannel) {
     @Inject
     lateinit var httpRequest: HttpServerRequest
 
+    @Inject
+    internal lateinit var hosted: Instance<HostedOAuthRuntime>
+
     data class Metadata(
         val resource: String,
         @get:JsonProperty("authorization_servers") val authorizationServers: List<String>,
@@ -56,13 +62,18 @@ class ProtectedResourceMetadataResource(private val channel: CustomerChannel) {
     private fun metadata(): Response {
         val admission = channel.admission?.takeIf { httpRequest.isSSL }
             ?: return Response.status(Response.Status.NOT_FOUND).build()
+        val hostedActive = hosted.isResolvable && hosted.get().enabledVendors.isNotEmpty()
         return Response.ok(
             Metadata(
                 resource = admission.allowlist.resource,
-                authorizationServers = listOf(admission.issuer),
+                authorizationServers = if (hostedActive) {
+                    listOf(HostedOAuthComplete.ISSUER, admission.issuer)
+                } else {
+                    listOf(admission.issuer)
+                },
                 bearerMethodsSupported = listOf("header"),
                 dpopSigningAlgValuesSupported = DpopProofVerifier.ALLOWED_ALGORITHMS.sorted(),
-                dpopBoundAccessTokensRequired = !admission.supportsHostedBearer,
+                dpopBoundAccessTokensRequired = !hostedActive && !admission.supportsHostedBearer,
             ),
         ).build()
     }

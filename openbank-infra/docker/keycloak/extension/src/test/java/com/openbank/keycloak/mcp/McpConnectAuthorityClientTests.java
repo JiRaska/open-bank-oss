@@ -214,7 +214,12 @@ public final class McpConnectAuthorityClientTests {
     }
 
     private static KeycloakSession tokenPolicySession(String tier) {
-        ClientModel client = proxy(ClientModel.class, "getAttribute", tier);
+        ClientModel client = ClientModel.class.cast(Proxy.newProxyInstance(ClientModel.class.getClassLoader(),
+                new Class<?>[] {ClientModel.class}, (unused, method, arguments) -> switch (method.getName()) {
+                    case "getClientId" -> "synthetic-fixture";
+                    case "getAttribute" -> McpConnectPolicy.TIER_ATTRIBUTE.equals(arguments[0]) ? tier : null;
+                    default -> throw new UnsupportedOperationException(method.getName());
+                }));
         KeycloakContext context = proxy(KeycloakContext.class, "getClient", client);
         var authenticator = new McpWithheldCodeAuthenticatorFactory();
         KeycloakSessionFactory factory = proxy(KeycloakSessionFactory.class, "getProviderFactory", authenticator);

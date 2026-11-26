@@ -424,6 +424,34 @@ step 1 starts. "Open PR" means not on `main`; the PR number is the only claim ma
 | C-E2 | Elevation of privilege | The edge reaches management or other ports | NetworkPolicy `mcp-service-ingress-allow-list` (generated): `envoy-gateway-system` admitted on `:8443` (mTLS, client auth required) only; route matches only `/customer/mcp` and its two RFC 9728 metadata paths | Policy: in this PR; route off |
 | C-E3 | Elevation of privilege | Abuse is invisible, so none of the above is noticed in time | ADR-0384: three alerts on main (`prometheus-rules-mcp-customer.yaml`), `McpMetricsAdapter` series, admin health page; the rest of #16605 (lifecycle events, proposal funnel, SLOs, kill switch, warehouse, fraud signals) is missing | **OPEN — blocks go-live** |
 
+### Hosted OAuth adapter
+
+The hosted clients use an OpenBank authorization server on the MCP origin. The adapter starts a
+second authorization transaction as the bank-owned client for that vendor. The bank transaction
+requires PAR, S256 PKCE, DPoP, and the same native OpenBank approval and SCA policy as the direct
+customer channel.
+
+- **Client spoofing.** Authorization and token exchange pin the client identity, callback, canonical
+  resource, and read scope. ChatGPT authenticates with a pinned client assertion key and replay
+  check. Claude's sandbox client secret has a fixed expiry. Both vendors have distinct bank client
+  identities and distinct Transit keys for assertions and DPoP.
+- **Callback substitution and replay.** A secure browser binding and one-time, expiring PostgreSQL
+  state link the bank callback to the outer PKCE request. The adapter exchanges an approved bank
+  code before issuing an outer code. Outer codes are short lived and consumed atomically.
+- **Token theft and privilege expansion.** The adapter stores only hashes of outer tokens and
+  returns them for the canonical MCP resource. Bank tokens stay encrypted in custody and
+  are sent only on the dedicated bank-side DPoP and mTLS transport. Discovery and dispatch
+  restrict the outer grant to account listing and balance reading.
+- **Refresh races and stale consent.** Refresh rotation is fenced in the database. A replay of
+  a spent outer refresh credential revokes its family. Bank refresh must preserve the approved
+  connection, vendor client and DPoP binding. The bank grant authority is checked before issuing
+  or using the credential.
+- **Operations.** Keep adapter activation disabled until the scoped OpenBao identity, public
+  key pins and mTLS identities are verified. Disable both hosted clients to stop new authorizations
+  and clear grant custody through the supported revocation path when rolling back the adapter.
+  Log stage, vendor and derived correlation only. Keep codes, assertions, cookies and tokens out
+  of logs, including gateway access logs.
+
 ## 5. Documented-but-unenforced controls (summary)
 
 > **2026-07-31 — ADR-0224 D2 (agent sessions) landed.** The service is stateful now: the

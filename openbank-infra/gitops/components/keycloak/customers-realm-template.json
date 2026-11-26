@@ -634,6 +634,182 @@
       }
     },
     {
+      "clientId": "mcp-bank-hosted-chatgpt",
+      "name": "ChatGPT via OpenBank",
+      "description": "MCP client, ADR-0385 Tier H. DERIVED from mcp-client-allowlist.yaml - do not hand-edit.",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "https://mcp.open-bank.tech/oauth/hosted/callback"
+      ],
+      "webOrigins": [],
+      "authenticationFlowBindingOverrides": {
+        "browser": "efd9751b-94d8-4ae5-80dc-3f078a671b2d"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "party-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "party_id",
+            "claim.name": "party_id",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "mcp-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "openbank-mcp-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "publicClient": false,
+      "clientAuthenticatorType": "client-jwt",
+      "attributes": {
+        "access.token.lifespan": "300",
+        "backchannel.logout.session.required": "true",
+        "client_credentials.use_refresh_token": "false",
+        "dpop.bound.access.tokens": "true",
+        "exclude.session.state.from.auth.response": "false",
+        "frontchannel.logout.session.required": "false",
+        "jwks.string": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"sig\",\"alg\":\"ES256\",\"kid\":\"mcp-bank-hosted-chatgpt-synthetic-reference\",\"x\":\"YjafRAl4ccJOds2lzTjR1K773cQvvDsAZAQyu3Pr8LM\",\"y\":\"YqWH6opHAHAKXkMI_pIizp5ex7OhqWN4vnAHLsc2PII\"}]}",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.profile": "bank-hosted-v2",
+        "openbank.mcp.resource": "https://mcp.open-bank.tech/customer/mcp",
+        "openbank.mcp.tier": "H",
+        "pkce.code.challenge.method": "S256",
+        "require.pushed.authorization.requests": "true",
+        "standard.token.exchange.enabled": "false",
+        "token.endpoint.auth.signing.alg": "ES256",
+        "use.jwks.string": "true",
+        "use.jwks.url": "false",
+        "use.refresh.tokens": "true"
+      }
+    },
+    {
+      "clientId": "mcp-bank-hosted-claude",
+      "name": "Claude via OpenBank",
+      "description": "MCP client, ADR-0385 Tier H. DERIVED from mcp-client-allowlist.yaml - do not hand-edit.",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "https://mcp.open-bank.tech/oauth/hosted/callback"
+      ],
+      "webOrigins": [],
+      "authenticationFlowBindingOverrides": {
+        "browser": "efd9751b-94d8-4ae5-80dc-3f078a671b2d"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "party-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "party_id",
+            "claim.name": "party_id",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "mcp-service-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "openbank-mcp-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "publicClient": false,
+      "clientAuthenticatorType": "client-jwt",
+      "attributes": {
+        "access.token.lifespan": "300",
+        "backchannel.logout.session.required": "true",
+        "client_credentials.use_refresh_token": "false",
+        "dpop.bound.access.tokens": "true",
+        "exclude.session.state.from.auth.response": "false",
+        "frontchannel.logout.session.required": "false",
+        "jwks.string": "{\"keys\":[{\"kty\":\"EC\",\"crv\":\"P-256\",\"use\":\"sig\",\"alg\":\"ES256\",\"kid\":\"mcp-bank-hosted-claude-synthetic-reference\",\"x\":\"A3fENPXLgnCPXdjgAdGgfUUm22pTlGsYg0weVINs8GI\",\"y\":\"9MhAaHP8InbvtM9gsjeX0ZTUldGnnQ9Xgx3hHkFUadI\"}]}",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "openbank.mcp.profile": "bank-hosted-v2",
+        "openbank.mcp.resource": "https://mcp.open-bank.tech/customer/mcp",
+        "openbank.mcp.tier": "H",
+        "pkce.code.challenge.method": "S256",
+        "require.pushed.authorization.requests": "true",
+        "standard.token.exchange.enabled": "false",
+        "token.endpoint.auth.signing.alg": "ES256",
+        "use.jwks.string": "true",
+        "use.jwks.url": "false",
+        "use.refresh.tokens": "true"
+      }
+    },
+    {
       "clientId": "openbank-mcp-service",
       "name": "openbank-mcp-service",
       "description": "ADR-0383 D4 mcp-service RFC 8693 requester: customer token to one downstream read. DERIVED - do not hand-edit.",
@@ -1309,6 +1485,23 @@
         ],
         "profiles": [
           "openbank-mcp-oauth-hardening",
+          "openbank-mcp-dpop"
+        ]
+      },
+      {
+        "name": "openbank-mcp-tier-bank-hosted-v2",
+        "description": "Require DPoP for the dedicated confidential bank hosted adapter.",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "client-attributes",
+            "configuration": {
+              "is_negative_logic": false,
+              "attributes": "[{\"key\": \"openbank.mcp.profile\", \"value\": \"bank-hosted-v2\"}]"
+            }
+          }
+        ],
+        "profiles": [
           "openbank-mcp-dpop"
         ]
       },

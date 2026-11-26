@@ -113,6 +113,16 @@ class McpCustomerChannelIT {
     }
 
     @Test
+    fun `an unissued hosted credential cannot discover tools on the mTLS listener`() {
+        GatewayTls.spec().contentType(ContentType.JSON)
+            .header("Host", "mcp.test.example")
+            .header("Authorization", "Bearer obat1_${"A".repeat(43)}")
+            .body(LIST).post("/customer/mcp").then()
+            .statusCode(401)
+            .header("WWW-Authenticate", containsString("Bearer error=\"invalid_token\""))
+    }
+
+    @Test
     fun `an admitted customer reaches no tool and the refusal is audited under the customer`() {
         CustomerTokenSource.claims = customerClaims()
         post(LIST).statusCode(200).body("result.tools.size()", equalTo(0))

@@ -120,3 +120,31 @@ clients:
     redirect_uris:
       - http://127.0.0.1/callback
       - http://[::1]/callback
+
+  - client_id: mcp-bank-hosted-chatgpt
+    tier: H
+    profile: bank-hosted-v2
+    browser_flow: native-passkey
+    enabled: false
+    display_name: "ChatGPT via OpenBank"
+    redirect_uris:
+      - https://mcp.open-bank.tech/oauth/hosted/callback
+    auth:
+      method: private_key_jwt
+      signing_alg: ES256
+      jwks_file: mcp-clients/mcp-bank-hosted-chatgpt.jwks.json
+      jwks_sha256: 98c344ecfdd7fa13977575da13612163ed1410b1f6b5f94dec1960618cf229a4
+
+  - client_id: mcp-bank-hosted-claude
+    tier: H
+    profile: bank-hosted-v2
+    browser_flow: native-passkey
+    enabled: false
+    display_name: "Claude via OpenBank"
+    redirect_uris:
+      - https://mcp.open-bank.tech/oauth/hosted/callback
+    auth:
+      method: private_key_jwt
+      signing_alg: ES256
+      jwks_file: mcp-clients/mcp-bank-hosted-claude.jwks.json
+      jwks_sha256: b63765cc64bb75c98e70557c2981b63c6c8ab69b9076758b8c9827284af1c28e

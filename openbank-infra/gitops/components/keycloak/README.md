@@ -493,3 +493,15 @@ configuration and issuer-rooted OAuth authorization-server metadata. Both omit C
 exact client is disabled. During the approved pilot, both advertise CIMD with the same issuer,
 PAR endpoints and authentication methods. Confirm an unrelated realm still omits CIMD. Roll back
 by reverting only the pin and verifying omission after the replacement pod is Ready.
+
+#### Bank-owned hosted adapter identities
+
+The disabled registrations `mcp-bank-hosted-chatgpt` and `mcp-bank-hosted-claude` use distinct
+signing keys and the same exact bank callback. The authenticated bank client identifies the
+assistant in the native handoff and stays bound to the grant and session. Each registration
+requires authenticated PAR, S256 PKCE and verified DPoP. The native app verifies the passkey and
+obtains separate strong customer authentication before activation.
+
+The committed public keys are disposable references whose private halves were discarded.
+Controlled activation requires vendor-specific bank-held keys, the vendor-facing adapter,
+a reviewed site-specific admission change, and actual read and revocation evidence.

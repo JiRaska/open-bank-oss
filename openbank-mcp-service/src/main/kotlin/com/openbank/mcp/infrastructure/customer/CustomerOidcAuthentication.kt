@@ -4,6 +4,7 @@
 
 package com.openbank.mcp.infrastructure.customer
 
+import com.openbank.mcp.infrastructure.oauth.HostedOpaqueCredential
 import io.quarkus.oidc.TenantResolver
 import io.quarkus.oidc.runtime.OidcAuthenticationMechanism
 import io.quarkus.security.identity.IdentityProviderManager
@@ -12,6 +13,7 @@ import io.quarkus.vertx.http.runtime.security.ChallengeData
 import io.quarkus.vertx.http.runtime.security.HttpAuthenticationMechanism
 import io.quarkus.vertx.http.runtime.security.HttpCredentialTransport
 import io.smallrye.mutiny.Uni
+import io.vertx.core.http.HttpMethod
 import io.vertx.ext.web.RoutingContext
 import jakarta.enterprise.context.ApplicationScoped
 
@@ -31,7 +33,16 @@ class CustomerMcpTenantResolver : TenantResolver {
 @ApplicationScoped
 class CustomerOidcAuthentication(private val oidc: OidcAuthenticationMechanism) : HttpAuthenticationMechanism {
     override fun authenticate(context: RoutingContext, manager: IdentityProviderManager): Uni<SecurityIdentity> =
-        if (context.isCustomerMcpPath()) oidc.authenticate(context, manager) else Uni.createFrom().nullItem()
+        if (context.isCustomerMcpPath() && !context.usesHostedOpaqueAuthentication()) {
+            oidc.authenticate(context, manager)
+        } else {
+            Uni.createFrom().nullItem()
+        }
+
+    private fun RoutingContext.usesHostedOpaqueAuthentication(): Boolean = normalizedPath() == "/customer/mcp" &&
+        request().isSSL &&
+        request().method() == HttpMethod.POST &&
+        HostedOpaqueCredential.extract(request().headers().getAll("Authorization")) != null
 
     override fun getChallenge(context: RoutingContext): Uni<ChallengeData> =
         if (context.isCustomerMcpPath()) oidc.getChallenge(context) else Uni.createFrom().nullItem()
