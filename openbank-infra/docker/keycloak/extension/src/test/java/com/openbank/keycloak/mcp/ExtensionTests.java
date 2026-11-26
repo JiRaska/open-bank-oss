@@ -96,8 +96,8 @@ public final class ExtensionTests {
         eq("handoff path", "/app/mcp/connect", uri.getPath());
         check("handoff has no query", uri.getRawQuery() == null);
         check("handoff has exactly 32 opaque bytes", Base64.getUrlDecoder().decode(token).length == 32);
-        eq("handoff state stores the presented token digest", McpConnectContext.sha256Hex(token),
-                first.tokenSha256());
+        eq("handoff state stores the raw 32-byte token digest",
+                McpConnectContext.sha256Hex(Base64.getUrlDecoder().decode(token)), first.tokenSha256());
         check("a new browser handoff gets a distinct token",
                 !first.tokenSha256().equals(McpNativeHandoff.issue().tokenSha256()));
         check("handoff's diagnostic form does not print the token", !first.toString().contains(token));

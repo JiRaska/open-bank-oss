@@ -28,7 +28,7 @@ final class McpNativeHandoff {
         }
 
         String tokenSha256() {
-            return McpConnectContext.sha256Hex(token);
+            return McpConnectContext.sha256Hex(Base64.getUrlDecoder().decode(token));
         }
 
         String appLink() {
