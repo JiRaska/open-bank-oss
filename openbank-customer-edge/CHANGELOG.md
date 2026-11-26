@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.0...customer-edge-v1.14.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** record verified native passkey age ([#17315](https://github.com/JiRaska/open-bank-oss/issues/17315)) ([20bd46f](https://github.com/JiRaska/open-bank-oss/commit/20bd46f52112b0a8e3ea786f9fcb40457e7ab559))
+
 ## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.3...customer-edge-v1.14.0) (2026-11-24)
 
 
