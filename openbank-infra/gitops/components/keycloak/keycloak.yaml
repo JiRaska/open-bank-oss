@@ -97,16 +97,12 @@ spec:
                   name: keycloak-bootstrap
                   key: admin-password
             # --- ADR-0385 D3: MCP withheld-code authenticator (server-level SPI config) ---
-            # Read once at boot by McpWithheldCodeAuthenticatorFactory.init; runtime options, so they
-            # do not conflict with --optimized. sca-url is sca-service's in-cluster HTTP listener;
-            # the token is minted from THIS Keycloak's openbank realm (back-channel, plain http) for
-            # the openbank-keycloak-mcp client. The secret ref is OPTIONAL on purpose: this is the
+            # The authenticator uses SCA's private mTLS listener and the scoped staff OAuth client.
+            # The secret ref is OPTIONAL on purpose: this is the
             # bank's only IdP, and an unseeded OpenBao key must not keep it from starting. Unset,
             # the authenticator refuses every MCP connect (fail closed) and logs a WARN at boot.
             - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__SCA_URL
-              value: http://sca-service.sca.svc:8110
-            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__TOKEN_URL
-              value: http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token
+              value: https://sca-service.sca.svc:8443
             - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CLIENT_ID
               value: openbank-keycloak-mcp
             - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CLIENT_SECRET
@@ -185,6 +181,12 @@ spec:
                   key: delegation-url
             - name: MCP_READ_ISSUER_TOKEN_URL
               value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__TOKEN_URL
+              value: $(MCP_READ_ISSUER_TOKEN_URL)
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CONNECT_AUTHORITY_URL
+              value: $(MCP_READ_DELEGATION_ORIGIN)
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CONNECT_V2_ENABLED
+              value: "true"
             - name: MCP_READ_DEPLOYMENT
               value: shared-sandbox
             - name: MCP_READ_CONNECTION_BINDING_ENABLED

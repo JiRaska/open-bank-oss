@@ -25,6 +25,8 @@ data class RegisteredCredential(
     val keycloakUserId: String,
     val attestedCredentialDataB64: String,
     val signCount: Long,
+    // Lower bound for credential age. Legacy records lack a server-observed registration time.
+    val firstVerifiedAtEpochMillis: Long? = null,
 )
 
 /**
@@ -41,6 +43,15 @@ class WebAuthnStore(redis: RedisDataSource, private val objectMapper: ObjectMapp
 
     fun save(credential: RegisteredCredential) {
         values.set(key(credential.credentialId), objectMapper.writeValueAsString(credential))
+    }
+
+    fun recordAssertion(credential: RegisteredCredential, signCount: Long) {
+        save(
+            credential.copy(
+                signCount = signCount,
+                firstVerifiedAtEpochMillis = credential.firstVerifiedAtEpochMillis ?: System.currentTimeMillis(),
+            ),
+        )
     }
 
     fun find(credentialId: String): RegisteredCredential? {

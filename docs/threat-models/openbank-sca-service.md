@@ -417,3 +417,7 @@ checks the party and context against its pending connection before granting acce
 A compromised authorized Delegation workload could read receipt metadata for a known
 challenge ID; the private listener and explicit network policy limit access to
 the service path.
+
+## Sandbox Connect V2 transport
+
+Keycloak uses SCA's private 8443 listener with the existing authority workload certificate. TLS authenticates the connection. SCA still requires the scoped `openbank-keycloak-mcp` staff OAuth bearer and authorizes only MCP connect challenge initiation and consumption. The connection continues to require the customer's approval, the bound request context and the existing device-age rule. Roll back by reverting the Connect V2 flags and Keycloak endpoint settings through GitOps. Leave the existing SCA listener and policy in place for other consumers.

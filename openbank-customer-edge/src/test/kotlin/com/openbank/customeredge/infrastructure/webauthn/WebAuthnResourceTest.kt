@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.webauthn
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -43,6 +44,24 @@ class WebAuthnResourceTest {
         // The registration routes fall back to Keycloak introspection when the bearer is not a
         // ticket; unless a test says otherwise, that fallback finds nothing.
         every { keycloakClient.introspectCustomerToken(any()) } returns null
+    }
+
+    @Test
+    fun `credential records without age evidence stay readable without an inferred date`() {
+        val mapper = jacksonObjectMapper()
+        val oldRecord = mapper.createObjectNode()
+            .put("credentialId", "credential")
+            .put("partyId", "party")
+            .put("keycloakUserId", "user")
+            .put("attestedCredentialDataB64", "public-key")
+            .put("signCount", 1)
+        val credential = mapper.treeToValue(oldRecord, RegisteredCredential::class.java)
+
+        assertThat(credential.firstVerifiedAtEpochMillis).isNull()
+        val observed = credential.copy(firstVerifiedAtEpochMillis = 1000)
+        val afterAssertion = observed.copy(signCount = 2)
+        val roundTrip = mapper.readValue(mapper.writeValueAsBytes(afterAssertion), RegisteredCredential::class.java)
+        assertThat(roundTrip.firstVerifiedAtEpochMillis).isEqualTo(1000L)
     }
 
     // ---- register/begin: enrollment ticket gate --------------------------------------------
