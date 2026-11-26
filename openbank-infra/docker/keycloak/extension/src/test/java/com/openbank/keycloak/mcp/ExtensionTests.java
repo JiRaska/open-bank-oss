@@ -4,15 +4,24 @@
 
 package com.openbank.keycloak.mcp;
 
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.RealmModel;
+import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
 
+import java.lang.reflect.Proxy;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 
 /**
  * Unit tests for the extension's pure logic. A plain runner, not JUnit: the extension compiles
@@ -70,12 +79,79 @@ public final class ExtensionTests {
             check("invalid refused: " + c.get("name"), refused);
         }
         policy();
+        nativeHandoff();
         if (!FAILURES.isEmpty()) {
             FAILURES.forEach(f -> System.err.println("FAIL " + f));
             System.err.printf("%d of %d checks failed%n", FAILURES.size(), checks);
             System.exit(1);
         }
         System.out.printf("extension tests: %d checks, 0 failed%n", checks);
+    }
+
+    private static void nativeHandoff() {
+        var first = McpNativeHandoff.issue();
+        URI uri = URI.create(first.appLink());
+        String token = uri.getRawFragment().substring("handoff=".length());
+        eq("handoff host", "open-bank.tech", uri.getHost());
+        eq("handoff path", "/app/mcp/connect", uri.getPath());
+        check("handoff has no query", uri.getRawQuery() == null);
+        check("handoff has exactly 32 opaque bytes", Base64.getUrlDecoder().decode(token).length == 32);
+        eq("handoff state stores the presented token digest", McpConnectContext.sha256Hex(token),
+                first.tokenSha256());
+        check("a new browser handoff gets a distinct token",
+                !first.tokenSha256().equals(McpNativeHandoff.issue().tokenSha256()));
+        check("handoff's diagnostic form does not print the token", !first.toString().contains(token));
+
+        var notes = new HashMap<>(Map.of(
+                McpNotes.PKCE_CHALLENGE, "A".repeat(43), McpNotes.STARTED_AT, "1000",
+                McpNotes.REDIRECT_URI, "https://assistant.example/oauth/callback",
+                McpNotes.RESOURCE, "https://bank.example/customer/mcp",
+                McpNotes.SCOPE, "read", McpNotes.REQUEST_URI, McpConnectContext.PAR_REQUEST_URI_PREFIX + "request"));
+        var binding = McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                1001, 120);
+        eq("handoff expires with its configured OAuth session", 1120L, binding.expiresAtEpochSecond());
+        eq("handoff binds hosted confidential PAR", "HOSTED", binding.kind());
+        var otherTab = McpNativeHandoff.binding(handoffSession(notes, "tab-b"), "https://bank.example/realms/test",
+                1001, 120);
+        check("handoff cannot move between browser tabs", !binding.sessionRef().equals(otherTab.sessionRef()));
+        notes.put(McpNotes.PAR_PROOF_JKT, "A".repeat(43));
+        eq("handoff preserves verified DPoP PAR", "DPOP",
+                McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                        1001, 120).kind());
+        expectThrow("handoff expiry is exclusive",
+                () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                        1120, 120));
+        notes.remove(McpNotes.PKCE_CHALLENGE);
+        expectThrow("handoff refuses a missing guarded PKCE challenge",
+                () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                        1001, 120));
+
+    }
+
+    private static AuthenticationSessionModel handoffSession(Map<String, String> notes, String tab) {
+        var client = testInterface(ClientModel.class, (method, args) -> switch (method) {
+            case "getAttribute" -> "H";
+            case "isPublicClient" -> false;
+            case "getClientAuthenticatorType" -> "client-jwt";
+            case "getId" -> "client-internal";
+            case "getClientId" -> "hosted-fixture";
+            default -> throw new UnsupportedOperationException(method);
+        });
+        var root = testInterface(RootAuthenticationSessionModel.class, (method, args) -> "browser-root");
+        var realm = testInterface(RealmModel.class, (method, args) -> "realm-id");
+        return testInterface(AuthenticationSessionModel.class, (method, args) -> switch (method) {
+            case "getClient" -> client;
+            case "getAuthNote" -> notes.get(args[0]);
+            case "getParentSession" -> root;
+            case "getRealm" -> realm;
+            case "getTabId" -> tab;
+            default -> throw new UnsupportedOperationException(method);
+        });
+    }
+
+    private static <T> T testInterface(Class<T> type, BiFunction<String, Object[], Object> behavior) {
+        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
+                (proxy, method, args) -> behavior.apply(method.getName(), args)));
     }
 
     private static void policy() {
@@ -134,6 +210,15 @@ public final class ExtensionTests {
         }
         eq("waiting page escapes markup", "&lt;script&gt;&amp;&quot;&#39;",
                 McpWithheldCodeAuthenticator.escape("<script>&\"'"));
+    }
+
+    private static void expectThrow(String what, Runnable action) {
+        try {
+            action.run();
+            check(what, false);
+        } catch (IllegalArgumentException expected) {
+            check(what, true);
+        }
     }
 
     private static void eq(String what, Object expected, Object actual) {

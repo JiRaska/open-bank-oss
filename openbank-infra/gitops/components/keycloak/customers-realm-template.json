@@ -1141,6 +1141,30 @@
       ]
     },
     {
+      "id": "efd9751b-94d8-4ae5-80dc-3f078a671b2d",
+      "alias": "openbank-mcp-native-passkey",
+      "description": "Hosted MCP OAuth handoff with a request-bound native passkey and separate SCA.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "openbank-mcp-native-handoff",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "openbank-mcp-withheld-code",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
       "id": "6d1c0b8e-3f4a-4c2e-9a51-0385d2f2a001",
       "alias": "openbank-mcp-fresh-passkey",
       "description": "ADR-0385 D2.2: fresh passwordless WebAuthn for every MCP authorize. NO auth-cookie alternative - an SSO session never skips the assertion. D3: the code is withheld until the context-linked SCA challenge is consumed. DERIVED from mcp-client-allowlist.yaml.",
