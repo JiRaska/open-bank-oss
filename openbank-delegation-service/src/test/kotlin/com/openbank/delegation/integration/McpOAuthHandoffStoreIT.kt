@@ -73,7 +73,7 @@ class McpOAuthHandoffStoreIT {
     }
 
     @Test
-    fun `exact selected proof is attested and consumed once without changing SCA state`(): Unit = onEventLoop {
+    fun `app proves the selected binding before browser polls and SCA stays independent`(): Unit = onEventLoop {
         val binding = binding()
         val token = reference()
         val owner = claim()
@@ -91,18 +91,19 @@ class McpOAuthHandoffStoreIT {
         val digest = McpConnectContextV2.of(base, owner.partyId.toString(), null, accounts).payloadSha256()
         assertThat(handoffs.issue(token, binding)).isTrue()
         assertThat(handoffs.claimAndRegister(token, owner)).isEqualTo(binding.requestRef)
-        assertThat(handoffs.attestSelectedContext(token, binding, digest)).isFalse()
+        assertThat(handoffs.selectedBinding(binding.requestRef, owner)).isNull()
         assertThat(handoffs.markProven(binding.requestRef, owner, digest)).isFalse()
         val selection = listOf(McpConnectRequestStore.AccountSelection(accountId, capabilities))
         assertThat(requests.select(owner.partyId, binding.requestRef, selection)).isTrue()
-        assertThat(handoffs.attestSelectedContext(token, binding, reference())).isFalse()
-        assertThat(handoffs.attestSelectedContext(token, binding, digest)).isTrue()
-        assertThat(handoffs.attestSelectedContext(token, binding, digest)).isTrue()
-        assertThat(handoffs.selectedBinding(binding.requestRef, owner)?.contextSha256).isEqualTo(digest)
         assertThat(handoffs.selectedBinding(binding.requestRef, owner.copy(keycloakSubject = "other"))).isNull()
+        assertThat(handoffs.markProven(binding.requestRef, owner, digest)).isFalse()
+        assertThat(handoffs.selectedBinding(binding.requestRef, owner)?.contextSha256).isEqualTo(digest)
+        assertThat(handoffs.selectedBinding(binding.requestRef, owner)?.contextSha256).isEqualTo(digest)
         assertThat(handoffs.markProven(binding.requestRef, owner, reference())).isFalse()
         assertThat(handoffs.consume(token, binding)).isNull()
         assertThat(handoffs.markProven(binding.requestRef, owner, digest)).isTrue()
+        assertThat(handoffs.claimedParty(token, binding)).isEqualTo(owner.partyId)
+        assertThat(handoffs.attestSelectedContext(token, binding, reference())).isFalse()
         assertThat(handoffs.attestSelectedContext(token, binding, digest)).isTrue()
         assertThat(handoffs.consume(token, binding)).isEqualTo(McpOAuthHandoffStore.Receipt(owner, digest))
         assertThat(handoffs.consume(token, binding)).isNull()

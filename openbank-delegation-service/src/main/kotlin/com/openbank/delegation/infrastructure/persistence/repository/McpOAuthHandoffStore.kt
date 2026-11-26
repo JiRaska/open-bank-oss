@@ -114,14 +114,7 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         return pool.withTransaction { connection ->
             connection.preparedQuery(SELECTED_ACCOUNTS).execute(parameters).flatMap { rows ->
                 val first = rows.firstOrNull() ?: return@flatMap Uni.createFrom().item(false)
-                val request = first.connectRequest(first.getUUID("party_id"))
-                val accounts = rows.map { row ->
-                    McpConnectContextV2.AccountScope(
-                        row.getUUID("account_id").toString(),
-                        row.getArrayOfStrings("capabilities").toList(),
-                    )
-                }
-                if (request.selectedContextDigest(accounts) != contextSha256) {
+                if (first.selectedContextDigest(rows) != contextSha256) {
                     return@flatMap Uni.createFrom().item(false)
                 }
                 connection.preparedQuery(ATTEST).execute(parameters.addString(contextSha256))
@@ -130,18 +123,27 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         }.awaitSuspending()
     }
 
+    /** Compute and attest the owner's immutable selection while the browser may be suspended. */
     suspend fun selectedBinding(requestRef: String, claim: Claim): SelectedBinding? {
         validateDigest(requestRef)
-        val row = pool.preparedQuery(APP_BINDING).execute(Tuple.of(requestRef, claim.partyId, claim.keycloakSubject))
-            .awaitSuspending().firstOrNull() ?: return null
-        return SelectedBinding(
-            row.getString("request_ref"),
-            row.getString("selected_context_sha256"),
-            row.getString("client_id"),
-            BindingKind.valueOf(row.getString("binding_kind")),
-            row.getString("par_jkt"),
-            row.getOffsetDateTime("expires_at").toEpochSecond(),
-        )
+        val parameters = Tuple.of(requestRef, claim.partyId, claim.keycloakSubject)
+        return pool.withTransaction { connection ->
+            connection.preparedQuery(APP_SELECTED_ACCOUNTS).execute(parameters).flatMap { rows ->
+                val first = rows.firstOrNull() ?: return@flatMap Uni.createFrom().nullItem<SelectedBinding>()
+                val contextSha256 = first.selectedContextDigest(rows)
+                connection.preparedQuery(APP_ATTEST).execute(parameters.addString(contextSha256)).map { updated ->
+                    if (updated.rowCount() != 1) return@map null
+                    SelectedBinding(
+                        first.getString("request_ref"),
+                        contextSha256,
+                        first.getString("client_id"),
+                        BindingKind.valueOf(first.getString("binding_kind")),
+                        first.getString("par_jkt"),
+                        first.getOffsetDateTime("expires_at").toEpochSecond(),
+                    )
+                }
+            }
+        }.awaitSuspending()
     }
 
     suspend fun markProven(requestRef: String, claim: Claim, contextSha256: String): Boolean {
@@ -174,18 +176,23 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
         expiresAt = getOffsetDateTime("expires_at"),
     )
 
-    private fun McpConnectRequestStore.Request.selectedContextDigest(
-        accounts: List<McpConnectContextV2.AccountScope>,
-    ): String {
+    private fun Row.selectedContextDigest(selection: Iterable<Row>): String {
+        val request = connectRequest(getUUID("party_id"))
         val base = McpConnectContext(
-            clientId,
-            redirectHost,
-            resource,
-            scopes.sorted().joinToString(" "),
-            requestRef,
-            expiresAt.toEpochSecond(),
+            request.clientId,
+            request.redirectHost,
+            request.resource,
+            request.scopes.sorted().joinToString(" "),
+            request.requestRef,
+            request.expiresAt.toEpochSecond(),
         )
-        return McpConnectContextV2.of(base, partyId.toString(), parJkt, accounts).payloadSha256()
+        val accounts = selection.map { row ->
+            McpConnectContextV2.AccountScope(
+                row.getUUID("account_id").toString(),
+                row.getArrayOfStrings("capabilities").toList(),
+            )
+        }
+        return McpConnectContextV2.of(base, request.partyId.toString(), request.parJkt, accounts).payloadSha256()
     }
 
     private fun Binding.parameters(tokenSha256: String): Tuple = Tuple.tuple()
@@ -251,27 +258,31 @@ class McpOAuthHandoffStore(private val pool: Pool, private val requests: McpConn
             JOIN mcp_connect_requests AS r ON $CONNECT_MATCH
             WHERE $EXACT_BINDING
         """
-        const val SELECTED_ACCOUNTS = """
+        const val SELECTION = """
             SELECT h.request_ref, h.party_id, h.client_id, h.par_jkt, h.redirect_uri, h.resource,
-                h.scopes, h.expires_at, a.account_id, a.capabilities
+                h.scopes, h.expires_at, h.binding_kind, a.account_id, a.capabilities
             FROM mcp_oauth_handoffs AS h
             JOIN mcp_connect_requests AS r ON $CONNECT_MATCH
             JOIN mcp_connect_selected_accounts AS a ON a.request_ref = r.request_ref
-            WHERE $EXACT_BINDING
         """
+        const val SELECTED_ACCOUNTS = """$SELECTION WHERE $EXACT_BINDING"""
+        const val APP_OWNER = """
+            h.request_ref = $1 AND h.party_id = $2 AND h.keycloak_subject = $3
+                AND h.expires_at > clock_timestamp() AND h.consumed_at IS NULL
+        """
+        const val APP_SELECTED_ACCOUNTS = """$SELECTION WHERE $APP_OWNER"""
         const val ATTEST = """
             UPDATE mcp_oauth_handoffs AS h
             SET selected_context_sha256 = $12
             WHERE $EXACT_BINDING AND claimed_at IS NOT NULL
                 AND (selected_context_sha256 IS NULL OR selected_context_sha256 = $12)
         """
-        const val APP_BINDING = """
-            SELECT h.request_ref, h.selected_context_sha256, h.client_id, h.binding_kind, h.par_jkt, h.expires_at
-            FROM mcp_oauth_handoffs AS h
-            JOIN mcp_connect_requests AS r ON $CONNECT_MATCH
-            WHERE h.request_ref = $1 AND h.party_id = $2 AND h.keycloak_subject = $3
-                AND h.expires_at > clock_timestamp() AND h.consumed_at IS NULL
-                AND h.selected_context_sha256 IS NOT NULL
+        const val APP_ATTEST = """
+            UPDATE mcp_oauth_handoffs AS h
+            SET selected_context_sha256 = $4
+            WHERE $APP_OWNER
+                AND (h.selected_context_sha256 IS NULL OR h.selected_context_sha256 = $4)
+                AND EXISTS (SELECT 1 FROM mcp_connect_requests AS r WHERE $CONNECT_MATCH)
         """
         const val PROVE = """
             UPDATE mcp_oauth_handoffs AS h
