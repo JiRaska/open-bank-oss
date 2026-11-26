@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: [openbank-app]
 tags: [ai-agents, authn, security]
 followup: "#16590 — realm tier admission and its parity gate are built; the authorize-endpoint passkey + in-app SCA flow is not yet"
-summary: "Amends ADR-0383: MCP clients are admitted by allowlist tier — hosted ones only as authenticated confidential clients, local ones only with DPoP; authorize = fresh passkey in the starting browser plus a context-linked SCA in the app."
+summary: "Amends ADR-0383: MCP clients are admitted by allowlist tier — hosted ones only as authenticated confidential clients, local ones only with DPoP; authorize = fresh request-bound passkey plus a separate context-linked SCA in the app."
 ---
 
 # ADR-0385 — Customer MCP client admission tiers and phishing-resistant cross-device authentication at the authorize endpoint
@@ -208,8 +208,8 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
      the OS-provided QR with the phone camera, and the protocol requires proximity.
    - Authenticator attachment is relaxed for this flow if `platform` hides hybrid. P3 verifies
      that hybrid is offered in real browsers under the realm policy.
-   - This is authenticate-then-initiate. There is no bank-made QR, and no password, SMS, e-mail
-     link or device-code fallback.
+   - The browser WebAuthn variant authenticates first and then initiates SCA. Its cross-device QR
+     is provided by the OS. Password, SMS, e-mail links and device-code grants are outside this flow.
 3. **Registration and recovery are unreachable** from an MCP authorize. A passkey, or an SCA
    device, enrolled less than 72 h ago cannot authorize an MCP connect. Account recovery is
    explicitly out of this path.
@@ -222,6 +222,25 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
    - A handle presented by another party's app is refused.
    - The app approval completes only that session, and the code is returned only to that session.
      A handle presented from another browser session is refused.
+
+5. **Native passkey path for approved hosted clients.**
+   - Keycloak creates a short-lived handoff after validating the original client, PAR and S256
+     challenge. A bank link or QR opens the first-party app. The opaque handle travels in the URL
+     fragment and Delegation stores only its digest, together with the immutable OAuth request and
+     browser-session binding.
+   - The app authenticates as the owner, claims the pending request, and displays the client and
+     account permissions before the customer selects accounts. Customer Edge requires a fresh
+     user-verified assertion against a one-use challenge bound to the exact customer, Keycloak
+     subject, guarded request and selected-account context. Its server-observed credential age
+     must meet the same 72-hour minimum. Older records without a trustworthy time acquire a
+     conservative lower bound at first verified use.
+   - Keycloak consumes only a single matching bank-internal receipt. It rechecks the user,
+     selected context and session expiry before initiating the existing context-bound SCA.
+     Keycloak releases the original OAuth code after SCA consumption, with the original redirect
+     and S256 exchange. The app receives only the bank review and approval state.
+   - The browser WebAuthn and native flows have distinct per-client binding. Enable the native
+     flow only for an approved hosted client after the app, authority and issuer are deployed.
+
    - The link path is new and claimed only by the `tech.openbank.app` app id. It is not matched
      by `/pay/v1*` and is not claimed by any other app id.
    - The web fallback page only tells the customer to install the app.
