@@ -124,6 +124,14 @@ spec:
             # secret are all set — a misconfigured pod never starts serving. The two secret refs
             # are optional so this pod runs (channel off) before ESO has generated the
             # mcp-customer-store-valkey / -hmac Secrets (customer-store-externalsecret.yaml, in-cluster generator).
+            - name: MCP_CUSTOMER_ENABLED
+              value: "true"
+            - name: MCP_CUSTOMER_CONNECTION_BINDING_ENABLED
+              value: "true"
+            - name: MCP_BOUND_BALANCE_ENABLED
+              value: "true"
+            - name: MCP_CUSTOMER_ALLOWLIST
+              value: /mnt/mcp-customer-allowlist/allowlist.yaml
             - name: MCP_CUSTOMER_SHARED_STORE
               value: valkey
             # Reuse the exchange client registered in the existing customer realm.
@@ -245,6 +253,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: customer-site-allowlist
+              mountPath: /mnt/mcp-customer-allowlist
+              readOnly: true
             - name: mcp-bound-client
               mountPath: /mnt/mcp-bound-client
               readOnly: true
@@ -327,6 +338,12 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
+        - name: customer-site-allowlist
+          configMap:
+            name: mcp-shared-customer-allowlist
+            items:
+              - key: allowlist.yaml
+                path: allowlist.yaml
         - name: mcp-bound-client
           secret:
             secretName: mcp-bound-read-client-tls
