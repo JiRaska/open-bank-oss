@@ -299,6 +299,10 @@ NOT_PROBED = [
     ("https://openbank-sandbox-test-evidence.s3.eu-north-1.amazonaws.com", "our own Test Intelligence evidence bucket (#13201); readable only through the cluster VPC endpoint, so a probe from CI cannot reach a verdict"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://mcp.open-bank.tech/customer/mcp", "canonical MCP resource identifier validated by Keycloak; issuer does not fetch it"),
+    ("https://chatgpt.com/oauth/client.json", "registered MCP OAuth client identifier; admission uses pinned client auth metadata"),
+    ("https://chatgpt.com/connector_platform_oauth_redirect", "registered OAuth callback handled by the user agent"),
+    ("https://claude.ai/api/mcp/auth_callback", "registered OAuth callback handled by the user agent"),
+    ("https://mcp-client.example/oauth/callback", "disabled reference MCP client callback on reserved example domain"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
     # Governance rules.yaml live source (governance-auditor / control-liveness-sentinel): this is
     # our own repo's file served by GitHub's CDN. The file itself is gate-enforced in-repo, and a
