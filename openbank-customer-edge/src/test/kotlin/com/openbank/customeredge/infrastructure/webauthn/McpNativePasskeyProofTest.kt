@@ -55,7 +55,8 @@ class McpNativePasskeyProofTest {
     @Test
     fun `completion requires the challenged connect and exact customer credential`() {
         every { challenges.claim(CHALLENGE) } returns binding andThen null
-        assertThat(service.complete(binding.copy(parBinding = McpNativeParBinding.ConfidentialClient), assertion())).isNull()
+        val hosted = binding.copy(parBinding = McpNativeParBinding.ConfidentialClient)
+        assertThat(service.complete(hosted, assertion())).isNull()
         assertThat(service.complete(binding, assertion())).isNull()
         verify(exactly = 0) { credentials.find(any()) }
     }
