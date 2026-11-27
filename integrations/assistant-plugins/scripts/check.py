@@ -127,100 +127,106 @@ def literal_call(tokens: list[str], name: str) -> list[list[str]]:
     return split_arguments(tokens[2:-1])
 
 
-def account_properties(tokens: list[str]) -> list[list[str]]:
-    """Expand only the registry's named, no-argument literal property helper."""
-    signature = ["private", "fun", "accountProps", "(", ")", ":", "Map", "<", "String", ",", "Any", ">", "="]
-    matches = [i + len(signature) for i in range(len(tokens)) if tokens[i:i + len(signature)] == signature]
-    if len(matches) != 1:
-        raise ValueError("expected one literal accountProps definition")
-    start = matches[0]
-    depth = 0
-    for end in range(start + 1, len(tokens)):
+def call_at(tokens: list[str], start: int, name: str) -> list[str]:
+    if tokens[start:start + 2] != [name, "("]:
+        raise ValueError(f"expected {name} at registry definition")
+    depth = 1
+    for end in range(start + 2, len(tokens)):
         depth += {"(": 1, ")": -1}.get(tokens[end], 0)
         if depth == 0:
-            if tokens[end + 1:end + 3] != ["private", "fun"]:
-                raise ValueError("accountProps must be a single literal map")
-            return literal_call(tokens[start:end + 1], "mapOf")
-    raise ValueError("unterminated accountProps map")
+            return tokens[start:end + 1]
+    raise ValueError(f"unterminated {name} in registry")
 
 
-def account_reference_field() -> str:
-    source = REPO / "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpAccountRefs.kt"
-    tokens = kotlin_tokens(source.read_text())
-    prefix = ["const", "val", "REF_FIELD", "="]
-    matches = [i + len(prefix) for i in range(len(tokens)) if tokens[i:i + len(prefix)] == prefix]
-    if len(matches) != 1 or tokens[matches[0] + 1:matches[0] + 3] != ["const", "val"]:
-        raise ValueError("expected one literal McpAccountRefs.REF_FIELD")
-    return literal_string(tokens[matches[0]:matches[0] + 1])
+def string_constants(tokens: list[str], prefix: list[str]) -> dict[str, list[str]]:
+    result = {}
+    for i in range(len(tokens) - 4):
+        if tokens[i:i + 2] == ["const", "val"] and tokens[i + 3] == "=":
+            value = tokens[i + 4]
+            if value.startswith('"'):
+                key = ".".join([*prefix, tokens[i + 2]])
+                if key in result:
+                    raise ValueError(f"duplicate customer registry constant: {key}")
+                result[key] = tokens[i + 4:i + 6] if tokens[i + 5:i + 6] == ["+"] else [value]
+    return result
 
 
-def parse_registry(text: str) -> dict[str, dict]:
-    """Read the registry's literal obj(mapOf(...), required=listOf(...)) shape."""
+def parse_customer_registry(text: str, proposer_text: str) -> dict[str, dict]:
     tokens = kotlin_tokens(text)
-    tools: dict[str, dict] = {}
-    # Locate calls in token space so strings/comments cannot impersonate definitions.
-    for i in range(len(tokens) - 1):
-        if tokens[i:i + 2] != ["ToolDefinition", "("]:
-            continue
-        depth, end = 1, i + 2
-        while depth and end < len(tokens):
-            depth += {"(": 1, ")": -1}.get(tokens[end], 0)
-            end += 1
-        if depth:
-            raise ValueError("unterminated ToolDefinition")
+    constants = string_constants(tokens, [])
+    constants.update(string_constants(kotlin_tokens(proposer_text), ["CustomerPaymentProposer"]))
+
+    def resolve(parts):
+        symbol = ".".join(parts[::2]) if parts[1::2] == ["."] * (len(parts) // 2) else ""
+        return literal_string(constants.get(symbol, parts))
+
+    def find(marker):
+        points = [i + len(marker) for i in range(len(tokens)) if tokens[i:i + len(marker)] == marker]
+        if len(points) != 1:
+            raise ValueError("expected one customer registry definition: " + " ".join(marker))
+        return points[0]
+
+    proposal_start = find(kotlin_tokens("private fun proposeSchema(): Map<String, Any> ="))
+    proposal = call_at(tokens, proposal_start, "schema")
+    tool_start = find(kotlin_tokens("private val tools: Map<String, Tool> ="))
+    tool_list = call_at(tokens, tool_start, "listOf")
+    tool_end = tool_start + len(tool_list)
+    catalog_suffix = kotlin_tokens(".associateBy { it.definition.name } fun list(")
+    if tokens[tool_end:tool_end + len(catalog_suffix)] != catalog_suffix:
+        raise ValueError("expected customer catalog association followed by the list declaration")
+    registry = {}
+    for call in literal_call(tool_list, "listOf"):
+        definition, _, action = literal_call(call, "Tool")
         fields = {}
-        for arg in literal_call(tokens[i:end], "ToolDefinition"):
+        for arg in literal_call(definition, "ToolDefinition"):
             if len(arg) < 3 or arg[1] != "=" or arg[0] in fields:
-                raise ValueError("expected unique named ToolDefinition arguments")
+                raise ValueError("expected unique named customer ToolDefinition arguments")
             fields[arg[0]] = arg[2:]
-        name = literal_string(fields.get("name", []))
-        if name in tools:
-            raise ValueError(f"duplicate tool {name}")
-        args = literal_call(fields.get("inputSchema", []), "obj")
-        if len(args) != 2:
-            raise ValueError(f"expected properties and required arguments for {name}")
-        props_arg, req_arg = args
-        if props_arg[:2] == ["properties", "="]:
-            props_arg = props_arg[2:]
-        if req_arg[:2] == ["required", "="]:
-            req_arg = req_arg[2:]
-        helper = props_arg[:3] == ["accountProps", "(", ")"]
-        helper_pairs = account_properties(tokens) if helper else []
-        props_tail = props_arg[3:] if helper else props_arg
-        if helper and props_tail:
-            if props_tail[0] != "+":
-                raise ValueError(f"expected literal account property extension for {name}")
-            props_tail = props_tail[1:]
-            if not props_tail:
-                raise ValueError(f"missing literal account property extension for {name}")
-        pairs = literal_call(props_tail, "mapOf") if props_tail or not helper else []
+        name = resolve(fields["name"])
+        schema = proposal if fields["inputSchema"] == kotlin_tokens("proposeSchema()") else fields["inputSchema"]
+        prop_arg, required_arg = literal_call(schema, "schema")
         props = []
-        for index, pair in enumerate(helper_pairs + pairs):
-            if index < len(helper_pairs) and pair[:4] == ["McpAccountRefs", ".", "REF_FIELD", "to"]:
-                prop = account_reference_field()
-                value = pair[4:]
-            else:
-                if len(pair) < 3 or pair[1] != "to":
-                    raise ValueError(f"expected literal property pair for {name}")
-                prop = literal_string(pair[:1])
-                value = pair[2:]
-            if prop in props or not value or value[0] in ("+", "*", "="):
-                raise ValueError(f"ambiguous property pair for {name}")
-            props.append(prop)
-        if req_arg == ["emptyList", "(", ")"]:
-            required = []
-        else:
-            required = [literal_string(arg) for arg in literal_call(req_arg, "listOf")]
-        if len(set(required)) != len(required):
-            raise ValueError(f"duplicate required argument for {name}")
-        tools[name] = {"properties": sorted(props), "required": sorted(required)}
-    caps_block = re.search(r"val capabilities: Map<String, String> = mapOf\((.*?)\n    \)", text, re.DOTALL)
-    if not caps_block:
-        raise ValueError("capabilities map not found in registry source")
-    caps = dict(re.findall(r'"([a-z_]+)"\s+to\s+"([^"]+)"', caps_block.group(1)))
-    for name, cap in caps.items():
-        tools.setdefault(name, {"properties": None, "required": None})["capability"] = cap
-    return tools
+        if prop_arg != kotlin_tokens("emptyMap()"):
+            for pair in literal_call(prop_arg, "mapOf"):
+                if "to" not in pair:
+                    raise ValueError(f"expected literal customer property pair: {name}")
+                index = pair.index("to")
+                if not 0 < index < len(pair) - 1:
+                    raise ValueError(f"expected literal customer property pair: {name}")
+                props.append(resolve(pair[:index]))
+        required = [] if required_arg == kotlin_tokens("emptyList()") else [
+            resolve(arg) for arg in literal_call(required_arg, "listOf")
+        ]
+        if name in registry or len(set(props)) != len(props) or len(set(required)) != len(required):
+            raise ValueError(f"duplicate customer tool or schema key: {name}")
+        registry[name] = {"properties": sorted(props), "required": sorted(required), "capability": resolve(action)}
+
+    bound_start = find(kotlin_tokens(
+        "private fun toolAvailable(tool: String, connectionBound: Boolean): Boolean { "
+        "if (!connectionBound) return true return when (tool) {"
+    ))
+    end = tokens.index("}", bound_start)
+    if tokens[end:end + 2] != ["}", "}"]:
+        raise ValueError("expected toolAvailable to end after the connection-bound policy")
+    bound = tokens[bound_start:end]
+    branches = [i for i in range(len(bound)) if bound[i:i + 2] == ["-", ">"]]
+    if not branches or bound[branches[-1] - 1:] != ["else", "-", ">", "false"]:
+        raise ValueError("expected default-deny connection-bound customer tools")
+    available = set()
+    for start, following in zip(branches, branches[1:]):
+        name = resolve(bound[start - 1:start])
+        setting = bound[start + 2:following - 1]
+        if name not in registry:
+            raise ValueError("connection-bound policy names an undefined customer tool")
+        if setting not in (
+            ["false"], ["true"], ["boundProposalEnabled"], kotlin_tokens("boundBalance?.enabled == true"),
+        ):
+            raise ValueError(f"unsupported connection-bound policy expression: {name}")
+        if setting != ["false"]:
+            available.add(name)
+    for name, tool in registry.items():
+        tool["connection_bound"] = name in available
+    return registry
 
 
 def check_tools(listing: dict, registry: dict[str, dict]) -> list[str]:
@@ -233,6 +239,9 @@ def check_tools(listing: dict, registry: dict[str, dict]) -> list[str]:
         errs.append(f"tool drift: listing.json names '{name}', which the registry does not define")
     for name in sorted(set(included) & excluded):
         errs.append(f"tool '{name}' is both included and excluded")
+    for name in sorted(excluded):
+        if registry.get(name, {}).get("connection_bound"):
+            errs.append(f"tool '{name}': available to connection-bound customers but excluded")
     for name, t in included.items():
         if not ALLOWED_CAPABILITY.match(t["capability"]):
             errs.append(f"tool '{name}': capability '{t['capability']}' is not allowed on the customer channel (ADR-0383 D4)")
@@ -246,6 +255,8 @@ def check_tools(listing: dict, registry: dict[str, dict]) -> list[str]:
         reg = registry.get(name)
         if not reg:
             continue
+        if not reg.get("connection_bound", True):
+            errs.append(f"tool '{name}': unavailable to connection-bound customers")
         if reg.get("capability") != t["capability"]:
             errs.append(f"tool drift: '{name}' capability registry={reg.get('capability')} listing={t['capability']}")
         if reg["properties"] is not None and sorted(t["properties"]) != reg["properties"]:
@@ -562,7 +573,7 @@ def check_release(listing: dict) -> list[str]:
 
 
 CHECKS = {
-    "tools": lambda l, reg, r: check_tools(l, parse_registry(reg)),
+    "tools": lambda l, reg, r: check_tools(l, parse_customer_registry(*reg)),
     "openai": lambda l, reg, r: check_openai(r, l),
     "claude": lambda l, reg, r: check_claude(r, l),
     "credentials": lambda l, reg, r: check_credentials(r),
@@ -571,7 +582,7 @@ CHECKS = {
 }
 
 
-def run_checks(listing: dict, registry_text: str, rendered: dict, disabled: frozenset = frozenset()) -> list[str]:
+def run_checks(listing: dict, registry_text: tuple[str, str], rendered: dict, disabled: frozenset = frozenset()) -> list[str]:
     errs: list[str] = []
     for name, fn in CHECKS.items():
         if name not in disabled:
@@ -590,7 +601,7 @@ def on_disk_drift(rendered: dict) -> list[str]:
 
 
 # ------------------------------------------------------------------------------- selftest
-def selftest(listing: dict, registry_text: str) -> int:
+def selftest(listing: dict, registry_text: tuple[str, str]) -> int:
     """Each case removes a protection or feeds the thing it must reject; each must FAIL."""
     import unittest
     import test_check_registry
@@ -608,8 +619,9 @@ def selftest(listing: dict, registry_text: str) -> int:
         return lst, registry_text, generate.render(lst)
 
     def with_registry(old, new):
-        assert old in registry_text, old
-        return listing, registry_text.replace(old, new, 1), base_rendered
+        registry, proposer = registry_text
+        assert old in registry, old
+        return listing, (registry.replace(old, new, 1), proposer), base_rendered
 
     def with_rendered(rel, mut):
         r = dict(base_rendered)
@@ -622,20 +634,18 @@ def selftest(listing: dict, registry_text: str) -> int:
     # with its owning check removed and requires it to be MISSED, so no case passes vacuously
     # because some other check happened to fire.
     cases = {
-        "registry renames a tool": ("tools", with_registry('name = "get_balance"', 'name = "get_balances"')),
-        "registry adds a required arg": ("tools", with_registry('listOf("paymentId")', 'listOf("paymentId", "rail")')),
-        "registry changes a capability": ("tools", with_registry('"get_balance" to "query.balance.readonly"',
-                                                                 '"get_balance" to "query.balance.full"')),
-        "registry adds an unclassified tool": ("tools", with_registry(
-            '"propose_payment" to "propose.payment",',
-            '"propose_payment" to "propose.payment",\n        "initiate_payment" to "account.initiate-payment",')),
+        "customer registry renames a tool": ("tools", with_registry(
+            'const val GET_BALANCE = "get_balance"', 'const val GET_BALANCE = "get_balances"')),
+        "customer registry adds a required arg": ("tools", with_registry(
+            'listOf(ACCOUNT_ID)),', 'listOf(ACCOUNT_ID, "rail")),')),
+        "customer registry changes a capability": ("tools", with_registry(
+            '"query.balance.readonly"', '"query.balance.full"')),
+        "customer registry loses a bound tool": ("tools", with_registry(
+            'GET_BALANCE -> boundBalance?.enabled == true', 'GET_BALANCE -> false')),
+        "customer registry makes a legacy tool available": ("tools", with_registry(
+            'else -> false', 'LIST_TRANSACTIONS -> true\n            else -> false')),
         "package includes a write capability": ("tools", with_listing(
             lambda l: l["tools"]["included"][1].update(capability="account.initiate-payment"))),
-        "baseline read tool not marked read-only": ("tools", with_listing(
-            lambda l: next(t for t in l["tools"]["included"] if t["name"] == "list_transactions")
-            .update(readOnlyHint=False))),
-        "registry shared account property changes": ("tools", with_registry(
-            '"accountId" to mapOf(', '"renamedAccount" to mapOf(')),
         "propose_payment marked read-only": ("tools", with_listing(
             lambda l: l["tools"]["included"][-1].update(readOnlyHint=True))),
         "propose_payment marked destructive": ("tools", with_listing(
@@ -706,7 +716,10 @@ def selftest(listing: dict, registry_text: str) -> int:
 def main(argv: list[str]) -> int:
     listing = json.loads(generate.LISTING.read_text())
     registry_path = REPO / listing["tools"]["registry"]
-    registry_text = registry_path.read_text()
+    registry_text = (
+        registry_path.read_text(),
+        registry_path.with_name("CustomerPaymentProposer.kt").read_text(),
+    )
     if "--selftest" in argv:
         return selftest(listing, registry_text)
     rendered = generate.render(listing)
