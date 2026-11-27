@@ -17,7 +17,7 @@ service changed after it, so older runs describe older code. Unproven ⇒ nothin
 never a borrowed verdict.
 
 Prints one JSON object per publishable component:
-  {"component", "image_sha", "tested_sha", "run_id", "artifact", "equivalence"}
+  {"component", "image_sha", "tested_sha", "run_id", "run_attempt", "artifact_id", "equivalence"}
 and a summary on stderr. Uses `gh api` (GITHUB_TOKEN) and the local full-history checkout.
 """
 from __future__ import annotations
@@ -164,15 +164,21 @@ def main() -> int:
     runs = main_push_runs(args.repo)
     artifacts_by_run: dict[int, dict[str, dict]] = {}
 
-    def envelope_artifact(run: dict, component: str) -> dict | None:
+    def envelope_artifact(run: dict, component: str) -> tuple[int, int] | None:
         if run["id"] not in artifacts_by_run:
             pages = gh_json(f"repos/{args.repo}/actions/runs/{run['id']}/artifacts?per_page=100")
             artifacts_by_run[run["id"]] = {
                 item["name"]: item for page in pages for item in page.get("artifacts", []) if not item["expired"]}
         prefix = f"test-intelligence-run-{component}-{run['id']}-a"
-        named = [item for name, item in artifacts_by_run[run["id"]].items() if name.startswith(prefix)]
-        # the latest attempt is the one that describes the run's final verdict
-        return max(named, key=lambda item: int(item["name"].rsplit("-a", 1)[1]), default=None)
+        candidates = [
+            (int(name[len(prefix):]), item.get("id"))
+            for name, item in artifacts_by_run[run["id"]].items()
+            if name.startswith(prefix) and re.fullmatch(r"[1-9][0-9]*", name[len(prefix):])
+        ]
+        selected = max(candidates, key=lambda candidate: candidate[0], default=None)
+        if selected is not None and (type(selected[1]) is not int or selected[1] < 1):
+            raise ValueError(f"invalid envelope artifact ID for {component} in run {run['id']}")
+        return selected
 
     published = 0
     for component, sha8 in sorted(images.items()):
@@ -195,8 +201,10 @@ def main() -> int:
             else:
                 verdict = f"newest tested commit {tested[:8]} differs in build inputs from {image[:8]}"
                 break
+            attempt, artifact_id = artifact
             print(json.dumps({"component": component, "image_sha": image, "tested_sha": tested,
-                              "run_id": run["id"], "artifact": artifact["name"], "equivalence": equivalence}))
+                              "run_id": run["id"], "run_attempt": attempt, "artifact_id": artifact_id,
+                              "equivalence": equivalence}))
             published += 1
             verdict = ""
             break
