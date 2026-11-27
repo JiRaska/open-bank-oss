@@ -438,8 +438,21 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     return out
 
 
+def unique_json_object(pairs: list[tuple]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
 def serialise(doc: dict) -> str:
-    return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(doc, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
 
 
 def main() -> int:
@@ -447,8 +460,17 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="exit 1 if the template is stale")
     args = ap.parse_args()
     decl = load_allowlist()
-    current = TEMPLATE.read_text()
-    rendered = serialise(render(json.loads(current), decl, ALLOWLIST.parent))
+    current = TEMPLATE.read_bytes()
+    try:
+        template = json.loads(
+            current.decode("utf-8"),
+            object_pairs_hook=unique_json_object,
+            parse_constant=reject_json_constant,
+        )
+        rendered = serialise(render(template, decl, ALLOWLIST.parent)).encode("utf-8")
+    except ValueError:
+        print(f"::error file={TEMPLATE.relative_to(ROOT)}::Invalid or ambiguous MCP realm JSON")
+        return 1
     if args.check:
         if rendered != current:
             print(f"::error file={TEMPLATE.relative_to(ROOT)}::MCP clients are stale - run "
@@ -456,7 +478,7 @@ def main() -> int:
             return 1
         print("MCP realm clients are up to date")
         return 0
-    TEMPLATE.write_text(rendered)
+    TEMPLATE.write_bytes(rendered)
     print(f"wrote {len(decl['clients'])} MCP client(s) + flow {decl['flow']['alias']} into "
           f"{TEMPLATE.relative_to(ROOT)}")
     return 0
