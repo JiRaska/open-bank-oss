@@ -40,6 +40,7 @@ allowed_reasons contains "operator-party-write" if {
 	startswith(input.action, "party.")
     input.action != "party.pii.reveal"
     not startswith(input.action, "party.mcpNativePasskeyAgeException.")
+    not startswith(input.action, "party.mcpNativePasskeyAgePolicy.")
 }
 
 # Full personal data has a distinct grant. The REST endpoint additionally requires a verified
@@ -169,11 +170,16 @@ allowed_reasons contains "staff-native-passkey-age-manage" if {
     input.principal.type == "HUMAN"
     not principal_is_machine
     "ROLE_ADMIN" in input.principal.roles
-    input.action in {"party.mcpNativePasskeyAgeException.inspect", "party.mcpNativePasskeyAgeException.manage"}
+    input.action in {
+        "party.mcpNativePasskeyAgeException.inspect",
+        "party.mcpNativePasskeyAgeException.manage",
+        "party.mcpNativePasskeyAgePolicy.inspect",
+        "party.mcpNativePasskeyAgePolicy.manage",
+    }
 }
 
 allowed_reasons contains "edge-native-passkey-age-effective" if {
     machine_named("service-account-openbank-edge")
     "ROLE_API" in input.principal.roles
-    input.action == "party.mcpNativePasskeyAgeException.effective"
+    input.action in {"party.mcpNativePasskeyAgeException.effective", "party.mcpNativePasskeyAgePolicy.effective"}
 }

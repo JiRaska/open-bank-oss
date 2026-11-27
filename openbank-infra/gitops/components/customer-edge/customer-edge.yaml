@@ -267,6 +267,12 @@ spec:
                   name: mcp-sandbox-passkey-age-policy
                   key: enabled
                   optional: true
+            - name: EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: globalEnabled
+                  optional: true
             - name: MCP_NATIVE_CONNECT_AUTHORITY_URL
               value: https://delegation-service.delegation.svc:8443
             - name: DELEGATION_SERVICE_URL

@@ -114,3 +114,9 @@ administrátor ji může zapsat nebo odvolat v administraci. Nejkratší nastavi
 minuta a výjimka vyprší nejpozději za 24 hodin. Party ukládá aktéra, čas, důvod a změnu v jednom
 záznamu. Ověření stáří na základě existujícího záznamu passkey, vlastnictví, podpis a samostatná
 kontrola stáří zařízení pro SCA zůstávají povinné.
+
+### Platnost passkey pro MCP ve sdíleném sandboxu
+
+Party spravuje pravidlo i jeho neměnnou historii. Administrátor zadává důvod a platnost nejvýše 24 hodin. Odvolání přidá záznam a platí okamžitě. Výchozí doba je 72 hodin a minimální nastavitelná doba je jedna minuta. Ověření podpisu WebAuthn a samostatná pravidla SCA zůstávají v platnosti.
+
+`PARTY_SANDBOX_MCP_NATIVE_AGE_POLICY` zapínejte pouze ve sdíleném sandboxu. Výchozí hodnota je false.

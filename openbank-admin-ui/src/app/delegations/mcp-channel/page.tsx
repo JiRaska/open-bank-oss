@@ -2,14 +2,14 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// ADR-0384 D4 (first slice): "MCP kanál" — customer MCP channel health under /delegations, so it
-// inherits the delegations:view route permission. Read-only: the operator actions of D4 (revoke,
-// client suspend, four-eyes unsuspend / bulk revoke) are not built and no button pretends they are.
+// ADR-0384: channel health plus the sandbox-only administrator policy under ADR-0385.
 
 'use client'
 
 import { useEffect, useState } from 'react'
 import { Bot } from 'lucide-react'
+import { useAuth } from '@/lib/auth/useAuth'
+import { McpPasskeyAgeException } from '@/components/parties/McpPasskeyAgeException'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -17,6 +17,7 @@ import { McpChannelHealth, isMcpChannelPayload, type McpChannelPayload } from '@
 
 export default function McpChannelPage() {
   const { t, language } = useLanguage()
+  const { hasPermission } = useAuth()
   const [data, setData] = useState<McpChannelPayload | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -44,6 +45,7 @@ export default function McpChannelPage() {
         )}
         icon={<Bot className="h-6 w-6" />}
       />
+      {hasPermission('mcp-native-passkey-age-exception:manage') && <McpPasskeyAgeException />}
       {failed || data?.state === 'unavailable' ? (
         <DataUnavailable kind="unreachable" service="Prometheus" lang={language} />
       ) : data?.state === 'ok' ? (

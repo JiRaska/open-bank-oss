@@ -189,11 +189,13 @@ test_native_passkey_age_authority_is_exact if {
 	admin := {"service_account": false, "type": "HUMAN", "id": "admin-fixture", "roles": ["ROLE_ADMIN"]}
 	operator := {"service_account": false, "type": "HUMAN", "id": "operator-fixture", "roles": ["ROLE_OPERATOR"]}
 	edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}
-	every action in {"party.mcpNativePasskeyAgeException.inspect", "party.mcpNativePasskeyAgeException.manage"} {
+	every action in {"party.mcpNativePasskeyAgeException.inspect", "party.mcpNativePasskeyAgeException.manage", "party.mcpNativePasskeyAgePolicy.inspect", "party.mcpNativePasskeyAgePolicy.manage"} {
 		allow.allow with input as {"principal": admin, "action": action}
 		not allow.allow with input as {"principal": operator, "action": action}
 		not allow.allow with input as {"principal": edge, "action": action}
 	}
-	allow.allow with input as {"principal": edge, "action": "party.mcpNativePasskeyAgeException.effective"}
-	not allow.allow with input as {"principal": shared_api_only, "action": "party.mcpNativePasskeyAgeException.effective"}
+	every action in {"party.mcpNativePasskeyAgeException.effective", "party.mcpNativePasskeyAgePolicy.effective"} {
+		allow.allow with input as {"principal": edge, "action": action}
+		not allow.allow with input as {"principal": shared_api_only, "action": action}
+	}
 }
