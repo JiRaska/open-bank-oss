@@ -71,7 +71,7 @@ def render(listing: dict) -> dict[str, bytes | str]:
         "termsOfServiceURL": real(urls["termsOfService"]),
         "defaultPrompt": [
             "What is the balance of my main OpenBank account?",
-            "Summarise my last closed OpenBank statement.",
+            "Which OpenBank accounts did I connect?",
             "Propose a payment of 25 EUR from my OpenBank account.",
         ],
         "brandColor": ident["brandColor"],

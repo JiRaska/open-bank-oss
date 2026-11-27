@@ -9,7 +9,7 @@
     {
       "name": "openbank",
       "source": "./claude-code-plugin",
-      "description": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
+      "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
       "category": "finance"
     }
   ]

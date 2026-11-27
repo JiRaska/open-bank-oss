@@ -1,13 +1,13 @@
 {
   "$comment": "SINGLE SOURCE OF TRUTH for every assistant-platform package in this directory (issue #16614, ADR-0383 (proposed), ADR-0385 (proposed, PR #16611)). Name, logo and MCP URL are defined here once; scripts/generate.py renders every package from this file and scripts/check.py fails when a package, or the tool list, drifts from it. The bank-assigned display name and logo shown on the consent screen and in the app (ADR-0385 D1, 'The bank names the client': assigned by the bank, never taken from vendor metadata) must be these values; the customers-realm client entries are to be generated from this file when they exist. Values starting with OWNER-SUPPLIED are placeholders only the owner can fill.",
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.1.2",
   "identity": {
     "slug": "openbank",
     "displayName": "OpenBank",
     "shortDescription": "Ask about your accounts",
-    "description": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
-    "longDescription": "Connect your OpenBank account to ask about balances, recent transactions, closed statements and the confirmation details of payments you already made. The assistant can also draft a payment PROPOSAL. A proposal is never a payment: nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. The assistant can never pay, change limits, add trusted payees or change security settings. Data you ask about is sent to the assistant platform's own provider. You can see and revoke every connected assistant in the OpenBank app. Limitations: personal accounts only; IBANs and counterparty names are masked; transaction history is limited to 90 days and statements to 12 months.",
+    "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
+    "longDescription": "Connect your personal OpenBank account to ask about the accounts you shared and their balances. The assistant can also draft a payment proposal. Nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. Data you ask about is sent to the assistant platform's provider. You can see and revoke every connected assistant in the OpenBank app.",
     "category": "Finance",
     "keywords": [
       "banking",
@@ -40,12 +40,12 @@
     }
   },
   "server": {
-    "$comment": "Baseline draft URL for package surfaces other than the hosted ChatGPT plugin. The ChatGPT sandbox uses its own protected resource and OAuth issuer.",
-    "url": "https://customer.open-bank.tech/mcp",
-    "routeStatus": "PLANNED-NOT-ROUTABLE",
+    "$comment": "Public customer MCP route and RFC 9728 metadata. Package release and hosted-client admission have separate prerequisites.",
+    "url": "https://mcp.open-bank.tech/customer/mcp",
+    "routeStatus": "LIVE",
     "transport": "streamable-http",
-    "protectedResourceMetadata": "https://customer.open-bank.tech/.well-known/oauth-protected-resource/mcp",
-    "resource": "https://customer.open-bank.tech/mcp",
+    "protectedResourceMetadata": "https://mcp.open-bank.tech/.well-known/oauth-protected-resource/customer/mcp",
+    "resource": "https://mcp.open-bank.tech/customer/mcp",
     "chatgptHosted": {
       "displayName": "OpenBank MCP",
       "packageVersion": "0.1.3",
@@ -108,8 +108,8 @@
     ]
   },
   "tools": {
-    "$comment": "The customer-channel tool set: the subset of openbank-mcp-service McpToolRegistry that ADR-0383 D4 allows (query.*.readonly + propose.payment). Customer-facing descriptions are written here (the registry's current text describes the governed-agent PSD2-consent path, which ADR-0383 D3 says this channel does not use). scripts/check.py fails if a name, capability, input property or required argument drifts from the registry, or if a registry tool is neither included nor excluded.",
-    "registry": "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpToolRegistry.kt",
+    "$comment": "The connection-bound customer MCP tool set. scripts/check.py verifies the names, action, properties and required arguments against CustomerReadTools and CustomerPaymentProposer.",
+    "registry": "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/customer/CustomerReadTools.kt",
     "included": [
       {
         "name": "list_accounts",
@@ -128,54 +128,12 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "properties": [
-          "accountRef",
           "accountId"
         ],
-        "required": [],
-        "description": "Get the current balance of one of your connected accounts."
-      },
-      {
-        "name": "list_transactions",
-        "title": "List recent transactions",
-        "capability": "query.transaction.readonly",
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "properties": [
-          "accountRef",
-          "accountId",
-          "limit"
-        ],
-        "required": [],
-        "description": "List recent transactions of one of your connected accounts (bounded window and page size)."
-      },
-      {
-        "name": "get_statement",
-        "title": "Get a closed statement",
-        "capability": "query.statement.readonly",
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "properties": [
-          "accountRef",
-          "accountId",
-          "currency",
-          "legalSequence"
-        ],
-        "required": [],
-        "description": "Get a closed account statement as structured data; IBANs and counterparty names are masked."
-      },
-      {
-        "name": "get_payment_confirmation",
-        "title": "Get payment confirmation",
-        "capability": "query.payment_confirmation.readonly",
-        "readOnlyHint": true,
-        "destructiveHint": false,
-        "properties": [
-          "paymentId"
-        ],
         "required": [
-          "paymentId"
+          "accountId"
         ],
-        "description": "Get the confirmation details of a payment you already made, by its id."
+        "description": "Get the current balance of one of your connected accounts."
       },
       {
         "name": "propose_payment",
@@ -184,28 +142,29 @@
         "readOnlyHint": false,
         "destructiveHint": false,
         "properties": [
-          "fromAccountId",
-          "toIban",
+          "debtorAccountId",
+          "creditorIban",
+          "creditorName",
           "amount",
-          "currency"
+          "currency",
+          "reference",
+          "clientRequestId"
         ],
         "required": [
-          "fromAccountId",
-          "toIban",
+          "debtorAccountId",
+          "creditorIban",
+          "creditorName",
           "amount",
-          "currency"
+          "currency",
+          "clientRequestId"
         ],
-        "description": "Draft a payment PROPOSAL. It never moves money: you approve or reject it yourself in the OpenBank app with strong customer authentication. TODAY: refused, because no proposal store is wired (ADR-0383 D6 not built)."
+        "description": "Draft a payment proposal for separate approval in the OpenBank app with strong customer authentication. Reuse the same clientRequestId to retry."
       }
     ],
     "excluded": [
       {
-        "name": "list_consents",
-        "reason": "ADR-0383 D3: PSD2 consent is not used on the customer channel."
-      },
-      {
-        "name": "count_marketing_consents",
-        "reason": "Operator-plane aggregate (ADR-0209 D5), not a customer read."
+        "name": "list_transactions",
+        "reason": "This customer tool is unavailable when the connection is bound."
       }
     ]
   },

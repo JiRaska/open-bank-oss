@@ -1,8 +1,8 @@
 {
   "name": "openbank",
   "displayName": "OpenBank",
-  "version": "0.1.0",
-  "description": "Read your OpenBank accounts, balances, transactions, statements and payment confirmations, and draft payment proposals that you approve yourself in the OpenBank app.",
+  "version": "0.1.2",
+  "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
   "author": {
     "name": "OpenBank contributors",
     "url": "https://github.com/JiRaska/open-bank-oss"
