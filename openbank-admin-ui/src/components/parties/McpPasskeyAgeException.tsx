@@ -104,7 +104,7 @@ export function McpPasskeyAgeException({ partyId }: { partyId: string }) {
         </label>
         <label className="block">
           {t('Důvod změny', 'Reason for change')}{' '}
-          <input className="input" required maxLength={250} value={reason}
+          <input className="input" required maxLength={240} value={reason}
             onChange={event => setReason(event.target.value)} />
         </label>
         <button className="btn btn-primary" type="submit" disabled={busy || !reason.trim()}>

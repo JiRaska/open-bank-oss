@@ -29,7 +29,7 @@ async function relay(req: Request, { params }: RouteContext, method: 'GET' | 'PU
       !Number.isInteger(input?.minimumAgeMinutes) || input.minimumAgeMinutes < 1 ||
       input.minimumAgeMinutes >= 72 * 60 || typeof input.expiresAt !== 'string' ||
       !Number.isFinite(Date.parse(input.expiresAt)) || typeof input.reason !== 'string' ||
-      !input.reason.trim()
+      !input.reason.trim() || input.reason.trim().length > 240
     ) {
       return NextResponse.json({ error: 'invalid_policy' }, { status: 400 })
     }
