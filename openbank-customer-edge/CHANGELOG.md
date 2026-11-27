@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.3...customer-edge-v1.16.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
 ## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.2...customer-edge-v1.15.3) (2026-11-26)
 
 
