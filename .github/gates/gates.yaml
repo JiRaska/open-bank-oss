@@ -5813,6 +5813,19 @@ gates:
       python3 .github/scripts/test-check-service-build-results.py
     run: python3 .github/scripts/generate-service-ci-jobs.py --check
 
+  - id: assistant-plugin-packages
+    name: "Assistant package manifests match their generator and MCP contracts"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite — runs the package checker and its mutation suite"
+    rationale: "The standalone assistant packages have no Gradle build. Validate generated files and the hosted/shared MCP contracts directly."
+    review_after: "2027-06-01"
+    budget_seconds: 10
+    min_subjects: 13
+    run: |
+      python3 -B integrations/assistant-plugins/scripts/check.py
+      python3 -B integrations/assistant-plugins/scripts/check.py --selftest
+
   - id: service-ci-select-modules
     name: "Services CI module selection (self-test)"
     group: gitops
