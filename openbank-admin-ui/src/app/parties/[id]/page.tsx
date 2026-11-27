@@ -4,6 +4,7 @@
 
 'use client'
 
+import { McpPasskeyAgeException } from '@/components/parties/McpPasskeyAgeException'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -331,6 +332,9 @@ function PartyDetailPage() {
         </div>
       )}
 
+      {tab === 'overview' && hasPermission(roles, 'mcp-native-passkey-age-exception:manage') && (
+        <McpPasskeyAgeException key={party.id} partyId={party.id} />
+      )}
       {tab === 'messages' && <MessagesTab partyId={party.id} partyEmail={maskedParty?.piiMasked === false ? maskedParty.email : ''} roles={roles} />}
     </div>
   )
