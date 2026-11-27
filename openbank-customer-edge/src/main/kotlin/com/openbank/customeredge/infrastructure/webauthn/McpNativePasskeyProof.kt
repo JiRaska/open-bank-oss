@@ -18,7 +18,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Clock
-import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import java.util.HexFormat
 import java.util.UUID
@@ -96,6 +96,7 @@ internal class McpNativePasskeyChallengeStore(redis: RedisDataSource, private va
 internal class McpNativePasskeyProofService(
     private val challenges: McpNativePasskeyChallengeStore,
     private val credentials: WebAuthnStore,
+    private val agePolicy: McpNativeAgePolicy,
     private val mapper: ObjectMapper,
     private val clock: Clock,
     private val metrics: MeterRegistry,
@@ -130,7 +131,9 @@ internal class McpNativePasskeyProofService(
         if (binding.expiresAtEpochSecond <= now.epochSecond) return reject(Refusal.EXPIRED)
         val firstVerified = credential.firstVerifiedAtEpochMillis ?: return reject(Refusal.AGE_MISSING)
         if (firstVerified <= 0) return reject(Refusal.AGE_INVALID)
-        if (firstVerified > now.toEpochMilli() - MIN_AGE.toMillis()) return reject(Refusal.AGE_TOO_YOUNG)
+        if (!agePolicy.eligible(binding.partyId, Instant.ofEpochMilli(firstVerified), now)) {
+            return reject(Refusal.AGE_TOO_YOUNG)
+        }
         val attestedCredential = Base64.getDecoder().decode(credential.attestedCredentialDataB64)
         val digest = MessageDigest.getInstance("SHA-256").digest(attestedCredential)
         val credentialReference = HexFormat.of().formatHex(digest)
@@ -184,6 +187,5 @@ internal class McpNativePasskeyProofService(
     private companion object {
         const val CHALLENGE_BYTES = 32
         val CHALLENGE = Regex("[A-Za-z0-9_-]{43}")
-        val MIN_AGE: Duration = Duration.ofHours(72)
     }
 }

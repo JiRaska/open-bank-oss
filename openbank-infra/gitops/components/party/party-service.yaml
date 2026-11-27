@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c31a76880b9d8cd2"
+        openbank.tech/policy-checksum: "82a96e25f651fff1"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -178,6 +178,12 @@ spec:
             # explicit `false` is load-bearing.
             - name: AUTHZ_ENFORCE
               value: "true"
+            - name: PARTY_SANDBOX_MCP_NATIVE_AGE_EXCEPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: enabled
+                  optional: true
             # Redis for the four-eyes ApprovalStore (ADR-0155), backing the `party.merge`
             # gate. Load-bearing: the ApprovalConfig bean resolves with or without this, so
             # a missing Redis does not make the interceptor fall back to its documented

@@ -105,3 +105,12 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Výjimky pro stáří nativní passkey MCP v sandboxu
+
+Správa výjimek je ve výchozím nastavení vypnutá. Pravidlo 72 hodin platí, dokud služba Party
+nepotvrdí současně aktivní syntetickou fyzickou osobu a platnou výjimku. Přihlášený
+administrátor ji může zapsat nebo odvolat v administraci. Nejkratší nastavitelná lhůta je jedna
+minuta a výjimka vyprší nejpozději za 24 hodin. Party ukládá aktéra, čas, důvod a změnu v jednom
+záznamu. Ověření stáří na základě existujícího záznamu passkey, vlastnictví, podpis a samostatná
+kontrola stáří zařízení pro SCA zůstávají povinné.
