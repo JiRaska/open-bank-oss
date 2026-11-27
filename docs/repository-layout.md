@@ -40,8 +40,10 @@ working checkouts, local instructions, or caches as part of a blanket cleanup.
 ## Enforced root policy
 
 [`repository_root_layout`](../openbank-libs/governance/rules.yaml) declares permitted
-root files and non-Gradle directories. New Gradle modules are recognised from a
-tracked `openbank-*/build.gradle.kts`, matching `settings.gradle.kts` discovery.
+root files and non-Gradle directories. The check uses the same `build.gradle.kts`
+marker as `settings.gradle.kts`. It requires a staged marker and a module name
+matching `openbank-[a-z0-9-]+`, which is narrower than Gradle’s `openbank-` prefix
+check.
 Other new root entries need a reviewed policy change. Obsolete declarations fail
 as well, so deleting a root entry also removes its permission.
 
@@ -53,7 +55,8 @@ python3 .github/scripts/check-repository-root.py
 ```
 
 The check reads the **Git index**, including its policy and module markers. It
-ignores unstaged local files and catches ignored files staged with `git add -f`.
+ignores unstaged local files and intent-to-add placeholders from `git add -N`.
+It catches ignored files staged with `git add -f`.
 It runs through pre-commit and the CI gate manifest. It controls root placement;
 it does not replace secret scanning, licence checks, or review of component content.
 

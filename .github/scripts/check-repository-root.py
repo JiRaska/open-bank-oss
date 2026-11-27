@@ -26,12 +26,19 @@ POLICY = "openbank-libs/governance/rules.yaml"
 
 def git(root: Path, *args: str) -> str:
     return subprocess.check_output(
-        ["git", "-C", str(root), *args], stderr=subprocess.PIPE
+        ["git", "-C", str(root), *args], stdin=subprocess.DEVNULL, stderr=subprocess.PIPE
     ).decode("utf-8")
 
 
 def inspect(root: Path) -> tuple[list[str], int]:
     paths = set(git(root, "ls-files", "-z").split("\0")) - {""}
+    # Compare against an empty tree so intent-to-add replacements of tracked
+    # files are additions too. hash-object computes the ID without writing.
+    empty_tree = git(root, "hash-object", "-t", "tree", "--stdin").strip()
+    staged_additions = ("diff", "--cached", "--name-only", "-z", "--no-renames", empty_tree)
+    visible = set(git(root, *staged_additions, "--ita-visible-in-index").split("\0"))
+    invisible = set(git(root, *staged_additions, "--ita-invisible-in-index").split("\0"))
+    paths -= visible - invisible
     if not paths:
         raise ValueError("empty Git index; no repository subjects inspected")
     document = yaml.safe_load(git(root, "show", f":{POLICY}"))
@@ -51,8 +58,8 @@ def inspect(root: Path) -> tuple[list[str], int]:
         raise ValueError("root policy file/directory overlap")
     files = {x for x in paths if '/' not in x}
     directories = {x.split('/')[0] for x in paths if '/' in x}
-    # settings.gradle.kts discovers modules from this exact file marker. Requiring
-    # it in the index prevents an untracked build file from legitimising scratch.
+    # Gradle uses this build-file marker; the root policy also requires a lowercase
+    # module slug. Only a marker included in the commit can legitimise the path.
     modules = {d for d in directories if re.fullmatch(r'openbank-[a-z0-9-]+', d)
                and f'{d}/build.gradle.kts' in paths}
     errors = [f"unexpected root file: {x}" for x in sorted(files - allowed['files'])]
@@ -126,6 +133,15 @@ def self_test() -> int:
         git(root, 'rm', '--cached', '--', 'notes.txt')
         put('openbank-scratch/report.txt')
         put('openbank-scratch/build.gradle.kts', stage=False)
+        expect(1, 'unexpected root directory: openbank-scratch/')
+        git(root, 'add', '-N', '--', 'openbank-scratch/build.gradle.kts')
+        expect(1, 'unexpected root directory: openbank-scratch/')
+        git(root, 'add', '--', 'openbank-scratch/build.gradle.kts')
+        expect(0, 'layout OK')
+        git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+            '-c', 'commit.gpgsign=false', 'commit', '-qm', 'track the build marker')
+        git(root, 'rm', '--cached', '--', 'openbank-scratch/build.gradle.kts')
+        git(root, 'add', '-N', '--', 'openbank-scratch/build.gradle.kts')
         expect(1, 'unexpected root directory: openbank-scratch/')
         git(root, 'add', '--', 'openbank-scratch/build.gradle.kts')
         expect(0, 'layout OK')
