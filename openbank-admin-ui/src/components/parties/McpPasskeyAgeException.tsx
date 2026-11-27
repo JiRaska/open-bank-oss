@@ -11,9 +11,10 @@ interface Policy {
   reason: string
 }
 
-export function McpPasskeyAgeException({ partyId }: { partyId: string }) {
+export function McpPasskeyAgeException({ partyId }: { partyId?: string }) {
   const { t, language } = useLanguage()
-  const url = `/api/parties/${encodeURIComponent(partyId)}/mcp-native-passkey-age-exception`
+  const sandboxWide = partyId === undefined
+  const url = sandboxWide ? '/api/parties/mcp-passkey-age-policy' : `/api/parties/${encodeURIComponent(partyId)}/mcp-native-passkey-age-exception`
   const [policy, setPolicy] = useState<Policy | null>(null)
   const [available, setAvailable] = useState(false)
   const [minutes, setMinutes] = useState('1')
@@ -35,6 +36,13 @@ export function McpPasskeyAgeException({ partyId }: { partyId: string }) {
       })
     return () => controller.abort()
   }, [url])
+
+  useEffect(() => {
+    if (!policy) return
+    const remaining = Math.max(0, Date.parse(policy.expiresAt) - Date.now())
+    const timer = window.setTimeout(() => setPolicy(null), remaining)
+    return () => window.clearTimeout(timer)
+  }, [policy])
 
   async function change(method: 'PUT' | 'DELETE') {
     setBusy(true)
@@ -75,12 +83,22 @@ export function McpPasskeyAgeException({ partyId }: { partyId: string }) {
   return (
     <section className="card space-y-3 p-5" aria-labelledby="mcp-passkey-age-title">
       <h2 id="mcp-passkey-age-title" className="font-semibold">
-        {t('Stáří passkey pro MCP v sandboxu', 'MCP passkey age in the sandbox')}
+        {sandboxWide
+          ? t('Minimální stáří passkey pro celý sandbox', 'Minimum passkey age for the entire sandbox')
+          : t('Stáří passkey pro MCP v sandboxu', 'MCP passkey age in the sandbox')}
       </h2>
       <p className="text-sm text-muted-foreground">
-        {t('Dočasná výjimka pro tento syntetický účet. Samostatné schválení v aplikaci je stále povinné.',
-          'Temporary exception for this synthetic account. Separate approval in the app is still required.')}
+        {sandboxWide
+          ? t(
+            'Dočasná změna platí pro všechny způsobilé klienty v tomto sandboxu. Po vypršení opět platí 72 hodin. Schválení v aplikaci je povinné.',
+            'This temporary change applies to all eligible customers in this sandbox. The 72-hour minimum resumes at expiry. Approval in the app is required.',
+          )
+          : t(
+            'Dočasná výjimka pro tento syntetický účet. Samostatné schválení v aplikaci je stále povinné.',
+            'Temporary exception for this synthetic account. Separate approval in the app is still required.',
+          )}
       </p>
+      {sandboxWide && !policy && <p role="status">{t('Aktuální minimum je 72 hodin.', 'The current minimum is 72 hours.')}</p>}
       {policy && (
         <p role="status">
           {t('Minimum v minutách', 'Minimum in minutes')}{' '}{policy.minimumAgeMinutes}
