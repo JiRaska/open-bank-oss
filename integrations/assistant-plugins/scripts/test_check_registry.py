@@ -63,5 +63,28 @@ class RegistryTests(unittest.TestCase):
         self.assertTrue(any("required" in err for err in check.check_tools(listing, registry)))
 
 
+class HostedToolTests(unittest.TestCase):
+    SOURCE = """
+        class HostedVendorGrants {
+            companion object {
+                val TOOLS = setOf("list_accounts", "get_balance")
+                fun allowsTool(name: String): Boolean = name in TOOLS
+            }
+        }
+    """
+
+    def test_decoy_declarations_in_comments_and_strings_are_ignored(self):
+        decoys = '/* companion object { val TOOLS = setOf("decoy") } */\n'
+        decoys += 'val decoy = "companion object { val TOOLS = setOf(decoy) }"\n'
+        self.assertEqual(check.parse_hosted_tools(decoys + self.SOURCE), {"list_accounts", "get_balance"})
+        with self.assertRaisesRegex(ValueError, "one companion TOOLS"):
+            check.parse_hosted_tools(self.SOURCE.replace("companion object {", 'val TOOLS = setOf("decoy")\n companion object {'))
+
+    def test_membership_cannot_exclude_an_allowlisted_tool(self):
+        altered = self.SOURCE.replace("name in TOOLS", 'name in TOOLS && name != "get_balance"')
+        with self.assertRaisesRegex(ValueError, "allowsTool must be exactly"):
+            check.parse_hosted_tools(altered)
+
+
 if __name__ == "__main__":
     unittest.main()

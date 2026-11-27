@@ -127,6 +127,33 @@ def literal_call(tokens: list[str], name: str) -> list[list[str]]:
     return split_arguments(tokens[2:-1])
 
 
+def account_properties(tokens: list[str]) -> list[list[str]]:
+    """Expand only the registry's named, no-argument literal property helper."""
+    signature = ["private", "fun", "accountProps", "(", ")", ":", "Map", "<", "String", ",", "Any", ">", "="]
+    matches = [i + len(signature) for i in range(len(tokens)) if tokens[i:i + len(signature)] == signature]
+    if len(matches) != 1:
+        raise ValueError("expected one literal accountProps definition")
+    start = matches[0]
+    depth = 0
+    for end in range(start + 1, len(tokens)):
+        depth += {"(": 1, ")": -1}.get(tokens[end], 0)
+        if depth == 0:
+            if tokens[end + 1:end + 3] != ["private", "fun"]:
+                raise ValueError("accountProps must be a single literal map")
+            return literal_call(tokens[start:end + 1], "mapOf")
+    raise ValueError("unterminated accountProps map")
+
+
+def account_reference_field() -> str:
+    source = REPO / "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/application/McpAccountRefs.kt"
+    tokens = kotlin_tokens(source.read_text())
+    prefix = ["const", "val", "REF_FIELD", "="]
+    matches = [i + len(prefix) for i in range(len(tokens)) if tokens[i:i + len(prefix)] == prefix]
+    if len(matches) != 1 or tokens[matches[0] + 1:matches[0] + 3] != ["const", "val"]:
+        raise ValueError("expected one literal McpAccountRefs.REF_FIELD")
+    return literal_string(tokens[matches[0]:matches[0] + 1])
+
+
 def parse_registry(text: str) -> dict[str, dict]:
     """Read the registry's literal obj(mapOf(...), required=listOf(...)) shape."""
     tokens = kotlin_tokens(text)
@@ -157,12 +184,27 @@ def parse_registry(text: str) -> dict[str, dict]:
             props_arg = props_arg[2:]
         if req_arg[:2] == ["required", "="]:
             req_arg = req_arg[2:]
+        helper = props_arg[:3] == ["accountProps", "(", ")"]
+        helper_pairs = account_properties(tokens) if helper else []
+        props_tail = props_arg[3:] if helper else props_arg
+        if helper and props_tail:
+            if props_tail[0] != "+":
+                raise ValueError(f"expected literal account property extension for {name}")
+            props_tail = props_tail[1:]
+            if not props_tail:
+                raise ValueError(f"missing literal account property extension for {name}")
+        pairs = literal_call(props_tail, "mapOf") if props_tail or not helper else []
         props = []
-        for pair in literal_call(props_arg, "mapOf"):
-            if len(pair) < 3 or pair[1] != "to":
-                raise ValueError(f"expected literal property pair for {name}")
-            prop = literal_string(pair[:1])
-            if prop in props or pair[2] in ("+", "*", "="):
+        for index, pair in enumerate(helper_pairs + pairs):
+            if index < len(helper_pairs) and pair[:4] == ["McpAccountRefs", ".", "REF_FIELD", "to"]:
+                prop = account_reference_field()
+                value = pair[4:]
+            else:
+                if len(pair) < 3 or pair[1] != "to":
+                    raise ValueError(f"expected literal property pair for {name}")
+                prop = literal_string(pair[:1])
+                value = pair[2:]
+            if prop in props or not value or value[0] in ("+", "*", "="):
                 raise ValueError(f"ambiguous property pair for {name}")
             props.append(prop)
         if req_arg == ["emptyList", "(", ")"]:
@@ -246,10 +288,60 @@ def check_image(label: str, data: bytes) -> list[str]:
     return errs
 
 
+def parse_hosted_tools(text: str) -> set[str]:
+    """Read the sole companion allowlist and its exact membership predicate."""
+    source = kotlin_tokens(text)
+    classes = [i for i in range(len(source)) if source[i:i + 2] == ["class", "HostedVendorGrants"]]
+    if len(classes) != 1:
+        raise ValueError("expected one HostedVendorGrants class")
+
+    def closing_brace(tokens: list[str], opening: int) -> int:
+        depth = 1
+        for i in range(opening + 1, len(tokens)):
+            depth += {"{": 1, "}": -1}.get(tokens[i], 0)
+            if depth == 0:
+                return i
+        raise ValueError("unterminated hosted MCP block")
+
+    class_opening = source.index("{", classes[0])
+    tokens = source[class_opening + 1:closing_brace(source, class_opening)]
+    opening = ["companion", "object", "{"]
+    starts = [i + len(opening) for i in range(len(tokens)) if tokens[i:i + len(opening)] == opening]
+    if len(starts) != 1:
+        raise ValueError("expected one companion for hosted MCP tools")
+    start = starts[0]
+    end = closing_brace(tokens, start - 1)
+    body = tokens[start:end]
+    declaration = ["val", "TOOLS", "="]
+    declarations = [i for i in range(len(tokens)) if tokens[i:i + len(declaration)] == declaration]
+    if len(declarations) != 1 or not start <= declarations[0] < end:
+        raise ValueError("expected one companion TOOLS declaration")
+    consumer = ["fun", "allowsTool", "(", "name", ":", "String", ")", ":", "Boolean", "=", "name", "in", "TOOLS"]
+    if body[-len(consumer):] != consumer or tokens.count("allowsTool") != 1:
+        raise ValueError("allowsTool must be exactly name in TOOLS")
+    expression_start = declarations[0] - start + len(declaration)
+    tools = [literal_string(arg) for arg in literal_call(body[expression_start:-len(consumer)], "setOf")]
+    if not tools or len(tools) != len(set(tools)):
+        raise ValueError("hosted TOOLS must be a non-empty set of distinct strings")
+    return set(tools)
+
+
 def check_openai(rendered: dict, listing: dict) -> list[str]:
     errs = []
-    url = listing["server"]["url"]
-    tool_names = {t["name"] for t in listing["tools"]["included"]}
+    server = listing["server"]
+    hosted = server["chatgptHosted"]
+    if {key: hosted.get(key) for key in ("url", "protectedResourceMetadata", "authorizationServer")} != {
+        "url": "https://mcp.open-bank.tech/customer/hosted-mcp",
+        "protectedResourceMetadata": "https://mcp.open-bank.tech/.well-known/oauth-protected-resource/customer/hosted-mcp",
+        "authorizationServer": "https://mcp.open-bank.tech/oauth/hosted",
+    }:
+        errs.append("openai: ChatGPT must use the hosted MCP resource and issuer")
+    grants = REPO / "openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/oauth/HostedVendorGrants.kt"
+    allowed = parse_hosted_tools(grants.read_text())
+    tool_names = set(hosted["tools"])
+    included_reads = {t["name"] for t in listing["tools"]["included"] if t["readOnlyHint"]}
+    if tool_names != allowed or len(hosted["tools"]) != len(allowed) or not allowed <= included_reads:
+        errs.append("openai: ChatGPT tools must match the hosted read-only grants")
     pj = json.loads(rendered["openai-plugin/plugin.json"])
     if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", pj["name"]) or len(pj["name"]) > 64:
         errs.append("openai plugin.json: name must be kebab-case, <= 64 chars")
@@ -258,6 +350,8 @@ def check_openai(rendered: dict, listing: dict) -> list[str]:
             errs.append(f"openai plugin.json: {key} required")
     oa = pj.get("extensions", {}).get("com.openai", {})
     itf = oa.get("interface", {})
+    if pj.get("version") != hosted["packageVersion"] or itf.get("displayName") != hosted["displayName"]:
+        errs.append("openai plugin title and version must match the ChatGPT profile")
     limits = {"displayName": 30, "shortDescription": 30, "longDescription": 4000}
     for key, lim in limits.items():
         if not itf.get(key):
@@ -294,9 +388,13 @@ def check_openai(rendered: dict, listing: dict) -> list[str]:
     for c in pos:
         if not all(c.get(k) for k in ("description", "prompt", "tools_triggered", "expected_behavior")):
             errs.append("openai positive test case missing a required field")
-        for t in c.get("tools_triggered", []):
-            if t not in tool_names:
-                errs.append(f"openai test case triggers unknown tool '{t}'")
+        triggered = c.get("tools_triggered")
+        if not isinstance(triggered, str):
+            errs.append("openai positive tools_triggered must be a comma-separated import string")
+        else:
+            for t in triggered.split(","):
+                if t.strip() not in tool_names:
+                    errs.append(f"openai test case triggers unknown tool '{t.strip()}'")
     for c in neg:
         if not all(c.get(k) for k in ("description", "prompt")):
             errs.append("openai negative test case missing a required field")
@@ -313,13 +411,18 @@ def check_openai(rendered: dict, listing: dict) -> list[str]:
                 errs.append(f"{rel}: server '{name}' must be streamable-http over https")
             if s.get("headers"):
                 errs.append(f"{rel}: public submission rejects non-empty headers")
+            url = hosted["url"] if rel == "openai-plugin/mcp.json" else server["url"]
             if s.get("url") != url:
-                errs.append(f"{rel}: url differs from listing.json server.url")
+                errs.append(f"{rel}: url differs from its listing.json server declaration")
     if set(json.loads(rendered["openai-plugin/mcp.json"])) - {"$schema", "mcpServers"}:
         errs.append("openai mcp.json: only $schema and mcpServers allowed at top level")
     cp = json.loads(rendered["openai-plugin/.codex-plugin/plugin.json"])
-    if cp.get("interface") != itf:
-        errs.append("codex plugin.json interface differs from the Agent Plugins interface")
+    codex_interface = cp.get("interface") or {}
+    if codex_interface.get("displayName") != listing["identity"]["displayName"]:
+        errs.append("codex plugin.json interface.displayName differs from baseline identity")
+    for key in ("brandColor", "composerIcon", "logo"):
+        if codex_interface.get(key) != itf.get(key):
+            errs.append(f"codex plugin.json interface.{key} differs from the Agent Plugins branding")
     if cp.get("mcpServers") != "./.mcp.json":
         errs.append("codex plugin.json must point mcpServers at ./.mcp.json")
     return errs
@@ -528,14 +631,17 @@ def selftest(listing: dict, registry_text: str) -> int:
             '"propose_payment" to "propose.payment",\n        "initiate_payment" to "account.initiate-payment",')),
         "package includes a write capability": ("tools", with_listing(
             lambda l: l["tools"]["included"][1].update(capability="account.initiate-payment"))),
-        "read tool not marked read-only": ("tools", with_listing(
-            lambda l: l["tools"]["included"][0].update(readOnlyHint=False))),
+        "baseline read tool not marked read-only": ("tools", with_listing(
+            lambda l: next(t for t in l["tools"]["included"] if t["name"] == "list_transactions")
+            .update(readOnlyHint=False))),
+        "registry shared account property changes": ("tools", with_registry(
+            '"accountId" to mapOf(', '"renamedAccount" to mapOf(')),
         "propose_payment marked read-only": ("tools", with_listing(
             lambda l: l["tools"]["included"][-1].update(readOnlyHint=True))),
         "propose_payment marked destructive": ("tools", with_listing(
             lambda l: l["tools"]["included"][-1].update(destructiveHint=True))),
         "display name over 30 chars": ("openai", with_listing(
-            lambda l: l["identity"].update(displayName="OpenBank Customer Assistant Connector"))),
+            lambda l: l["server"]["chatgptHosted"].update(displayName="OpenBank Customer Assistant Connector"))),
         "brand color too light": ("openai", with_listing(lambda l: l["identity"].update(brandColor="#F5F5FF"))),
         "wrong number of test cases": ("openai", with_rendered(
             "openai-plugin/plugin.json",
@@ -543,6 +649,17 @@ def selftest(listing: dict, registry_text: str) -> int:
         "second URL in one package": ("claude", with_rendered(
             "claude-code-plugin/.mcp.json",
             lambda o: o["mcpServers"]["openbank"].update(url="https://api.open-bank.tech/mcp"))),
+        "ChatGPT declared on the direct bank route": ("openai", with_listing(
+            lambda l: l["server"]["chatgptHosted"].update(url="https://mcp.open-bank.tech/customer/mcp"))),
+        "ChatGPT references the direct issuer": ("openai", with_listing(
+            lambda l: l["server"]["chatgptHosted"].update(authorizationServer=l["server"]["authorizationServer"]))),
+        "generated ChatGPT URL regresses to baseline": ("openai", with_rendered(
+            "openai-plugin/mcp.json", lambda o: o["mcpServers"]["openbank"].update(url=listing["server"]["url"]))),
+        "ChatGPT lists an out-of-scope tool": ("openai", with_listing(
+            lambda l: l["server"]["chatgptHosted"]["tools"].append("list_transactions"))),
+        "ChatGPT review tools_triggered has incompatible array type": ("openai", with_rendered(
+            "openai-plugin/plugin.json", lambda o: o["extensions"]["com.openai"]["review"]["test_cases"]
+            ["positive"][0].update(tools_triggered=["list_accounts"]))),
         "header on openai server": ("openai", with_rendered(
             "openai-plugin/mcp.json",
             lambda o: o["mcpServers"]["openbank"].update(headers={"Authorization": "Bearer x"}))),
