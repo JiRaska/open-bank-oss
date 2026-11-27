@@ -33,8 +33,10 @@ import javax.sql.DataSource
 )
 class McpNativePasskeyAgePolicyApiIT {
     class Enabled : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> =
-            mapOf("openbank.party.sandbox-mcp-native-age-policy" to "true")
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.party.sandbox-mcp-native-age-policy" to "true",
+            "openbank.party.sandbox-mcp-native-age-exceptions" to "true",
+        )
     }
 
     @Inject lateinit var dataSource: DataSource
@@ -71,7 +73,7 @@ class McpNativePasskeyAgePolicyApiIT {
     }
 
     @Test
-    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(key = "sub", value = "edge-fixture-id"),
@@ -94,6 +96,7 @@ class McpNativePasskeyAgePolicyApiIT {
                 it.executeUpdate()
             }
             given().get(path).then().statusCode(404)
+            given().get("/api/v1/parties/$party/mcp-native-passkey-age-exception/effective").then().statusCode(404)
             conn.createStatement().use {
                 it.executeUpdate(
                     """
@@ -107,6 +110,35 @@ class McpNativePasskeyAgePolicyApiIT {
                 "/api/v1/parties/${UUID.randomUUID()}/mcp-native-passkey-age-policy/effective",
             ).then().statusCode(404)
             given().get(PATH).then().statusCode(403)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "other-workload-fixture-id"),
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "preferred_username", value = "service-account-openbank-services"),
+        ],
+    )
+    fun `another operator workload cannot use either effective endpoint`() = assertEffectiveStatus(403)
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "edge-fixture-id"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `Edge without the operator role cannot use either effective endpoint`() = assertEffectiveStatus(403)
+
+    private fun assertEffectiveStatus(status: Int) {
+        val party = UUID.randomUUID()
+        for (resource in listOf("mcp-native-passkey-age-policy", "mcp-native-passkey-age-exception")) {
+            given().get("/api/v1/parties/$party/$resource/effective").then().statusCode(status)
         }
     }
 

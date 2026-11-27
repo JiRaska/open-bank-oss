@@ -87,7 +87,7 @@ class McpNativePasskeyAgePolicyResource(
 
     @GET
     @Path("/{partyId}/mcp-native-passkey-age-policy/effective")
-    @RolesAllowed("ROLE_API")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "party.mcpNativePasskeyAgePolicy.effective")
     suspend fun effective(@PathParam("partyId") partyId: UUID?): Response {
         requireEffectiveCaller()
