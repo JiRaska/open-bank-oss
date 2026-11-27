@@ -259,6 +259,11 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
      grant permanently. The native assertion, credential age evidence, binding and separate
      SCA device age check remain required. Outside that sandbox configuration and on lookup
      failure, the 72-hour native minimum applies.
+   - A separately enabled shared sandbox may use an expiring site-wide native passkey
+     minimum for active individual customer and synthetic profiles. A staff administrator sets
+     a positive minimum in Admin UI and supplies a reason and expiry. Party records the change
+     and serves the active value only for an eligible bound party to the Edge service identity.
+     Ordinary deployment defaults and SCA device age do not inherit the sandbox setting.
    - Keycloak consumes only a single matching bank-internal receipt. It rechecks the user,
      selected context and session expiry before initiating the existing context-bound SCA.
      Keycloak releases the original OAuth code after SCA consumption, with the original redirect
