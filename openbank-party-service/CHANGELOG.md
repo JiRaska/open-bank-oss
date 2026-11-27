@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.2...party-service-v0.33.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
 ## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.1...party-service-v0.32.2) (2026-11-20)
 
 
