@@ -63,10 +63,9 @@ class McpNativePasskeyAgeExceptionResource(
     @RolesAllowed("ROLE_API")
     @Authorize(action = "party.mcpNativePasskeyAgeException.effective")
     suspend fun effective(@PathParam("partyId") partyId: UUID?): Response {
-        if (!enabled) throw NotFoundException()
-        if (!ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-edge")) throw ForbiddenException()
-        val row = latest(requireNotNull(partyId)) ?: throw NotFoundException()
-        if (row.getInteger("minimum_age_minutes") == null) throw NotFoundException()
+        requireEffectiveCaller()
+        val row = latest(requireNotNull(partyId))?.takeIf { it.getInteger("minimum_age_minutes") != null }
+            ?: throw NotFoundException()
         return response(Effective(row.getInteger("minimum_age_minutes"), row.getOffsetDateTime("expires_at")))
     }
 
@@ -77,10 +76,12 @@ class McpNativePasskeyAgeExceptionResource(
         val actor = staffActor()
         val party = requireNotNull(partyId)
         val request = requireNotNull(change)
-        val minutes = requireNotNull(request.minimumAgeMinutes).also { require(it in 1..4319) }
+        val minutes = requireNotNull(request.minimumAgeMinutes).also {
+            require(it in MIN_EXCEPTION_AGE_MINUTES..MAX_EXCEPTION_AGE_MINUTES)
+        }
         val expiry = requireNotNull(request.expiresAt)
         val reason = requireNotNull(request.reason).trim().also {
-            require(it.isNotEmpty() && it.length <= 240 && it.none(Char::isISOControl))
+            require(it.isNotEmpty() && it.length <= MAX_REASON_LENGTH && it.none(Char::isISOControl))
         }
         val result = pool.preparedQuery(
             """
@@ -114,10 +115,15 @@ class McpNativePasskeyAgeExceptionResource(
         return Response.noContent().header(HttpHeaders.CACHE_CONTROL, "no-store").build()
     }
 
+    private fun requireEffectiveCaller() {
+        if (!enabled) throw NotFoundException()
+        if (!ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-edge")) throw ForbiddenException()
+    }
+
     private fun staffActor(): String {
-        if (!enabled) throw ForbiddenException()
-        if (!ServiceAccountIdentity.isHumanStaff(identity)) throw ForbiddenException()
-        return (identity.principal as? JsonWebToken)?.subject?.takeIf { it.isNotBlank() && it.length <= 255 }
+        if (!enabled || !ServiceAccountIdentity.isHumanStaff(identity)) throw ForbiddenException()
+        return (identity.principal as? JsonWebToken)?.subject
+            ?.takeIf { it.isNotBlank() && it.length <= MAX_SUBJECT_LENGTH }
             ?: throw ForbiddenException()
     }
 
@@ -138,6 +144,11 @@ class McpNativePasskeyAgeExceptionResource(
         Response.ok(entity).header(HttpHeaders.CACHE_CONTROL, "no-store").build()
 
     private companion object {
+        const val MIN_EXCEPTION_AGE_MINUTES = 1
+        const val MAX_EXCEPTION_AGE_MINUTES = 4319
+        const val MAX_REASON_LENGTH = 240
+        const val MAX_SUBJECT_LENGTH = 255
+
         const val ELIGIBLE_PARTY = "parties.party_id = $1 AND party_type = 'INDIVIDUAL' " +
             "AND classification = 'SYNTHETIC' AND status = 'ACTIVE'"
     }

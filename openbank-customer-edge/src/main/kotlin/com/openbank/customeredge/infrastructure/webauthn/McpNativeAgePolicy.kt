@@ -6,6 +6,7 @@ package com.openbank.customeredge.infrastructure.webauthn
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.core.Response.Status
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
 import java.time.Instant
@@ -30,22 +31,24 @@ internal class McpNativeAgePolicy(
         return runCatching {
             val path = "/api/v1/parties/$party/mcp-native-passkey-age-exception/effective"
             upstream.getToService(partyService, path, emptyMap(), party.toString()).use { response ->
-                if (response.status != 200) return DEFAULT_AGE
+                if (response.status != Status.OK.statusCode) return DEFAULT_AGE
                 val body = mapper.readTree(response.entity.toString())
                 val minutes = body.path("minimumAgeMinutes")
+                    .takeIf { it.isIntegralNumber && it.canConvertToInt() }?.intValue()
+                    ?: return DEFAULT_AGE
+                if (minutes !in MIN_EXCEPTION_AGE_MINUTES..MAX_EXCEPTION_AGE_MINUTES) return DEFAULT_AGE
                 val expiry = Instant.parse(body.path("expiresAt").textValue())
-                if (!minutes.isIntegralNumber || !minutes.canConvertToInt() ||
-                    minutes.intValue() !in 1..4319 || !expiry.isAfter(now) ||
-                    expiry.isAfter(now.plus(Duration.ofHours(24)))
-                ) {
-                    return DEFAULT_AGE
-                }
-                Duration.ofMinutes(minutes.longValue())
+                if (!expiry.isAfter(now) || expiry.isAfter(now.plus(MAX_EXCEPTION_LIFETIME))) return DEFAULT_AGE
+                Duration.ofMinutes(minutes.toLong())
             }
         }.getOrDefault(DEFAULT_AGE)
     }
 
     private companion object {
+        const val MIN_EXCEPTION_AGE_MINUTES = 1
+        const val MAX_EXCEPTION_AGE_MINUTES = 4319
+        val MAX_EXCEPTION_LIFETIME: Duration = Duration.ofHours(24)
+
         val DEFAULT_AGE: Duration = Duration.ofHours(72)
     }
 }
