@@ -202,6 +202,13 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
 
+`McpEndpoint` receives the customer-branch collaborators through the CDI bean
+`CustomerChannelDeps`. The dependency bundle supplies grant lookup, read tools, auditing,
+metrics, throttling and client-address resolution. The endpoint creates the customer branch only
+when the channel supplies an admission policy. Direct endpoint tests leave the customer branch off without
+injected customer dependencies or an HTTP request. Client-address lookup remains deferred until a
+subject-less refusal needs an audit key.
+
 ## Customer reads: grant lookup and token exchange (ADR-0383 D3/D4)
 
 - **Connection binding.** `mcp.customer.connection-binding.enabled`
