@@ -3,7 +3,7 @@
   "digest": "sha256:12eb5d497a65f15b942c29038bb33a4cb61e600a467866767c6e3948ca7b0577",
   "image": "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui",
   "image_source_sha": "f9ed0e63ca4080625c824ef6bbe32886ceea19f1",
-  "manifest_sha": "f9ed0e63ca4080625c824ef6bbe32886ceea19f1",
+  "manifest_sha": "9e9f101371d086dda011ed3040418a8ac6af22f5",
   "rollback": false,
   "tag": "sandbox-f9ed0e63c-run45917435979"
 }
