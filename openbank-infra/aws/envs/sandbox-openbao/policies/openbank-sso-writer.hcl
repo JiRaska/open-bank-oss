@@ -28,3 +28,15 @@ path "openbank/data/delegation-disclosure-service" {
 path "openbank/data/langfuse" {
   capabilities = ["create", "update", "read", "patch"]
 }
+
+# ADR-0383 synthetic sandbox bootstrap. Keep this list explicit so other
+# sandbox data and live realm inputs retain their current access policy.
+path "openbank/data/mcp-synthetic-sandbox/sandbox-keycloak-realm-import" {
+  capabilities = ["create", "update", "read"]
+}
+path "openbank/data/mcp-synthetic-sandbox/read-issuer-client-trust" {
+  capabilities = ["create", "update", "read"]
+}
+path "openbank/data/mcp-synthetic/runner" {
+  capabilities = ["create", "update", "read"]
+}
