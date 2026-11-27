@@ -178,8 +178,9 @@ allowed_reasons contains "staff-native-passkey-age-manage" if {
     }
 }
 
-allowed_reasons contains "edge-native-passkey-age-effective" if {
+# Exact Edge workload reads on the two effective-lease GET routes.
+allowed_reasons contains "edge-native-passkey-age-effective-read" if {
     machine_named("service-account-openbank-edge")
-    "ROLE_API" in input.principal.roles
+    "ROLE_OPERATOR" in input.principal.roles
     input.action in {"party.mcpNativePasskeyAgeException.effective", "party.mcpNativePasskeyAgePolicy.effective"}
 }
