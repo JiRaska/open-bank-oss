@@ -139,9 +139,9 @@ public final class ExtensionTests {
         eq("QR encodes exactly the direct universal link", issued.appLink(), new MultiFormatReader().decode(bitmap).getText());
 
         var art = Pattern.compile("data:image/webp;base64,([A-Za-z0-9+/=]+)").matcher(html);
-        check("site artwork is bundled as a local WebP", art.find());
-        try (var source = McpNativeHandoffPage.class.getResourceAsStream("explorers-lipa.webp")) {
-            check("bundled website artwork bytes match the page", source != null
+        check("standalone Lípa artwork is bundled as a local WebP", art.find());
+        try (var source = McpNativeHandoffPage.class.getResourceAsStream("lipa-mascot.webp")) {
+            check("bundled mascot artwork bytes match the page", source != null
                     && Arrays.equals(source.readAllBytes(), Base64.getDecoder().decode(art.group(1))));
         }
 

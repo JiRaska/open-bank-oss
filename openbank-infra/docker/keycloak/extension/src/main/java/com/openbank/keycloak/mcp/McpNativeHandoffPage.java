@@ -16,8 +16,8 @@ import java.util.Base64;
 import java.util.UUID;
 
 final class McpNativeHandoffPage {
-    // Byte-identical first-party landing artwork; Keycloak has a separate Docker build context.
-    private static final String EXPLORERS_ART = asset("explorers-lipa.webp");
+    // Standalone Lípa mascot derived from the first-party landing artwork.
+    private static final String LIPA_MASCOT = asset("lipa-mascot.webp");
     private McpNativeHandoffPage() {
     }
 
@@ -26,7 +26,7 @@ final class McpNativeHandoffPage {
         String nonce = UUID.randomUUID().toString();
         String input = issued == null ? "" :
                 "<input type=\"hidden\" name=\"handoff\" value=\"" + issued.formValue() + "\">";
-        String html = TEMPLATE.formatted(nonce, STYLES, EXPLORERS_ART, McpWithheldCodeAuthenticator.escape(client),
+        String html = TEMPLATE.formatted(nonce, STYLES, LIPA_MASCOT, McpWithheldCodeAuthenticator.escape(client),
                 issued == null ? WAITING : qrPanel(issued), McpWithheldCodeAuthenticator.escape(action), input, nonce);
         return Response.ok(html, MediaType.TEXT_HTML_TYPE.withCharset("utf-8"))
                 .header("Cache-Control", "no-store")
@@ -126,11 +126,8 @@ final class McpNativeHandoffPage {
               display: flex; align-items: center; justify-content: space-between; gap: .75rem;
               border-bottom: 1px solid #dce4f6; padding-bottom: 1rem;
             }
-            .art {
-              flex: 0 0 clamp(4rem, 22vw, 7rem); block-size: clamp(4rem, 22vw, 7rem);
-              border-radius: 1rem; overflow: hidden; background: #e6f1ff;
-            }
-            .art img { display: block; height: 310%; position: relative; left: -191%; top: -41%; width: auto; }
+            .art { flex: 0 0 clamp(4.75rem, 25vw, 7.5rem); aspect-ratio: 1; }
+            .art img { display: block; inline-size: 100%; block-size: 100%; object-fit: contain; }
             .brand { margin: 0 0 .65rem; color: #2357aa; font-size: 1rem; font-weight: 750; }
             h1 { margin: 0; font-size: clamp(1.65rem, 6vw, 2.35rem); line-height: 1.08; letter-spacing: -.03em; }
             p { line-height: 1.45; }
