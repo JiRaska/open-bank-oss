@@ -77,6 +77,29 @@ is_inert_service_path() {
       # relevant. Both halves are self-tested below.
       if is_service_ci_recipe_path "$1"; then return 1; fi
       return 0 ;;
+    # Standalone manifests, generated assets, and Python validation. JVM test
+    # readers are still derived by service-ci-select-modules.sh from the diff.
+    integrations/assistant-plugins/README.md|\
+    integrations/assistant-plugins/assets/icon.png|\
+    integrations/assistant-plugins/assets/icon.svg|\
+    integrations/assistant-plugins/listing.json|\
+    integrations/assistant-plugins/packages/.claude-plugin/marketplace.json|\
+    integrations/assistant-plugins/packages/claude-code-plugin/.claude-plugin/plugin.json|\
+    integrations/assistant-plugins/packages/claude-code-plugin/.mcp.json|\
+    integrations/assistant-plugins/packages/claude-code-plugin/assets/icon.png|\
+    integrations/assistant-plugins/packages/claude-connector-listing/assets/icon.png|\
+    integrations/assistant-plugins/packages/claude-connector-listing/directory-listing.json|\
+    integrations/assistant-plugins/packages/openai-plugin/.codex-plugin/plugin.json|\
+    integrations/assistant-plugins/packages/openai-plugin/.mcp.json|\
+    integrations/assistant-plugins/packages/openai-plugin/assets/icon.png|\
+    integrations/assistant-plugins/packages/openai-plugin/assets/logo.png|\
+    integrations/assistant-plugins/packages/openai-plugin/assets/logo.svg|\
+    integrations/assistant-plugins/packages/openai-plugin/mcp.json|\
+    integrations/assistant-plugins/packages/openai-plugin/plugin.json|\
+    integrations/assistant-plugins/scripts/check.py|\
+    integrations/assistant-plugins/scripts/generate.py|\
+    integrations/assistant-plugins/scripts/test_check_registry.py)
+      return 0 ;;
     openbank-document-renderer/requirements.txt)
       # Main's Python sidecar lock remains outside the JVM lane.
       return 0 ;;

@@ -717,6 +717,7 @@ def main(argv: list[str]) -> int:
         print(f"FAIL {e}")
     if errs:
         return 1
+    print(f"SUBJECTS={len(rendered)}  # generated package files checked")
     print(f"OK: {len(listing['tools']['included'])} tools match the registry; {len(rendered)} package files "
           "match listing.json; OpenAI/Claude structural checks pass; no credentials")
     return 0
