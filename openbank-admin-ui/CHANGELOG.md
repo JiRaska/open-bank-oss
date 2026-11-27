@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.27.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.5...admin-ui-v4.27.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
 ## [4.26.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.4...admin-ui-v4.26.5) (2026-11-25)
 
 
