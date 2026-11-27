@@ -184,6 +184,12 @@ spec:
                   name: mcp-sandbox-passkey-age-policy
                   key: enabled
                   optional: true
+            - name: PARTY_SANDBOX_MCP_NATIVE_AGE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: globalEnabled
+                  optional: true
             # Redis for the four-eyes ApprovalStore (ADR-0155), backing the `party.merge`
             # gate. Load-bearing: the ApprovalConfig bean resolves with or without this, so
             # a missing Redis does not make the interceptor fall back to its documented
