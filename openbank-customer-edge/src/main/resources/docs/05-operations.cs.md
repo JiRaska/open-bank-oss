@@ -174,3 +174,12 @@ relace aplikace zastavil. Jediný nový štítek je pevně vymezený `reason`.
 
 Ověřte nárůst čítače ve stejném testovacím okně jako HTTP 403. Veřejná odpověď zůstává obecná.
 Metrika neobsahuje identifikátory klíčů, odkazy na požadavky ani hodnoty tokenů.
+
+## Výjimky pro stáří nativní passkey MCP v sandboxu
+
+Správa výjimek je ve výchozím nastavení vypnutá. Pravidlo 72 hodin platí, dokud služba Party
+nepotvrdí současně aktivní syntetickou fyzickou osobu a platnou výjimku. Přihlášený
+administrátor ji může zapsat nebo odvolat v administraci. Nejkratší nastavitelná lhůta je jedna
+minuta a výjimka vyprší nejpozději za 24 hodin. Party ukládá aktéra, čas, důvod a změnu v jednom
+záznamu. Ověření stáří na základě existujícího záznamu passkey, vlastnictví, podpis a samostatná
+kontrola stáří zařízení pro SCA zůstávají povinné.

@@ -191,3 +191,13 @@ admitting the app session. The only added label is the fixed `reason`.
 
 Confirm the counter increases in the same test interval as the HTTP 403. The public response
 stays generic. The metric contains no credential identifiers, request references or token values.
+
+## Sandbox native MCP passkey age exceptions
+
+The sandbox-only control defaults off. Enabled Party and Customer Edge deployments use the
+72-hour rule unless Party confirms that the current customer is an active synthetic individual
+and has an unexpired exception. An interactive administrator can record or revoke a rule in the
+admin console. The minimum is one minute and an exception expires within 24 hours. Party stores
+the operator, timestamp, reason and change together with the effective policy. Turning either
+deployment control off restores the ordinary rule. Existing credential evidence, ownership,
+cryptographic verification and the separate SCA device-age control still apply.
