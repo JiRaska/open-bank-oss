@@ -108,7 +108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-49d1972f@sha256:6dbc355b9b0098f9ef2e633bf8e0a36d1baf1e9c1e35ab08564fd5d5021e0872
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-01f4456f@sha256:82eb4f17704051fbc2c9280c606fe24387ca462631b161563583a0c29ad09ae0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
