@@ -115,3 +115,9 @@ admin console. The minimum is one minute and an exception expires within 24 hour
 the operator, timestamp, reason and change together with the effective policy. Turning either
 deployment control off restores the ordinary rule. Existing credential evidence, ownership,
 cryptographic verification and the separate SCA device-age control still apply.
+
+### MCP passkey age in the shared sandbox
+
+Party owns the effective rule and its append-only administrator audit history. A staff administrator records a reason and an expiry at most 24 hours ahead. Revocation appends a record and takes effect immediately. The default is 72 hours and the configurable floor is one minute. WebAuthn signature verification and the independent SCA policy still apply.
+
+Enable `PARTY_SANDBOX_MCP_NATIVE_AGE_POLICY` only in the shared sandbox. It defaults to false.
