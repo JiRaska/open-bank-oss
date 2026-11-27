@@ -204,6 +204,6 @@ cryptographic verification and the separate SCA device-age control still apply.
 
 ### MCP passkey age in the shared sandbox
 
-Customer Edge checks the rule for an active individual through Party. A valid per-party synthetic rule takes precedence. An unavailable, invalid, expired or revoked rule leaves the default in place. The default is 72 hours and the configurable floor is one minute. WebAuthn signature verification and the independent SCA policy still apply.
+Customer Edge checks the rule for an active individual through Party. A valid per-party synthetic rule takes precedence. If the synthetic endpoint refuses a regular customer and the shared rule is enabled, Edge checks that customer independently with the shared endpoint. An unavailable, invalid, expired or revoked rule leaves the default in place. The default is 72 hours and the configurable floor is one minute. WebAuthn signature verification and the independent SCA policy still apply.
 
 Enable `EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY` only in the shared sandbox. It defaults to false.

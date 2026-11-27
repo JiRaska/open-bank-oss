@@ -186,6 +186,6 @@ kontrola stáří zařízení pro SCA zůstávají povinné.
 
 ### Platnost passkey pro MCP ve sdíleném sandboxu
 
-Customer Edge načte pravidlo z Party pro aktivní fyzickou osobu. Platné individuální pravidlo pro syntetický profil má přednost. Nedostupné, neplatné, vypršené nebo odvolané pravidlo ponechá výchozí hodnotu. Výchozí doba je 72 hodin a minimální nastavitelná doba je jedna minuta. Ověření podpisu WebAuthn a samostatná pravidla SCA zůstávají v platnosti.
+Customer Edge načte pravidlo z Party pro aktivní fyzickou osobu. Platné individuální pravidlo pro syntetický profil má přednost. Pokud služba odmítne běžného zákazníka u syntetické výjimky a sdílené pravidlo je zapnuté, Edge ověří jeho způsobilost samostatně podle sdíleného pravidla. Nedostupné, neplatné, vypršené nebo odvolané pravidlo ponechá výchozí hodnotu. Výchozí doba je 72 hodin a minimální nastavitelná doba je jedna minuta. Ověření podpisu WebAuthn a samostatná pravidla SCA zůstávají v platnosti.
 
 `EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY` zapínejte pouze ve sdíleném sandboxu. Výchozí hodnota je false.

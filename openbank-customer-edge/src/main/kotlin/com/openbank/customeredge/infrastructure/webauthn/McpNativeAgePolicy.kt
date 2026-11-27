@@ -31,16 +31,30 @@ internal class McpNativeAgePolicy(
 
     private fun minimumConfiguredAge(party: UUID, now: Instant): Duration? {
         if (enabled) {
-            val exception = fetchAge(party, now, "mcp-native-passkey-age-exception")
+            // The synthetic endpoint returns 403 for ordinary customers. The shared
+            // endpoint authorizes eligible customers independently.
+            val exception =
+                fetchAge(
+                    party,
+                    now,
+                    "mcp-native-passkey-age-exception",
+                    forbiddenMeansAbsent = sharedPolicyEnabled,
+                )
             if (exception != null) return exception
         }
         return if (sharedPolicyEnabled) fetchAge(party, now, "mcp-native-passkey-age-policy") else null
     }
 
-    private fun fetchAge(party: UUID, now: Instant, resource: String): Duration? {
+    private fun fetchAge(
+        party: UUID,
+        now: Instant,
+        resource: String,
+        forbiddenMeansAbsent: Boolean = false,
+    ): Duration? {
         val path = "/api/v1/parties/$party/$resource/effective"
         return upstream.getToService(partyService, path, emptyMap(), party.toString()).use { response ->
             if (response.status == Status.NOT_FOUND.statusCode) return null
+            if (forbiddenMeansAbsent && response.status == Status.FORBIDDEN.statusCode) return null
             check(response.status == Status.OK.statusCode)
             val body = mapper.readTree(response.entity.toString())
             val minutes = body.path("minimumAgeMinutes")
