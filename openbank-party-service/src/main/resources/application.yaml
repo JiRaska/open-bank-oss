@@ -277,6 +277,8 @@ mp:
   authz:
     enforce: false
 openbank:
+  party:
+    sandbox-mcp-native-age-exceptions: ${PARTY_SANDBOX_MCP_NATIVE_AGE_EXCEPTIONS:false}
   authz:
     # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
     # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
