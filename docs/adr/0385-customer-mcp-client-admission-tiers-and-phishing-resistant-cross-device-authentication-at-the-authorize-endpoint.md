@@ -253,6 +253,12 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
      subject, guarded request and selected-account context. Its server-observed credential age
      must meet the same 72-hour minimum. Older records without a trustworthy time acquire a
      conservative lower bound at first verified use.
+   - In a dedicated sandbox configuration, a staff administrator may temporarily lower only
+     the native passkey minimum for one active synthetic individual. Party records the exact
+     administrator, beneficiary, expiry and reason. Loss of synthetic eligibility revokes the
+     grant permanently. The native assertion, credential age evidence, binding and separate
+     SCA device age check remain required. Outside that sandbox configuration and on lookup
+     failure, the 72-hour native minimum applies.
    - Keycloak consumes only a single matching bank-internal receipt. It rechecks the user,
      selected context and session expiry before initiating the existing context-bound SCA.
      Keycloak releases the original OAuth code after SCA consumption, with the original redirect

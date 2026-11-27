@@ -404,3 +404,11 @@ subject claims, and an absent actor context. It forwards only the authenticated 
 existing idempotency key to Delegation. Delegation enforces ownership against the connection
 record, and Edge rejects a list response containing another party. The pending-request collection,
 OAuth approval and payment approval continue to use their existing authorization rules.
+
+An explicitly enabled sandbox can apply an expiring, administrator-issued exception to the
+native passkey minimum for one active synthetic party. Edge looks up the policy for the verified
+party through its authenticated Party client. The policy changes only the age comparison and
+requires a recorded timestamp, the original WebAuthn assertion and the existing bound SCA.
+Unavailable or invalid policy falls back to 72 hours. Party appends an audit record on issuance
+or revocation and revokes when the party loses synthetic eligibility. Disable the sandbox policy
+switch to restore the standard minimum immediately at the next deployment.
