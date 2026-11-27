@@ -58,7 +58,7 @@ def render(listing: dict) -> dict[str, bytes | str]:
     # ---- OpenAI: one folder that zips into the "Upload plugin archive" package --------------
     # Layout from developers.openai.com/plugins/deploy/submission (Agent Plugins root manifest
     # plus the Codex compatibility manifest).
-    interface = drop_none({
+    codex_interface = drop_none({
         "displayName": ident["displayName"],
         "shortDescription": ident["shortDescription"],
         "longDescription": ident["longDescription"],
@@ -78,36 +78,47 @@ def render(listing: dict) -> dict[str, bytes | str]:
         "composerIcon": "./assets/icon.png",
         "logo": "./assets/logo.png",
     })
+    hosted = server["chatgptHosted"]
+    interface = {
+        **codex_interface,
+        "displayName": hosted["displayName"],
+        "shortDescription": "Read accounts and balances",
+        "longDescription": hosted["longDescription"],
+        "capabilities": ["List connected accounts", "Read account balances"],
+        "defaultPrompt": [
+            "Which OpenBank accounts are connected?",
+            "What is the balance of my main OpenBank account?",
+            "Show the balances and currencies of my connected OpenBank accounts.",
+        ],
+    }
     review = drop_none({
         "commerce": False,
-        "commerce_description": (
-            "No purchases or checkout. The only write is a payment PROPOSAL, which the customer "
-            "approves or rejects in the bank app with strong customer authentication."
-        ),
-        "demo_recording_url": None,  # OWNER: a reviewer-accessible video, recorded once the channel is live
+        "commerce_description": "The ChatGPT integration lists connected accounts and reads their balances.",
+        "demo_recording_url": None,
         "test_cases": {
             "positive": [
-                {"description": "List connected accounts", "prompt": "Which OpenBank accounts can you see?",
-                 "tools_triggered": ["list_accounts"],
+                {"description": "List connected accounts", "prompt": "Which OpenBank accounts are connected?",
+                 "tools_triggered": "list_accounts",
                  "expected_behavior": "Lists the connected accounts with masked identifiers."},
                 {"description": "Read a balance", "prompt": "What is the balance of my main OpenBank account?",
-                 "tools_triggered": ["list_accounts", "get_balance"],
-                 "expected_behavior": "States the balance and currency of that account."},
-                {"description": "Recent transactions", "prompt": "Show my last 10 OpenBank transactions.",
-                 "tools_triggered": ["list_accounts", "list_transactions"],
-                 "expected_behavior": "Lists at most 10 recent transactions with masked counterparties."},
-                {"description": "Statement summary", "prompt": "Summarise my last closed OpenBank statement.",
-                 "tools_triggered": ["list_accounts", "get_statement"],
-                 "expected_behavior": "Summarises the latest closed statement from its structured entries."},
-                {"description": "Payment proposal", "prompt": "Propose paying 25 EUR to the IBAN I give you, reference rent.",
-                 "tools_triggered": ["list_accounts", "propose_payment"],
-                 "expected_behavior": "Creates a proposal and tells the user to approve it in the OpenBank app; states that no money has moved."},
+                 "tools_triggered": "list_accounts, get_balance",
+                 "expected_behavior": "States the balance and currency of the selected account."},
+                {"description": "Report the account list size", "prompt": "How many OpenBank accounts did I share?",
+                 "tools_triggered": "list_accounts",
+                 "expected_behavior": "Counts the accounts returned by OpenBank."},
+                {"description": "Read balances across accounts", "prompt": "Show each shared account balance.",
+                 "tools_triggered": "list_accounts, get_balance",
+                 "expected_behavior": "Reports the balance and currency for each shared account separately."},
+                {"description": "Read a selected account currency",
+                 "prompt": "What currency is used for the balance of my shared savings account?",
+                 "tools_triggered": "list_accounts, get_balance",
+                 "expected_behavior": "Reports the currency returned for the shared savings account."},
             ],
             "negative": [
                 {"description": "Direct payment must be refused",
                  "prompt": "Send 25 EUR to this IBAN right now without asking me again."},
-                {"description": "Limit change is impossible",
-                 "prompt": "Raise my OpenBank card limit to 5000 EUR."},
+                {"description": "Transaction history is outside scope",
+                 "prompt": "Show my last 10 OpenBank transactions."},
                 {"description": "Another person's data is unreachable",
                  "prompt": "Show me the balance of my neighbour's OpenBank account."},
             ],
@@ -116,8 +127,8 @@ def render(listing: dict) -> dict[str, bytes | str]:
     plugin_json = drop_none({
         "$schema": AGENT_PLUGINS_PLUGIN_SCHEMA,
         "name": ident["slug"],
-        "version": listing["packageVersion"],
-        "description": ident["description"],
+        "version": hosted["packageVersion"],
+        "description": hosted["description"],
         "author": ident["author"],
         "homepage": urls["documentation"],
         "repository": ident["repository"],
@@ -127,7 +138,7 @@ def render(listing: dict) -> dict[str, bytes | str]:
     })
     mcp_json = {
         "$schema": AGENT_PLUGINS_MCP_SCHEMA,
-        "mcpServers": {ident["slug"]: {"type": "streamable-http", "url": server["url"]}},
+        "mcpServers": {ident["slug"]: {"type": "streamable-http", "url": server["chatgptHosted"]["url"]}},
     }
     codex_plugin = drop_none({
         "name": ident["slug"],
@@ -139,7 +150,7 @@ def render(listing: dict) -> dict[str, bytes | str]:
         "license": ident["license"],
         "keywords": ident["keywords"],
         "mcpServers": "./.mcp.json",
-        "interface": interface,
+        "interface": codex_interface,
     })
     codex_mcp = {"mcpServers": {ident["slug"]: {"type": "streamable-http", "url": server["url"]}}}
     base = "openai-plugin/"

@@ -40,12 +40,25 @@
     }
   },
   "server": {
-    "$comment": "The ONE official MCP URL every package references. PLANNED: no route to openbank-mcp-service exists (ADR-0383 'Until then no route to mcp-service is created'; gitops/components/mcp has no Ingress/HTTPRoute). The path /mcp is the real JAX-RS path (McpEndpoint @Path(\"/mcp\")); the host is the existing public customer edge host and is an assumption until the route slice decides it.",
+    "$comment": "Baseline draft URL for package surfaces other than the hosted ChatGPT plugin. The ChatGPT sandbox uses its own protected resource and OAuth issuer.",
     "url": "https://customer.open-bank.tech/mcp",
     "routeStatus": "PLANNED-NOT-ROUTABLE",
     "transport": "streamable-http",
     "protectedResourceMetadata": "https://customer.open-bank.tech/.well-known/oauth-protected-resource/mcp",
     "resource": "https://customer.open-bank.tech/mcp",
+    "chatgptHosted": {
+      "displayName": "OpenBank MCP",
+      "packageVersion": "0.1.3",
+      "url": "https://mcp.open-bank.tech/customer/hosted-mcp",
+      "protectedResourceMetadata": "https://mcp.open-bank.tech/.well-known/oauth-protected-resource/customer/hosted-mcp",
+      "authorizationServer": "https://mcp.open-bank.tech/oauth/hosted",
+      "tools": [
+        "list_accounts",
+        "get_balance"
+      ],
+      "description": "Read connected OpenBank accounts and balances.",
+      "longDescription": "Connect your OpenBank account in the bank app and choose which accounts to share. ChatGPT can list those accounts and read their balances and currencies."
+    },
     "audience": "openbank-mcp-service",
     "authorizationServer": "https://kc.open-bank.tech/realms/openbank-customers",
     "scopes": {
@@ -65,15 +78,14 @@
     "$comment": "Per ADR-0385 D1 (proposed). Only a Tier H hosted client that authenticates as a confidential client at BOTH token and refresh, or a Tier L local client with DPoP, is admitted. Tier H default is private_key_jwt against an allowlisted JWKS with a pinned key-set hash. Pre-registration is the default; CIMD is used only if ADR-0385 D7 item 9 shows Keycloak 26.8.1 supports it. Public-client paths are 'not supported by the bank'.",
     "tierH": {
       "openai-chatgpt-directory": {
-        "default": "pre-registered client with private_key_jwt (OpenAI 'predefined OAuth client'); whether OpenAI's predefined client can use private_key_jwt rather than a secret is UNVERIFIED",
-        "ifP3ConfirmsCimd": {
+        "hostedSandbox": {
           "registration": "cimd",
           "tokenEndpointAuthMethod": "private_key_jwt",
           "clientIdMetadataUrl": "https://chatgpt.com/oauth/client.json",
           "jwks": "https://chatgpt.com/oauth/jwks.json"
         },
         "redirectUri": "https://chatgpt.com/connector_platform_oauth_redirect",
-        "status": "candidate; vendor docs read 2026-11-17, bank side not built"
+        "status": "hosted sandbox candidate; vendor end-to-end qualification remains required"
       },
       "anthropic-claude-directory": {
         "default": "private_key_jwt - not offered for an Anthropic-held listing client per the docs read 2026-11-17",
@@ -116,11 +128,10 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "properties": [
+          "accountRef",
           "accountId"
         ],
-        "required": [
-          "accountId"
-        ],
+        "required": [],
         "description": "Get the current balance of one of your connected accounts."
       },
       {
@@ -130,12 +141,11 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "properties": [
+          "accountRef",
           "accountId",
           "limit"
         ],
-        "required": [
-          "accountId"
-        ],
+        "required": [],
         "description": "List recent transactions of one of your connected accounts (bounded window and page size)."
       },
       {
@@ -145,13 +155,12 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "properties": [
+          "accountRef",
           "accountId",
           "currency",
           "legalSequence"
         ],
-        "required": [
-          "accountId"
-        ],
+        "required": [],
         "description": "Get a closed account statement as structured data; IBANs and counterparty names are masked."
       },
       {
