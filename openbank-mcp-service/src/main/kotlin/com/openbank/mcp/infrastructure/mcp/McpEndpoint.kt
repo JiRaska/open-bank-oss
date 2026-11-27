@@ -28,9 +28,6 @@ import com.openbank.mcp.application.protocol.ServerInfo
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
-import com.openbank.mcp.infrastructure.customer.CustomerChannel
-import com.openbank.mcp.infrastructure.customer.CustomerGrantCache
-import com.openbank.mcp.infrastructure.customer.CustomerReadTools
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
@@ -118,25 +115,9 @@ class McpEndpoint(
     @Inject
     lateinit var toolsCatalog: PolicyFilteredToolCatalog
 
-    /**
-     * Field-injected for the same reason as [metrics]. The customer MCP channel (ADR-0383/0385);
-     * off unless `mcp.customer.enabled`. Plain unit tests that construct this class leave it unset,
-     * which reads as "off".
-     */
+    /** Customer-channel wiring. Plain endpoint unit tests leave this unset. */
     @Inject
-    lateinit var customerChannel: CustomerChannel
-
-    /** ADR-0383 D3: the customer's MCP_CLIENT grant lookup (positive answers cached briefly). */
-    @Inject
-    lateinit var customerGrants: CustomerGrantCache
-
-    /** ADR-0383 D3/D4: the customer channel's read tools on exchanged customer tokens. */
-    @Inject
-    lateinit var customerTools: CustomerReadTools
-
-    /** Field-injected for the same reason as [metrics]: the subject-less audit key (#16847). */
-    @Inject
-    lateinit var clientAddress: ClientAddressResolver
+    lateinit var customerDeps: CustomerChannelDeps
 
     /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
     @Inject
@@ -149,20 +130,11 @@ class McpEndpoint(
     private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
 
     private val customerBranch by lazy {
-        if (!::customerChannel.isInitialized || !::httpRequest.isInitialized || !::customerGrants.isInitialized) {
-            return@lazy null
-        }
-        customerChannel.admission?.let { admission ->
-            McpCustomerBranch(
-                admission,
-                auditor,
-                metrics,
-                rateLimiter,
-                customerGrants,
-                customerTools,
-                shared = customerChannel.sharedThrottles,
-            ) {
-                if (::clientAddress.isInitialized) clientAddress.key(httpRequest) else ClientAddressKey.UNKNOWN
+        if (!::customerDeps.isInitialized || !::httpRequest.isInitialized) return@lazy null
+        val channel = customerDeps.channel
+        channel.admission?.let { admission ->
+            McpCustomerBranch(admission, customerDeps, shared = channel.sharedThrottles) {
+                customerDeps.clientAddress.key(httpRequest)
             }
         }
     }
