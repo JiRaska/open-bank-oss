@@ -149,12 +149,27 @@ tasks.register("verifyPackagedLibrarySbom") {
             }.sortedBy { it.getValue("projectPath") }
         val resolved = temporaryDir.resolve("resolved-runtime-projects.json")
         resolved.writeText(JsonOutput.toJson(artifacts))
-        val output = providers.exec {
+        val verification = providers.exec {
+            isIgnoreExitValue = true
             commandLine("python3", verifier.asFile.absolutePath,
                 "--sbom", operationalSbom.get().asFile.absolutePath,
                 "--runtime-artifacts", resolved.absolutePath,
-                "--quarkus-app", packagedApp.get().asFile.absolutePath)
-        }.standardOutput.asText.get()
+                "--quarkus-app", packagedApp.get().asFile.absolutePath,
+                "--redact-failure")
+        }
+        val result = verification.result.get()
+        val output = verification.standardOutput.asText.get()
+        if (result.exitValue != 0) {
+            val failureCode = output.trim()
+            val code = when (failureCode) {
+                "EVIDENCE_REJECTED", "LIBRARY_INVENTORY_MISMATCH", "LIBRARY_HASH_MISSING",
+                "LIBRARY_HASH_INVALID", "LIBRARY_HASH_MISMATCH", "PACKAGED_ARTIFACT_MISMATCH",
+                "INPUT_IO_ERROR", "INVALID_INPUT" -> failureCode
+                else -> "VERIFIER_FAILED"
+            }
+            logger.error("Packaged library SBOM verification failed for $path: $code")
+            result.assertNormalExitValue()
+        }
         receipt.parentFile.mkdirs()
         receipt.writeText(output)
     }
