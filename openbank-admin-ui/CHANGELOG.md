@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.28.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.28.0...admin-ui-v4.28.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **admin-ui:** link the MCP explainer to channel observability ([#17318](https://github.com/JiRaska/open-bank-oss/issues/17318)) ([45d31db](https://github.com/JiRaska/open-bank-oss/commit/45d31db573e7f344489537a8364f1b128a0e1b47)), closes [#16606](https://github.com/JiRaska/open-bank-oss/issues/16606)
+
 ## [4.28.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.27.0...admin-ui-v4.28.0) (2026-11-27)
 
 
