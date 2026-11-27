@@ -90,15 +90,15 @@ export function McpPasskeyAgeException({ partyId }: { partyId?: string }) {
       <p className="text-sm text-muted-foreground">
         {sandboxWide
           ? t(
-            'Dočasná změna platí pro všechny způsobilé klienty v tomto sandboxu. Po vypršení opět platí 72 hodin. Schválení v aplikaci je povinné.',
-            'This temporary change applies to all eligible customers in this sandbox. The 72-hour minimum resumes at expiry. Approval in the app is required.',
+            'Dočasná změna platí pro všechny způsobilé klienty v tomto sandboxu. Po vypršení se výchozí limit vrátí na 72 hodin. Schválení v aplikaci je povinné.',
+            'This temporary change applies to all eligible customers in this sandbox. The default returns to 72 hours at expiry. Approval in the app is required.',
           )
           : t(
             'Dočasná výjimka pro tento syntetický účet. Samostatné schválení v aplikaci je stále povinné.',
             'Temporary exception for this synthetic account. Separate approval in the app is still required.',
           )}
       </p>
-      {sandboxWide && !policy && <p role="status">{t('Aktuální minimum je 72 hodin.', 'The current minimum is 72 hours.')}</p>}
+      {sandboxWide && !policy && <p role="status">{t('Výchozí minimum v sandboxu je 72 hodin.', 'The sandbox default minimum is 72 hours.')}</p>}
       {policy && (
         <p role="status">
           {t('Minimum v minutách', 'Minimum in minutes')}{' '}{policy.minimumAgeMinutes}

@@ -395,15 +395,16 @@ UI and Party.
 
 Set `data.globalEnabled` to the string `"true"` in the namespace-local
 `mcp-sandbox-passkey-age-policy` ConfigMap. This key enables the global policy
-for active synthetic individuals. The existing `data.enabled` key controls
+for active individual CUSTOMER and SYNTHETIC profiles. The existing `data.enabled` key controls
 individual exceptions separately. Keep both keys absent from reusable manifests.
 
 After deploying images with global-policy support, provision and roll Party,
 Customer Edge and Admin UI in that order, following the ConfigMap sync and Admin
 UI pin steps above. Use the staff interface to configure the time-limited
-policy. Verify that a synthetic individual receives the intended threshold and
-that ineligible parties and expired or missing policies continue to use the
-72-hour default.
+policy. Verify both ordinary and synthetic individual profiles. An active
+per-profile synthetic exception takes precedence. Ineligible parties use the
+72-hour default. A missing or expired global policy also falls back to the
+default if no individual exception is active.
 
 To stop applying the global policy, remove `globalEnabled` from Customer Edge
 first and roll it. Then remove the key and roll Admin UI and Party. Preserve
