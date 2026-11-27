@@ -11,13 +11,10 @@
 // carefully-scoped follow-up.
 //
 // Run against a docker-compose or sandbox stack:
-//   LEDGER_URL=http://localhost:8101 TXN_URL=http://localhost:8102 k6 run money-path-smoke.js
-//
-// Thresholds are ADVISORY (the CI lane never fails a deploy on them; issue #334) — they
-// are the tripwire values to investigate, calibrated from the first green baseline run.
+// Set LEDGER_URL, TXN_URL, PERF_READ_TOKEN and the seeded PERF_ACCOUNT_ID.
 import http from "k6/http";
-import { check } from "k6";
-import { Trend } from "k6/metrics";
+import { check, sleep } from "k6";
+import { Rate, Trend } from "k6/metrics";
 
 // A 401 proves only that the identity boundary rejected the request. It does NOT prove
 // that either money-path handler, database projection, or read query ran, so it must never
@@ -30,12 +27,18 @@ const TXN_URL = __ENV.TXN_URL || "http://localhost:8102";
 // PERF_READ_TOKEN is injected only by the scheduled workflow from an environment secret.
 // It is deliberately never given a default and is never logged or added to k6 tags.
 const readHeaders = { Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}` };
+const accountId = __ENV.PERF_ACCOUNT_ID || "";
+const ledgerPath = `${LEDGER_URL}/api/v1/journals?limit=20`;
+const txnPath = `${TXN_URL}/api/v1/transactions?limit=20&accountId=${encodeURIComponent(accountId)}`;
+const infoPath = `${LEDGER_URL}/api/v1/info`;
+const preflight = new Rate("money_path_preflight");
 
 const ledgerLatency = new Trend("ledger_journals_ms", true);
 const txnLatency = new Trend("txn_list_ms", true);
 const infoLatency = new Trend("info_ms", true);
 
 export const options = {
+  systemTags: ["status", "method", "name", "check", "scenario", "expected_response"],
   scenarios: {
     // Gentle, steady read load — a baseline, not a soak or a spike.
     steady_reads: {
@@ -50,38 +53,66 @@ export const options = {
     },
   },
   thresholds: {
-    // Advisory tripwires (p95). Recalibrate from the first stable baseline; the CI
-    // lane runs with --no-thresholds-fail so a breach reports without failing the run.
+    "money_path_preflight": [{ threshold: "rate==1.0", abortOnFail: true }],
     "ledger_journals_ms": ["p(95)<800"],
     "txn_list_ms": ["p(95)<800"],
     "info_ms": ["p(95)<200"],
     "http_req_failed": ["rate<0.01"],
-    // A transport percentile is not a handler baseline unless every asserted route answered.
-    // The workflow keeps thresholds advisory; Test Intelligence retains the breach as failed
-    // evidence until a least-privilege runner identity is configured.
+    // Every sampled route must return its expected status.
     "checks": ["rate==1.0"],
   },
 };
 
-export default function () {
-  // Ledger: list journal entries (cursor-paginated read).
-  const j = http.get(`${LEDGER_URL}/api/v1/journals?limit=20`, {
-    headers: readHeaders,
-    tags: { name: "ledger_journals" },
-  });
+function read(path, name, headers = readHeaders) {
+  return http.get(path, { headers, redirects: 0, tags: { name } });
+}
+
+function hasSeededRows(response) {
+  if (response.status !== 200) return false;
+  try {
+    const rows = response.json("data");
+    return Array.isArray(rows) && rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export function setup() {
+  const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+  if (!uuid.test(accountId) || !__ENV.PERF_READ_TOKEN) {
+    preflight.add(false);
+    console.error("Money-path preflight requires a synthetic account UUID and read token.");
+    return false;
+  }
+
+  const ready = [
+    ["ledger_journals", hasSeededRows(read(ledgerPath, "ledger_journals"))],
+    ["txn_list", hasSeededRows(read(txnPath, "txn_list"))],
+    ["info", read(infoPath, "info", {}).status === 200],
+  ];
+  for (const [route, ok] of ready) {
+    preflight.add(ok);
+    if (!ok) console.error(`Money-path preflight failed for ${route}.`);
+  }
+  return ready.every(([, ok]) => ok);
+}
+
+export default function (ready) {
+  if (!ready) {
+    sleep(1);
+    return;
+  }
+
+  const j = read(ledgerPath, "ledger_journals");
   ledgerLatency.add(j.timings.duration);
   check(j, { "ledger journals 200": (r) => r.status === 200 });
 
-  // Transaction: list (read side of the money path).
-  const t = http.get(`${TXN_URL}/api/v1/transactions?limit=20`, {
-    headers: readHeaders,
-    tags: { name: "txn_list" },
-  });
+  const t = read(txnPath, "txn_list");
   txnLatency.add(t.timings.duration);
   check(t, { "txn list 200": (r) => r.status === 200 });
 
-  // libs-served service-info (unauthenticated; cheap liveness+version surface).
-  const i = http.get(`${LEDGER_URL}/api/v1/info`, { headers: readHeaders, tags: { name: "info" } });
+  const i = read(infoPath, "info", {});
   infoLatency.add(i.timings.duration);
   check(i, { "info 200": (r) => r.status === 200 });
+  sleep(1);
 }

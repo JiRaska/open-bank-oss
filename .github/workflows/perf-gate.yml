@@ -136,7 +136,7 @@ jobs:
           summary = [
               "## Performance gate scope",
               "",
-              f"**{len(matrix)} of {denom} requested service(s) actually measured.**",
+              f"**{len(matrix)} of {denom} requested service(s) selected for measurement.**",
               "",
           ]
           if override:
@@ -154,7 +154,7 @@ jobs:
               summary += ["| Excluded | Why |", "|---|---|"]
               summary += [f"| `{svc}` | {why} |" for svc, why in skipped]
               summary += [""]
-          summary += ["Measured: " + (", ".join(f"`{m['service']}`" for m in matrix) or "_none_")]
+          summary += ["Selected: " + (", ".join(f"`{m['service']}`" for m in matrix) or "_none_")]
           with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a") as fh:
               fh.write("\n".join(summary) + "\n")
 
@@ -302,7 +302,13 @@ jobs:
           # turns UP (domestic-payment and sepa-payment hung that way on run 41183628397).
           # Every registrar follows `openbank.<service>.worker.enabled`, so the switch is
           # derived from the module's own source instead of a per-service list.
-          EXTRA_PROPS=(-Dquarkus.kafka.devservices.enabled=false -Dkafka.bootstrap.servers=localhost:9092)
+          # The read harness records k6 metrics directly. Disable the optional LGTM dev stack,
+          # whose extra image pull exhausted the Ledger boot window in run 42999680156.
+          EXTRA_PROPS=(
+            -Dquarkus.kafka.devservices.enabled=false
+            -Dkafka.bootstrap.servers=localhost:9092
+            -Dquarkus.observability.enabled=false
+          )
           # No OPA sidecar exists in the throwaway stack. Services whose base default is
           # AUTHZ_ENFORCE:true (e.g. sanctions-service) would fail every @Authorize route
           # closed with 503 POLICY_DECISION_POINT_UNAVAILABLE and the lane would measure

@@ -39,6 +39,7 @@ raise SystemExit(int(os.environ.get('FAKE_EXIT', '0')))
         self.env = {**os.environ, 'PATH': str(self.root) + os.pathsep + os.environ['PATH'],
                     'BASE_URL': 'https://example.invalid', 'PERF_READ_TOKEN': 'synthetic-only',
                     'LEDGER_URL': 'https://example.invalid', 'TXN_URL': 'https://example.invalid',
+                    'PERF_ACCOUNT_ID': '30000000-0000-0000-0000-000000000103',
                     'K6_IMAGE': 'synthetic-pinned-image', 'MODULE_DEF': 'fixture.js',
                     'GITHUB_OUTPUT': str(self.root / 'outputs'), 'FAKE_EXIT': '0',
                     'FAKE_SUMMARY': json.dumps({'metrics': {'checks': {'thresholds': {'rate==1': False}}}})}
@@ -75,6 +76,17 @@ raise SystemExit(int(os.environ.get('FAKE_EXIT', '0')))
         rows = json.loads((self.root / 'run.json').read_text())['specializedEvidence']
         self.assertEqual(next(row['state'] for row in rows if row['kind'] == 'performance'), 'failed')
 
+    def test_money_path_breach_fails_and_retains_summary(self):
+        threshold = {'ledger_journals_ms': {'thresholds': {'p(95)<800': True}}}
+        self.env.update(FAKE_EXIT='99', FAKE_SUMMARY=json.dumps({'metrics': threshold}))
+        result = self.workflow_run(job='k6')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('ledger_journals_ms p(95)<800', result.stdout)
+        self.assertEqual(json.loads((self.root / 'perf-summary.json').read_text())['metrics'], threshold)
+        args = json.loads((self.root / 'docker-args.json').read_text())
+        self.assertIn('PERF_ACCOUNT_ID', args)
+        self.assertNotIn(self.env['PERF_ACCOUNT_ID'], args)
+
     def run_helper(self, *args):
         return subprocess.run(['python3', str(RUNNER), '--definition', 'fixture.js', '--summary', 'summary.json', *args], cwd=self.root, env=self.env, capture_output=True, text=True, check=False)
 
@@ -102,6 +114,7 @@ raise SystemExit(int(os.environ.get('FAKE_EXIT', '0')))
                     self.env[missing] = saved
 
     def test_missing_fixture_produces_not_run_envelope_not_pass(self):
+        self.env.pop('PERF_ACCOUNT_ID')
         result = self.run_helper('--check-config', '--required-fixtures', 'PERF_ACCOUNT_ID')
         self.assertEqual(result.returncode, 0, result.stderr)
         reason = next(line.removeprefix('reason=') for line in (self.root / 'outputs').read_text().splitlines() if line.startswith('reason='))
