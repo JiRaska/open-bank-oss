@@ -183,3 +183,9 @@ administrátor ji může zapsat nebo odvolat v administraci. Nejkratší nastavi
 minuta a výjimka vyprší nejpozději za 24 hodin. Party ukládá aktéra, čas, důvod a změnu v jednom
 záznamu. Ověření stáří na základě existujícího záznamu passkey, vlastnictví, podpis a samostatná
 kontrola stáří zařízení pro SCA zůstávají povinné.
+
+### Platnost passkey pro MCP ve sdíleném sandboxu
+
+Customer Edge načte pravidlo z Party pro aktivní fyzickou osobu. Platné individuální pravidlo pro syntetický profil má přednost. Nedostupné, neplatné, vypršené nebo odvolané pravidlo ponechá výchozí hodnotu. Výchozí doba je 72 hodin a minimální nastavitelná doba je jedna minuta. Ověření podpisu WebAuthn a samostatná pravidla SCA zůstávají v platnosti.
+
+`EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY` zapínejte pouze ve sdíleném sandboxu. Výchozí hodnota je false.

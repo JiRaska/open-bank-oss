@@ -412,3 +412,10 @@ requires a recorded timestamp, the original WebAuthn assertion and the existing 
 Unavailable or invalid policy falls back to 72 hours. Party appends an audit record on issuance
 or revocation and revokes when the party loses synthetic eligibility. Disable the sandbox policy
 switch to restore the standard minimum immediately at the next deployment.
+
+The separately enabled shared-sandbox policy can supply a temporary minimum for all eligible
+active individual profiles. The Party authority rechecks the bound party and the policy expiry.
+Edge validates the returned duration and expiry and retains its 72-hour default when no valid
+policy is available. The synthetic per-party policy has precedence. The new site switches
+default off independently of the original synthetic setting. Disable the Edge site switch to
+revert immediately after its pods restart, then disable Party and Admin UI.

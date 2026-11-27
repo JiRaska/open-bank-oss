@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { auth } from '@/auth'
+import { PUT as PUT_SANDBOX } from '@/app/api/parties/mcp-passkey-age-policy/route'
 import { PUT } from '@/app/api/parties/[id]/mcp-native-passkey-age-exception/route'
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
@@ -57,5 +58,22 @@ describe('sandbox MCP passkey policy authority proxy', () => {
     expect(url).toBe(`https://party.invalid/api/v1/parties/${partyId}/mcp-native-passkey-age-exception`)
     expect(JSON.parse(init.body)).toEqual(policy)
     expect(init.headers.authorization).toBe('Bearer test-token')
+  })
+})
+
+describe('sandbox-wide passkey policy', () => {
+  it('requires its own switch even with synthetic exceptions enabled', async () => {
+    vi.stubEnv('OPENBANK_MCP_SANDBOX_PASSKEY_AGE_POLICY', 'false')
+    expect((await PUT_SANDBOX(request(policy))).status).toBe(403)
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('uses the global authority and never forwards a caller-supplied customer or actor', async () => {
+    vi.stubEnv('OPENBANK_MCP_SANDBOX_PASSKEY_AGE_POLICY', 'true')
+    upstream.mockResolvedValue(Response.json(policy))
+    expect((await PUT_SANDBOX(request({ ...policy, partyId, actor: 'forged' }))).status).toBe(200)
+    const [url, init] = upstream.mock.calls[0]
+    expect(url).toBe('https://party.invalid/api/v1/parties/mcp-native-passkey-age-policy')
+    expect(JSON.parse(init.body)).toEqual(policy)
   })
 })

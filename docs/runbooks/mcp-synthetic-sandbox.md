@@ -390,3 +390,22 @@ to sync before changing the workload pod template. Verify every ready replica
 uses the updated template.
 To restore the 72-hour floor, turn off and roll Customer Edge first, then Admin
 UI and Party.
+
+### Enable the global age policy in the shared sandbox
+
+Set `data.globalEnabled` to the string `"true"` in the namespace-local
+`mcp-sandbox-passkey-age-policy` ConfigMap. This key enables the global policy
+for active individual CUSTOMER and SYNTHETIC profiles. The existing `data.enabled` key controls
+individual exceptions separately. Keep both keys absent from reusable manifests.
+
+After deploying images with global-policy support, provision and roll Party,
+Customer Edge and Admin UI in that order, following the ConfigMap sync and Admin
+UI pin steps above. Use the staff interface to configure the time-limited
+policy. Verify both ordinary and synthetic individual profiles. An active
+per-profile synthetic exception takes precedence. Ineligible parties use the
+72-hour default. A missing or expired global policy also falls back to the
+default if no individual exception is active.
+
+To stop applying the global policy, remove `globalEnabled` from Customer Edge
+first and roll it. Then remove the key and roll Admin UI and Party. Preserve
+`enabled` if individual sandbox exceptions should remain available.

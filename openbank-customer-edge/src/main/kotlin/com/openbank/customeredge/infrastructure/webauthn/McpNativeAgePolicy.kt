@@ -20,28 +20,36 @@ internal class McpNativeAgePolicy(
     @ConfigProperty(name = "openbank.edge.party-service-url") private val partyService: String,
     @ConfigProperty(name = "openbank.edge.sandbox-mcp-native-age-exceptions", defaultValue = "false")
     private val enabled: Boolean,
+    @ConfigProperty(name = "openbank.edge.sandbox-mcp-native-age-policy", defaultValue = "false")
+    private val sharedPolicyEnabled: Boolean,
 ) {
     fun eligible(party: UUID, firstVerified: Instant, now: Instant): Boolean {
         if (!firstVerified.isAfter(now.minus(DEFAULT_AGE))) return true
-        if (!enabled) return false
-        return !firstVerified.isAfter(now.minus(exceptionMinimumAge(party, now)))
+        val leaseAge = runCatching { minimumConfiguredAge(party, now) }.getOrNull() ?: return false
+        return !firstVerified.isAfter(now.minus(leaseAge))
     }
 
-    private fun exceptionMinimumAge(party: UUID, now: Instant): Duration {
-        return runCatching {
-            val path = "/api/v1/parties/$party/mcp-native-passkey-age-exception/effective"
-            upstream.getToService(partyService, path, emptyMap(), party.toString()).use { response ->
-                if (response.status != Status.OK.statusCode) return DEFAULT_AGE
-                val body = mapper.readTree(response.entity.toString())
-                val minutes = body.path("minimumAgeMinutes")
-                    .takeIf { it.isIntegralNumber && it.canConvertToInt() }?.intValue()
-                    ?: return DEFAULT_AGE
-                if (minutes !in MIN_EXCEPTION_AGE_MINUTES..MAX_EXCEPTION_AGE_MINUTES) return DEFAULT_AGE
-                val expiry = Instant.parse(body.path("expiresAt").textValue())
-                if (!expiry.isAfter(now) || expiry.isAfter(now.plus(MAX_EXCEPTION_LIFETIME))) return DEFAULT_AGE
-                Duration.ofMinutes(minutes.toLong())
-            }
-        }.getOrDefault(DEFAULT_AGE)
+    private fun minimumConfiguredAge(party: UUID, now: Instant): Duration? {
+        if (enabled) {
+            val exception = fetchAge(party, now, "mcp-native-passkey-age-exception")
+            if (exception != null) return exception
+        }
+        return if (sharedPolicyEnabled) fetchAge(party, now, "mcp-native-passkey-age-policy") else null
+    }
+
+    private fun fetchAge(party: UUID, now: Instant, resource: String): Duration? {
+        val path = "/api/v1/parties/$party/$resource/effective"
+        return upstream.getToService(partyService, path, emptyMap(), party.toString()).use { response ->
+            if (response.status == Status.NOT_FOUND.statusCode) return null
+            check(response.status == Status.OK.statusCode)
+            val body = mapper.readTree(response.entity.toString())
+            val minutes = body.path("minimumAgeMinutes")
+                .takeIf { it.isIntegralNumber && it.canConvertToInt() }?.intValue()
+            check(minutes != null && minutes in MIN_EXCEPTION_AGE_MINUTES..MAX_EXCEPTION_AGE_MINUTES)
+            val expiry = Instant.parse(body.path("expiresAt").textValue())
+            check(expiry.isAfter(now) && !expiry.isAfter(now.plus(MAX_EXCEPTION_LIFETIME)))
+            Duration.ofMinutes(minutes.toLong())
+        }
     }
 
     private companion object {
