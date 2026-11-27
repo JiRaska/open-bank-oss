@@ -52,4 +52,42 @@ class McpNativeAgePolicyTest {
         assertThat(policy.eligible(party, now.minusSeconds(60), now)).isTrue()
         assertThat(policy.eligible(party, now.minusSeconds(60), now.plusSeconds(3600))).isFalse()
     }
+
+    @Test
+    fun `legacy denial still checks an independently eligible shared sandbox customer`() {
+        val policy = McpNativeAgePolicy(upstream, ObjectMapper(), "https://party.test", true, true)
+        val legacy = "/api/v1/parties/$party/mcp-native-passkey-age-exception/effective"
+        val shared = "/api/v1/parties/$party/mcp-native-passkey-age-policy/effective"
+        every { upstream.getToService("https://party.test", legacy, emptyMap(), party.toString()) } answers {
+            Response.status(403).build()
+        }
+        every { upstream.getToService("https://party.test", shared, emptyMap(), party.toString()) } answers {
+            Response.ok("""{"minimumAgeMinutes":1,"expiresAt":"2026-11-27T01:00:00Z"}""").build()
+        }
+        assertThat(policy.eligible(party, now.minusSeconds(59), now)).isFalse()
+        assertThat(policy.eligible(party, now.minusSeconds(60), now)).isTrue()
+
+        every { upstream.getToService("https://party.test", shared, emptyMap(), party.toString()) } answers {
+            Response.status(403).build()
+        }
+        assertThat(policy.eligible(party, now.minusSeconds(60), now)).isFalse()
+    }
+
+    @Test
+    fun `valid synthetic rule takes precedence and legacy service errors fail closed`() {
+        val policy = McpNativeAgePolicy(upstream, ObjectMapper(), "https://party.test", true, true)
+        val legacy = "/api/v1/parties/$party/mcp-native-passkey-age-exception/effective"
+        val shared = "/api/v1/parties/$party/mcp-native-passkey-age-policy/effective"
+        every { upstream.getToService("https://party.test", legacy, emptyMap(), party.toString()) } answers {
+            Response.ok("""{"minimumAgeMinutes":2,"expiresAt":"2026-11-27T01:00:00Z"}""").build()
+        }
+        assertThat(policy.eligible(party, now.minusSeconds(60), now)).isFalse()
+        assertThat(policy.eligible(party, now.minusSeconds(120), now)).isTrue()
+
+        every { upstream.getToService("https://party.test", legacy, emptyMap(), party.toString()) } answers {
+            Response.status(503).build()
+        }
+        assertThat(policy.eligible(party, now.minusSeconds(120), now)).isFalse()
+        verify(exactly = 0) { upstream.getToService("https://party.test", shared, emptyMap(), party.toString()) }
+    }
 }
