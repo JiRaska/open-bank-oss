@@ -4,6 +4,12 @@
 
 package com.openbank.keycloak.mcp;
 
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.MultiFormatReader;
+import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
+import com.google.zxing.common.HybridBinarizer;
+import javax.imageio.ImageIO;
+
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
@@ -11,6 +17,7 @@ import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
 
+import java.io.ByteArrayInputStream;
 import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +27,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -27,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.regex.Pattern;
 
 /**
  * Unit tests for the extension's pure logic. A plain runner, not JUnit: the extension compiles
@@ -85,6 +94,7 @@ public final class ExtensionTests {
         }
         policy();
         nativeHandoff();
+        nativeHandoffPage();
         scopedCimdMetadata();
         if (!FAILURES.isEmpty()) {
             FAILURES.forEach(f -> System.err.println("FAIL " + f));
@@ -92,6 +102,53 @@ public final class ExtensionTests {
             System.exit(1);
         }
         System.out.printf("extension tests: %d checks, 0 failed%n", checks);
+    }
+
+    private static void nativeHandoffPage() throws Exception {
+        var issued = McpNativeHandoff.issue();
+        var response = McpNativeHandoffPage.render("/login-actions/authenticate?one=1&two=2", "<assistant>", issued);
+        String html = response.getEntity().toString();
+        check("page contains both Czech and English instructions",
+                html.contains("Propojení AI asistenta") && html.contains("Connect your AI assistant")
+                        && html.contains("schvalte") && html.contains("approve"));
+        check("page escapes dynamic client name and action URL",
+                html.contains("&lt;assistant&gt;") && !html.contains("<assistant>")
+                        && html.contains("one=1&amp;two=2"));
+        check("direct link and form keep exact bank handoff",
+                html.contains("href=\"" + issued.appLink() + "\"")
+                        && html.contains("name=\"handoff\" value=\"" + issued.formValue() + "\""));
+        check("page retains automatic 3-second polling and cancel",
+                html.contains("requestSubmit();") && html.contains("},3000)")
+                        && html.contains("name=\"cancel\" value=\"1\""));
+        var nonce = Pattern.compile("<style nonce=\"([0-9a-f-]+)\">").matcher(html);
+        check("style nonce exists", nonce.find());
+        String nonceValue = nonce.group(1);
+        String csp = response.getHeaderString("Content-Security-Policy");
+        check("CSP permits only nonce styles/scripts and embedded artwork",
+                csp.contains("default-src 'none'") && csp.contains("img-src data:")
+                        && csp.contains("style-src 'nonce-" + nonceValue + "'")
+                        && csp.contains("script-src 'nonce-" + nonceValue + "'")
+                        && !csp.contains("unsafe-inline") && html.contains("<script nonce=\"" + nonceValue + "\">"));
+        eq("handoff page is not cached", "no-store", response.getHeaderString("Cache-Control"));
+        eq("handoff page referrer omitted", "no-referrer", response.getHeaderString("Referrer-Policy"));
+
+        var qr = Pattern.compile("data:image/png;base64,([A-Za-z0-9+/=]+)").matcher(html);
+        check("handoff QR is served as local PNG", qr.find());
+        var image = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode(qr.group(1))));
+        var bitmap = new BinaryBitmap(new HybridBinarizer(new BufferedImageLuminanceSource(image)));
+        eq("QR encodes exactly the direct universal link", issued.appLink(), new MultiFormatReader().decode(bitmap).getText());
+
+        var art = Pattern.compile("data:image/webp;base64,([A-Za-z0-9+/=]+)").matcher(html);
+        check("site artwork is bundled as a local WebP", art.find());
+        try (var source = McpNativeHandoffPage.class.getResourceAsStream("explorers-lipa.webp")) {
+            check("bundled website artwork bytes match the page", source != null
+                    && Arrays.equals(source.readAllBytes(), Base64.getDecoder().decode(art.group(1))));
+        }
+
+        String waiting = McpNativeHandoffPage.render("/login-actions/authenticate", "Assistant", null).getEntity().toString();
+        check("waiting page introduces no handoff material",
+                waiting.contains("Continue in the app") && !waiting.contains("name=\"handoff\"")
+                        && !waiting.contains("data:image/png") && waiting.contains("requestSubmit();"));
     }
 
     private static void nativeHandoff() {

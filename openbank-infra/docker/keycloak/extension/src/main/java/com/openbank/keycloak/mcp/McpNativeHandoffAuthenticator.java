@@ -3,17 +3,10 @@
 
 package com.openbank.keycloak.mcp;
 
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.MultiFormatWriter;
 import com.google.zxing.WriterException;
-import com.google.zxing.client.j2se.MatrixToImageWriter;
-import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.UUID;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
@@ -143,46 +136,11 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
     }
 
     private static Response page(AuthenticationFlowContext ctx, McpNativeHandoff.Issued issued) throws WriterException, IOException {
-        String action = McpWithheldCodeAuthenticator.escape(ctx.getActionUrl(ctx.generateAccessCode()).toString());
+        String action = ctx.getActionUrl(ctx.generateAccessCode()).toString();
         var registeredClient = ctx.getAuthenticationSession().getClient();
         String clientName = registeredClient.getName();
-        String client = McpWithheldCodeAuthenticator.escape(
-                clientName == null || clientName.isBlank() ? registeredClient.getClientId() : clientName);
-        String connect = "<p>If you have not opened the app yet, restart the connection in your assistant.</p>";
-        String handoffInput = "";
-        String scriptNonce = UUID.randomUUID().toString();
-        if (issued != null) {
-            String link = issued.appLink();
-            handoffInput = "<input type=\"hidden\" name=\"handoff\" value=\"" + issued.formValue() + "\">";
-            var out = new ByteArrayOutputStream();
-            var matrix = new MultiFormatWriter().encode(link, BarcodeFormat.QR_CODE, 240, 240);
-            MatrixToImageWriter.writeToStream(matrix, "PNG", out);
-            String image = Base64.getEncoder().encodeToString(out.toByteArray());
-            connect = "<p><a href=\"" + McpWithheldCodeAuthenticator.escape(link)
-                    + "\">Open OpenBank</a></p><img alt=\"Scan to open OpenBank\" src=\"data:image/png;base64,"
-                    + image + "\">";
-        }
-        String html = """
-                <!doctype html><html lang="en"><head><meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Continue in OpenBank</title></head><body><main>
-                <h1>Continue in OpenBank</h1><p>Assistant: %s</p>
-                <p>Open the bank app or scan the code. Review the accounts and verify your passkey.</p>%s
-                <form id="native-mcp-check" method="post" action="%s">%s
-                <button type="submit" name="check" value="1">Continue</button>
-                <button type="submit" name="cancel" value="1">Cancel</button></form>
-                <script nonce="%s">setTimeout(function(){
-                document.getElementById('native-mcp-check').requestSubmit();
-                },3000);</script>
-                </main></body></html>
-                """.formatted(client, connect, action, handoffInput, scriptNonce);
-        return Response.ok(html, MediaType.TEXT_HTML_TYPE.withCharset("utf-8"))
-                .header("Cache-Control", "no-store")
-                .header("Referrer-Policy", "no-referrer")
-                .header("Content-Security-Policy",
-                        "default-src 'none'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; "
-                                + "script-src 'nonce-" + scriptNonce + "'")
-                .build();
+        return McpNativeHandoffPage.render(action,
+                clientName == null || clientName.isBlank() ? registeredClient.getClientId() : clientName, issued);
     }
 
     @Override
