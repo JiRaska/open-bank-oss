@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.33.0...party-service-v0.34.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** configure the shared sandbox passkey age ([#17407](https://github.com/JiRaska/open-bank-oss/issues/17407)) ([647fa7e](https://github.com/JiRaska/open-bank-oss/commit/647fa7ea3ead2bca6752474c5b4376c73d670084))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.2...party-service-v0.33.0) (2026-11-27)
 
 
