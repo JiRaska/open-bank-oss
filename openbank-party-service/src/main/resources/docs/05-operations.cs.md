@@ -120,3 +120,5 @@ kontrola stáří zařízení pro SCA zůstávají povinné.
 Party spravuje pravidlo i jeho neměnnou historii. Administrátor zadává důvod a platnost nejvýše 24 hodin. Odvolání přidá záznam a platí okamžitě. Výchozí doba je 72 hodin a minimální nastavitelná doba je jedna minuta. Ověření podpisu WebAuthn a samostatná pravidla SCA zůstávají v platnosti.
 
 `PARTY_SANDBOX_MCP_NATIVE_AGE_POLICY` zapínejte pouze ve sdíleném sandboxu. Výchozí hodnota je false.
+
+Oba endpointy pro platnou dobu stáří passkey vyžadují ověřený účet služby Customer Edge s rolí operátora. Samotná role operátora k těmto endpointům přístup nedává.

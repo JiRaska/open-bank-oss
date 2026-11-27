@@ -60,7 +60,7 @@ class McpNativePasskeyAgeExceptionResource(
 
     @GET
     @Path("/effective")
-    @RolesAllowed("ROLE_API")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "party.mcpNativePasskeyAgeException.effective")
     suspend fun effective(@PathParam("partyId") partyId: UUID?): Response {
         requireEffectiveCaller()

@@ -121,3 +121,5 @@ cryptographic verification and the separate SCA device-age control still apply.
 Party owns the effective rule and its append-only administrator audit history. A staff administrator records a reason and an expiry at most 24 hours ahead. Revocation appends a record and takes effect immediately. The default is 72 hours and the configurable floor is one minute. WebAuthn signature verification and the independent SCA policy still apply.
 
 Enable `PARTY_SANDBOX_MCP_NATIVE_AGE_POLICY` only in the shared sandbox. It defaults to false.
+
+Both effective MCP age endpoints accept the verified Customer Edge service account with its operator realm role. An operator role by itself gives no access to either endpoint.
