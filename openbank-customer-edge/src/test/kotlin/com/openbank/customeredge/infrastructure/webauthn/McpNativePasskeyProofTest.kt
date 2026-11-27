@@ -38,6 +38,7 @@ class McpNativePasskeyProofTest {
     private val service = McpNativePasskeyProofService(
         challenges,
         credentials,
+        McpNativeAgePolicy(mockk(), ObjectMapper(), "https://party.test", false),
         ObjectMapper(),
         Clock.fixed(now, ZoneOffset.UTC),
         metrics,

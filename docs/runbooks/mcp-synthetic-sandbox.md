@@ -360,3 +360,33 @@ issuer, Balance HTTPS origin and named client TLS configuration. Enable
 `MCP_CUSTOMER_BOUND_PROPOSAL_ENABLED` only for the separate synthetic proposal run after
 the synthetic settlement boundary has been confirmed. Record the deployed revision, both
 journey outcomes and the revoked connection check.
+
+## Enable the synthetic native passkey age policy
+
+The Party, Customer Edge and Admin UI workloads read the optional
+`mcp-sandbox-passkey-age-policy` ConfigMap in their own namespaces. The
+application default stays off when the object or its `enabled` key is absent.
+Provision these ConfigMaps only through the shared sandbox's site GitOps
+configuration. Set `data.enabled` to the string `"true"` for each stage below.
+
+1. Confirm the new Party, Customer Edge and Admin UI images are healthy. Confirm
+   Party's Flyway V29 migration and the matching Party authorization bundle.
+2. Provision the ConfigMap in `party`. Roll Party through its
+   GitOps pod template and confirm the effective-policy API returns no exception
+   for a synthetic party with no policy.
+3. Provision it in `customer-edge`. Roll Customer Edge and verify the 72-hour
+   default still applies when no valid per-party policy is available.
+4. Provision it in `admin-ui`. Change the Admin UI pod template on `main` under
+   `openbank-infra/gitops/components/admin-ui`. The Admin UI deployment workflow
+   updates `deploy/sandbox:pins/admin-ui`, which the live Argo Application tracks.
+   Wait for its pin and rollout before exercising the staff form.
+5. Set an audited, short-lived policy for one active synthetic individual and
+   verify the app journey. The policy applies only to the request's bound party.
+   A native passkey and the separate SCA confirmation remain required.
+
+ConfigMap values supplied through environment variables are read at pod start.
+After provisioning, changing or removing a map, wait for that GitOps change
+to sync before changing the workload pod template. Verify every ready replica
+uses the updated template.
+To restore the 72-hour floor, turn off and roll Customer Edge first, then Admin
+UI and Party.

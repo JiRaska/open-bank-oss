@@ -261,6 +261,12 @@ spec:
             # Hosted OAuth client binding is managed separately in Keycloak.
             - name: MCP_NATIVE_CONNECT_ENABLED
               value: "true"
+            - name: EDGE_SANDBOX_MCP_NATIVE_AGE_EXCEPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: enabled
+                  optional: true
             - name: MCP_NATIVE_CONNECT_AUTHORITY_URL
               value: https://delegation-service.delegation.svc:8443
             - name: DELEGATION_SERVICE_URL
