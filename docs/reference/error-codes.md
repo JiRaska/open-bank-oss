@@ -19,6 +19,8 @@ published semantics. Owners name the modules and enums that currently declare ea
 | `INTERNAL_ERROR` | `INTERNAL` | false | An unexpected error occurred | openbank-libs-domain.PlatformErrorCode |
 | `NOT_FOUND` | `NOT_FOUND` | false | The resource does not exist | openbank-libs-domain.PlatformErrorCode |
 | `POLICY_DECISION_POINT_UNAVAILABLE` | `UNAVAILABLE` | true | Authorization is temporarily unavailable | openbank-libs-domain.PlatformErrorCode |
+| `PRODUCT_CODE_ALREADY_EXISTS` | `CONFLICT` | false | The product code already exists | openbank-product-catalog.CatalogErrorCode |
+| `PRODUCT_NOT_FOUND` | `NOT_FOUND` | false | The product does not exist | openbank-product-catalog.CatalogErrorCode |
 | `RATE_LIMIT_EXCEEDED` | `RATE_LIMITED` | true | Too many requests | openbank-libs-domain.PlatformErrorCode |
 | `SERVICE_UNAVAILABLE` | `UNAVAILABLE` | true | The service is temporarily unavailable | openbank-libs-domain.PlatformErrorCode |
 | `UNAUTHORIZED` | `UNAUTHENTICATED` | false | Authentication is required | openbank-libs-domain.PlatformErrorCode |

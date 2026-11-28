@@ -45,6 +45,8 @@ components:
           - INTERNAL_ERROR
           - NOT_FOUND
           - POLICY_DECISION_POINT_UNAVAILABLE
+          - PRODUCT_CODE_ALREADY_EXISTS
+          - PRODUCT_NOT_FOUND
           - RATE_LIMIT_EXCEEDED
           - SERVICE_UNAVAILABLE
           - UNAUTHORIZED

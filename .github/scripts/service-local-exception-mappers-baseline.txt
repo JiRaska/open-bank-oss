@@ -123,8 +123,6 @@ openbank-party-service	openbank-party-service/src/main/kotlin/com/openbank/party
 openbank-pid-service	openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/rest/ExceptionMappers.kt	InvalidPartyCaseTransitionMapper
 openbank-pid-service	openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/rest/ExceptionMappers.kt	IllegalCaseTransitionMapper
 openbank-pid-service	openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/rest/ExceptionMappers.kt	PidVerificationExceptionMapper
-openbank-product-catalog	openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/ProductCatalogExceptionMappers.kt	DuplicateProductCodeExceptionMapper
-openbank-product-catalog	openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/ProductCatalogExceptionMappers.kt	ProductNotFoundExceptionMapper
 openbank-product-catalog	openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/ProductCatalogExceptionMappers.kt	CatalogValidationExceptionMapper
 openbank-product-catalog	openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/ProductCatalogExceptionMappers.kt	CatalogPreconditionRequiredExceptionMapper
 openbank-product-catalog	openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/ProductCatalogExceptionMappers.kt	CatalogPreconditionFailedExceptionMapper

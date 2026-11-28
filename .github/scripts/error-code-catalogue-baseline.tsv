@@ -13,6 +13,8 @@ IDEMPOTENCY_REQUEST_IN_PROGRESS	CONFLICT	true	A request with this idempotency ke
 INTERNAL_ERROR	INTERNAL	false	An unexpected error occurred
 NOT_FOUND	NOT_FOUND	false	The resource does not exist
 POLICY_DECISION_POINT_UNAVAILABLE	UNAVAILABLE	true	Authorization is temporarily unavailable
+PRODUCT_CODE_ALREADY_EXISTS	CONFLICT	false	The product code already exists
+PRODUCT_NOT_FOUND	NOT_FOUND	false	The product does not exist
 RATE_LIMIT_EXCEEDED	RATE_LIMITED	true	Too many requests
 SERVICE_UNAVAILABLE	UNAVAILABLE	true	The service is temporarily unavailable
 UNAUTHORIZED	UNAUTHENTICATED	false	Authentication is required
