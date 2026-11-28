@@ -9,8 +9,10 @@ admin-ui-engines-nightly.yml|job:report|issues
 # Dataset-only OIDC publisher; IAM limits writes to Gate Health snapshots and its CAS selector.
 admin-ui-evidence.yml|job:publish|id-token
 agent-review.yml|job:review|pull-requests
+# ADR-0382: OIDC to the Get-only digest reader pinned to the main-branch report workflow.
+alert-noise-weekly.yml|job:report|id-token
 alert-noise-weekly.yml|job:report|issues
-# ADR-0382: OIDC to a List/Get-only role on the in-cluster digest envelope prefix; no write.
+# ADR-0382: OIDC to the Get-only digest reader pinned to the main-branch RCA workflow.
 alert-rca-weekly.yml|job:review|id-token
 alert-rca-weekly.yml|job:publish|contents
 alert-rca-weekly.yml|job:publish|issues

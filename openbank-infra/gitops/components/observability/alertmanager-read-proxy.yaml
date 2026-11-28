@@ -17,7 +17,7 @@
 #      so a direct POST from the digest pod is DROPPED by the CNI before Alertmanager sees it.
 #   2. This relay never forwards the caller's method, path, query, headers or body. Whatever
 #      arrives, the only upstream request it can construct is
-#      `GET <UPSTREAM_BASE>/api/v2/alerts?filter=severity="critical"`. Every non-GET verb is
+#      `GET <UPSTREAM_BASE>/api/v2/alerts?active=true&silenced=true&inhibited=true`. Every non-GET verb is
 #      answered 405 locally, without reading the body, and opens no upstream connection.
 #   3. The relay's own egress allow-list (networkpolicy-alert-digest.yaml) reaches DNS and
 #      Alertmanager :9093 only, so even a compromised relay cannot exfiltrate.
@@ -56,13 +56,15 @@ data:
   relay.py: |
     """GET-only, fixed-target relay for Alertmanager /api/v2/alerts (ADR-0382)."""
     import http.server
+    import json
     import os
     import urllib.error
     import urllib.request
 
     # The upstream PATH and QUERY are constants, not configuration: nothing a caller sends and
     # nothing in the environment can turn this into a request for /api/v2/silences.
-    UPSTREAM_PATH = "/api/v2/alerts?filter=severity%3D%22critical%22"
+    UPSTREAM_PATH = "/api/v2/alerts?active=true&silenced=true&inhibited=true"
+    NOISE_ALERTS = {"Watchdog", "AlertRuleFlapping"}
     MAX_BYTES = 8 * 1024 * 1024
 
     def upstream_url():
@@ -100,7 +102,16 @@ data:
                 return self._reply(502, f"upstream unreachable: {type(exc).__name__}\n".encode())
             if len(body) > MAX_BYTES:
                 return self._reply(502, b"upstream response too large\n")
-            return self._reply(status, body, "application/json")
+            try:
+                alerts = json.loads(body)
+                if not isinstance(alerts, list):
+                    raise ValueError("expected an alert array")
+                selected = [alert for alert in alerts
+                            if alert["labels"].get("severity") == "critical"
+                            or alert["labels"].get("alertname") in NOISE_ALERTS]
+            except (AttributeError, KeyError, TypeError, ValueError):
+                return self._reply(502, b"upstream response was not an alert array\n")
+            return self._reply(status, json.dumps(selected).encode(), "application/json")
 
         def _refuse(self):
             # Deliberately does not read the request body and opens no upstream connection.
@@ -143,6 +154,8 @@ spec:
       app.kubernetes.io/name: alertmanager-read-proxy
   template:
     metadata:
+      annotations:
+        openbank.tech/relay-script-sha256: "7cb2868b9d41b896abcca1ffa9360fb22ba990c402b404e1a276cf3362a1b84f"
       labels:
         app.kubernetes.io/name: alertmanager-read-proxy
         app.kubernetes.io/part-of: observability

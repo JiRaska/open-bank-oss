@@ -19,6 +19,7 @@ relay, so the envelope the weekly RCA consumes is produced by the path that will
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import http.server
 import importlib.util
@@ -41,11 +42,21 @@ RELAY_EGRESS = GITOPS / "observability" / "networkpolicy-alertmanager-read-proxy
 AM_INGRESS = GITOPS / "observability" / "networkpolicy-tools-gate.yaml"
 DIGEST_DIR = GITOPS / "alert-digest"
 DIGEST_SCRIPT = ROOT / ".github" / "scripts" / "standing-critical-digest.py"
+NOISE_REPORT = ROOT / ".github" / "scripts" / "alert-noise-report.py"
 DIGEST_SCRIPT_CM = GITOPS / "alert-digest" / "configmap-digest-script.yaml"
 DIGEST_NS = "alert-digest"
 
 ALERTS = [{"labels": {"severity": "critical", "alertname": "LedgerDown", "service": "ledger"},
            "startsAt": "2026-11-16T06:00:00Z"}]
+NOISE_ALERTS = [
+    {"labels": {"alertname": "Watchdog", "severity": "none"}},
+    {"labels": {"alertname": "AlertRuleFlapping", "severity": "warning",
+                "alert_name": "LedgerLatency", "alert_severity": "warning"},
+     "annotations": {"summary": "LedgerLatency (warning) fired 22 separate times in 7 days"}},
+]
+UPSTREAM_PATH = "/tools/alertmanager/api/v2/alerts?active=true&silenced=true&inhibited=true"
+UNRELATED_ALERT = {"labels": {"alertname": "Unrelated", "severity": "warning"}}
+
 
 
 def docs(path: Path) -> list[dict]:
@@ -72,10 +83,11 @@ def load_relay():
 
 class FakeAlertmanager(http.server.BaseHTTPRequestHandler):
     seen: list[tuple[str, str]] = []
+    alerts: object = ALERTS + NOISE_ALERTS + [UNRELATED_ALERT]
 
     def _record(self):
         FakeAlertmanager.seen.append((self.command, self.path))
-        body = json.dumps(ALERTS).encode()
+        body = json.dumps(FakeAlertmanager.alerts).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -110,6 +122,7 @@ class RelayRefusesWrites(unittest.TestCase):
 
     def setUp(self):
         FakeAlertmanager.seen.clear()
+        FakeAlertmanager.alerts = ALERTS + NOISE_ALERTS + [UNRELATED_ALERT]
 
     def call(self, method, path, body=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
@@ -123,14 +136,12 @@ class RelayRefusesWrites(unittest.TestCase):
     def test_get_alerts_is_relayed_to_the_fixed_upstream(self):
         status, data = self.call("GET", "/api/v2/alerts?filter=severity%3D%22critical%22")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(data), ALERTS)
-        self.assertEqual(FakeAlertmanager.seen,
-                         [("GET", "/tools/alertmanager/api/v2/alerts?filter=severity%3D%22critical%22")])
+        self.assertEqual(json.loads(data), ALERTS + NOISE_ALERTS)
+        self.assertEqual(FakeAlertmanager.seen, [("GET", UPSTREAM_PATH)])
 
     def test_caller_query_cannot_steer_the_upstream(self):
         self.call("GET", "/api/v2/alerts?filter=x&silenced=true")
-        self.assertEqual(FakeAlertmanager.seen,
-                         [("GET", "/tools/alertmanager/api/v2/alerts?filter=severity%3D%22critical%22")])
+        self.assertEqual(FakeAlertmanager.seen, [("GET", UPSTREAM_PATH)])
 
     def test_every_write_verb_is_refused_and_never_reaches_alertmanager(self):
         silence = json.dumps({"matchers": [{"name": "alertname", "value": ".*", "isRegex": True}],
@@ -188,8 +199,55 @@ class RelayRefusesWrites(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr)
             envelope = json.loads(Path(tmp, "obs.json").read_text())
             self.assertEqual(envelope["alerts"], ALERTS)
+            self.assertEqual(envelope["alertNoise"], NOISE_ALERTS)
+            self.assertEqual(FakeAlertmanager.seen, [("GET", UPSTREAM_PATH)])
+            noise_report = Path(tmp, "noise.md")
+            classified = subprocess.run([sys.executable, str(NOISE_REPORT), f"{tmp}/obs.json", str(noise_report)],
+                                        env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(classified.returncode, 0, classified.stdout + classified.stderr)
+            self.assertIn("| 22 | `LedgerLatency` | warning |", noise_report.read_text())
+            envelope["alertNoise"] = []
+            Path(tmp, "obs.json").write_text(json.dumps(envelope))
+            classified = subprocess.run([sys.executable, str(NOISE_REPORT), f"{tmp}/obs.json", str(noise_report)],
+                                        env=env, capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(classified.returncode, 0)
+            self.assertIn("UNREADABLE", classified.stdout)
             self.assertIn("observedAt", envelope)
             self.assertIn("Open criticals: **1**", Path(tmp, "digest.md").read_text())
+
+    def test_unreadable_upstream_does_not_write_an_envelope(self):
+        for alerts, error in (
+            ({"error": "bad upstream payload"}, "HTTP Error 502"),
+            ([], "Watchdog absent"),
+            (ALERTS, "Watchdog absent"),
+        ):
+            with self.subTest(alerts=alerts), tempfile.TemporaryDirectory() as tmp:
+                FakeAlertmanager.alerts = alerts
+                env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
+                envelope = Path(tmp, "obs.json")
+                digest = Path(tmp, "digest.md")
+                env.update(ALERTMANAGER_URL=f"http://127.0.0.1:{self.port}", ALERTMANAGER_AUTH="none",
+                           DIGEST_OUTPUT=str(digest), DIGEST_ALERTS_OUTPUT=str(envelope))
+                result = subprocess.run([sys.executable, "-I", str(DIGEST_SCRIPT)], env=env,
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                self.assertFalse(envelope.exists())
+                self.assertFalse(digest.exists())
+
+    def test_watchdog_only_is_a_genuine_zero_critical_observation(self):
+        FakeAlertmanager.alerts = [NOISE_ALERTS[0]]
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
+            envelope = Path(tmp, "obs.json")
+            digest = Path(tmp, "digest.md")
+            env.update(ALERTMANAGER_URL=f"http://127.0.0.1:{self.port}", ALERTMANAGER_AUTH="none",
+                       DIGEST_OUTPUT=str(digest), DIGEST_ALERTS_OUTPUT=str(envelope))
+            result = subprocess.run([sys.executable, "-I", str(DIGEST_SCRIPT)], env=env,
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(envelope.read_text())["alerts"], [])
+            self.assertIn("Open criticals: **0**", digest.read_text())
 
     def test_missing_token_without_explicit_opt_out_still_fails_closed(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ALERTMANAGER")}
@@ -223,17 +281,24 @@ class NetworkLayerBlocksTheDirectPath(unittest.TestCase):
         policy = find(DIGEST_DIR / "networkpolicy-alert-digest-egress.yaml", "NetworkPolicy",
                       "standing-critical-digest-egress-allow-list")
         self.assertIn("Egress", policy["spec"]["policyTypes"])
+        credential_rules = []
         for rule in policy["spec"]["egress"]:
             ports = {p["port"] for p in rule.get("ports", [])}
             self.assertNotIn(9093, ports)
             self.assertTrue(ports, "an egress rule without ports opens every port")
             for peer in rule["to"]:
-                if "ipBlock" in peer:
+                if "ipBlock" in peer and peer["ipBlock"]["cidr"] == "169.254.170.23/32":
+                    credential_rules.append(rule)
+                elif "ipBlock" in peer:
                     excepted = set(peer["ipBlock"].get("except", []))
                     self.assertTrue({"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} <= excepted)
                 if "podSelector" in peer:
                     self.assertEqual(peer["podSelector"]["matchLabels"]["app.kubernetes.io/name"],
                                      "alertmanager-read-proxy")
+        self.assertEqual(credential_rules, [{
+            "to": [{"ipBlock": {"cidr": "169.254.170.23/32"}}],
+            "ports": [{"protocol": "TCP", "port": 80}],
+        }])
 
     def test_relay_egress_is_dns_and_alertmanager_only(self):
         policy = find(RELAY_EGRESS, "NetworkPolicy", "alertmanager-read-proxy-egress-allow-list")
@@ -274,7 +339,11 @@ class NetworkLayerBlocksTheDirectPath(unittest.TestCase):
 
     def test_relay_runs_the_tested_configmap(self):
         dep = find(RELAY_YAML, "Deployment", "alertmanager-read-proxy")
-        spec = dep["spec"]["template"]["spec"]
+        template = dep["spec"]["template"]
+        script = find(RELAY_YAML, "ConfigMap", "alertmanager-read-proxy")["data"]["relay.py"]
+        self.assertEqual(template["metadata"]["annotations"]["openbank.tech/relay-script-sha256"],
+                         hashlib.sha256(script.encode("utf-8")).hexdigest())
+        spec = template["spec"]
         self.assertEqual(spec["containers"][0]["command"], ["python3", "-I", "/app/relay.py"])
         self.assertEqual(spec["volumes"][0]["configMap"]["name"], "alertmanager-read-proxy")
 

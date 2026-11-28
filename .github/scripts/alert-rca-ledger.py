@@ -67,18 +67,30 @@ DEFAULT_LEDGER = "docs/runbooks/alert-rca/ledger.jsonl"
 # downstream can disagree with it.
 EXIT_OK = 0
 EXIT_USAGE = 1
-EXIT_NO_OBSERVATIONS = 2
+EXIT_NO_OBSERVATIONS = 2  # evidence missing or incomplete
 
 COVERAGE_OBSERVED = "OBSERVED"
 COVERAGE_NO_OBSERVATIONS = "NO_OBSERVATIONS"
+COVERAGE_INCOMPLETE = "INCOMPLETE"
+DAILY_POLL_UTC = dt.timedelta(hours=8, minutes=30)
+REVIEW_DAYS = 7
 
 
-def coverage(observation_count: int) -> dict:
+def coverage(observation_count: int, missing_days: list[str] | None = None) -> dict:
     """Classify what this run actually measured.
 
     Deliberately NOT a boolean: a bool invites `if ok:` at the call site, which is
     exactly how a no-op gets folded back into the success path.
     """
+    if observation_count > 0 and missing_days:
+        return {
+            "outcome": COVERAGE_INCOMPLETE,
+            "observationCount": observation_count,
+            "detail": (
+                f"Read {observation_count} of {REVIEW_DAYS} expected daily observations. "
+                f"Evidence was unavailable for {', '.join(missing_days)}."
+            ),
+        }
     if observation_count > 0:
         return {
             "outcome": COVERAGE_OBSERVED,
@@ -94,8 +106,7 @@ def coverage(observation_count: int) -> dict:
         "detail": (
             "No observation envelope covered this window. The daily "
             "standing-critical digest archives an envelope even on a day with zero "
-            "critical alerts, so this is NOT a quiet week — it means the producer "
-            "did not run (or ran and failed). Nothing below has been measured."
+            "critical alerts. Nothing below has been measured."
         ),
     }
 
@@ -175,13 +186,13 @@ def observe(
                 "source": source,
                 "granularitySeconds": granularity_seconds,
             }
-        elif existing.get("resolvedAt") is None:
+        elif existing.get("resolvedAt") is None and parse_time(existing["lastSeenAt"]) < observed_at:
             existing["lastSeenAt"] = fmt_time(observed_at)
     for key, record in by_key.items():
         if key in seen or record.get("resolvedAt") is not None:
             continue
-        # Never close a record with an observation that predates its last sighting.
-        if parse_time(record["lastSeenAt"]) <= observed_at:
+        # Only a newer observation can close a record.
+        if parse_time(record["lastSeenAt"]) < observed_at:
             record["resolvedAt"] = fmt_time(observed_at)
     return list(by_key.values())
 
@@ -274,14 +285,15 @@ def render_rca(records: list[dict], now: dt.datetime, cover: dict) -> str:
         "## Coverage",
         "",
     ]
-    if cover["outcome"] == COVERAGE_NO_OBSERVATIONS:
+    if cover["outcome"] != COVERAGE_OBSERVED:
+        headline = ("NO OBSERVATIONS — this review measured nothing."
+                    if cover["outcome"] == COVERAGE_NO_OBSERVATIONS else "INCOMPLETE OBSERVATIONS — the review window has gaps.")
         lines += [
             "> [!CAUTION]",
-            "> **NO OBSERVATIONS — this review measured nothing.**",
+            f"> **{headline}**",
             f"> {cover['detail']}",
             ">",
-            "> Every finding below is the *absence of data*, not a clean week. Treat this",
-            "> review as FAILED until the daily digest is producing envelopes again.",
+            "> Treat this review as FAILED until evidence is available.",
             "",
         ]
     else:
@@ -304,7 +316,9 @@ def render_rca(records: list[dict], now: dt.datetime, cover: dict) -> str:
             f"accurate to {mttr['granularitySeconds']}s."
         )
     lines += ["", "## Alerts in the last 7 days", ""]
-    if window:
+    if cover["outcome"] != COVERAGE_OBSERVED:
+        lines.append("**Unknown** — daily observations did not cover the review window.")
+    elif window:
         lines += ["| Alert | Service | First fired | Resolved | RCA |", "|---|---|---|---|---|"]
         for record in window:
             resolved = record.get("resolvedAt") or "_still open_"
@@ -312,12 +326,12 @@ def render_rca(records: list[dict], now: dt.datetime, cover: dict) -> str:
                 f"| `{record['alertname']}` | `{record['service']}` | "
                 f"{record['startsAt']} | {resolved} | _(fill in)_ |"
             )
-    elif cover["outcome"] == COVERAGE_NO_OBSERVATIONS:
-        lines.append("**Unknown** — no observation covered this window.")
     else:
         lines.append("No critical alerts recorded in the window.")
     lines += ["", "## Rate-of-recurrence guard (ADR-0241 D3)", ""]
-    if flagged:
+    if cover["outcome"] != COVERAGE_OBSERVED:
+        lines.append("**Unknown** — daily observations did not cover the review window.")
+    elif flagged:
         lines.append(
             f"The following fired {RECURRENCE_THRESHOLD}+ times in "
             f"{RECURRENCE_WINDOW_DAYS} days and must have a follow-up issue "
@@ -330,14 +344,23 @@ def render_rca(records: list[dict], now: dt.datetime, cover: dict) -> str:
                 f"{', '.join('`' + s + '`' for s in item['services'])} "
                 f"({item['firstSeen']} .. {item['lastSeen']})"
             )
-    elif cover["outcome"] == COVERAGE_NO_OBSERVATIONS:
-        lines.append(
-            "**Unknown** — the recurrence guard saw no observations, so a silent "
-            "recurrence would look identical to this."
-        )
     else:
         lines.append("No alert reached the recurrence threshold in the window.")
     return "\n".join(lines) + "\n"
+
+
+def observations_in_review_window(
+    observations: list[tuple[dt.datetime, list[dict]]], now: dt.datetime,
+) -> tuple[list[tuple[dt.datetime, list[dict]]], list[str]]:
+    # A review before the daily 08:30 UTC poll is due uses yesterday as its last day.
+    last_day = (now - DAILY_POLL_UTC).date()
+    expected_days = [last_day - dt.timedelta(days=back) for back in reversed(range(REVIEW_DAYS))]
+    by_day = {}
+    for observed_at, alerts in sorted(observations, key=lambda observation: observation[0]):
+        day = observed_at.date()
+        if day in expected_days and observed_at <= now:
+            by_day[day] = (observed_at, alerts)
+    return list(by_day.values()), [day.isoformat() for day in expected_days if day not in by_day]
 
 
 def replay(records: list[dict], observations: list[tuple[dt.datetime, list[dict]]],
@@ -362,9 +385,19 @@ def read_observation(payload) -> tuple[dt.datetime, list[dict]]:
     """
     if isinstance(payload, dict) and "observedAt" in payload and "alerts" in payload:
         alerts = payload["alerts"]
-        if not isinstance(alerts, list):
-            raise ValueError("`alerts` must be an array")
-        return parse_time(payload["observedAt"]), alerts
+        if not isinstance(alerts, list) or not isinstance(payload["observedAt"], str):
+            raise ValueError("expected an alert array and an observedAt timestamp")
+        when = parse_time(payload["observedAt"])
+        if when.utcoffset() is None:
+            raise ValueError("observedAt must carry a timezone")
+        for alert in alerts:
+            if not isinstance(alert, dict) or not isinstance(alert.get("labels"), dict):
+                raise ValueError("expected alert labels")
+            if alert["labels"].get("severity") == "critical":
+                started = alert.get("startsAt")
+                if not isinstance(started, str) or parse_time(started).utcoffset() is None:
+                    raise ValueError("critical alert startsAt must carry a timezone")
+        return when.astimezone(dt.timezone.utc), alerts
     raise ValueError("expected an observation envelope {observedAt, alerts}")
 
 
@@ -389,6 +422,12 @@ def self_test() -> None:
     # a later observation must not reopen or re-close an already closed record
     led = observe(led, [], day(4, 8), 86400, "poll")
     assert led[0]["resolvedAt"] == "2026-08-03T08:00:00Z"
+    active = [_alert("LedgerLag", "ledger", "2026-08-01T00:00:00Z")]
+    latest = observe([], active, day(7, 8), 86400, "poll")
+    overlapping = [(day(n, 8), active if n != 2 else []) for n in range(1, 8)]
+    assert replay(latest, overlapping, 86400, "poll") == latest
+    assert observe(latest, [], day(7, 8), 86400, "poll") == latest
+    assert observe(latest, [], day(8, 8), 86400, "poll")[0]["resolvedAt"] == "2026-08-08T08:00:00Z"
     # a non-critical alert is never admitted
     assert observe([], [{"labels": {"severity": "warning", "alertname": "W"}, "startsAt": "2026-08-01T00:00:00Z"}], day(1), 86400, "poll") == []
 
@@ -529,11 +568,54 @@ def self_test() -> None:
         assert cli("--allow-no-observations") == EXIT_OK
         # MUST ACCEPT: a real observation -> exit 0 with no override needed.
         envelope = os.path.join(tmp, "obs.json")
+        actual_now = dt.datetime.now(dt.timezone.utc)
+        last_day = (actual_now - DAILY_POLL_UTC).date()
+        window = []
+        for back in range(REVIEW_DAYS):
+            day = last_day - dt.timedelta(days=back)
+            path = os.path.join(tmp, f"{day}.json")
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump({"observedAt": f"{day}T08:30:00Z", "alerts": []}, stream)
+            window.append(path)
         with open(envelope, "w", encoding="utf-8") as stream:
             json.dump({"observedAt": "2026-08-20T08:46:00Z", "alerts": []}, stream)
         assert cli("--observe", envelope) == EXIT_OK, (
             "a genuinely observed quiet week must pass without an override"
         )
+        coverage_path = os.path.join(tmp, "coverage.json")
+        strict_args = ("--current-review-window", "--coverage-output", coverage_path)
+        assert cli(*strict_args, "--observe", envelope) == EXIT_NO_OBSERVATIONS
+        assert cli(*strict_args, "--observe", *window[:-1], window[0]) == EXIT_NO_OBSERVATIONS
+        with open(coverage_path, encoding="utf-8") as stream:
+            observed = json.load(stream)
+        assert observed["outcome"] == COVERAGE_INCOMPLETE
+        assert observed["observationCount"] == 6 and len(observed["missingDays"]) == 1
+        assert cli(*strict_args, "--observe", *window) == EXIT_OK
+
+        # A legacy Actions envelope is usable there, but the S3 reader requires the
+        # relay heartbeat before it can use an empty snapshot to resolve alerts.
+        ledger_path = os.path.join(tmp, "l.jsonl")
+        active_at = dt.datetime.combine(last_day - dt.timedelta(days=7), dt.time(8, 30), dt.timezone.utc)
+        seed = observe([], [_alert("LedgerLag", "ledger", fmt_time(active_at))], active_at, 86400, "poll")
+        write_ledger(ledger_path, seed)
+        s3_args = (*strict_args, "--require-watchdog", "--observe", *window)
+        assert cli(*s3_args) == EXIT_NO_OBSERVATIONS
+        assert load_ledger(ledger_path) == seed
+        for index, path in enumerate(window):
+            with open(path, encoding="utf-8") as stream:
+                payload = json.load(stream)
+            payload["alertNoise"] = [{"labels": {"alertname": "Watchdog" if index else "AlertRuleFlapping"}}]
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream)
+        assert cli(*s3_args) == EXIT_NO_OBSERVATIONS
+        assert load_ledger(ledger_path) == seed
+        with open(window[0], encoding="utf-8") as stream:
+            payload = json.load(stream)
+        payload["alertNoise"] = [{"labels": {"alertname": "Watchdog"}}]
+        with open(window[0], "w", encoding="utf-8") as stream:
+            json.dump(payload, stream)
+        assert cli(*s3_args) == EXIT_OK
+        assert load_ledger(ledger_path)[0]["resolvedAt"] is not None
 
     # --- rendering never launders a refusal into a number -------------------
     doc = render_rca(led, now, covered)
@@ -560,11 +642,16 @@ def main() -> int:
     parser.add_argument("--observe", metavar="OBSERVATION_JSON", nargs="*", default=[],
                         help="observation envelope(s) to fold into the ledger, replayed "
                              "in observedAt order")
+    parser.add_argument("--require-watchdog", action="store_true",
+                        help="exclude in-cluster observations without Watchdog evidence")
     parser.add_argument("--source", default="alertmanager-poll")
     parser.add_argument("--granularity-seconds", type=int, default=86400,
                         help="how precisely this source dates a resolution (daily poll = 86400)")
     parser.add_argument("--rca-output", help="write the weekly RCA markdown here")
     parser.add_argument("--recurrence-output", help="write flagged recurrences as JSON here")
+    parser.add_argument("--coverage-output", help="write observation coverage as JSON here")
+    parser.add_argument("--current-review-window", action="store_true",
+                        help="require one observation for each of the last seven UTC daily polls")
     parser.add_argument(
         "--allow-no-observations", action="store_true",
         help="exit 0 even when no observation covered the window. For local/ad-hoc "
@@ -579,27 +666,43 @@ def main() -> int:
 
     now = dt.datetime.now(dt.timezone.utc)
     records = load_ledger(args.ledger)
-    if args.observe:
-        observations = []
-        for path in args.observe:
+    observations = []
+    for path in args.observe:
+        try:
             with open(path, encoding="utf-8") as stream:
                 payload = json.load(stream)
-            try:
-                observed_at, alerts = read_observation(payload)
-            except ValueError as exc:
-                print(f"ERROR: {path}: {exc}", file=sys.stderr)
-                return EXIT_USAGE
-            observations.append((observed_at, alerts, path))
-        records = replay(records, [(w, a) for w, a, _ in observations],
-                         args.granularity_seconds, args.source)
+                observation = read_observation(payload)
+                if args.require_watchdog:
+                    noise = payload.get("alertNoise")
+                    if not isinstance(noise, list) or not any(
+                        isinstance(alert, dict) and isinstance(alert.get("labels"), dict)
+                        and alert["labels"].get("alertname") == "Watchdog"
+                        for alert in noise
+                    ):
+                        print(f"WARNING: {path}: Watchdog evidence unavailable", file=sys.stderr)
+                        continue
+                observations.append(observation)
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: {path}: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+    missing_days = None
+    if args.current_review_window:
+        observations, missing_days = observations_in_review_window(observations, now)
+    cover = coverage(len(observations), missing_days)
+    if missing_days:
+        cover["missingDays"] = missing_days
+    if cover["outcome"] == COVERAGE_OBSERVED:
+        records = replay(records, observations, args.granularity_seconds, args.source)
         write_ledger(args.ledger, records)
         print(f"ledger: {len(records)} record(s) from {len(observations)} observation(s) -> {args.ledger}")
-    cover = coverage(len(args.observe))
+    if args.coverage_output:
+        with open(args.coverage_output, "w", encoding="utf-8") as stream:
+            json.dump(cover, stream, indent=2, sort_keys=True)
     if args.rca_output:
         with open(args.rca_output, "w", encoding="utf-8") as stream:
             stream.write(render_rca(records, now, cover))
         print(f"rca: {args.rca_output}")
-    flagged = recurrences(records, now)
+    flagged = recurrences(records, now) if cover["outcome"] == COVERAGE_OBSERVED else []
     if args.recurrence_output:
         with open(args.recurrence_output, "w", encoding="utf-8") as stream:
             json.dump(flagged, stream, indent=2, sort_keys=True)
@@ -608,14 +711,9 @@ def main() -> int:
         {"coverage": cover, "mttr": mttr, "recurrences": flagged},
         indent=2, sort_keys=True,
     ))
-    if cover["outcome"] == COVERAGE_NO_OBSERVATIONS:
-        print(
-            "ERROR: no observation envelope covered this window — the weekly review "
-            "measured nothing. This is not a clean week; the daily standing-critical "
-            "digest is not producing envelopes. See #5869.",
-            file=sys.stderr,
-        )
-        if not args.allow_no_observations:
+    if cover["outcome"] != COVERAGE_OBSERVED:
+        print(f"ERROR: {cover['detail']} See #16022.", file=sys.stderr)
+        if args.current_review_window or not args.allow_no_observations:
             return EXIT_NO_OBSERVATIONS
     return EXIT_OK
 

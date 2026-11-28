@@ -1,6 +1,6 @@
 # Weekly alert-noise report. Prometheus computes per-alert FIRING ONSETS over 7d in-cluster
-# (AlertRuleFlapping, prometheus-rules-jobs.yaml); this reads the firing set from Alertmanager
-# and keeps ONE tracking issue current. Rationale and the three outcomes are in the script.
+# (AlertRuleFlapping, prometheus-rules-jobs.yaml). The in-cluster daily digest archives that
+# firing set in its existing envelope, which this workflow uses to update one tracking issue.
 name: Weekly alert-noise report
 
 on:
@@ -24,18 +24,45 @@ jobs:
     permissions:
       contents: read
       issues: write
+      id-token: write  # Get-only access to the existing digest envelope store
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Self-test the report classifier
         run: python3 .github/scripts/alert-noise-report.py --self-test
-      - name: Read AlertRuleFlapping from Alertmanager
+      - name: Require the digest reader role
+        env:
+          DIGEST_READER_ROLE: ${{ vars.ALERT_DIGEST_READER_ROLE_ARN }}
+        run: |
+          if [ -z "$DIGEST_READER_ROLE" ]; then
+            python3 .github/scripts/watch_outcome.py UNREADABLE "ALERT_DIGEST_READER_ROLE_ARN is unset"
+          fi
+      - name: Configure AWS credentials for the digest envelope store
+        id: credentials
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.ALERT_DIGEST_READER_ROLE_ARN }}
+          aws-region: eu-north-1
+          unset-current-credentials: true
+      - name: Read alert-noise evidence from today's digest envelope
         id: report
         env:
-          ALERTMANAGER_URL: ${{ secrets.ALERTMANAGER_URL }}
-          ALERTMANAGER_DIGEST_TOKEN: ${{ secrets.ALERTMANAGER_DIGEST_TOKEN }}
-        run: python3 .github/scripts/alert-noise-report.py "$RUNNER_TEMP/alert-noise.md"
+          DIGEST_BUCKET: openbank-sandbox-alert-digest
+          CREDENTIALS_OUTCOME: ${{ steps.credentials.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$CREDENTIALS_OUTCOME" != "success" ]; then
+            python3 .github/scripts/watch_outcome.py UNREADABLE "digest reader role could not be assumed"
+          fi
+          day="$(date -u +%Y-%m-%d)"
+          observation="$RUNNER_TEMP/alert-observation.json"
+          if ! aws s3api get-object --bucket "$DIGEST_BUCKET" \
+            --key "observations/${day}/alert-observation.json" "$observation" >/dev/null; then
+            python3 .github/scripts/watch_outcome.py UNREADABLE "could not read the digest envelope for $day"
+          fi
+          python3 .github/scripts/alert-noise-report.py "$observation" "$RUNNER_TEMP/alert-noise.md"
       - name: Open or update the tracking issue
         if: steps.report.outputs.state == 'NOISY'
         env:
@@ -51,3 +78,4 @@ jobs:
             gh issue create --title "Weekly alert-noise report" --label tech-debt \
               --body-file "$RUNNER_TEMP/alert-noise.md"
           fi
+          python3 .github/scripts/watch_outcome.py FOUND "published flapping alert rules in the tracking issue"

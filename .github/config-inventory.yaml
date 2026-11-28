@@ -122,7 +122,7 @@ github:
     - kind: variable
       names:
         - ALERT_DIGEST_READER_ROLE_ARN
-      reason: "ADR-0382 reader role for the in-cluster digest envelopes; the S3 step is skipped until the owner applies alert-digest.tf and sets it"
+      reason: "ADR-0382 reader role for alert RCA and alert-noise; noise reports UNREADABLE until the owner provisions the role and sets it"
       issue: 6432
       review_by: 2027-01-15
     - kind: variable

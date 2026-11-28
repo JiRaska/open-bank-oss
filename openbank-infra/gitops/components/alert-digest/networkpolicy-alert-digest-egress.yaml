@@ -4,6 +4,7 @@
 # Egress allow-list for the standing-critical digest CronJob (ADR-0382).
 #   - DNS;
 #   - the GET-only relay in `observability` on :8080 — its ONLY in-cluster destination;
+#   - the EKS Pod Identity credential endpoint on TCP 80;
 #   - TCP 443 to non-private addresses: S3 (the envelope's destination) and the Slack webhook.
 #     The digest script ships as a ConfigMap, so nothing is cloned from GitHub at runtime. A NetworkPolicy cannot name an FQDN, so
 #     this is the narrowest form the CNI can express (same trade as
@@ -46,6 +47,12 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    - to:
+        - ipBlock:
+            cidr: 169.254.170.23/32
+      ports:
+        - protocol: TCP
+          port: 80
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

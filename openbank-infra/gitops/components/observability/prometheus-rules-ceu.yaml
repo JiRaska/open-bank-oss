@@ -29,9 +29,10 @@ spec:
             severity: critical
             team: platform
           annotations:
-            summary: "Today's CEÚ change overview is not filed with ČNB"
+            summary: "CEÚ overview is past the local cutoff without submission evidence"
             description: >-
-              The CEÚ daily change overview (CEUSIFE10) for today's working day is not SUBMITTED
-              or ACKNOWLEDGED, and ČNB's 12:00 deadline is less than an hour away. Approve it
-              (four-eyes), deliver it through SDAT and record the submission reference.
+              The reporting workflow in this environment has no SUBMITTED or ACKNOWLEDGED
+              CEUSIFE10 overview for today's working day. Check the reporting environment
+              and reconcile any external receipt with the recorded status. Follow the
+              environment's filing procedure if submission is due.
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/ceu-alerts.md#ceudailyoverviewnotfiled"

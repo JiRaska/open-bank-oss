@@ -1,38 +1,42 @@
 #!/usr/bin/env python3
 """Weekly alert-noise report: which alert rules fired most often in the last 7 days.
 
-Source: the `AlertRuleFlapping` meta-alert (prometheus-rules-jobs.yaml), which Prometheus
-computes in-cluster as FIRING ONSETS per alertname over 7d and holds while > 14. Prometheus has
-no public ingress; Alertmanager is reachable from a hosted runner (the same URL and token the
-standing-critical digest uses), so the count travels as the meta-alert's `summary`/value.
+Source: the existing daily in-cluster digest's S3 observation. Prometheus computes
+AlertRuleFlapping from firing onsets over 7 days, and the digest captures the
+current meta-alerts in the same poll as standing criticals. The report requires
+today's UTC snapshot and a Watchdog from that snapshot before declaring quiet.
 
-Three outcomes, never two:
-  NOISY      >= 1 flapping rule: render the table, exit 0, caller opens/updates the issue.
-  QUIET      Alertmanager answered and carries no AlertRuleFlapping: exit 0, no issue.
-  UNREADABLE Alertmanager did not answer, or Watchdog is absent (the pipeline that would carry
-             AlertRuleFlapping is itself down, so "none flapping" would be a lie): exit 2.
-
-  ALERTMANAGER_URL=... ALERTMANAGER_DIGEST_TOKEN=... python3 .github/scripts/alert-noise-report.py out.md
+  python3 .github/scripts/alert-noise-report.py alert-observation.json out.md
   python3 .github/scripts/alert-noise-report.py --self-test
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import re
 import sys
-import tempfile
-import urllib.error
-import urllib.request
+from pathlib import Path
+
+from watch_outcome import emit
 
 HEADER = "<!-- alert-noise-weekly -->"
 
 
-def fetch(url: str, token: str) -> list[dict]:
-    req = urllib.request.Request(url.rstrip("/") + "/api/v2/alerts?active=true&silenced=true&inhibited=true",
-                                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r)
+def read_envelope(payload: object, now: dt.datetime) -> list[dict]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("alertNoise"), list):
+        raise ValueError("observation lacks alertNoise evidence")
+    timestamp = payload.get("observedAt")
+    if not isinstance(timestamp, str):
+        raise ValueError("observation lacks an observedAt timestamp")
+    observed = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    if observed.utcoffset() != dt.timedelta(0) or observed.date() != now.date() or observed > now:
+        raise ValueError("observation is outside today's UTC evidence window")
+    alerts = payload["alertNoise"]
+    if any(not isinstance(alert, dict) or not isinstance(alert.get("labels"), dict)
+           or alert["labels"].get("alertname") not in ("Watchdog", "AlertRuleFlapping") for alert in alerts):
+        raise ValueError("observation contains malformed or unexpected alertNoise evidence")
+    return alerts
 
 
 def classify(alerts: list[dict]) -> tuple[str, list[tuple[int, str, str]]]:
@@ -44,8 +48,15 @@ def classify(alerts: list[dict]) -> tuple[str, list[tuple[int, str, str]]]:
         lab = a.get("labels", {})
         if lab.get("alertname") != "AlertRuleFlapping":
             continue
-        m = re.search(r"fired (\d+(?:\.\d+)?) separate times", a.get("annotations", {}).get("summary", ""))
-        rows.append((int(float(m.group(1))) if m else -1, lab.get("alert_name", "?"), lab.get("alert_severity", "?")))
+        annotations = a.get("annotations")
+        summary = annotations.get("summary") if isinstance(annotations, dict) else None
+        name, severity = lab.get("alert_name"), lab.get("alert_severity", "")
+        if not isinstance(severity, str) or not all(isinstance(value, str) and value for value in (name, summary)):
+            raise ValueError("AlertRuleFlapping evidence lacks labels or summary")
+        match = re.search(r"fired (\d+)(?:\.\d+)? separate times", summary)
+        if not match:
+            raise ValueError("AlertRuleFlapping summary lacks an onset count")
+        rows.append((int(match.group(1)), name, severity or "?"))
     rows.sort(reverse=True)
     return ("NOISY" if rows else "QUIET"), rows
 
@@ -79,33 +90,49 @@ def self_test() -> int:
         print(f"{'ok  ' if ok else 'FAIL'} {name}: {got} rows={len(rows)}")
     if "| 66 | `X` | warning |" not in render(classify([wd, flap])[1]):
         print("FAIL render"); bad += 1
+    now = dt.datetime(2026, 11, 23, 10, 30, tzinfo=dt.timezone.utc)
+    payload = {"observedAt": "2026-11-23T08:30:00Z", "alertNoise": [wd, flap]}
+    assert classify(read_envelope(payload, now)) == ("NOISY", [(66, "X", "warning")])
+    for malformed in (
+        {"observedAt": payload["observedAt"], "alerts": []},
+        {**payload, "observedAt": "2026-11-22T08:30:00Z"},
+        {**payload, "observedAt": "2026-11-23T11:00:00Z"},
+        {**payload, "observedAt": "2026-11-23T08:30:00"},
+        {**payload, "alertNoise": [wd, None]},
+        {**payload, "alertNoise": [wd, {**flap, "annotations": {}}]},
+    ):
+        try:
+            classify(read_envelope(malformed, now))
+        except ValueError:
+            continue
+        print("FAIL malformed evidence was accepted")
+        bad += 1
     return 1 if bad else 0
 
 
 def main() -> int:
     if sys.argv[1:] == ["--self-test"]:
         return self_test()
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(tempfile.gettempdir(), "alert-noise.md")
-    url, token = os.environ.get("ALERTMANAGER_URL", ""), os.environ.get("ALERTMANAGER_DIGEST_TOKEN", "")
-    if not url or not token:
-        print("::error::ALERTMANAGER_URL / ALERTMANAGER_DIGEST_TOKEN unset — refusing to report QUIET unread")
+    if len(sys.argv) != 3:
+        print(f"usage: {sys.argv[0]} OBSERVATION_JSON REPORT_MD", file=sys.stderr)
         return 2
+    observation, report = map(Path, sys.argv[1:])
     try:
-        state, rows = classify(fetch(url, token))
-    except (OSError, ValueError, urllib.error.URLError) as e:
-        print(f"::error::Alertmanager unreadable: {e}")
-        return 2
+        payload = json.loads(observation.read_text(encoding="utf-8"))
+        state, rows = classify(read_envelope(payload, dt.datetime.now(dt.timezone.utc)))
+        if state == "UNREADABLE":
+            return emit("UNREADABLE", "Watchdog absent from the daily Alertmanager observation")
+        if state == "NOISY":
+            report.write_text(render(rows), encoding="utf-8")
+        gh_out = os.environ.get("GITHUB_OUTPUT")
+        if gh_out:
+            with open(gh_out, "a", encoding="utf-8") as stream:
+                stream.write(f"state={state}\n")
+    except (OSError, ValueError) as exc:
+        return emit("UNREADABLE", f"could not read daily alert-noise evidence: {exc}")
+    if state == "QUIET":
+        return emit("CLEAN", "Watchdog present and no flapping alerts in the daily observation")
     print(f"alert-noise: {state} ({len(rows)} flapping rules)")
-    if state == "UNREADABLE":
-        print("::error::Watchdog absent from Alertmanager — cannot tell 'nothing flapping' from 'pipeline down'")
-        return 2
-    if state == "NOISY":
-        with open(out, "w", encoding="utf-8") as f:
-            f.write(render(rows))
-    gh_out = os.environ.get("GITHUB_OUTPUT")
-    if gh_out:
-        with open(gh_out, "a") as f:
-            f.write(f"state={state}\n")
     return 0
 
 
