@@ -19,6 +19,7 @@ final class McpNotes {
     static final String PKCE_CHALLENGE = "openbank.mcp.pkce_challenge";
     static final String NATIVE_HANDOFF = "openbank.mcp.native_handoff";
     static final String NATIVE_PROOF = "openbank.mcp.native_proof_context";
+    static final String NATIVE_STAGED_CONTEXT = "openbank.mcp.native_staged_context";
     static final String CONNECT_V2 = "openbank.mcp.connect_v2";
     static final String CONNECT_CONTEXT_SHA256 = "openbank.mcp.connect_context_sha256";
     static final String CHALLENGE_ID = "openbank.mcp.challenge_id";

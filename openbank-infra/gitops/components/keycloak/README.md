@@ -502,6 +502,11 @@ assistant in the native handoff and stays bound to the grant and session. Each r
 requires authenticated PAR, S256 PKCE and verified DPoP. The native app verifies the passkey and
 obtains separate strong customer authentication before activation.
 
+The native authorization can defer browser passkey enrollment for this transaction after
+the verified app handoff and independent SCA have staged the same context. The required
+enrollment stays on the account for browser sign-in. Explicit browser enrollment, other
+required account actions, and other clients continue through the normal Keycloak checks.
+
 The committed public keys are disposable references whose private halves were discarded.
 Controlled activation requires vendor-specific bank-held keys, the vendor-facing adapter,
 a reviewed site-specific admission change, and actual read and revocation evidence.
