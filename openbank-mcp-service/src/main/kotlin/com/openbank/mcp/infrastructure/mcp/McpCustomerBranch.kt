@@ -51,12 +51,8 @@ import java.util.UUID
  */
 internal class McpCustomerBranch(
     private val admission: CustomerChannelAdmission,
-    private val auditor: McpCallAuditor,
-    private val metrics: McpMetricsPort,
-    private val limiter: McpRateLimiter,
-    private val grantCache: CustomerGrantCache,
-    private val tools: CustomerReadTools,
-    /** The shared (Valkey) D5.3 budgets when configured; null = the in-process [limiter]. */
+    private val deps: CustomerChannelDeps,
+    /** Shared D5.3 budgets when configured. Otherwise the in-process limiter applies. */
     private val shared: CustomerChannelAdmission.Throttles? = null,
     /** The subject-less window key for this request ([ClientAddressResolver]). */
     private val clientKey: () -> String = { ClientAddressKey.UNKNOWN },
@@ -105,7 +101,7 @@ internal class McpCustomerBranch(
             if (shared != null) {
                 shared.proofKey(thumbprint)
             } else {
-                reason(limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
+                reason(deps.limiter.check(CustomerChannelAdmission.proofKeyThrottleKey(thumbprint)))
             },
         )
 
@@ -113,7 +109,7 @@ internal class McpCustomerBranch(
             if (shared != null) {
                 shared.client(clientId)
             } else {
-                reason(limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
+                reason(deps.limiter.checkShared(CustomerChannelAdmission.clientThrottleKey(clientId)))
             },
         )
 
@@ -121,13 +117,13 @@ internal class McpCustomerBranch(
             if (shared != null) {
                 shared.subject(subject, clientId)
             } else {
-                reason(limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
+                reason(deps.limiter.check(CustomerChannelAdmission.throttleKey(subject, clientId)))
             },
         )
     }
 
     private fun metered(reason: String?): String? = reason?.also {
-        metrics.requestThrottled(
+        deps.metrics.requestThrottled(
             McpMetricsPort.ThrottleSurface.TOOLS_CALL,
             McpMetricsPort.ThrottleCaller.AUTHENTICATED,
         )
@@ -139,8 +135,8 @@ internal class McpCustomerBranch(
      * throttled or not — cannot become an unbounded audit-write amplifier. Every refusal is metered.
      */
     private fun refuse(outcome: Outcome.Refused, subject: String?, method: String, params: JsonNode): Response {
-        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
-        val auditable = limiter.shouldAuditThrottle(customerRefusalWindowKey(subject, clientKey))
+        deps.metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        val auditable = deps.limiter.shouldAuditThrottle(customerRefusalWindowKey(subject, clientKey))
         if (auditable) log.warnf("customer channel refused %s: %s", McpInputBounds.logSafe(method), outcome.reason)
         if (auditable && method == TOOLS_CALL && !McpInputBounds.containsNul(params)) {
             audit(UNKNOWN, McpInputBounds.echo(params.path("name").asText("")), params, outcome.reason, emptyList())
@@ -172,7 +168,7 @@ internal class McpCustomerBranch(
             ?: return Grants.Unknown("token carries no party_id")
         val key = GrantKey(party, outcome.client.clientId, outcome.keyThumbprint, outcome.connectionId)
         return try {
-            Grants.Known(key, grantCache.grants(key))
+            Grants.Known(key, deps.grantCache.grants(key))
         } catch (e: GrantLookupUnavailable) {
             log.warnf("customer grant lookup unavailable: %s", e.message)
             Grants.Unknown(LOOKUP_UNAVAILABLE)
@@ -192,7 +188,7 @@ internal class McpCustomerBranch(
         // initialize / ping / notifications and unknown methods carry no data: the shared dispatch answers them.
         if (method != TOOLS_LIST && method != TOOLS_CALL) return null
         val startedAt = System.nanoTime()
-        metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
+        deps.metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
         val ctx = outcome.context
         val grants = grantsFor(outcome, jwt)
         if (method == TOOLS_LIST) return list(ctx, grants, id)
@@ -214,10 +210,10 @@ internal class McpCustomerBranch(
             sessionId = sessionOf(jwt),
             resourceProof = resourceProof,
         )
-        val result = tools.call(tool, args, caller, known.grants)
+        val result = deps.tools.call(tool, args, caller, known.grants)
         val decision = result.auditDecision()
-        metrics.toolCallCompleted(
-            tool.takeIf { tools.capabilityOf(it) != null } ?: McpMetricsPort.UNMAPPED_TOOL,
+        deps.metrics.toolCallCompleted(
+            tool.takeIf { deps.tools.capabilityOf(it) != null } ?: McpMetricsPort.UNMAPPED_TOOL,
             decision,
             if (decision == McpCallAuditor.Decision.ALLOW) AuditResult.SUCCESS else AuditResult.DENIED,
             Duration.ofNanos(System.nanoTime() - startedAt),
@@ -249,14 +245,14 @@ internal class McpCustomerBranch(
             Response.ok(McpResponse(id = id, result = result.result)).build()
         }
         is CustomerReadTools.Outcome.Refused -> {
-            if (result.invalidateGrant) grantCache.invalidate(key)
+            if (result.invalidateGrant) deps.grantCache.invalidate(key)
             val decision = result.auditDecision()
             audit(ctx.agentId, tool, params, result.reason, ctx.actChain, decision, result.capability)
             toolError(id, result.message ?: if (result.unavailable) AUTHZ_UNAVAILABLE else NOT_PERMITTED)
         }
         is CustomerReadTools.Outcome.DownstreamRejected -> {
             // The grant may have been revoked since it was cached: forget it, so the next call asks again.
-            grantCache.invalidate(key)
+            deps.grantCache.invalidate(key)
             audit(
                 ctx.agentId,
                 tool,
@@ -271,19 +267,21 @@ internal class McpCustomerBranch(
     }
 
     private fun list(ctx: ConsentContext, grants: Grants, id: JsonNode): Response {
-        val offered = (grants as? Grants.Known)?.let { tools.list(it.grants, it.key.connectionId != null) }.orEmpty()
+        val offered = (grants as? Grants.Known)?.let {
+            deps.tools.list(it.grants, it.key.connectionId != null)
+        }.orEmpty()
         val reason = when {
             grants is Grants.Unknown -> grants.reason
             offered.isEmpty() -> NO_ACTIVE_GRANT
             else -> null
         }
         runBlocking {
-            auditor.toolsListCompleted(
+            deps.auditor.toolsListCompleted(
                 McpCallAuditor.ToolsList(
                     agentId = ctx.agentId,
                     consentId = NO_CONSENT,
                     toolsReturned = offered.size,
-                    toolsTotal = tools.totalTools,
+                    toolsTotal = deps.tools.totalTools,
                     pdpErrors = 0,
                     reason = reason,
                     actChain = ctx.actChain,
@@ -308,7 +306,7 @@ internal class McpCustomerBranch(
         capability: String? = null,
         consentId: String = NO_CONSENT,
     ) = runBlocking {
-        auditor.toolCallCompleted(
+        deps.auditor.toolCallCompleted(
             McpCallAuditor.ToolCall(
                 agentId = agentId,
                 consentId = consentId,
