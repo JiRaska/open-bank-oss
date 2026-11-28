@@ -38,7 +38,7 @@ spec:
         app.kubernetes.io/name: keycloak
       annotations:
         # Bumped by gen-theme-configmap.sh when a login theme changes.
-        openbank.dev/theme-checksum: "1c4591e58a46aab1"
+        openbank.dev/theme-checksum: "1368e003c0e20820"
         # Single-replica IdP: forbid Karpenter from voluntarily evicting this pod
         # for consolidation ("Evicted pod: Underutilized"). Even with the optimized
         # image (~10s start) a consolidation still lands a cold pod on a possibly
