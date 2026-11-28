@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.6](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.5...kyb-service-v0.11.6) (2026-11-28)
+
+
+### Bug Fixes
+
+* **kyb:** serve private authority checks over mutual TLS ([#15705](https://github.com/JiRaska/open-bank-oss/issues/15705)) ([999028b](https://github.com/JiRaska/open-bank-oss/commit/999028b332b5850ea11eb3837fbe424def796ff4))
+
 ## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.11.4...kyb-service-v0.11.5) (2026-11-23)
 
 
