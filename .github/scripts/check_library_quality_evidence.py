@@ -165,25 +165,47 @@ def api(endpoint, *, budget):
     raise AssertionError("unreachable retry exhaustion")
 
 
+def changed_paths(base, head, *, budget):
+    if any(not re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (base, head)):
+        raise EvidenceUnavailable("event base and head must be full commit SHAs")
+    try:
+        # GitHub's PR comparison uses a merge base. Include both sides of renames
+        # so removing a path from the proof scope still requires the proof.
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "-z", "--no-renames", f"{base}...{head}", "--"],
+            check=True, capture_output=True, timeout=min(30, budget.remaining()),
+        )
+        budget.remaining()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EvidenceUnavailable(f"event PR diff unavailable: {type(exc).__name__}") from exc
+    return result.stdout.decode("utf-8", errors="surrogateescape").split("\0")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--pr", required=True, type=int)
-    parser.add_argument("--head", required=True)
-    parser.add_argument("--timeout", type=int, default=900)
+    mode = parser.add_subparsers(dest="mode", required=True)
+    classify = mode.add_parser("classify")
+    classify.add_argument("--base", required=True)
+    classify.add_argument("--head", required=True)
+    verify = mode.add_parser("verify")
+    verify.add_argument("--repo", required=True)
+    verify.add_argument("--head", required=True)
+    verify.add_argument("--applicable", choices=("true", "false"), required=True)
+    verify.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args()
-    budget = ReadBudget(args.timeout)
     try:
-        return require_proofs(args, budget)
+        if args.mode == "classify":
+            paths = changed_paths(args.base, args.head, budget=ReadBudget(30))
+            print("applicable=" + str(applicable(paths)).lower())
+            return 0
+        return require_proofs(args, ReadBudget(args.timeout))
     except EvidenceUnavailable as exc:
         print(f"::error::Library quality evidence NOT_EVALUATED: {exc}; refusing all-green")
         return 1
 
 
 def require_proofs(args, budget):
-    paths = [f["filename"] for page in api(f"repos/{args.repo}/pulls/{args.pr}/files?per_page=100", budget=budget) for f in page]
-    if not applicable(paths):
-        budget.remaining()
+    if args.applicable == "false":
         print("Library proofs: not applicable to these paths")
         return 0
     completed_jobs = {}
