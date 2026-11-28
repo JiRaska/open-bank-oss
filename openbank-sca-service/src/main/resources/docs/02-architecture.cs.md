@@ -118,3 +118,10 @@ jeden autorizační požadavek PAR.
   `VALIDATION_ERROR`. Autentikátor na první čeká a při čemkoli jiném relaci ukončí.
 - **Kanonický kontext.** `McpConnectContext` určuje bajty, nad kterými se počítá `payloadSha256`;
   je bajt po bajtu vázán na fixture, kterou čtou i testy rozšíření Keycloaku.
+### Push k připojení asistenta
+
+Výzva k připojení MCP odesílá bezpečnostní push `MCP_CONNECT_APPROVAL`.
+U kanonické žádosti V2 odkaz identifikuje konkrétní žádost. Push neobsahuje
+předávací token ani podepisovaný kontext. Aplikace načte kontext přes
+autentizovanou trasu vlastníka. Kompatibilní službu Notification nasaďte dříve
+než odesílatele v SCA.

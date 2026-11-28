@@ -116,3 +116,10 @@ PAR authorization request.
   `VALIDATION_ERROR`. The authenticator polls on the first and ends the session on anything else.
 - **Canonical context.** `McpConnectContext` specifies the bytes `payloadSha256` is computed over;
   it is held byte for byte to the fixture the Keycloak extension's tests read too.
+### Assistant connection push delivery
+
+An MCP connection challenge sends a `MCP_CONNECT_APPROVAL` security push.
+For a canonical V2 request, its link identifies the exact request. The payload
+carries neither the handoff token nor the signed approval context. The app
+loads that context from the authenticated owner route. Deploy the compatible
+Notification consumer before the SCA producer.

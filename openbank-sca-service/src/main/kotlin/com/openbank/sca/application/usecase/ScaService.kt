@@ -256,6 +256,9 @@ class ScaService(
                     command.partyId,
                     saved.id,
                     buildPushMessage(command.purpose, command.dynamicLinkingData),
+                    command.dynamicLinkingData?.approvalRequestId.takeIf {
+                        command.purpose == ScaPurpose.MCP_CLIENT_CONNECT
+                    },
                 )
             }
         }
