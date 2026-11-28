@@ -14,7 +14,9 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.19.0
+  # 2.19.0 -> 2.20.0 (ADR-0326 phase b): additive optional RFC 9457 and ApiError-compatible members
+  # on LegacyError; the established required `error` member remains unchanged.
+  version: 2.20.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -1222,6 +1224,17 @@ components:
       type: object
       properties:
         error: { type: string }
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, minLength: 1, maxLength: 64 }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        traceId: { type: string }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
       required: [error]
     ApiError:
       type: object

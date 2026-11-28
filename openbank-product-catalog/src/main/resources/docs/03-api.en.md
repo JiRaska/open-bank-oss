@@ -141,12 +141,13 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Legacy v1 product-not-found responses retain `{ "error": "<message>" }` for existing Pacts.
-When banking compatibility is disabled, the six documented product detail, update, code lookup,
-activation, deactivation, and per-product fee 404 responses come from the shared mapper as
-`ApiError` (`traceId`, `status`, `code`, `message`, `timestamp`). Those six responses accept both
-bodies. V2 returns `ApiError`; schema validation uses 422 with ordered
-`{instancePath,schemaPath,keyword,message}` violations.
+Product-not-found and duplicate-product-code failures use the shared `DomainExceptionMapper`.
+Their 404 and 409 responses retain the required legacy `error` member with the established message
+and add the typed `ProblemDetail`/`ApiError` members. Their stable codes are `PRODUCT_NOT_FOUND`
+and `PRODUCT_CODE_ALREADY_EXISTS`; clients can therefore migrate to `code` without losing the
+legacy member during the compatibility window. Other catalog validation, lifecycle, precondition
+and conflict failures keep their existing shared mappings. V2 schema validation uses 422 with
+ordered `{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
