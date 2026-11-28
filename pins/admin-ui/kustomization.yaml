@@ -14,5 +14,5 @@ resources:
 - manifests/tools-gate.yaml
 images:
 - name: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui
-  newTag: sandbox-26bac76a5-run46117456035
-  digest: sha256:2411fa903344a206824df0a671a63479614371a63610bf3cd3b95ebcf203c320
+  newTag: sandbox-314cbb668-run46118478123
+  digest: sha256:333aa47cf1e2f27f7bdbb8d54494fe2877f3253c5e967df9783702d4c22b0b6f
