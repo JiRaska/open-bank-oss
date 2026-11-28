@@ -187,3 +187,11 @@ Stav je append-only, verzovaný log žádaného stavu (`dispatch_control_log`); 
 `when` bez `else`, takže šablona bez textu neprojde kompilací. Šest šablon `PENSION_*` se vykresluje
 přes `PensionCopy`: předměty jsou konstantní pro šablonu a jazyk, hodnoty jsou HTML-escapované a
 `PENSION_PAYOUT_ACCOUNT_CHANGED` je bezpečnostní oznámení, které nelze ztlumit.
+
+### Schválení připojení AI asistenta
+
+`MCP_CONNECT_APPROVAL` je bezpečnostní push s pevným textem o připojení a bez
+proměnných od odesílatele. Volitelný odkaz musí mít tvar
+`openbank://mcp/connect/<64 malých hexadecimálních znaků>`. Reference slouží
+jen k otevření žádosti. Aplikace ji načte v osobní relaci a ověří vázanou výzvu
+před schválením. Službu Notification nasaďte dříve, než SCA začne šablonu odesílat.

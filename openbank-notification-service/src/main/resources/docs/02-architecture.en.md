@@ -187,3 +187,12 @@ State is an append-only, versioned desired-state log (`dispatch_control_log`); e
 with no `else`, so a template without copy fails to compile. The six `PENSION_*` templates render
 through `PensionCopy`: subjects are constant per template and language, values are HTML-escaped, and
 `PENSION_PAYOUT_ACCOUNT_CHANGED` is a SECURITY notice that cannot be muted.
+
+### AI assistant connection approval
+
+`MCP_CONNECT_APPROVAL` is a security push with fixed connection-specific copy
+and no caller-supplied variables. Its optional deep link must be
+`openbank://mcp/connect/<64 lowercase hexadecimal characters>`. The reference
+only routes the user to a review. The app fetches the request with the personal
+session and verifies the bound challenge before the user can approve it. Deploy
+this Notification consumer before the SCA producer starts sending the template.

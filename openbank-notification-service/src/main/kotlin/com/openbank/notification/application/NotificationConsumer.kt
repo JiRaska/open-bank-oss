@@ -31,6 +31,7 @@ import com.openbank.notification.domain.model.NotificationLanguage
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
+import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.PushResult
@@ -304,8 +305,13 @@ class NotificationConsumer @Inject constructor(
             )
             return Uni.createFrom().voidItem()
         }
+        val mcpTemplate = req.template == NotificationTemplate.MCP_CONNECT_APPROVAL
         val validDeepLink = req.deepLink == null ||
-            (req.channel == NotificationChannel.PUSH && MobileDeepLink.isAllowed(req.deepLink))
+            (
+                req.channel == NotificationChannel.PUSH &&
+                    MobileDeepLink.isAllowed(req.deepLink) &&
+                    MobileDeepLink.isMcpConnect(req.deepLink) == mcpTemplate
+                )
         if (!validDeepLink) {
             // The deep link controls device navigation, so it gets the same allow-list posture as
             // template identifiers. Do not log the rejected value; it may be attacker-controlled.
