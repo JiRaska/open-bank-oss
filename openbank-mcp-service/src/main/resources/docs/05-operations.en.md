@@ -417,6 +417,9 @@ configuration.
 
 Verify gateway access logs with a synthetic query marker before enabling real authorization.
 Application events report the vendor and a derived correlation value for the PAR and callback stages.
+Hosted MCP advertises tools only. Requests for unimplemented methods return JSON-RPC
+`Method not found` after grant admission. Out-of-scope tool calls return HTTP 403. The
+application records a fixed refusal category and omits request IDs, methods and arguments.
 Confirm both ChatGPT and Claude can display the bank approval, return to the original session,
 list the test account, read its known balance after token renewal, and lose access after revocation.
 To roll back, disable hosted OAuth and revoke the hosted test grants through the supported

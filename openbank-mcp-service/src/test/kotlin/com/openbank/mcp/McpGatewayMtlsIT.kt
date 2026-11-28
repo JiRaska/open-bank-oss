@@ -6,8 +6,18 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.mtls.ProductionListenerKeys
 import com.openbank.mcp.infrastructure.customer.DpopTestProofs
 import com.openbank.mcp.infrastructure.mcp.ClientAddressKey
+import com.openbank.mcp.infrastructure.oauth.HostedBankAccess
+import com.openbank.mcp.infrastructure.oauth.HostedMcpDispatch
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthAdmission.Vendor
+import com.openbank.mcp.infrastructure.oauth.HostedOAuthRuntimeProducer
+import com.openbank.mcp.infrastructure.oauth.HostedVendorGrants
+import com.openbank.mcp.infrastructure.oauth.PgHostedVendorGrants
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -25,6 +35,7 @@ import org.junit.jupiter.api.Test
 import java.net.Socket
 import java.nio.file.Files
 import java.security.KeyStore
+import java.util.UUID
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
@@ -72,6 +83,35 @@ class McpGatewayMtlsIT {
 
     /** A request over the 8443-shaped listener presenting [identity] ("gateway" / "other"), or no certificate. */
     private fun mtls(identity: String?): RequestSpecification = GatewayTls.spec(identity)
+
+    @Test
+    fun `hosted unsupported methods return JSON-RPC errors and empty notifications over TLS`() {
+        val token = "obat2_" + "A".repeat(43)
+        val grants = mockk<HostedVendorGrants>()
+        coEvery { grants.admit(token) } returns PgHostedVendorGrants.Identity(Vendor.CHATGPT, UUID.randomUUID())
+        val dispatch = HostedMcpDispatch(grants, mockk<HostedBankAccess>()) { _, _, _, _ ->
+            error("unsupported methods and notifications must never reach the bank")
+        }
+        val runtime = mockk<HostedOAuthRuntimeProducer>()
+        every { runtime.enabledVendors } returns setOf(Vendor.CHATGPT)
+        every { runtime.dispatch } returns dispatch
+        QuarkusMock.installMockForType(runtime, HostedOAuthRuntimeProducer::class.java)
+
+        mtls("gateway").header("Authorization", "Bearer $token").contentType("application/json")
+            .body("""{"jsonrpc":"2.0","id":"discovery","method":"resources/list"}""")
+            .post("/customer/hosted-mcp")
+            .then().statusCode(200).body("jsonrpc", equalTo("2.0"))
+            .body("id", equalTo("discovery")).body("error.code", equalTo(-32601))
+
+        mtls("gateway").header("Authorization", "Bearer $token").contentType("application/json")
+            .body("""{"jsonrpc":"2.0","method":"notifications/cancelled"}""")
+            .post("/customer/hosted-mcp")
+            .then().statusCode(202).body(equalTo(""))
+
+        mtls("gateway").header("Authorization", "Bearer $token")
+            .post("/customer/hosted-mcp")
+            .then().statusCode(415)
+    }
 
     private fun customerToken(sub: String, jkt: String): String {
         val claims = JwtClaims()
