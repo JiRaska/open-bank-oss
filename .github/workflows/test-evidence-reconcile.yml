@@ -50,10 +50,17 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Check REST quota before optional work
+        id: api-reserve
+        uses: ./.github/actions/optional-api-reserve
+        env:
+          GH_github.token: ${{ github.token }}
+
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
       - name: Resolve provable evidence per running image
+        if: steps.api-reserve.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -63,12 +70,14 @@ jobs:
           echo "$(wc -l < "${RUNNER_TEMP}/plan.jsonl") component(s) to publish"
 
       - name: Assume the evidence-writer role (GitHub OIDC)
+        if: steps.api-reserve.outputs.proceed == 'true'
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-test-evidence-writer
           aws-region: eu-north-1
 
       - name: Publish write-once
+        if: steps.api-reserve.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
