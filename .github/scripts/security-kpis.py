@@ -220,10 +220,15 @@ def collect_fuzz() -> dict:
                      "Accept": "application/vnd.github+json"})
         return urllib.request.urlopen(req, timeout=30).read()
 
+    stage = "run-list"
+    fallback = "not-attempted"
     try:
         runs = json.loads(gh("actions/workflows/api-fuzz.yml/runs?status=completed&per_page=10"))
 
         def download(artifact: dict) -> dict:
+            nonlocal stage, fallback
+            stage = "archive-download"
+            fallback = "not-attempted"
             req = urllib.request.Request(
                 artifact["archive_download_url"],
                 headers={"Authorization": f"Bearer {token}",
@@ -240,14 +245,25 @@ def collect_fuzz() -> dict:
                 import subprocess
                 ghbin = shutil.which("gh")
                 if not ghbin:
+                    fallback = "unavailable"
                     raise
-                out = subprocess.run(
-                    [ghbin, "api", f"repos/{repo}/actions/artifacts/{artifact['id']}/zip"],
-                    capture_output=True, timeout=60,
-                    env={**os.environ, "GH_TOKEN": token}, check=False)
+                try:
+                    out = subprocess.run(
+                        [ghbin, "api", f"repos/{repo}/actions/artifacts/{artifact['id']}/zip"],
+                        capture_output=True, timeout=60,
+                        env={**os.environ, "GH_TOKEN": token}, check=False)
+                except subprocess.TimeoutExpired:
+                    fallback = "timeout"
+                    raise urllib_exc from None
+                except OSError:
+                    fallback = "failed"
+                    raise urllib_exc from None
                 if out.returncode != 0 or not out.stdout:
+                    fallback = "failed"
                     raise urllib_exc
+                fallback = "success"
                 blob = out.stdout
+            stage = "archive-content"
             return json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("fuzz-coverage.json"))
 
         # The LATEST run's artifact is not automatically the coverage measurement: a dispatch
@@ -260,6 +276,8 @@ def collect_fuzz() -> dict:
         cov = None
         skipped_overrides = 0
         for run in runs.get("workflow_runs", [])[:10]:
+            stage = "artifact-list"
+            fallback = "not-attempted"
             arts = json.loads(gh(f"actions/runs/{run['id']}/artifacts?per_page=100"))
             hit = [a for a in arts.get("artifacts", [])
                    if a["name"] == "fuzz-coverage" and not a.get("expired")]
@@ -289,7 +307,16 @@ def collect_fuzz() -> dict:
     except Exception as exc:  # network/API degradation must not kill the other collectors
         import urllib.error
         detail = f"HTTP {exc.code}" if isinstance(exc, urllib.error.HTTPError) else exc.__class__.__name__
-        return {"available": False, "reason": f"fuzz artifact fetch failed: {detail}"}
+        if isinstance(exc, urllib.error.HTTPError):
+            from urllib.parse import urlsplit
+            if stage == "archive-download":
+                try:
+                    host = urlsplit(exc.geturl()).hostname
+                except (TypeError, ValueError):
+                    host = None
+                if host and host != "api.github.com":
+                    stage = "archive-redirect"
+        return {"available": False, "reason": f"fuzz artifact fetch failed: {stage}: {detail}; fallback={fallback}"}
 def self_test() -> int:
     bad = 0
     # The parse regexes must survive the real scripts' output shape — pin them on the
@@ -382,6 +409,34 @@ def self_test() -> int:
     same = handler.redirect_request(src, None, 302, "", {}, "https://api.github.com/x/other")
     if same is None or not same.has_header("Authorization"):
         print("self-test FAIL: Authorization dropped on a same-host redirect"); bad += 1
+    import os
+    import subprocess
+    import urllib.error
+    from unittest.mock import Mock
+    for url, cli_error, stage, fallback in (
+        ("https://api.github.com/run?private=fixture-secret", None, "run-list", "not-attempted"),
+        ("https://[fixture-secret", subprocess.TimeoutExpired("fixture-secret", 60),
+         "archive-download", "timeout"),
+        ("https://blob.invalid/?private=fixture-secret", OSError("fixture-secret"),
+         "archive-redirect", "failed"),
+    ):
+        failure = urllib.error.HTTPError(url, 403, "fixture-secret", {}, None)
+        responses = [failure] if cli_error is None else [
+            io.BytesIO(b'{"workflow_runs":[{"id":1}]}'),
+            io.BytesIO(b'{"artifacts":[{"id":2,"name":"fuzz-coverage",'
+                       b'"archive_download_url":"https://api.github.com/archive"}]}'),
+        ]
+        archive = Mock(open=Mock(side_effect=failure))
+        with (patch.dict(os.environ, {"GH_TOKEN": "fixture-secret"}),
+              patch.object(urllib.request, "urlopen", side_effect=responses),
+              patch.dict(globals(), {"_no_auth_redirect_opener": lambda archive=archive: archive}),
+              patch("shutil.which", return_value="/fixture/gh"),
+              patch("subprocess.run", side_effect=cli_error)):
+            actual = collect_fuzz()
+        expected = {"available": False, "reason":
+                    f"fuzz artifact fetch failed: {stage}: HTTP 403; fallback={fallback}"}
+        if actual != expected:
+            print(f"self-test FAIL: redacted fuzz transport case {stage}"); bad += 1
     print("security-kpis self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
