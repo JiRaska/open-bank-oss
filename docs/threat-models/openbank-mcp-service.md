@@ -447,9 +447,11 @@ customer channel.
   restrict the outer grant to account listing and balance reading.
 - **Refresh races and stale consent.** Refresh rotation is fenced in the database. A replay of
   a spent outer refresh credential revokes its family. Rotation requires the same outer client
-  registration as issuance. Bank refresh must preserve the approved
-  connection, vendor client and DPoP binding. The bank grant authority is checked before issuing
-  or using the credential.
+  registration as issuance. The private Keycloak refresh credential remains opaque in encrypted
+  custody. The authenticated token response sets its bounded deadline. The adapter verifies the
+  successor's signed access token and requires the same approved connection, vendor client,
+  subject, session and DPoP binding. Keycloak validates the exact online refresh family before
+  issuing that successor and Delegation confirms the live balance grant before use.
 - **Operations.** Keep adapter activation disabled until the scoped OpenBao identity, public
   key pins and mTLS identities are verified. Disable both hosted clients to stop new authorizations
   and clear grant custody through the supported revocation path when rolling back the adapter.

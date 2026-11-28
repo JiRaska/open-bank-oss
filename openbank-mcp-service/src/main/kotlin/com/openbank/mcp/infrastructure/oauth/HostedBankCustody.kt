@@ -42,37 +42,56 @@ internal class HostedBankJwtVerifier(
         val refreshExpiry: Instant,
         val subject: String,
         val session: String,
-        val reuseId: String,
     )
 
-    fun validate(
+    /** Only call for a response from the authenticated, pinned Keycloak token endpoint. */
+    fun validateResponse(vendor: Vendor, thumbprint: String, tokens: JsonNode): OwnedTokens? =
+        validate(vendor, thumbprint, tokens, allowExpiredAccess = false) { issued ->
+            // Anchor the bank's relative online refresh lifetime to its signed access issue time.
+            Math.addExact(issued, time(tokens, "refresh_expires_in"))
+        }
+
+    /** The absolute deadline comes from the custody row, never from refresh claims. */
+    fun validateStored(
         vendor: Vendor,
         thumbprint: String,
         tokens: JsonNode,
-        allowExpiredAccess: Boolean = false,
+        refreshExpiry: Instant,
+        allowExpiredAccess: Boolean,
+    ): OwnedTokens? = validate(vendor, thumbprint, tokens, allowExpiredAccess) { refreshExpiry.epochSecond }
+
+    private fun validate(
+        vendor: Vendor,
+        thumbprint: String,
+        tokens: JsonNode,
+        allowExpiredAccess: Boolean,
+        refreshDeadline: (Long) -> Long,
     ): OwnedTokens? = runCatching {
         check(tokens.path("token_type").textValue()?.equals("DPoP", ignoreCase = true) == true)
         check(THUMBPRINT.matches(thumbprint))
         val access = requireNotNull(tokens.path("access_token").textValue())
+        // Keycloak signs online refresh tokens with its internal symmetric key. Only Keycloak
+        // validates them. The facade holds the returned credential opaque and encrypted.
         val refresh = requireNotNull(tokens.path("refresh_token").textValue())
+        check(refresh != access && refresh.length in 1..MAX_TOKEN_CHARS && refresh.all { it in '!'..'~' })
         val now = clock.instant().epochSecond
-        val accessClaims = verified(access, vendor, thumbprint, "DPoP", now, allowExpiredAccess)
-        val refreshClaims = verified(refresh, vendor, thumbprint, "Refresh", now)
+        val accessClaims = verified(access, vendor, thumbprint, now, allowExpiredAccess)
+        val issued = time(accessClaims, "iat")
+        val accessExpires = time(accessClaims, "exp")
+        val refreshExpires = refreshDeadline(issued)
+        check(refreshExpires > now && refreshExpires in (issued + 1)..(issued + MAX_ONLINE_REFRESH_SECONDS))
         check(audience(accessClaims.path("aud")))
-        check(accessClaims.path("exp").longValue() - accessClaims.path("iat").longValue() <= MAX_ACCESS_SECONDS)
-        check(accessClaims.path("sub").textValue() == refreshClaims.path("sub").textValue())
-        check(accessClaims.path("sid").textValue() == refreshClaims.path("sid").textValue())
+        check(accessExpires - issued <= MAX_ACCESS_SECONDS)
         val party = uuid(accessClaims.path("party_id").textValue())
         val connection = uuid(accessClaims.path("openbank_mcp_connection_id").textValue())
         OwnedTokens(
             GrantKey(party, vendor.bankClientId, thumbprint, connection),
             access,
             refresh,
-            Instant.ofEpochSecond(accessClaims.path("exp").longValue()),
-            Instant.ofEpochSecond(refreshClaims.path("exp").longValue()),
+            Instant.ofEpochSecond(accessExpires),
+            Instant.ofEpochSecond(refreshExpires),
             accessClaims.path("sub").textValue(),
             accessClaims.path("sid").textValue(),
-            requireNotNull(refreshClaims.path("reuse_id").textValue()).also { check(it.isNotBlank()) },
         )
     }.getOrNull()
 
@@ -80,7 +99,6 @@ internal class HostedBankJwtVerifier(
         token: String,
         vendor: Vendor,
         thumbprint: String,
-        type: String,
         now: Long,
         allowExpired: Boolean = false,
     ): JsonNode {
@@ -93,7 +111,7 @@ internal class HostedBankJwtVerifier(
         check(jws.verifySignature())
         val claims = mapper.readTree(jws.payload)
         check(claims.path("iss").textValue() == ISSUER && claims.path("azp").textValue() == vendor.bankClientId)
-        check(claims.path("typ").textValue() == type && claims.path("cnf").path("jkt").textValue() == thumbprint)
+        check(claims.path("typ").textValue() == "DPoP" && claims.path("cnf").path("jkt").textValue() == thumbprint)
         check(!claims.path("sub").textValue().isNullOrBlank() && !claims.path("sid").textValue().isNullOrBlank())
         val issued = time(claims, "iat")
         val expires = time(claims, "exp")
@@ -119,16 +137,19 @@ internal class HostedBankJwtVerifier(
         const val MIN_RSA_BITS = 2048
         const val MAX_TOKEN_CHARS = 16_384
         const val MAX_ACCESS_SECONDS = 300
+        const val MAX_ONLINE_REFRESH_SECONDS = 36_000 // Customer realm SSO session maximum.
         const val CLOCK_SKEW_SECONDS = 5
         val THUMBPRINT = Regex("[A-Za-z0-9_-]{43}")
     }
 }
 
 internal interface HostedBankGrantStore {
+    class Record(val sealed: String, val expiresAt: Instant)
+
     suspend fun put(vendor: Vendor, connectionId: UUID, sealed: String, expires: Instant): Boolean
-    suspend fun get(vendor: Vendor, connectionId: UUID): String?
+    suspend fun get(vendor: Vendor, connectionId: UUID): Record?
     suspend fun erase(vendor: Vendor, connectionId: UUID)
-    suspend fun claim(vendor: Vendor, connectionId: UUID, operation: UUID): String?
+    suspend fun claim(vendor: Vendor, connectionId: UUID, operation: UUID): Record?
     suspend fun replace(vendor: Vendor, connectionId: UUID, operation: UUID, sealed: String, expires: Instant): Boolean
     suspend fun release(vendor: Vendor, connectionId: UUID, operation: UUID)
     suspend fun discard(vendor: Vendor, connectionId: UUID, operation: UUID)
@@ -148,7 +169,7 @@ internal class HostedBankCustody(
         dpopThumbprint: String,
         tokenResponse: JsonNode,
     ): VerifiedConnection? {
-        val verified = verifier.validate(vendor, dpopThumbprint, tokenResponse) ?: return null
+        val verified = verifier.validateResponse(vendor, dpopThumbprint, tokenResponse) ?: return null
         val connection = requireNotNull(verified.key.connectionId)
         if (!active(verified.key)) return null
         val sealed = seal(vendor, connection, verified)
@@ -170,8 +191,8 @@ internal class HostedBankCustody(
         connectionId: UUID,
         dpopThumbprint: String,
     ): HostedBankJwtVerifier.OwnedTokens? {
-        val sealed = store.get(vendor, connectionId) ?: return null
-        val verified = open(vendor, connectionId, dpopThumbprint, sealed)
+        val record = store.get(vendor, connectionId) ?: return null
+        val verified = open(vendor, connectionId, dpopThumbprint, record)
         return verified?.takeIf { it.key.connectionId == connectionId && active(it.key) }
     }
 
@@ -186,15 +207,15 @@ internal class HostedBankCustody(
         bank: HostedBankRefreshExchange,
     ): Boolean {
         val operation = Ids.randomId()
-        val sealed = store.claim(vendor, connectionId, operation) ?: return false
+        val record = store.claim(vendor, connectionId, operation) ?: return false
         var replaced = false
         var exchangeStarted = false
         try {
-            val old = open(vendor, connectionId, dpopThumbprint, sealed, allowExpiredAccess = true)
+            val old = open(vendor, connectionId, dpopThumbprint, record, allowExpiredAccess = true)
                 ?.takeIf { it.key.connectionId == connectionId && active(it.key) } ?: return false
             exchangeStarted = true
             val response = bank.refresh(vendor, dpopThumbprint, old.refresh) ?: return false
-            val next = verifier.validate(vendor, dpopThumbprint, response) ?: return false
+            val next = verifier.validateResponse(vendor, dpopThumbprint, response) ?: return false
             if (!sameFamily(old, next) || !active(next.key)) return false
             val updated = seal(vendor, connectionId, next)
             replaced = store.replace(vendor, connectionId, operation, updated, next.refreshExpiry)
@@ -212,23 +233,24 @@ internal class HostedBankCustody(
         }
     }
 
+    // Keycloak's refresh response hook attests the same active family by stamping its connection.
+    // The newly signed access must independently prove the same subject, session and exact grant.
     private fun sameFamily(old: HostedBankJwtVerifier.OwnedTokens, next: HostedBankJwtVerifier.OwnedTokens): Boolean =
         old.key == next.key &&
             old.subject == next.subject &&
             old.session == next.session &&
-            old.reuseId == next.reuseId &&
             old.refresh != next.refresh
 
     private suspend fun open(
         vendor: Vendor,
         connection: UUID,
         thumbprint: String,
-        sealed: String,
+        record: HostedBankGrantStore.Record,
         allowExpiredAccess: Boolean = false,
     ): HostedBankJwtVerifier.OwnedTokens? {
-        val clear = withContext(Dispatchers.IO) { protector.decrypt(sealed, aad(vendor, connection)) }
+        val clear = withContext(Dispatchers.IO) { protector.decrypt(record.sealed, aad(vendor, connection)) }
         return try {
-            verifier.validate(vendor, thumbprint, mapper.readTree(clear), allowExpiredAccess)
+            verifier.validateStored(vendor, thumbprint, mapper.readTree(clear), record.expiresAt, allowExpiredAccess)
         } finally {
             clear.fill(0)
         }

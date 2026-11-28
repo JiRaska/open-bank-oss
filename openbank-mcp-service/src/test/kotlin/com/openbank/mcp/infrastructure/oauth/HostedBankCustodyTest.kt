@@ -7,9 +7,11 @@ import com.openbank.libs.security.FieldProtector
 import com.openbank.mcp.infrastructure.customer.CustomerGrant
 import com.openbank.mcp.infrastructure.customer.CustomerGrantSource
 import com.openbank.mcp.infrastructure.customer.GrantKey
+import com.openbank.mcp.infrastructure.oauth.HostedBankGrantStore.Record
 import com.openbank.mcp.infrastructure.oauth.HostedOAuthAdmission.Vendor
 import kotlinx.coroutines.runBlocking
 import org.jose4j.jws.JsonWebSignature
+import org.jose4j.keys.HmacKey
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -32,7 +34,6 @@ class HostedBankCustodyTest {
         assertNull(fixture.custody.storeApproved(Vendor.CLAUDE, KEY, tokens))
         assertNull(fixture.custody.storeApproved(Vendor.CHATGPT, "B".repeat(43), tokens))
         assertNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, fixture.tokens(audience = "unrelated")))
-        assertNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, fixture.tokens(refreshSid = "other")))
         assertNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, tokens))
         fixture.authorized = true
         val result = fixture.custody.storeApproved(Vendor.CHATGPT, KEY, tokens)
@@ -45,6 +46,46 @@ class HostedBankCustodyTest {
         assertNull(fixture.custody.loadActive(Vendor.CHATGPT, CONNECTION, KEY))
         fixture.custody.eraseRevoked(Vendor.CHATGPT, CONNECTION)
         assertNull(fixture.store.get(Vendor.CHATGPT, CONNECTION))
+    }
+
+    @Test
+    fun `native opaque refresh must use the authenticated response expiry`(): Unit = runBlocking {
+        val fixture = Fixture().apply { authorized = true }
+        assertNull(
+            fixture.custody.storeApproved(
+                Vendor.CHATGPT,
+                KEY,
+                fixture.tokens().apply {
+                    remove("refresh_expires_in")
+                },
+            ),
+        )
+        assertNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, fixture.tokens(refreshSeconds = 0)))
+        assertNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, fixture.tokens(refreshSeconds = 36_001)))
+        val accepted = fixture.tokens(refreshSeconds = 120)
+        assertNotNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, accepted))
+        assertEquals(
+            fixture.now.plusSeconds(120),
+            fixture.custody.loadActive(Vendor.CHATGPT, CONNECTION, KEY)?.refreshExpiry,
+        )
+        fixture.now = fixture.now.plusSeconds(121)
+        assertFalse(
+            fixture.custody.refreshActive(Vendor.CHATGPT, CONNECTION, KEY) { _, _, _ ->
+                error("expired refresh must not leave custody")
+            },
+        )
+    }
+
+    @Test
+    fun `rotation rejects another signed session and discards the prior credential`(): Unit = runBlocking {
+        val fixture = Fixture().apply { authorized = true }
+        assertNotNull(fixture.custody.storeApproved(Vendor.CHATGPT, KEY, fixture.tokens()))
+        assertFalse(
+            fixture.custody.refreshActive(Vendor.CHATGPT, CONNECTION, KEY) { _, _, _ ->
+                fixture.tokens(revision = 2, session = "other")
+            },
+        )
+        assertNull(fixture.custody.loadActive(Vendor.CHATGPT, CONNECTION, KEY))
     }
 
     @Test
@@ -148,48 +189,58 @@ class HostedBankCustodyTest {
             clock,
         )
 
-        fun tokens(audience: String = "openbank-mcp-service", refreshSid: String = "session", revision: Int = 1) =
-            mapper.createObjectNode().apply {
-                put("token_type", "DPoP")
-                put("access_token", token("DPoP", "session", audience, revision))
-                put(
-                    "refresh_token",
-                    token("Refresh", refreshSid, "https://kc.open-bank.tech/realms/openbank-customers", revision),
-                )
-            }
+        fun tokens(
+            audience: String = "openbank-mcp-service",
+            revision: Int = 1,
+            session: String = "session",
+            refreshSeconds: Long = 600,
+        ) = mapper.createObjectNode().apply {
+            put("token_type", "DPoP")
+            put("access_token", token(session, audience, revision))
+            put("refresh_expires_in", refreshSeconds)
+            // Model the actual Keycloak INTERNAL refresh signature. Its claims are deliberately
+            // unusable as facade identity or expiry proof.
+            put(
+                "refresh_token",
+                JsonWebSignature().apply {
+                    algorithmHeaderValue = "HS512"
+                    keyIdHeaderValue = "keycloak-internal"
+                    key = HmacKey(ByteArray(64) { 42 })
+                    payload = """{"exp":1,"jti":"fixture-revision-$revision"}"""
+                }.compactSerialization,
+            )
+        }
 
-        private fun token(type: String, session: String, audience: String, revision: Int): String =
-            JsonWebSignature().apply {
-                algorithmHeaderValue = "RS256"
-                keyIdHeaderValue = "fixture"
-                key = keys.private
-                payload = mapper.writeValueAsString(
-                    mapOf(
-                        "iss" to "https://kc.open-bank.tech/realms/openbank-customers",
-                        "azp" to Vendor.CHATGPT.bankClientId,
-                        "aud" to audience,
-                        "sub" to "fixture-user",
-                        "jti" to "fixture-revision-$revision",
-                        "reuse_id" to "fixture-family",
-                        "sid" to session,
-                        "typ" to type,
-                        "iat" to clock.instant().epochSecond,
-                        "exp" to clock.instant().plusSeconds(if (type == "Refresh") 600 else 60).epochSecond,
-                        "party_id" to PARTY.toString(),
-                        "openbank_mcp_connection_id" to CONNECTION.toString(),
-                        "cnf" to mapOf("jkt" to KEY),
-                    ),
-                )
-            }.compactSerialization
+        private fun token(session: String, audience: String, revision: Int): String = JsonWebSignature().apply {
+            algorithmHeaderValue = "RS256"
+            keyIdHeaderValue = "fixture"
+            key = keys.private
+            payload = mapper.writeValueAsString(
+                mapOf(
+                    "iss" to "https://kc.open-bank.tech/realms/openbank-customers",
+                    "azp" to Vendor.CHATGPT.bankClientId,
+                    "aud" to audience,
+                    "sub" to "fixture-user",
+                    "jti" to "fixture-revision-$revision",
+                    "sid" to session,
+                    "typ" to "DPoP",
+                    "iat" to clock.instant().epochSecond,
+                    "exp" to clock.instant().plusSeconds(60).epochSecond,
+                    "party_id" to PARTY.toString(),
+                    "openbank_mcp_connection_id" to CONNECTION.toString(),
+                    "cnf" to mapOf("jkt" to KEY),
+                ),
+            )
+        }.compactSerialization
     }
 
     private class MemoryStore : HostedBankGrantStore {
-        private val rows = mutableMapOf<Pair<Vendor, UUID>, String>()
+        private val rows = mutableMapOf<Pair<Vendor, UUID>, Record>()
         private val rotation = mutableMapOf<Pair<Vendor, UUID>, UUID>()
         override suspend fun put(vendor: Vendor, connectionId: UUID, sealed: String, expires: Instant): Boolean =
-            rows.putIfAbsent(vendor to connectionId, sealed) == null
+            rows.putIfAbsent(vendor to connectionId, Record(sealed, expires)) == null
 
-        override suspend fun get(vendor: Vendor, connectionId: UUID): String? =
+        override suspend fun get(vendor: Vendor, connectionId: UUID): Record? =
             rows[vendor to connectionId].takeIf { (vendor to connectionId) !in rotation }
 
         override suspend fun erase(vendor: Vendor, connectionId: UUID) {
@@ -197,7 +248,7 @@ class HostedBankCustodyTest {
             rotation.remove(vendor to connectionId)
         }
 
-        override suspend fun claim(vendor: Vendor, connectionId: UUID, operation: UUID): String? {
+        override suspend fun claim(vendor: Vendor, connectionId: UUID, operation: UUID): Record? {
             val row = get(vendor, connectionId) ?: return null
             rotation[vendor to connectionId] = operation
             return row
@@ -211,7 +262,7 @@ class HostedBankCustodyTest {
             expires: Instant,
         ): Boolean {
             if (!rotation.remove(vendor to connectionId, operation)) return false
-            rows[vendor to connectionId] = sealed
+            rows[vendor to connectionId] = Record(sealed, expires)
             return true
         }
 

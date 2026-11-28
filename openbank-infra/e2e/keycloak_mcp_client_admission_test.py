@@ -80,9 +80,13 @@ def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
 
-def claims(token):
-    part = token.split(".")[1]
+def token_part(token, index):
+    part = token.split(".")[index]
     return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+
+
+def claims(token):
+    return token_part(token, 1)
 
 
 def cbor(o):
@@ -1248,9 +1252,17 @@ class McpNativeEnrollmentAdmission(McpV2Admission):
             "redirect_uri": BANK_CB, "code_verifier": verifier, **self.client_auth(BANK),
         }, {"DPoP": self.proof()})
         self.assertEqual(tokens.status, 200)
-        access = claims(tokens.json()["access_token"])
-        self.assertEqual(access["openbank_mcp_connection_id"], self.authority.connection)
-        self.assertEqual(access["cnf"]["jkt"], self.dpop.thumbprint())
+        response = tokens.json()
+        access = self.assert_hosted_token_response(response)
+        rotated = self.post(self.token_url, {
+            "grant_type": "refresh_token", "client_id": BANK, "refresh_token": response["refresh_token"],
+            **self.client_auth(BANK),
+        }, {"DPoP": self.proof()})
+        self.assertEqual(rotated.status, 200)
+        next_response = rotated.json()
+        next_access = self.assert_hosted_token_response(next_response)
+        self.assertTrue(next_response["refresh_token"] != response["refresh_token"], "refresh must rotate")
+        self.assertEqual((next_access["sub"], next_access["sid"]), (access["sub"], access["sid"]))
 
         user_info = Browser(self.origin, self.browser_tls).request("GET",
             f"{self.origin}/admin/realms/openbank-customers/users/{USER_ID}",
@@ -1268,6 +1280,18 @@ class McpNativeEnrollmentAdmission(McpV2Admission):
         self.assertEqual(ordinary.status, 200)
         self.assertIn('id="registerWebAuthn"', ordinary.text)
         self.assertNotIn("code", ordinary.query())
+
+    def assert_hosted_token_response(self, response):
+        # The facade independently verifies the public RS256 access credential, but Keycloak's
+        # INTERNAL refresh signature uses the realm's non-exportable symmetric signing key.
+        self.assertEqual(response["token_type"].lower(), "dpop")
+        self.assertEqual(token_part(response["access_token"], 0)["alg"], "RS256")
+        self.assertEqual(token_part(response["refresh_token"], 0)["alg"], "HS512")
+        self.assertTrue(0 < response["refresh_expires_in"] <= 36000)
+        access = claims(response["access_token"])
+        self.assertEqual(access["openbank_mcp_connection_id"], self.authority.connection)
+        self.assertEqual(access["cnf"]["jkt"], self.dpop.thumbprint())
+        return access
 
 
 def load_tests(loader, _suite, _pattern):
