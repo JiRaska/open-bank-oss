@@ -36,6 +36,7 @@ abstract class DomainException(
     val retryAfter: Duration? = null,
     internalDetail: String? = null,
     cause: Throwable? = null,
+    val legacyError: String? = null,
 ) : RuntimeException(internalDetail ?: clientMessage, cause) {
 
     /** True when [errorCode] is well-formed and belongs to this exception's [category]. */
@@ -87,7 +88,15 @@ open class NotFound(
     errorCode: ErrorCode = PlatformErrorCode.NOT_FOUND,
     internalDetail: String? = null,
     cause: Throwable? = null,
-) : DomainException(ErrorCategory.NOT_FOUND, errorCode, clientMessage, internalDetail = internalDetail, cause = cause)
+    legacyError: String? = null,
+) : DomainException(
+    ErrorCategory.NOT_FOUND,
+    errorCode,
+    clientMessage,
+    internalDetail = internalDetail,
+    cause = cause,
+    legacyError = legacyError,
+)
 
 /** The request conflicts with the resource's current state. */
 open class Conflict(
@@ -96,6 +105,7 @@ open class Conflict(
     retryAfter: Duration? = null,
     internalDetail: String? = null,
     cause: Throwable? = null,
+    legacyError: String? = null,
 ) : DomainException(
     ErrorCategory.CONFLICT,
     errorCode,
@@ -103,6 +113,7 @@ open class Conflict(
     retryAfter = retryAfter,
     internalDetail = internalDetail,
     cause = cause,
+    legacyError = legacyError,
 )
 
 /** The request is well-formed and a business rule refuses it. */

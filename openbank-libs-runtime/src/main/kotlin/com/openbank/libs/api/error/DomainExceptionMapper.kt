@@ -86,6 +86,7 @@ class DomainExceptionMapper : ExceptionMapper<DomainException> {
             message = exception.clientMessage,
             timestamp = Instant.now(),
             details = exception.violations.map { FieldError(it.field, it.message) }.ifEmpty { null },
+            error = exception.legacyError,
         )
     }
 
