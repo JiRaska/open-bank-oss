@@ -5,7 +5,6 @@
 package com.openbank.productcatalog
 
 import com.openbank.libs.testing.containers.PostgresTestResource
-import com.openbank.productcatalog.infrastructure.catalog.DeclarativeDeposits
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -78,7 +77,7 @@ class CatalogReferenceOfferingSeederIT {
     @Test
     @TestSecurity(user = "test-deposit-checker", roles = ["ROLE_OPERATOR"])
     fun `file seeded deposit has one identity across the account and revision reads after approval`() {
-        val productId = DeclarativeDeposits.identity("DECLARATIVE_SAVINGS_TEST")
+        val productId = java.util.UUID.fromString("e1237e4f-b065-3bf3-a579-d3f98893a9f2")
         val deadline = System.nanoTime() + BUDGET_NANOS
         var draft = depositDraft()
         while (draft == null && System.nanoTime() < deadline) {
@@ -117,11 +116,12 @@ class CatalogReferenceOfferingSeederIT {
             "SELECT o.id, r.id FROM catalog_offerings o JOIN catalog_revisions r ON r.offering_id = o.id " +
                 "WHERE o.code = 'DECLARATIVE_SAVINGS_TEST' AND r.state = 'DRAFT'",
         ).use { statement ->
-            statement.executeQuery().use { rows ->
-                if (rows.next()) rows.getString(1) to rows.getString(2) else null
-            }
+            statement.executeQuery().use(::readDepositDraft)
         }
     }
+
+    private fun readDepositDraft(rows: java.sql.ResultSet): Pair<String, String>? =
+        if (rows.next()) rows.getString(1) to rows.getString(2) else null
 
     private fun offeringStates(): Map<String, List<String>> = dataSource.connection.use { connection ->
         connection.prepareStatement(

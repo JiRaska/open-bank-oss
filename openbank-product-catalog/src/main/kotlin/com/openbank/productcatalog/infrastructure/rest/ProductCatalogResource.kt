@@ -63,7 +63,7 @@ class ProductCatalogResource(
     suspend fun getById(@PathParam("id") id: String): Response {
         requireBankCompatibility()
         val product = service.findById(id) ?: runCatching { UUID.fromString(id) }.getOrNull()
-            ?.let { catalog.findDeclarativeDepositProduct(it) }
+            ?.let { catalog.findDeclaredOfferingProduct(it) }
         return product?.let(::okWithRevision)
             ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
     }

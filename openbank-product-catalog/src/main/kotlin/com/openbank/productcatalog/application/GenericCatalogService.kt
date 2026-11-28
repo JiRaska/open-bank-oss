@@ -16,7 +16,6 @@ import com.openbank.libs.productrevision.IrSigningException
 import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.Product
-import com.openbank.productcatalog.domain.ProductStatus
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
 import com.openbank.productcatalog.domain.catalog.CatalogValue
@@ -35,8 +34,8 @@ import com.openbank.productcatalog.domain.catalog.SchemaValidationResult
 import com.openbank.productcatalog.domain.catalog.SchemaViolation
 import com.openbank.productcatalog.domain.catalog.catalogPrincipalKey
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
-import com.openbank.productcatalog.infrastructure.catalog.DeclarativeDeposits
 import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
+import com.openbank.productcatalog.infrastructure.persistence.BankV1CatalogMapping
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -337,44 +336,24 @@ class GenericCatalogService(
 
     suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision =
         repository.findPublishedForLegacyProduct(productId, effectiveAt)
-            ?: findPublishedDeclarativeDeposit(productId, effectiveAt)
+            ?: findPublishedDeclaredOffering(productId, effectiveAt)
             ?: throw CatalogNotFoundException(
                 "no published revision of legacy product $productId is effective at $effectiveAt",
             )
 
     /** A declared deposit owns its identity in v2; it is never mirrored into an editable v1 row. */
-    suspend fun findDeclarativeDepositProduct(productId: UUID): Product? {
-        val revision = findPublishedDeclarativeDeposit(productId, clock.instant()) ?: return null
+    suspend fun findDeclaredOfferingProduct(productId: UUID): Product? {
+        val revision = findPublishedDeclaredOffering(productId, clock.instant()) ?: return null
         val offering = findOffering(revision.offeringId)
-        val fields = revision.content.attributes.values
-        val currency = (fields["currency"] as? CatalogValue.TextValue)?.value ?: return null
-        val interest = (fields["interest"] as? CatalogValue.ObjectValue)?.values ?: return null
-        val rate = (interest["annualRate"] as? CatalogValue.TextValue)?.value?.toDoubleOrNull() ?: return null
-        return Product(
-            id = productId.toString(),
-            code = offering.code,
-            name = revision.content.name.values.let { it["en"] ?: it.toSortedMap().values.first() },
-            type = "SAVINGS",
-            currency = currency,
-            status = ProductStatus.ACTIVE,
-            isPublic = false,
-            baseRate = rate,
-            createdAt = revision.createdAt,
-            updatedAt = revision.updatedAt,
-            revision = revision.number,
-        )
+        return BankV1CatalogMapping.DeclaredOffering.declaredProduct(productId, offering.code, revision)
     }
 
-    private suspend fun findPublishedDeclarativeDeposit(productId: UUID, effectiveAt: Instant): ProductRevision? {
+    private suspend fun findPublishedDeclaredOffering(productId: UUID, effectiveAt: Instant): ProductRevision? {
         val spec = repository.findSpecification(productId) ?: return null
-        if (spec.schemaRef != DeclarativeDeposits.SCHEMA || productId != DeclarativeDeposits.identity(spec.code)) return null
+        if (!BankV1CatalogMapping.DeclaredOffering.matchesDeclaredSpecification(spec)) return null
         val offering = repository.listOfferings(spec.id).singleOrNull { it.code == spec.code } ?: return null
         val revision = repository.findPublished(offering.id, effectiveAt) ?: return null
-        val fields = revision.content.attributes.values
-        val type = (fields["productType"] as? CatalogValue.TextValue)?.value
-        val interest = (fields["interest"] as? CatalogValue.ObjectValue)?.values
-        val rateType = (interest?.get("rateType") as? CatalogValue.TextValue)?.value
-        return revision.takeIf { it.schemaRef == DeclarativeDeposits.SCHEMA && type == "SAVINGS" && rateType == "FIXED" }
+        return revision.takeIf(BankV1CatalogMapping.DeclaredOffering::matchesDeclaredRevision)
     }
 
     private suspend fun validateOrThrow(

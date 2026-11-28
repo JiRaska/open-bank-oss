@@ -51,7 +51,11 @@ class ShadowRevisionCaptureTest {
             Uni.createFrom().item(mapper.readValue(json, RevisionDto::class.java))
         val accounts = mockk<AccountContextPort>()
         coEvery { accounts.resolve("account", "EUR") } returns
-            AccountBilling("product", FeeContext(currency = "EUR", balance = balance), Instant.parse("2025-01-01T00:00:00Z"))
+            AccountBilling(
+                "product",
+                FeeContext(currency = "EUR", balance = balance),
+                Instant.parse("2025-01-01T00:00:00Z"),
+            )
         val pins = mockk<AccountRevisionPinPort>()
         coEvery { pins.find("account") } returns revisionId
         val meters = SimpleMeterRegistry()
