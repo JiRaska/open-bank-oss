@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.mcp.infrastructure.oauth
 
+import com.openbank.mcp.infrastructure.oauth.HostedBankGrantStore.Record
 import com.openbank.mcp.infrastructure.oauth.HostedOAuthAdmission.Vendor
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
@@ -22,27 +23,31 @@ internal class PgHostedBankGrantStore(private val pool: PgPool) : HostedBankGran
         ).execute(Tuple.of(vendor.name, connectionId, sealed, OffsetDateTime.ofInstant(expires, ZoneOffset.UTC)))
             .awaitSuspending().rowCount() == 1
 
-    override suspend fun get(vendor: Vendor, connectionId: UUID): String? = pool.preparedQuery(
+    override suspend fun get(vendor: Vendor, connectionId: UUID): Record? = pool.preparedQuery(
         """
-        SELECT sealed_tokens FROM mcp_hosted_bank_grants
+        SELECT sealed_tokens, expires_at FROM mcp_hosted_bank_grants
         WHERE vendor = $1 AND connection_id = $2 AND rotation_id IS NULL AND expires_at > statement_timestamp()
         """.trimIndent(),
-    ).execute(Tuple.of(vendor.name, connectionId)).awaitSuspending().firstOrNull()?.getString("sealed_tokens")
+    ).execute(Tuple.of(vendor.name, connectionId)).awaitSuspending().firstOrNull()?.let { row ->
+        Record(row.getString("sealed_tokens"), row.getOffsetDateTime("expires_at").toInstant())
+    }
 
     override suspend fun erase(vendor: Vendor, connectionId: UUID) {
         pool.preparedQuery("DELETE FROM mcp_hosted_bank_grants WHERE vendor = $1 AND connection_id = $2")
             .execute(Tuple.of(vendor.name, connectionId)).awaitSuspending()
     }
 
-    override suspend fun claim(vendor: Vendor, connectionId: UUID, operation: UUID): String? = pool.preparedQuery(
+    override suspend fun claim(vendor: Vendor, connectionId: UUID, operation: UUID): Record? = pool.preparedQuery(
         """
         UPDATE mcp_hosted_bank_grants SET rotation_id = $3
         WHERE vendor = $1 AND connection_id = $2 AND rotation_id IS NULL AND expires_at > statement_timestamp()
-        RETURNING sealed_tokens
+        RETURNING sealed_tokens, expires_at
         """.trimIndent(),
     ).execute(
         Tuple.of(vendor.name, connectionId, operation),
-    ).awaitSuspending().firstOrNull()?.getString("sealed_tokens")
+    ).awaitSuspending().firstOrNull()?.let { row ->
+        Record(row.getString("sealed_tokens"), row.getOffsetDateTime("expires_at").toInstant())
+    }
 
     override suspend fun replace(
         vendor: Vendor,

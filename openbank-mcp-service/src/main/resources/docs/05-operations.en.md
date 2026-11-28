@@ -397,6 +397,9 @@ The adapter serves `/customer/hosted-mcp` and publishes its own authorization-se
 PAR transaction for the registered client and returns through the existing native approval flow.
 The issued session exposes account listing and balance reads. The bank token remains in encrypted
 OpenBao-backed custody and the balance call uses the existing customer authorization boundary.
+The adapter independently verifies the RS256 access token against the approved public keys.
+Keycloak owns the online refresh credential and validates it at refresh. The adapter stores it
+opaque in encrypted custody and takes its expiration from the authenticated token response.
 
 Hosted OAuth starts disabled. To activate it in the shared sandbox, configure the customer channel,
 its shared replay store and the approved projected site file. The site file selects explicit public
