@@ -10,33 +10,18 @@ import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogPreconditionFailedException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
 import com.openbank.productcatalog.application.CatalogValidationException
-import com.openbank.productcatalog.application.DuplicateProductCodeException
-import com.openbank.productcatalog.application.ProductNotFoundException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import org.jboss.logging.MDC
 import java.time.Instant
 
-@Provider
-class DuplicateProductCodeExceptionMapper : ExceptionMapper<DuplicateProductCodeException> {
-    override fun toResponse(exception: DuplicateProductCodeException): Response =
-        Response.status(Response.Status.CONFLICT)
-            .entity(mapOf("error" to (exception.message ?: "Product code already exists")))
-            .build()
-}
-
 // ProductUpdateConflictException: mapped by libs-runtime's ResourceConflictExceptionMapper since
 // #10911 phase 2 (the exception now extends the libs-domain base) -- see
 // ProductCatalogExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
-/** Preserve the established v1 `{error}` body used by bank clients and its Pact. */
-@Provider
-class ProductNotFoundExceptionMapper : ExceptionMapper<ProductNotFoundException> {
-    override fun toResponse(exception: ProductNotFoundException): Response = Response.status(Response.Status.NOT_FOUND)
-        .entity(mapOf("error" to (exception.message ?: "Product not found")))
-        .build()
-}
+// ProductNotFoundException and DuplicateProductCodeException use DomainExceptionMapper (ADR-0326
+// phase b); their established legacy `error` member is preserved by the typed response.
 
 // CatalogNotFoundException: mapped by libs-runtime's ResourceNotFoundExceptionMapper since #10911
 // phase 2 -- see ProductCatalogExceptionMapperEquivalenceTest for the byte-for-byte proof.

@@ -120,7 +120,13 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Chybový model
 
-Legacy 404 odpovědi pro nenalezený produkt zachovávají `{ "error": "<zpráva>" }` kvůli existujícímu Paktu. Pokud je bankovní kompatibilita vypnutá, šest dokumentovaných odpovědí 404 pro detail, úpravu, hledání podle kódu, aktivaci, deaktivaci a poplatky produktu vrací centrální mapper ve tvaru `ApiError` s `traceId`, `status`, `code`, `message` a `timestamp`. Těchto šest odpovědí připouští oba tvary. Validační, lifecycle a konfliktní chyby používají obálku `ApiError`.
+Chyby nenalezeného produktu a duplicitního kódu produktu mapuje sdílený `DomainExceptionMapper`.
+Odpovědi 404 a 409 zachovávají povinný legacy člen `error` se stávající zprávou a doplňují typované
+členy `ProblemDetail`/`ApiError`. Stabilní kódy jsou `PRODUCT_NOT_FOUND` a
+`PRODUCT_CODE_ALREADY_EXISTS`; klienti proto mohou přejít na `code`, aniž by během kompatibilního
+okna ztratili legacy člen. Ostatní validační, lifecycle, precondition a konfliktní chyby katalogu
+zachovávají stávající sdílené mapování. Validační chyby schématu ve v2 používají 422 se seřazenými
+`{instancePath,schemaPath,keyword,message}` violations.
 
 ## Verzování
 

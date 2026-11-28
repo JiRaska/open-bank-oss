@@ -1,0 +1,7 @@
+# Legacy duplicate wire-code owners (ADR-0326 phase b debt, issue #11610).
+# Schema: CODE<TAB>MODULE<TAB>ENUM
+# A new duplicate owner fails. Remove a row only when that owner disappears.
+CURRENCY_NOT_ALLOWED	openbank-domestic-payment	DomesticSchemeErrorCode
+CURRENCY_NOT_ALLOWED	openbank-sepa-instant	SctInstErrorCode
+CURRENCY_NOT_ALLOWED	openbank-sepa-payment	SctErrorCode
+CURRENCY_NOT_ALLOWED	openbank-standing-order-service	StandingOrderErrorCode

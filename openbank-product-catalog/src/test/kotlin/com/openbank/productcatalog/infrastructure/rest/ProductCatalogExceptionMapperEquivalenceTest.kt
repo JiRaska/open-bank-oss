@@ -5,32 +5,24 @@
 package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.api.error.DomainExceptionMapper
+import com.openbank.libs.api.error.ProblemDetail
 import com.openbank.libs.api.error.ResourceConflictExceptionMapper
 import com.openbank.libs.api.error.ResourceNotFoundExceptionMapper
 import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogNotFoundException
+import com.openbank.productcatalog.application.DuplicateProductCodeException
+import com.openbank.productcatalog.application.ProductNotFoundException
 import com.openbank.productcatalog.application.ProductUpdateConflictException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * #10911 phase 2: proves the shared libs-runtime mappers reproduce the deleted local
- * `CatalogNotFoundExceptionMapper` / `CatalogConflictExceptionMapper` /
- * `ProductUpdateConflictExceptionMapper` byte-for-byte on status, `code` and `message` (the fields
- * the wire contract / pact matchers actually pin -- traceId's source is unchanged here: both the
- * deleted local mappers and the shared ones read the correlation MDC first, falling back to a
- * random id).
+ * Proves that the shared libs-runtime mappers preserve the established status, code, and message
+ * when local mappers are deleted. The ADR-0326 pilot additionally pins the legacy `error` member
+ * and the typed RFC 9457 representation for product-not-found and duplicate-code responses.
  *
- * This test FAILS TO COMPILE if `CatalogNotFoundException` / `CatalogConflictException` /
- * `ProductUpdateConflictException` stop extending the libs-domain bases (the mapper parameter
- * types no longer match) -- that is the "fails without the fix" proof: reverting the exception
- * classes to plain `RuntimeException` breaks this file at compile time (confirmed manually before
- * committing: "type mismatch: inferred type is CatalogNotFoundException but
- * ResourceNotFoundException was expected").
- *
- * `ProductNotFoundException` / `DuplicateProductCodeException` are deliberately NOT migrated: their
- * mappers return the legacy `{"error": message}` body (preserved for the v1 Pact), which is not the
- * `ApiError` envelope the shared mappers produce.
+ * These tests fail to compile if any migrated exception stops extending its libs-domain base.
  */
 class ProductCatalogExceptionMapperEquivalenceTest {
 
@@ -74,5 +66,45 @@ class ProductCatalogExceptionMapperEquivalenceTest {
         assertThat(error.code).isEqualTo("CONCURRENT_MODIFICATION")
         assertThat(error.message).isEqualTo("Product was modified concurrently")
         assertThat(error.traceId).isNotBlank()
+    }
+
+    @Test
+    fun `ProductNotFoundException keeps its legacy error and gains the typed 404 representation`() {
+        val message = "Product prod-1 not found"
+
+        val response = DomainExceptionMapper().toResponse(ProductNotFoundException(message))
+
+        assertThat(response.status).isEqualTo(404)
+        val problem = response.entity as ProblemDetail
+        assertThat(problem.status).isEqualTo(404)
+        assertThat(problem.error).isEqualTo(message)
+        assertThat(problem.code).isEqualTo("PRODUCT_NOT_FOUND")
+        assertThat(problem.message).isEqualTo(message)
+        assertThat(problem.type).isEqualTo("urn:openbank:error:product-not-found")
+        assertThat(problem.title).isEqualTo("The product does not exist")
+        assertThat(problem.detail).isEqualTo(message)
+        assertThat(problem.instance).isEqualTo("urn:openbank:error-occurrence:${problem.correlationId}")
+        assertThat(problem.retryable).isFalse()
+        assertThat(problem.traceId).isEqualTo(problem.correlationId)
+    }
+
+    @Test
+    fun `DuplicateProductCodeException keeps its legacy error and gains the typed 409 representation`() {
+        val message = "Product with code 'CURRENT' already exists"
+
+        val response = DomainExceptionMapper().toResponse(DuplicateProductCodeException(message))
+
+        assertThat(response.status).isEqualTo(409)
+        val problem = response.entity as ProblemDetail
+        assertThat(problem.status).isEqualTo(409)
+        assertThat(problem.error).isEqualTo(message)
+        assertThat(problem.code).isEqualTo("PRODUCT_CODE_ALREADY_EXISTS")
+        assertThat(problem.message).isEqualTo(message)
+        assertThat(problem.type).isEqualTo("urn:openbank:error:product-code-already-exists")
+        assertThat(problem.title).isEqualTo("The product code already exists")
+        assertThat(problem.detail).isEqualTo(message)
+        assertThat(problem.instance).isEqualTo("urn:openbank:error-occurrence:${problem.correlationId}")
+        assertThat(problem.retryable).isFalse()
+        assertThat(problem.traceId).isEqualTo(problem.correlationId)
     }
 }
