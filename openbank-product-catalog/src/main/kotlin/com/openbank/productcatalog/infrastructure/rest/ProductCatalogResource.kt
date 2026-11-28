@@ -6,6 +6,7 @@ package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.productcatalog.application.GenericCatalogService
 import com.openbank.productcatalog.application.ProductCatalogService
 import com.openbank.productcatalog.application.ProductRequest
 import com.openbank.productcatalog.infrastructure.security.CatalogRoles
@@ -25,6 +26,7 @@ import jakarta.ws.rs.core.EntityTag
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import java.util.UUID
 
 @Suppress("TooManyFunctions")
 @ApplicationScoped
@@ -32,6 +34,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 @Produces(MediaType.APPLICATION_JSON)
 class ProductCatalogResource(
     private val service: ProductCatalogService,
+    private val catalog: GenericCatalogService,
     private val identity: SecurityIdentity,
     @ConfigProperty(name = "openbank.catalog.bank-v1-compatibility-enabled", defaultValue = "true")
     private val bankCompatibilityEnabled: Boolean,
@@ -59,7 +62,9 @@ class ProductCatalogResource(
     @Authorize(action = "catalog.read", resource = "#id")
     suspend fun getById(@PathParam("id") id: String): Response {
         requireBankCompatibility()
-        return service.findById(id)?.let(::okWithRevision)
+        val product = service.findById(id) ?: runCatching { UUID.fromString(id) }.getOrNull()
+            ?.let { catalog.findDeclaredOfferingProduct(it) }
+        return product?.let(::okWithRevision)
             ?: Response.status(404).entity(mapOf("error" to "Product $id not found")).build()
     }
 

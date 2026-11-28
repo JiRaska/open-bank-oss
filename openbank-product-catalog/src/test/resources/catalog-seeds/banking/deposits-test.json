@@ -1,0 +1,33 @@
+[
+  {
+    "code": "DECLARATIVE_SAVINGS_TEST",
+    "name": "Illustrative test savings",
+    "effectiveDate": "2025-01-01",
+    "attributes": {
+      "currency": "EUR",
+      "productType": "SAVINGS",
+      "interest": {
+        "rateType": "FIXED",
+        "annualRate": "0.025",
+        "dayCount": "ACT_365",
+        "payoutFrequency": "MONTHLY"
+      },
+      "accountingClass": "CUSTOMER_DEPOSIT_SAVINGS",
+      "regulatoryClass": {
+        "finrepInstrument": "DEPOSITS_OVERNIGHT",
+        "counterpartySector": "HOUSEHOLDS"
+      }
+    },
+    "prices": [
+      {
+        "code": "MAINT",
+        "kind": "AMOUNT",
+        "value": "2.00",
+        "currency": "EUR",
+        "unit": "account",
+        "cadence": "MONTHLY",
+        "role": "FEE"
+      }
+    ]
+  }
+]

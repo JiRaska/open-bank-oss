@@ -14,7 +14,7 @@ info:
   # dry-run of the same parser a revision write runs; stores nothing.
   # 2.10.0 -> 2.11.0 (#12078): correction. The six v1 404s also document the ApiError body the
   # disabled banking-compatibility routes answer with; served behaviour is unchanged.
-  version: 2.19.0
+  version: 2.19.1
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -122,6 +122,7 @@ paths:
     get:
       tags: [Products]
       summary: Get a product by id
+      description: Published file-defined savings deposits are read-only and resolve by their catalog specification UUID.
       operationId: getProduct
       deprecated: true
       parameters:
@@ -831,12 +832,13 @@ paths:
   /api/v2/legacy-products/{productId}/published-revision:
     get:
       tags: [Catalog V2]
-      summary: Resolve the published revision of a v1 banking product by its v1 product id
+      summary: Resolve a published banking revision by the account product id
       description: >-
         ADR-0341: a contract pins a published catalog revision. Services that still hold only the v1
         product id (an account's `productId`) resolve the revision effective now here and pin its
         `id`; the pin, not this lookup, is what later reads use. 404 when the product is unknown or
-        none of its revisions is published yet.
+        none of its revisions is published yet. File-defined fixed savings deposits use their
+        catalog specification UUID as the account product id.
       operationId: getPublishedRevisionForLegacyProductV2
       parameters:
         - { name: productId, in: path, required: true, schema: { type: string, format: uuid } }

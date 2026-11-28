@@ -16,7 +16,9 @@ import com.openbank.productcatalog.domain.catalog.PriceCadence
 import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.PriceKind
 import com.openbank.productcatalog.domain.catalog.ProductRevision
+import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RevisionContent
+import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.TaxTreatment
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import io.vertx.core.json.JsonObject
@@ -26,10 +28,44 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.HexFormat
+import java.util.UUID
 
 /** The only place where the legacy banking document is translated to the generic catalog model. */
 @ApplicationScoped
 class BankV1CatalogMapping(private val mapper: ObjectMapper, private val catalogJson: CatalogJson) {
+    internal object DeclaredOffering {
+        fun matchesDeclaredSpecification(spec: ProductSpecification): Boolean =
+            spec.schemaRef == DECLARED_SCHEMA && spec.id == declaredProductId(spec.code)
+
+        fun matchesDeclaredRevision(revision: ProductRevision): Boolean {
+            val fields = revision.content.attributes.values
+            val type = (fields["productType"] as? CatalogValue.TextValue)?.value
+            val interest = (fields["interest"] as? CatalogValue.ObjectValue)?.values
+            val rateType = (interest?.get("rateType") as? CatalogValue.TextValue)?.value
+            return revision.schemaRef == DECLARED_SCHEMA && type == "SAVINGS" && rateType == "FIXED"
+        }
+
+        fun declaredProduct(productId: UUID, offeringCode: String, revision: ProductRevision): Product? {
+            val fields = revision.content.attributes.values
+            val currency = (fields["currency"] as? CatalogValue.TextValue)?.value ?: return null
+            val interest = (fields["interest"] as? CatalogValue.ObjectValue)?.values ?: return null
+            val rate = (interest["annualRate"] as? CatalogValue.TextValue)?.value?.toDoubleOrNull() ?: return null
+            return Product(
+                id = productId.toString(),
+                code = offeringCode,
+                name = revision.content.name.values.let { it["en"] ?: it.toSortedMap().values.first() },
+                type = "SAVINGS",
+                currency = currency,
+                status = ProductStatus.ACTIVE,
+                isPublic = false,
+                baseRate = rate,
+                createdAt = revision.createdAt,
+                updatedAt = revision.updatedAt,
+                revision = revision.number,
+            )
+        }
+    }
+
     fun contentOf(product: Product): RevisionContent = RevisionContent(
         name = LocalizedText(mapOf("en" to product.name)),
         description = product.description?.takeIf(String::isNotBlank)?.let { LocalizedText(mapOf("en" to it)) },
@@ -149,6 +185,11 @@ class BankV1CatalogMapping(private val mapper: ObjectMapper, private val catalog
     )
 
     companion object {
+        internal val DECLARED_SCHEMA = SchemaRef("org.openbank.banking.deposit", 3)
+
+        internal fun declaredProductId(code: String): UUID =
+            UUID.nameUUIDFromBytes("declarative-deposit:$code".toByteArray(StandardCharsets.UTF_8))
+
         const val LEGACY_DOCUMENT = "legacyDocument"
         private const val PRODUCT_TYPE = "productType"
         private const val CURRENCY = "currency"

@@ -15,6 +15,7 @@ import com.openbank.libs.productrevision.IrSignerPort
 import com.openbank.libs.productrevision.IrSigningException
 import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
+import com.openbank.productcatalog.domain.Product
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
 import com.openbank.productcatalog.domain.catalog.CatalogValue
@@ -34,6 +35,7 @@ import com.openbank.productcatalog.domain.catalog.SchemaViolation
 import com.openbank.productcatalog.domain.catalog.catalogPrincipalKey
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
+import com.openbank.productcatalog.infrastructure.persistence.BankV1CatalogMapping
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -334,9 +336,25 @@ class GenericCatalogService(
 
     suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision =
         repository.findPublishedForLegacyProduct(productId, effectiveAt)
+            ?: findPublishedDeclaredOffering(productId, effectiveAt)
             ?: throw CatalogNotFoundException(
                 "no published revision of legacy product $productId is effective at $effectiveAt",
             )
+
+    /** A declared deposit owns its identity in v2; it is never mirrored into an editable v1 row. */
+    suspend fun findDeclaredOfferingProduct(productId: UUID): Product? {
+        val revision = findPublishedDeclaredOffering(productId, clock.instant()) ?: return null
+        val offering = findOffering(revision.offeringId)
+        return BankV1CatalogMapping.DeclaredOffering.declaredProduct(productId, offering.code, revision)
+    }
+
+    private suspend fun findPublishedDeclaredOffering(productId: UUID, effectiveAt: Instant): ProductRevision? {
+        val spec = repository.findSpecification(productId) ?: return null
+        if (!BankV1CatalogMapping.DeclaredOffering.matchesDeclaredSpecification(spec)) return null
+        val offering = repository.listOfferings(spec.id).singleOrNull { it.code == spec.code } ?: return null
+        val revision = repository.findPublished(offering.id, effectiveAt) ?: return null
+        return revision.takeIf(BankV1CatalogMapping.DeclaredOffering::matchesDeclaredRevision)
+    }
 
     private suspend fun validateOrThrow(
         ref: SchemaRef,

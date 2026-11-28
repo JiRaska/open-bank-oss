@@ -10,8 +10,11 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import javax.sql.DataSource
 
@@ -35,6 +38,7 @@ class CatalogReferenceOfferingSeederIT {
     class FastSeedProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.scheduler.enabled" to "true",
+            "openbank.catalog.deposit-definitions" to "/catalog-seeds/banking/deposits-test.json",
             "openbank.catalog.reference-offering-seed-interval" to "1s",
             "openbank.catalog.reference-offering-seed-initial-delay" to "0s",
         )
@@ -69,6 +73,55 @@ class CatalogReferenceOfferingSeederIT {
         Thread.sleep(SETTLE_MILLIS)
         assertThat(offeringStates()).isEqualTo(first)
     }
+
+    @Test
+    @TestSecurity(user = "test-deposit-checker", roles = ["ROLE_OPERATOR"])
+    fun `file seeded deposit has one identity across the account and revision reads after approval`() {
+        val productId = java.util.UUID.fromString("e1237e4f-b065-3bf3-a579-d3f98893a9f2")
+        val deadline = System.nanoTime() + BUDGET_NANOS
+        var draft = depositDraft()
+        while (draft == null && System.nanoTime() < deadline) {
+            Thread.sleep(POLL_MILLIS)
+            draft = depositDraft()
+        }
+        val (offeringId, revisionId) = requireNotNull(draft)
+        val productPath = "/api/v1/products/$productId"
+        val revisionPath = "/api/v2/legacy-products/$productId/published-revision"
+
+        given().get(productPath).then().statusCode(404)
+        given().get(revisionPath).then().statusCode(404)
+        given().get("/api/v2/offerings/$offeringId").then().statusCode(200)
+            .body("specificationId", equalTo(productId.toString()))
+
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body("""{"reason":"independent fixed deposit approval"}""")
+            .post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+            .then().statusCode(200).body("state", equalTo("PUBLISHED"))
+
+        given().get(productPath).then().statusCode(200)
+            .body("id", equalTo(productId.toString()))
+            .body("status", equalTo("ACTIVE"))
+            .body("currency", equalTo("EUR"))
+        val published = given().get(revisionPath).then().statusCode(200)
+            .body("id", equalTo(revisionId))
+            .body("offeringId", equalTo(offeringId))
+            .body("content.attributes.interest.annualRate", equalTo("0.025"))
+            .body("content.prices[0].code", equalTo("MAINT"))
+            .extract().jsonPath()
+        assertThat(published.getString("content.prices[0].value").toBigDecimal()).isEqualByComparingTo("2.00")
+    }
+
+    private fun depositDraft(): Pair<String, String>? = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT o.id, r.id FROM catalog_offerings o JOIN catalog_revisions r ON r.offering_id = o.id " +
+                "WHERE o.code = 'DECLARATIVE_SAVINGS_TEST' AND r.state = 'DRAFT'",
+        ).use { statement ->
+            statement.executeQuery().use(::readDepositDraft)
+        }
+    }
+
+    private fun readDepositDraft(rows: java.sql.ResultSet): Pair<String, String>? =
+        if (rows.next()) rows.getString(1) to rows.getString(2) else null
 
     private fun offeringStates(): Map<String, List<String>> = dataSource.connection.use { connection ->
         connection.prepareStatement(
