@@ -25,6 +25,24 @@ interface DelegationRepository {
     ): List<DelegationGrant>
     suspend fun findActiveWithRecertificationAudience(): List<DelegationGrant>
 
+    /**
+     * ADR-0383 D3 — ACTIVE `MCP_CLIENT` grants made by [grantorPartyId] to [clientId] bound to
+     * [keyThumbprint]. Filtered in SQL on all three (the V34 partial index
+     * `idx_delegation_mcp_client_binding`), so another customer's grant to the same client is never
+     * loaded at all.
+     */
+    suspend fun findActiveMcpClientGrants(
+        grantorPartyId: UUID,
+        clientId: String,
+        keyThumbprint: String,
+    ): List<DelegationGrant>
+
+    suspend fun findActiveHostedMcpClientGrants(
+        grantorPartyId: UUID,
+        clientId: String,
+        connectionId: UUID,
+    ): List<DelegationGrant>
+
     fun findExpiredActive(threshold: OffsetDateTime): Uni<List<DelegationGrant>>
     fun markExpired(
         id: UUID,

@@ -1,0 +1,16 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-service
+  namespace: platform
+spec:
+  template:
+    spec:
+      containers:
+      - name: mcp-service
+        env:
+        - name: QUARKUS_CONFIG_LOCATIONS
+          value: /mnt/mcp-read-tls-config/runtime.properties
+        - name: MCP_BOUND_TLS_CONFIGURATION
+          value: mcp-bound-read

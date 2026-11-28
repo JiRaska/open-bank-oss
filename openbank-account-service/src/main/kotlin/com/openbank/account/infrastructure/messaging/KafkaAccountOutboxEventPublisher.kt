@@ -21,7 +21,11 @@ class KafkaAccountOutboxEventPublisher(@Channel("account-outbox-out") private va
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()
         OutboxKafkaHeaders.headersFor(entry).forEach { (k, v) -> kafkaHeaders.add(k, v.toByteArray()) }
-        val meta = OutgoingKafkaRecordMetadata.builder<String>()
+        val builder = OutgoingKafkaRecordMetadata.builder<String>()
+        if (entry.eventType == "AccountStatusChanged") {
+            builder.withTopic("openbank.accounts.account.status-changed")
+        }
+        val meta = builder
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()

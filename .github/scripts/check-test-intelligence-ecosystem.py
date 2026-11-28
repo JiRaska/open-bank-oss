@@ -286,7 +286,7 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
         "name": "Mint repository read token",
         "id": "read_token",
         "if": "env.GITOPS_APP_ID != ''",
-        "uses": "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+        "uses": "actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc",
         "with": {
             "app-id": "${{ secrets.GITOPS_APP_ID }}",
             "private-key": "${{ secrets.GITOPS_APP_PRIVATE_KEY }}",
@@ -310,6 +310,7 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
             "env.APP_RO_TOKEN!=''",
             "runner.os=='macOS'",
             "steps.build.outputs.digest!=''",
+            "steps.history.outputs.run_id!=''",
             "vars.ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN==''",
             "steps.rewrite.outputs.changed=='true'",
             "env.GITOPS_APP_ID!=''",
@@ -1191,9 +1192,16 @@ def check(root: Path) -> list[str]:
     ):
         if needle not in deploy_source_guard:
             errors.append(message)
-    history_stage = deploy.partition("Stage immutable per-attempt Test Intelligence history")[2].partition(
+    history_block = deploy.partition("Find the previous main deployment history")[2].partition(
         "Stage pitest mutation results"
     )[0]
+    if "actions/cache" in history_block or "uses: actions/upload-artifact@" not in history_block:
+        errors.append("downloaded run envelopes must be retained as artifacts outside the Actions cache")
+    if "uses: actions/download-artifact@" not in history_block or (
+        "run-id: ${{ steps.history.outputs.run_id }}" not in history_block
+    ):
+        errors.append("immutable run history must restore from the verified producer run")
+    history_stage = history_block.partition("Stage immutable per-attempt Test Intelligence history")[2]
     for needle, message in (
         ("for page in 1 2 3 4 5; do", "immutable run history is not paginated"),
         ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
@@ -1213,11 +1221,11 @@ def check(root: Path) -> list[str]:
          "immutable run history does not select the deployed money-path screen envelope"),
         ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
         ("extract-test-intelligence-envelope.py --self-test", "immutable run envelope selector is not regression-tested"),
-        ("--prune-cache openbank-admin-ui/test-run-history",
+        ("--prune-history openbank-admin-ui/test-run-history",
          "restored immutable run history is not validated before deployment"),
-        ('if [ -f "${cached}" ]; then',
-         "a stale staged artifact ID can suppress repair of a missing cached envelope"),
-        ('"${archive}" "${cached}"',
+        ('if [ -f "${envelope}" ]; then',
+         "immutable run history re-downloads already retained envelopes"),
+        ('"${archive}" "${envelope}"',
          "immutable run history does not accept browser variant envelopes"),
     ):
         if needle not in history_stage:
@@ -1527,7 +1535,7 @@ def self_test() -> int:
             "      - name: Mint repository read token\n"
             "        id: read_token\n"
             "        if: env.GITOPS_APP_ID != ''\n"
-            "        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510\n"
+            "        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc\n"
             "        with:\n"
             "          app-id: ${{ secrets.GITOPS_APP_ID }}\n"
             "          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}\n"

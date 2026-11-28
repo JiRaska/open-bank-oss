@@ -14,6 +14,10 @@
             "comment": "OAuth2 PKCE redirect (claimed-HTTPS callback, P0)"
           },
           {
+            "/": "/app/mcp/connect",
+            "comment": "Customer MCP OAuth handoff to OpenBank"
+          },
+          {
             "/": "/pay/v1/9999/*",
             "exclude": true,
             "comment": "SPAYD-URI pilot: addressed to the QRlessPay SDK example app (bank code 9999), not to OpenBank"

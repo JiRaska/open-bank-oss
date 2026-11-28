@@ -1,0 +1,105 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: mcp-synthetic-keycloak-db
+  namespace: mcp-synthetic-sandbox
+  annotations:
+    open-bank.tech/backup-exempt-reason: Disposable synthetic Keycloak data is re-enrolled from the sandbox fixture.
+spec:
+  instances: 2
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
+  enableSuperuserAccess: false
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-synthetic-keycloak-db-ingress
+  namespace: mcp-synthetic-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: mcp-synthetic-keycloak-db
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: keycloak
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: mcp-synthetic-keycloak-db
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9187
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: mcp-synthetic-keycloak-db
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: mcp-synthetic-keycloak-db-metrics
+  namespace: mcp-synthetic-sandbox
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: mcp-synthetic-keycloak-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - targetLabel: job
+          replacement: mcp-synthetic-sandbox/mcp-synthetic-keycloak-db
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cnpg_cluster

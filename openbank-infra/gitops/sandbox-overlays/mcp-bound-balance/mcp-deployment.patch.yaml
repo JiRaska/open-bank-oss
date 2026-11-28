@@ -1,0 +1,47 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: mcp-service
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-bound-client
+    mountPath: /mnt/mcp-bound-client
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-bound-server-trust
+    mountPath: /mnt/mcp-bound-server-trust
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-read-tls-config
+    mountPath: /mnt/mcp-read-tls-config
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-bound-client
+    secret:
+      secretName: mcp-bound-read-client-tls
+      items:
+      - key: tls.crt
+        path: tls.crt
+      - key: tls.key
+        path: tls.key
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-bound-server-trust
+    secret:
+      secretName: mcp-bound-read-server-trust
+      items:
+      - key: ca.crt
+        path: ca.crt
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-read-tls-config
+    configMap:
+      name: mcp-bound-read-tls

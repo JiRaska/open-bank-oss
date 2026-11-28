@@ -21,8 +21,10 @@ import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
 import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
 import com.openbank.sca.domain.model.ScaMethod
+import com.openbank.sca.domain.model.ScaStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import java.util.UUID
 
 /**
@@ -36,6 +38,9 @@ class ScaExceptionMapperTest {
     private val id: UUID = UUID.randomUUID()
 
     private fun bodyOf(response: jakarta.ws.rs.core.Response): ApiError = response.entity as ApiError
+
+    private fun capture(root: Map<*, *>, vararg path: String): Map<*, *> =
+        path.fold(root) { node, key -> node[key] as Map<*, *> }
 
     @Test
     fun `not-found maps to 404 with NOT_FOUND and carries the exception message`() {
@@ -117,6 +122,28 @@ class ScaExceptionMapperTest {
         val response = ScaNotApprovedMapper().toResponse(ScaChallengeNotApprovedException(id))
         assertThat(response.status).isEqualTo(ErrorCode.VALIDATION_ERROR.httpStatus)
         assertThat(bodyOf(response).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+    }
+
+    /** ADR-0385 D3: only a still-PENDING challenge carries the "keep waiting" code; a denial is final. */
+    @Test
+    fun `not-approved distinguishes pending from a final refusal`() {
+        val openApi = requireNotNull(javaClass.getResourceAsStream("/openapi.yaml")).use { Yaml().load<Map<*, *>>(it) }
+        val consume = capture(openApi, "paths", "/api/v1/sca/challenges/{id}/consume", "post")
+        val response = capture(consume, "responses", "400", "content", "application/json")
+        assertThat(capture(response, "schema")["\$ref"]).isEqualTo("#/components/schemas/ApiError")
+        val examples = capture(response, "examples")
+        val pendingCode = capture(examples, "pending", "value")["code"]
+        val refusedCode = capture(examples, "refused", "value")["code"]
+        val pending = ScaNotApprovedMapper().toResponse(ScaChallengeNotApprovedException(id, ScaStatus.PENDING))
+        assertThat(pending.status).isEqualTo(400)
+        assertThat(bodyOf(pending).code).isEqualTo(SCA_CHALLENGE_PENDING).isEqualTo(pendingCode)
+        listOf(ScaStatus.FAILED, ScaStatus.CANCELLED, ScaStatus.EXPIRED).forEach { st ->
+            val final = ScaNotApprovedMapper().toResponse(ScaChallengeNotApprovedException(id, st))
+            assertThat(bodyOf(final).code)
+                .`as`(st.name)
+                .isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+                .isEqualTo(refusedCode)
+        }
     }
 
     @Test

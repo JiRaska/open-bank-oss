@@ -75,6 +75,31 @@ github:
         []
   unprovisioned:
     - kind: secret
+      names: [BREAK_GLASS_APP_ID, BREAK_GLASS_APP_PRIVATE_KEY]
+      reason: "environment-scoped merge-train break-glass credential awaits owner setup; the workflow fails closed until then"
+      issue: 17006
+      review_by: 2026-12-21
+    - kind: variable
+      names: [AUTO_DEPLOY_MAX_PARALLEL, MERGE_TRAIN_API_RETRY_ATTEMPTS, MERGE_TRAIN_BATCH_SIZE, MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP, MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_EXPEDITE_LANE, MERGE_TRAIN_HOTFIX_DAILY_CAP, MERGE_TRAIN_PREFETCH_BATCH, MERGE_TRAIN_RESERVATION_CEILING_S, MERGE_TRAIN_SPECULATIVE_STACK, MERGE_TRAIN_STALE_RED_CAP, MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S, MERGE_TRAIN_STRICT_AGING_S, MERGE_TRAIN_STRICT_BATCH_CAP, MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
+      reason: "optional owner-tunable merge-train and auto-deploy knobs; unset means the reviewed workflow default applies, and merge-train.py range-validates any value"
+      issue: 16932
+      review_by: 2027-02-21
+    - kind: variable
+      names:
+        - TF_ARC_MIN_RUNNERS
+        - TF_ARC_MAX_RUNNERS
+        - TF_ARC_DEPLOY_MAX_RUNNERS
+        - TF_ARC_BATCH_MAX_RUNNERS
+        - TF_ARC_DR_MAX_RUNNERS
+      reason: "optional ADR-0389 runner-pool overrides for platform-tofu; unset by design means the variables.tf default applies, ranges enforced by tofu validation"
+      issue: 17006
+      review_by: 2027-02-21
+    - kind: variable
+      names: [PR_RUNNER_POOL]
+      reason: "opt-in PR build pool trial; unset is the kill switch (every PR build hosted) and only allowlisted labels are honoured"
+      issue: 16006
+      review_by: 2026-12-03
+    - kind: secret
       names: [SECURITY_KPI_DEPENDABOT_READ_TOKEN]
       reason: "repository-scoped Dependabot alerts read access awaits owner provisioning; only CVE Remediation degrades until then"
       issue: 16492
@@ -100,6 +125,12 @@ github:
       reason: "ADR-0382 reader role for the in-cluster digest envelopes; the S3 step is skipped until the owner applies alert-digest.tf and sets it"
       issue: 6432
       review_by: 2027-01-15
+    - kind: variable
+      names:
+        - DEPLOY_DROPPED_PIN_HOURS
+      reason: "tuning knob for the dropped-pin watch; the workflow falls back to 6 hours, so unset is the intended default"
+      issue: 16701
+      review_by: 2027-02-15
     - kind: variable
       names:
         - CODEQL_JAVA_ON_PR
@@ -138,10 +169,41 @@ github:
       review_by: 2027-01-31
     - kind: variable
       names:
+        - GATE_BUDGET_MULTIPLIER
+        - FLEET_LINT_TIMEOUT_MINUTES
+        - FLEET_LINT_STEP_TIMEOUT_MINUTES
+        - LIBS_BENCH_TIMEOUT_MINUTES
+        - SERVICE_CI_CONTRACT_TIMEOUT_MINUTES
+      reason: "ADR-0389 runtime tuning knobs; every consumer falls back to today's value, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-02-15
+    - kind: variable
+      names:
         - APICURIO_REGISTRY_URL
       reason: "schema registry apply waits on the registry rollout"
       issue: 1916
       review_by: 2027-01-31
+    - kind: variable
+      names:
+        - ADMIN_UI_ENGINES_NIGHTLY_SCHEDULE_PAUSED
+        - AGENT_ISSUE_WORKER_SCHEDULE_PAUSED
+        - AGENT_PR_STEWARD_SCHEDULE_PAUSED
+        - ALERT_NOISE_WEEKLY_SCHEDULE_PAUSED
+        - APP_STATUS_REFRESH_SCHEDULE_PAUSED
+        - AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED
+        - AUTO_UPDATE_ARMED_PRS_SCHEDULE_PAUSED
+        - BRANCH_CLEANUP_SCHEDULE_PAUSED
+        - CI_ARTIFACT_MIRROR_SCHEDULE_PAUSED
+        - DEPS_FRESHNESS_SCHEDULE_PAUSED
+        - DERIVED_ARTEFACT_AUTOHEAL_SCHEDULE_PAUSED
+        - FLEET_LINT_SCHEDULE_PAUSED
+        - INCIDENT_GATE_COVERAGE_SCHEDULE_PAUSED
+        - ISSUE_KIND_SCHEDULE_PAUSED
+        - SCHEDULES_PAUSED
+        - UPSTREAM_UNBLOCK_WATCH_SCHEDULE_PAUSED
+      reason: "ADR-0389 instant pause switches for scheduled workflows; unset (or anything but 'true') means the schedule runs, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-05-21
 openbao:
   # Stores backed by OpenBao. kafka-messaging-certs is the Kubernetes provider (Strimzi-issued
   # Secrets in-cluster), not OpenBao, so it is out of scope.
@@ -198,7 +260,16 @@ openbao:
     - keycloak/kyb-service
     - keycloak/ledger-pension-co
     - keycloak/lending-service
+    - keycloak/mcp-authority-tls
+    - keycloak/mcp-read-client-truststore
+    - keycloak/mcp-balance-client-trust
+    - keycloak/mcp-balance-delegation-trust
+    - keycloak/mcp-bound-read-server-trust
+    - keycloak/mcp-read-issuer
+    - keycloak/mcp-read-nonce
+    - keycloak/mcp-read-proof
     - keycloak/mcp-service
+    - keycloak/mcp-service-customer-exchange
     - keycloak/party-service
     - keycloak/pension-fund-service
     - keycloak/pension-service
@@ -223,10 +294,62 @@ openbao:
     - pricing-console
     - pricing-service
     - temporal/db
+  unprovisioned:
+    - names: [keycloak/keycloak-mcp]
+      reason: "client secret of openbank-keycloak-mcp (ADR-0385 D3) is written by the owner when the client is created in the live realm; Keycloak's secret ref is optional and the MCP authenticator refuses every connect until then"
+      issue: 16667
+      review_by: 2027-01-31
+    - kind: openbao
+      names: [mcp-synthetic/runner]
+      reason: "The suspended runner needs the independently enrolled synthetic account, passkey and SCA fixture before enablement."
+      issue: 16617
+      review_by: 2027-02-22
+    - kind: openbao
+      names: [fetch-broker/browser-run]
+      reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
+      issue: 16754
+      review_by: 2027-02-18
+    - kind: openbao
+      names:
+        - mcp-synthetic-sandbox/balance-mcp-oidc-trust
+        - mcp-synthetic-sandbox/balance-mcp-read-origins
+        - mcp-synthetic-sandbox/customer-edge-mcp-oidc-origins
+        - mcp-synthetic-sandbox/customer-edge-mcp-oidc-trust
+        - mcp-synthetic-sandbox/mcp-customer-oidc-origins
+        - mcp-synthetic-sandbox/mcp-customer-oidc-trust
+        - mcp-synthetic-sandbox/sandbox-keycloak-realm-import
+        - mcp-synthetic-sandbox/read-issuer-client-trust
+      reason: "Site-owned private MCP sandbox bootstrap, discovery and trust inputs. The sandbox overlays are dormant until the owner provisions and verifies the exact synthetic inputs."
+      issue: 16996
+      review_by: 2027-01-31
 # ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
 # whoever else must hold the same value is named, so a rotation cannot forget them.
 generated:
+  - secret: platform/mcp-customer-store-valkey
+    generator: Password mcp-customer-store-valkey-password (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-valkey requirepass and mcp-service QUARKUS_REDIS_PASSWORD, both read from this Secret; no copy outside the cluster"
+  - secret: platform/mcp-customer-store-metrics
+    generator: Password mcp-customer-store-metrics-password (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-valkey `metrics` ACL user and its redis_exporter sidecar, both read from this Secret; no copy outside the cluster"
+  - secret: platform/mcp-customer-store-hmac
+    generator: Password mcp-customer-store-key-hmac (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-service MCP_CUSTOMER_KEY_HMAC_SECRET only; no copy outside the cluster"
   - secret: observability/ci-metrics-ingest
     generator: Password ci-metrics-ingest-token (refreshPolicy CreatedOnce)
     holders:
       - "GitHub secret CI_METRICS_TOKEN in JiRaska/openbank-app (copied by the owner, #16205)"
+  - secret: platform/mcp-service-account-ref
+    generator: Password mcp-service-account-ref-key (refreshPolicy CreatedOnce)
+    holders:
+      - "none outside the cluster: only mcp-service pods read it (accountRef HMAC key, #16678); rotation = delete the Secret and restart the pods"
+  - secret: platform/copilot-redis-exporter
+    generator: Password copilot-redis-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the copilot-redis Deployment (platform), `metrics` ACL user + redis_exporter sidecar"
+  - secret: ai-platform/langfuse-valkey-exporter
+    generator: Password langfuse-valkey-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the langfuse-valkey Deployment (ai-platform), `metrics` ACL user + redis_exporter sidecar"

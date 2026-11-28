@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-11-17T05:35:14.000Z",
-  "inputFingerprint": "sha256:4ea2570f9688e8e9e49fe182db517424dd207720ac46b7d2955e48dd95477bb0",
+  "generatedAt": "2026-11-25T22:52:56.000Z",
+  "inputFingerprint": "sha256:3ca70b2c118097b5481fbf85493bf7d3c0543321138a68d405ebb249d429f46a",
   "counts": {
-    "namespaces": 86,
-    "networkPolicies": 149,
-    "externalSecrets": 244,
+    "namespaces": 88,
+    "networkPolicies": 170,
+    "externalSecrets": 272,
     "clusterPolicies": 0
   },
   "groups": [
@@ -354,6 +354,15 @@
       "declared": true
     },
     {
+      "name": "fetch-broker",
+      "group": "domain",
+      "role": {
+        "cs": "fetch-broker",
+        "en": "fetch-broker"
+      },
+      "declared": true
+    },
+    {
       "name": "finops-agent",
       "group": "domain",
       "role": {
@@ -539,6 +548,15 @@
       "role": {
         "cs": "loyalty",
         "en": "loyalty"
+      },
+      "declared": true
+    },
+    {
+      "name": "mcp-synthetic-sandbox",
+      "group": "domain",
+      "role": {
+        "cs": "mcp-synthetic-sandbox",
+        "en": "mcp-synthetic-sandbox"
       },
       "declared": true
     },
@@ -871,11 +889,11 @@
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 149 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
-        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 149 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 170 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 170 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy manifests (149)",
+        "NetworkPolicy manifests (170)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -977,12 +995,12 @@
         "en": "A time-locked vault — passwords never sit in the code."
       },
       "summary": {
-        "cs": "OpenBao drží tajemství; 244 ExternalSecret je sype do k8s. Žádný secret v gitu.",
-        "en": "OpenBao holds the secrets; 244 ExternalSecrets feed them into k8s. No secret in git."
+        "cs": "OpenBao drží tajemství; 272 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+        "en": "OpenBao holds the secrets; 272 ExternalSecrets feed them into k8s. No secret in git."
       },
       "controls": [
         "OpenBao",
-        "External Secrets (244)",
+        "External Secrets (272)",
         "KMS unseal"
       ],
       "adr": [
@@ -1124,8 +1142,8 @@
         "en": "Technical separation of workloads and legal entities"
       },
       "reality": {
-        "cs": "86 namespaců",
-        "en": "86 namespaces"
+        "cs": "88 namespaců",
+        "en": "88 namespaces"
       },
       "status": "live"
     },
@@ -1139,8 +1157,8 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "149 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
-        "en": "149 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
+        "cs": "170 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "170 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
       "status": "partial"
     },
@@ -1169,8 +1187,8 @@
         "en": "OpenBao + ESO, nothing in git"
       },
       "reality": {
-        "cs": "244 ExternalSecret",
-        "en": "244 ExternalSecrets"
+        "cs": "272 ExternalSecret",
+        "en": "272 ExternalSecrets"
       },
       "status": "live"
     },

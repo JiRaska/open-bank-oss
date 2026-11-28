@@ -63,7 +63,7 @@ class PidTraceContractIT {
     /** Same InMemory-channel twin as PidApiContractTest — no broker in this contract's stack. */
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out", "pid-events-out") +
+            InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out") +
                 InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
 
         override fun stop() = InMemoryConnector.clear()

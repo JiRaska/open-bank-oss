@@ -19,6 +19,7 @@ audit-money-path-subscription openbank-infra/
 audit-money-path-subscription openbank-libs/
 claude-md-identifiers-exist build-logic/
 claude-md-identifiers-exist build.gradle.kts
+claude-md-identifiers-exist e2e/mcp-harness/
 claude-md-identifiers-exist fuzz/
 claude-md-identifiers-exist openbank-*/
 claude-md-identifiers-exist openbank-admin-ui/
@@ -68,7 +69,6 @@ gate-script-registration CODEOWNERS
 gate-script-registration CODE_OF_CONDUCT.md
 gate-script-registration CONTRIBUTING.md
 gate-script-registration DEPLOYMENT.md
-gate-script-registration Dockerfile.scanner
 gate-script-registration GOVERNANCE.md
 gate-script-registration LICENSE
 gate-script-registration LICENSES/
@@ -86,6 +86,7 @@ gate-script-registration ci/
 gate-script-registration codecov.yml
 gate-script-registration config/
 gate-script-registration docs/
+gate-script-registration e2e/mcp-harness/
 gate-script-registration evals/
 gate-script-registration fuzz/
 gate-script-registration gradle.properties
@@ -120,6 +121,7 @@ license-header-consistency build.gradle.kts
 license-header-consistency codecov.yml
 license-header-consistency config/
 license-header-consistency docs/
+license-header-consistency e2e/mcp-harness/
 license-header-consistency fuzz/
 license-header-consistency integrations/
 license-header-consistency openbank-*/

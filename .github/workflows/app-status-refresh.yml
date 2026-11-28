@@ -34,6 +34,7 @@ concurrency:
 
 jobs:
   refresh:
+    if: github.event_name != 'schedule' || (vars.APP_STATUS_REFRESH_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: regenerate the dossier and open a PR on drift
     runs-on: ubuntu-latest
     permissions:
@@ -102,7 +103,7 @@ jobs:
       - name: Mint a GitHub App installation token
         id: app_token
         if: steps.regen.outputs.changed == 'true'
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}

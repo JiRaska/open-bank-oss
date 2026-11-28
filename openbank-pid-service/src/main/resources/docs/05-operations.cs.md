@@ -69,7 +69,7 @@ readinessProbe:
 
 ## Workload tier (ADR-0057)
 
-pid-service **není money-path** a čtení/zápisy identity jsou nárazové, ne konstantní. Je kandidátem na **scale-to-zero / scale-from-zero tier** dle FinOps workload klasifikátoru (ADR-0057). Pozor: outbox dispatcher `@Scheduled(every = "5s")` potřebuje alespoň jednu běžící repliku pro odbavení `pid_outbox`, takže scale-to-zero politika musí držet warm repliku (nebo přesunout odbavení na KEDA cron/Kafka-lag trigger). Klasifikace tieru je TBD — ověř proti nasazenému manifestu.
+pid-service **není money-path** a čtení/zápisy identity jsou nárazové, ne konstantní. Je kandidátem na **scale-to-zero / scale-from-zero tier** dle FinOps workload klasifikátoru (ADR-0057). Klasifikace tieru je TBD — ověř proti nasazenému manifestu.
 
 ## SLO
 
@@ -81,16 +81,9 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 | Dostupnost | 99,9 % | Prometheus `up{service="pid-service"}` |
 | Latence p95 GET `/parties/{id}` | < 100 ms | `http_server_requests_seconds{quantile=0.95}` |
 | Latence p95 POST `/parties` | < 300 ms | zahrnuje DB zápis + publish události |
-| Outbox lag | < 10 s | stáří nejstaršího řádku `pid_outbox` s `status != SENT` (interval pollu je 5 s) |
 | Chybovost | < 0,1 % 5xx | `http_server_requests_seconds_count{status=~"5.."}` |
 
 ## Runbooky
-
-### Rostoucí outbox lag
-1. Spočti uvízlé řádky: `SELECT count(*) FROM pid_outbox WHERE status <> 'SENT';`
-2. Prozkoumej selhání: `SELECT event_id, attempt_count, last_error FROM pid_outbox WHERE status='FAILED' ORDER BY updated_at DESC LIMIT 20;`
-3. Zkontroluj circuit breaker — opakované `@Timeout`/Kafka chyby ho otevřou na ~5 s. Ověř dostupnost brokera.
-4. Zkontroluj, že dispatcher běží na ≥ 1 replice (`@Scheduled` se spouští jen na živém podu).
 
 ### Duplicitní identita / 409 při vytvoření
 Symptom: `409 CONFLICT` „Party with bankID sub … already exists" nebo porušení unikátního externího id. Příčina: bankID `sub` (nebo jiné `(id_type,id_value)`) je už namapováno. Akce: dohledej existující party přes `GET /by-external-id?type=BANKID_SUB&value=…` a použij ho znovu — nezakládej druhý party (invariant jeden člověk = jeden party).

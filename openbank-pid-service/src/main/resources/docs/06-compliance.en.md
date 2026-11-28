@@ -11,7 +11,7 @@
 | **eIDAS** (Reg. (EU) 910/2014) + Czech bankID | Identity proofing via bankID (qualified electronic identification) | `verificationSource=BANKID`, `BANKID_SUB` external id, `/sync/bankid` ingests verified attributes |
 | **Czech AML Act 253/2008 + ZoB** | Customer due diligence, ID document capture | `party_id_documents`, birth number (rodné číslo) handling, data-box (datová schránka) |
 | **PSD2** (Reg. (EU) 2015/2366) | Identity backs SCA + consent decisions | party identity referenced by `consent-service` / `sca-service`; no direct TPP access here |
-| **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, fault-tolerant outbox dispatcher, audit events, SLO, runbooks |
+| **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, audit events, SLO, runbooks |
 | **NIS2** | Network & information security | OIDC auth, security headers (CSP/HSTS), in-cluster mTLS, audit log |
 | **Czech basic registers (ROB/ISZR, RUIAN)** | Authoritative address / population data | `/sync/rob`, `ROB_AIFO` external id, `ruian_code` on addresses |
 
@@ -49,7 +49,6 @@ The Czech birth number is a sensitive national identifier. It is stored **only**
 |---|---|
 | Party identity + KYC/AML | 10 years (AMLD 6 Art. 40, Czech AML Act) — except after `PARTY_ERASED`, where personal data is anonymised at once and only the shell remains |
 | ID documents | per AML Act retention |
-| `pid_outbox` SENT rows | operational only, prunable |
 | Retained fraud-block key (`RNX:`) and its REJECT decision | until the applicable AML record-keeping period ends (see below); **no automated purge yet** |
 
 ### Retained fraud-block key (`RNX:`)
@@ -71,7 +70,7 @@ When a party is erased, a verification case that four eyes decided REJECT agains
 | Art. 5/6 | ICT risk management | hexagonal isolation, centralized `openbank-libs` |
 | Art. 9 | Identification | `BuildInfo` (gitCommit, buildTime, version) in `/api/v1/info` |
 | Art. 10 | Detection | Micrometer/Prometheus metrics, OpenTelemetry traces |
-| Art. 11 | Response & recovery | fault-tolerant outbox (circuit breaker/retry/timeout), runbooks in `05-operations.md` |
+| Art. 11 | Response & recovery | runbooks in `05-operations.md` |
 | Art. 16 | Incident management | domain events → audit-service (evidence) |
 | Art. 28 | Third-party risk | bankID / ROB are regulated national systems, not third-party SaaS; no external SaaS dependency in this service |
 
@@ -109,8 +108,8 @@ Every mutation emits a domain event to `party.events`; `audit-service` persists 
 - ✅ Birth number encrypted at rest, never returned, masked in logs
 - ✅ Unique `(id_type, id_value)` prevents identity-collision / duplicate-party
 - ✅ Security headers: CSP `default-src 'self'`, HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy
-- ✅ Resilience: fault-tolerant outbox dispatcher (circuit breaker / retry / timeout / bulkhead)
 - ✅ Secrets: dev placeholders (`CHANGE_ME_LOCAL_DEV_ONLY`) must be overridden via Vault in prod
+- ✅ A birth number dated after today (Europe/Prague, from the service clock) is invalid: no blind index is computed and tier-1 is skipped, so resolution falls through to tier-2
 - ⚠️ Idempotency on mutations: no `Idempotency-Key` cache yet (creation deduplicated on bankID `sub`) — tracked enhancement
 - ⚠️ Birth-number blind-index dedup (true one-person = one-party matching): roadmap item, not implemented
 - ⚠️ `openapi.yaml` drift vs the live resource — tracked follow-up (see [03 — API](./03-api.md))

@@ -1,0 +1,9 @@
+- op: add
+  path: /data/private-oidc.properties
+  value: |
+    quarkus.oidc.mcp-customer.auth-server-url=${BALANCE_MCP_OIDC_DISCOVERY_URL}
+    quarkus.oidc.mcp-customer.token.issuer=${BALANCE_MCP_ISSUER}
+    quarkus.oidc.mcp-customer.tls.tls-configuration-name=mcp-balance-oidc
+    quarkus.tls.mcp-balance-oidc.trust-store.pem.certs=/mnt/mcp-balance-oidc-trust/ca.crt
+    quarkus.tls.mcp-balance-oidc.protocols=TLSv1.3
+    quarkus.tls.mcp-balance-oidc.reload-period=1h

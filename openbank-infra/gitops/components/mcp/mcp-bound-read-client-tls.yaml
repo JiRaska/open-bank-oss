@@ -1,0 +1,22 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-bound-read-client-tls
+  namespace: platform
+spec:
+  commonName: openbank-mcp-read
+  duration: 720h
+  issuerRef:
+    kind: Issuer
+    name: mcp-read-client-ca
+  privateKey:
+    algorithm: ECDSA
+    rotationPolicy: Always
+    size: 256
+  renewBefore: 240h
+  secretName: mcp-bound-read-client-tls
+  uris:
+  - spiffe://openbank/mcp-read
+  usages:
+  - client auth
+  - digital signature

@@ -28,7 +28,7 @@
    │  admin UI  │ ────────────────────────► │  pid-service     │
    └─────┬──────┘   (employee/admin)        │  (Party Identity)│
          │                                   └───────┬──────────┘
-   ┌─────┴──────┐   POST /sync/bankid                │ outbox → Kafka
+   ┌─────┴──────┐   POST /sync/bankid                │ party.events → Kafka
    │ onboarding │ ─────────────────────────►         │  topic: party.events
    │  / IdP     │                                     ▼
    └────────────┘                          ┌───────────────────────┐

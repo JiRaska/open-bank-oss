@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Local adapter-to-customer-MCP transport only. This certificate carries no customer
+# authentication and does not grant the Envoy client-address header privilege.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mcp-hosted-oauth-client-tls
+  namespace: platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: mcp-hosted-oauth-client-tls
+  duration: 720h
+  renewBefore: 240h
+  privateKey:
+    algorithm: ECDSA
+    encoding: PKCS8
+    rotationPolicy: Always
+    size: 256
+  usages:
+    - client auth
+    - digital signature
+  uris:
+    - spiffe://openbank/mcp-hosted-oauth
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

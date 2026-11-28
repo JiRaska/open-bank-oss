@@ -116,6 +116,11 @@ quarkus:
       url: ${SCA_SERVICE_URL:http://localhost:8110}
       connect-timeout: 2000
       read-timeout: 2000
+    mcp-connect-sca-receipt:
+      url: ${MCP_CONNECT_SCA_RECEIPT_URL:https://localhost:8443}
+      tls-configuration-name: ${MCP_CONNECT_SCA_TLS_CONFIGURATION:}
+      connect-timeout: 2000
+      read-timeout: 2000
     pid-service:
       url: ${PID_SERVICE_URL:http://localhost:8103}
       connect-timeout: 2000
@@ -215,6 +220,15 @@ mp:
         connector: smallrye-kafka
         client.id: delegation-service-approval-${quarkus.uuid}
         topic: openbank.delegation.approval-events
+      # ADR-0383 D6 proposal lifecycle (Created/Approved/Rejected/Expired/Executed/ExecutionFailed),
+      # keyed by proposal id. Its own topic, so no existing delegation consumer sees these types.
+      payment-proposal-events-out:
+        connector: smallrye-kafka
+        topic: openbank.delegation.payment-proposal-events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       # One canonical value per immutable roster revision. The `groupId:revision` key preserves
       # every historical revision under compaction and allows new product services to bootstrap.
       approval-group-revisions-out:
@@ -312,6 +326,8 @@ openbank:
     # Expand/contract rollout: enable only after account-service has replayed approval-group
     # revisions and its operation-snapshot/decision-ledger health checks are green.
     n-of-m-enabled: ${DELEGATION_N_OF_M_ENABLED:false}
+    mcp-connect-enabled: ${DELEGATION_MCP_CONNECT_ENABLED:false}
+    mcp-native-handoff-enabled: ${DELEGATION_MCP_NATIVE_HANDOFF_ENABLED:false}
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
     # Existing neutral reservations and exact replays retain their established behavior.
@@ -335,6 +351,12 @@ openbank:
       # ADR-0312: flips PENDING / unclaimed-APPROVED approval requests past expiresAt to EXPIRED.
       # A config expression so BusinessApprovalExpirySweepIT can drive the REAL scheduler.
       expiry-cron: "0 */5 * * * ?"
+    # ADR-0383 D6: proposals a customer MCP client may create. 24 h and 10 open / 20 per day are
+    # the ADR's ceilings; PaymentProposalService refuses a ttl above 24 h whatever is configured.
+    payment-proposals:
+      ttl: PT24H
+      max-open-per-party: 10
+      max-created-per-party-per-day: 20
     recertification:
       # A reminder-only sweep. Due tasks are idempotent and the grant remains ACTIVE after dueAt.
       cron: "0 15 * * * ?"

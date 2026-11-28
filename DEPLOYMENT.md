@@ -45,7 +45,8 @@ Everything is **GitOps**: the cluster's desired state is whatever is on `main`. 
 ## 2. Local development (Docker Compose)
 
 The whole fleet runs on a laptop via [`openbank-infra`](openbank-infra). Prereqs: Docker
-Desktop ≥ 4.x (Compose v2), **16 GB RAM** recommended (33 backend services + infra stack).
+Desktop ≥ 4.x (Compose v2), **16 GB RAM** recommended. The checked-in
+[Compose file](openbank-infra/docker-compose.yml) defines the local service inventory.
 
 ```bash
 cd openbank-infra

@@ -1,5 +1,133 @@
 # Changelog
 
+## [4.28.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.28.0...admin-ui-v4.28.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **admin-ui:** link the MCP explainer to channel observability ([#17318](https://github.com/JiRaska/open-bank-oss/issues/17318)) ([45d31db](https://github.com/JiRaska/open-bank-oss/commit/45d31db573e7f344489537a8364f1b128a0e1b47)), closes [#16606](https://github.com/JiRaska/open-bank-oss/issues/16606)
+
+## [4.28.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.27.0...admin-ui-v4.28.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** configure the shared sandbox passkey age ([#17407](https://github.com/JiRaska/open-bank-oss/issues/17407)) ([647fa7e](https://github.com/JiRaska/open-bank-oss/commit/647fa7ea3ead2bca6752474c5b4376c73d670084))
+
+## [4.27.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.5...admin-ui-v4.27.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
+## [4.26.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.4...admin-ui-v4.26.5) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** trust the MCP client CA in Keycloak OAuth ([#17309](https://github.com/JiRaska/open-bank-oss/issues/17309)) ([0a8fbfd](https://github.com/JiRaska/open-bank-oss/commit/0a8fbfd883ae4661376161cdf7e68c5f2dd1801a))
+
+## [4.26.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.3...admin-ui-v4.26.4) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** connect the shared MCP issuer to Delegation TLS ([#17300](https://github.com/JiRaska/open-bank-oss/issues/17300)) ([beeba0d](https://github.com/JiRaska/open-bank-oss/commit/beeba0d05544445ef810cc8695af90ea27132e73))
+* **infra:** wire shared MCP balance TLS material ([#17302](https://github.com/JiRaska/open-bank-oss/issues/17302)) ([6e2edd8](https://github.com/JiRaska/open-bank-oss/commit/6e2edd8bf142f394b8e9ed1eac1caefaca58d95e))
+
+## [4.26.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.2...admin-ui-v4.26.3) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** wire private MCP authorization transport in Delegation ([#17297](https://github.com/JiRaska/open-bank-oss/issues/17297)) ([b2934f3](https://github.com/JiRaska/open-bank-oss/commit/b2934f3dabd0399f83aad8a21d4ba1e92ad8b571))
+
+## [4.26.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.1...admin-ui-v4.26.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** stage shared MCP issuer mTLS listener ([#17288](https://github.com/JiRaska/open-bank-oss/issues/17288)) ([fa4c587](https://github.com/JiRaska/open-bank-oss/commit/fa4c5874b9891e05a131ec029a2e766677173b18))
+
+## [4.26.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.0...admin-ui-v4.26.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **infra:** wire shared sandbox MCP customer dependencies ([#17271](https://github.com/JiRaska/open-bank-oss/issues/17271)) ([9fdee4e](https://github.com/JiRaska/open-bank-oss/commit/9fdee4ea0b0f96e55cd519e77e8abc2fa9494e56))
+
+## [4.26.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.25.0...admin-ui-v4.26.0) (2026-11-25)
+
+
+### Features
+
+* **infra:** compose isolated MCP sandbox Keycloak runtime ([#17262](https://github.com/JiRaska/open-bank-oss/issues/17262)) ([1e7a246](https://github.com/JiRaska/open-bank-oss/commit/1e7a2463d1e90e46bdfec83ce706d2d07c87d192))
+
+## [4.25.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.24.0...admin-ui-v4.25.0) (2026-11-24)
+
+
+### Features
+
+* **infra:** stage synthetic MCP sandbox workloads ([#17251](https://github.com/JiRaska/open-bank-oss/issues/17251)) ([1253c2e](https://github.com/JiRaska/open-bank-oss/commit/1253c2ea151d44c6c171ad6794e3d8270c9cf3ab))
+
+
+### Bug Fixes
+
+* **admin-ui:** describe hosted MCP approval and balance flow ([#17256](https://github.com/JiRaska/open-bank-oss/issues/17256)) ([95759c6](https://github.com/JiRaska/open-bank-oss/commit/95759c6ce05070e780c3f8485b83f7bfb2bf7f17))
+
+## [4.24.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.2...admin-ui-v4.24.0) (2026-11-24)
+
+
+### Features
+
+* **admin-ui:** spec conformance as a Test Intelligence dimension ([#16857](https://github.com/JiRaska/open-bank-oss/issues/16857)) ([1d1b2d8](https://github.com/JiRaska/open-bank-oss/commit/1d1b2d8ace146d82d29ff37353ffdece11b04108))
+
+
+### Security
+
+* **infra:** harden redis_exporter: least-privilege ACL user, no multi-target scrape, Prometheus-only ingress ([#16916](https://github.com/JiRaska/open-bank-oss/issues/16916)) ([849913a](https://github.com/JiRaska/open-bank-oss/commit/849913a117e4a87ac54c759f65a57b6d49f550c2))
+
+## [4.23.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.1...admin-ui-v4.23.2) (2026-11-23)
+
+
+### Security
+
+* **sca:** Keycloak MCP extension - withheld code, 72 h passkey floor, no token exchange (ADR-0385 C, [#16667](https://github.com/JiRaska/open-bank-oss/issues/16667)) ([#16672](https://github.com/JiRaska/open-bank-oss/issues/16672)) ([699eaf9](https://github.com/JiRaska/open-bank-oss/commit/699eaf9e7e0b3d2b0604d964d35497ab774367aa))
+
+## [4.23.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.23.0...admin-ui-v4.23.1) (2026-11-23)
+
+
+### Security
+
+* **mcp-service:** caller-scoped opaque accountRef for MCP tool chaining ([#16863](https://github.com/JiRaska/open-bank-oss/issues/16863)) ([cdd8413](https://github.com/JiRaska/open-bank-oss/commit/cdd8413840c923f2d5f56a80f5c9615b55a94ab9))
+
+## [4.23.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.1...admin-ui-v4.23.0) (2026-11-22)
+
+
+### Features
+
+* **fetch-broker:** gitops, egress policy and OPA host check (ADR-0387 S3) ([#16794](https://github.com/JiRaska/open-bank-oss/issues/16794)) ([69de3a7](https://github.com/JiRaska/open-bank-oss/commit/69de3a76661109ca7a70a22acba251cb79a1da96))
+
+
+### Security
+
+* **mcp-service:** shared fail-closed Valkey DPoP replay store and budgets ([#16791](https://github.com/JiRaska/open-bank-oss/issues/16791)) ([49b0b6c](https://github.com/JiRaska/open-bank-oss/commit/49b0b6cb70d888ef9cd468d203fb309f676b8789))
+
+## [4.22.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.22.0...admin-ui-v4.22.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** read merge-train knob defaults from repo-variable expressions ([#17047](https://github.com/JiRaska/open-bank-oss/issues/17047)) ([4cc61c7](https://github.com/JiRaska/open-bank-oss/commit/4cc61c799be149a5da040471b18a88d52f0b62a9)), closes [#17009](https://github.com/JiRaska/open-bank-oss/issues/17009)
+
+## [4.22.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.1...admin-ui-v4.22.0) (2026-11-21)
+
+
+### Features
+
+* **mcp-service:** ADR-0384 slice 1 — customer MCP channel metrics, alerts and admin view ([#16779](https://github.com/JiRaska/open-bank-oss/issues/16779)) ([c421931](https://github.com/JiRaska/open-bank-oss/commit/c4219319f7fa372e8899c4a775ce3fa99c626299))
+
 ## [4.21.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.21.0...admin-ui-v4.21.1) (2026-11-18)
 
 

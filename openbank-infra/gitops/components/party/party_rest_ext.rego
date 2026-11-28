@@ -39,6 +39,8 @@ allowed_reasons contains "operator-party-write" if {
 	role in input.principal.roles
 	startswith(input.action, "party.")
     input.action != "party.pii.reveal"
+    not startswith(input.action, "party.mcpNativePasskeyAgeException.")
+    not startswith(input.action, "party.mcpNativePasskeyAgePolicy.")
 }
 
 # Full personal data has a distinct grant. The REST endpoint additionally requires a verified
@@ -161,4 +163,24 @@ allowed_reasons contains "delegation-inspects-statutory-representation" if {
     input.principal.service_account == true
     machine_named("service-account-openbank-delegation")
     input.action == "party.statutory-representation.inspect"
+}
+
+
+allowed_reasons contains "staff-native-passkey-age-manage" if {
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    "ROLE_ADMIN" in input.principal.roles
+    input.action in {
+        "party.mcpNativePasskeyAgeException.inspect",
+        "party.mcpNativePasskeyAgeException.manage",
+        "party.mcpNativePasskeyAgePolicy.inspect",
+        "party.mcpNativePasskeyAgePolicy.manage",
+    }
+}
+
+# Exact Edge workload reads on the two effective-lease GET routes.
+allowed_reasons contains "edge-native-passkey-age-effective-read" if {
+    machine_named("service-account-openbank-edge")
+    "ROLE_OPERATOR" in input.principal.roles
+    input.action in {"party.mcpNativePasskeyAgeException.effective", "party.mcpNativePasskeyAgePolicy.effective"}
 }

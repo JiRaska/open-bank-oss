@@ -19,7 +19,7 @@ reference. A RELEASED status without that reference means the release has been c
 rail result is still unknown. A missing receipt returns 404 and leaves execution unknown.
 Lookup responses use `Cache-Control: no-store`.
 
-Flyway V34 adds the append-only receipt table. Deploy the migration before the writer. To roll
+Flyway V44 adds the append-only receipt table. Deploy the migration before the writer. To roll
 back, stop sending and querying correlations and roll back the application. Retain the table
 and its receipt evidence.
 
@@ -47,7 +47,7 @@ the rail's own receipt. The Edge must use the mode claim before either write pat
 uses the mode-aware contract. Both callers and provider must support the contract before it is
 activated.
 
-Flyway V35 adds the immutable mode binding and links new receipts to a HELD binding. PostgreSQL
+Flyway V45 adds the immutable mode binding and links new receipts to a HELD binding. PostgreSQL
 records the first claim time. Claim age supplies no outcome evidence. Any archival or deletion
 requires an explicit retention process that preserves protection against key reuse. Application
 rollback retains the binding and receipt evidence.

@@ -18,6 +18,14 @@ data class Iban(val value: String) {
     override fun toString(): String = value
 
     companion object {
+        private val CANONICAL_SHAPE = Regex("^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$")
+
+        /**
+         * Checks the uppercase, unspaced wire format without normalizing input.
+         * Use [isValid] to check the country, BBAN structure and checksum.
+         */
+        fun hasCanonicalShape(value: String): Boolean = value.matches(CANONICAL_SHAPE)
+
         fun of(raw: String): Iban = Iban(raw.replace(" ", "").uppercase())
 
         /**

@@ -1,0 +1,42 @@
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mcp-customer-oidc-origins
+  namespace: platform
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: mcp-customer-oidc-origins
+    creationPolicy: Owner
+  data:
+  - secretKey: discovery-url
+    remoteRef:
+      key: mcp-synthetic-sandbox/mcp-customer-oidc-origins
+      property: discovery-url
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mcp-customer-oidc-trust
+  namespace: platform
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: mcp-customer-oidc-trust
+    creationPolicy: Owner
+  data:
+  - secretKey: ca.crt
+    remoteRef:
+      key: mcp-synthetic-sandbox/mcp-customer-oidc-trust
+      property: ca.crt

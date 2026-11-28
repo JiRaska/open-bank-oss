@@ -8,15 +8,10 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.webauthn4j.WebAuthnManager
 import com.webauthn4j.converter.AttestedCredentialDataConverter
 import com.webauthn4j.converter.util.ObjectConverter
-import com.webauthn4j.credential.CredentialRecordImpl
-import com.webauthn4j.data.AuthenticationParameters
-import com.webauthn4j.data.AuthenticationRequest
 import com.webauthn4j.data.RegistrationParameters
 import com.webauthn4j.data.RegistrationRequest
-import com.webauthn4j.data.attestation.statement.NoneAttestationStatement
 import com.webauthn4j.data.client.Origin
 import com.webauthn4j.data.client.challenge.DefaultChallenge
-import com.webauthn4j.data.extension.authenticator.AuthenticationExtensionsAuthenticatorOutputs
 import com.webauthn4j.server.ServerProperty
 import com.webauthn4j.util.Base64UrlUtil
 import com.webauthn4j.verifier.exception.VerificationException
@@ -174,6 +169,7 @@ class WebAuthnResource(
                     attestedCredentialDataConverter.convert(attestedCredentialData),
                 ),
                 signCount = authenticatorData.signCount,
+                firstVerifiedAtEpochMillis = System.currentTimeMillis(),
             ),
         )
 
@@ -223,58 +219,20 @@ class WebAuthnResource(
         val stored = credentialStore.find(credentialIdB64)
             ?: return unauthorized("Unknown credential")
 
-        val attestedCredentialData = attestedCredentialDataConverter.convert(
-            Base64.getDecoder().decode(stored.attestedCredentialDataB64),
-        )
-        // CredentialRecord (not the deprecated Authenticator-based constructor/overload): the
-        // extra fields webauthn4j added alongside it (clientData, clientExtensions, transports,
-        // uvInitialized/backupEligible/backupState) are all nullable and unused here — this
-        // store only ever persisted the attested credential data + counter.
-        val credentialRecord = CredentialRecordImpl(
-            NoneAttestationStatement(),
-            null, // uvInitialized
-            null, // backupEligible
-            null, // backupState
-            stored.signCount,
-            attestedCredentialData,
-            AuthenticationExtensionsAuthenticatorOutputs(),
-            null, // clientData
-            null, // clientExtensions
-            null, // transports
-        )
-
-        // Result unused: [webAuthnManager] throws VerificationException on any failure — this
-        // call's only job is to run the assertion checks; success is verifying it doesn't throw.
-        try {
-            webAuthnManager.verify(
-                AuthenticationRequest(
-                    Base64UrlUtil.decode(request.credentialId),
-                    Base64UrlUtil.decode(request.userHandle),
-                    Base64UrlUtil.decode(request.authenticatorData),
-                    clientDataJsonBytes,
-                    Base64UrlUtil.decode(request.signature),
-                ),
-                AuthenticationParameters(
-                    ServerProperty(Origin.create(origin), rpId, DefaultChallenge(Base64UrlUtil.decode(challenge))),
-                    credentialRecord,
-                    null, // allowCredentials — not enforced; the lookup above already pinned the exact credential
-                    true, // userVerificationRequired — Face ID
-                    true, // userPresenceRequired
-                ),
-            )
+        val counter = try {
+            WebAuthnAssertionVerifier.verify(request, stored, challenge, rpId, origin)
         } catch (e: VerificationException) {
             Log.warnf(e, "authComplete: assertion verification failed for credential=%s", credentialIdB64)
             return unauthorized("Assertion verification failed")
         }
 
-        // Persist the post-verify counter (webauthn4j clone-detection: a signature whose
-        // embedded counter does not exceed the stored one throws above, before reaching here —
-        // this line only ever advances it).
-        credentialStore.save(stored.copy(signCount = credentialRecord.counter))
+        if (!credentialStore.recordAssertion(stored, counter)) {
+            return unauthorized("Credential changed during authentication")
+        }
         Log.debugf(
             "authComplete: verified assertion for credential=%s, newCounter=%d",
             credentialIdB64,
-            credentialRecord.counter,
+            counter,
         )
 
         val (accessToken, refreshToken) = keycloakClient.impersonate(stored.keycloakUserId)

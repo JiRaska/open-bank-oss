@@ -1394,6 +1394,76 @@
       "secret": "__PENSION_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-keycloak-mcp",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Keycloak MCP connect",
+      "description": "ADR-0385 D3: M2M identity of the customers-realm withheld-code authenticator at sca-service. ROLE_API only; OPA admits it to scaChallenge.initiate/consume alone and sca-service scopes it to MCP_CLIENT_CONNECT.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "secret": "__KEYCLOAK_MCP_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-mcp-read-issuer",
+      "fullScopeAllowed": false,
+      "name": "OpenBank MCP read issuer",
+      "description": "Service identity for the Keycloak read grant to request one balance-read permit from delegation-service.",
+      "enabled": false,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "clientAuthenticatorType": "client-secret",
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {
+        "use.refresh.tokens.for.client.credentials.grant": "false"
+      },
+      "secret": "__MCP_READ_ISSUER_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-balance-mcp-reader",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Balance MCP reader",
+      "description": "Service identity for balance-service to recheck a live MCP grant in delegation-service.",
+      "enabled": false,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "clientAuthenticatorType": "client-secret",
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {
+        "use.refresh.tokens.for.client.credentials.grant": "false"
+      },
+      "secret": "__BALANCE_MCP_READER_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-pension-fund",
       "fullScopeAllowed": false,
       "name": "OpenBank Pension Fund Service",
@@ -1973,6 +2043,9 @@
     }
   ],
   "scopeMappings": [
+    { "client": "openbank-keycloak-mcp", "roles": ["ROLE_API"] },
+    { "client": "openbank-mcp-read-issuer", "roles": ["ROLE_API"] },
+    { "client": "openbank-balance-mcp-reader", "roles": ["ROLE_API"] },
     { "client": "openbank-synthetic-transfer-verifier", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "admin-cli", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-admin-ui", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
@@ -2329,6 +2402,30 @@
       "username": "service-account-openbank-pension",
       "enabled": true,
       "serviceAccountClientId": "openbank-pension",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-keycloak-mcp",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-keycloak-mcp",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-mcp-read-issuer",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-mcp-read-issuer",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-balance-mcp-reader",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-balance-mcp-reader",
       "realmRoles": [
         "ROLE_API"
       ]

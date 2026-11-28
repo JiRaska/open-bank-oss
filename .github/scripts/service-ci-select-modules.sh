@@ -524,6 +524,19 @@ self_test() {
   expect pr-gitleaks-only-builds-nothing "" "$(run pull_request)"
   echo b >> "$repo/openbank-a-service/src/A.kt"; sg_do commit -q -am glm || return 1
   expect pr-gitleaks-plus-module-builds-that-module "openbank-a-service openbank-c-service " "$(run pull_request)"
+  pr_from_base pr-assistant-plugin || return 1
+  mkdir -p "$repo/integrations/assistant-plugins"
+  echo '{}' > "$repo/integrations/assistant-plugins/listing.json"
+  sg_do add integrations/assistant-plugins/listing.json && sg_do commit -q -m assistant-plugin || return 1
+  expect pr-assistant-plugin-only-builds-nothing "" "$(run pull_request)"
+  expect push-assistant-plugin-only-builds-nothing "" "$(run push)"
+  printf '%s\n' 'val listing = java.io.File("../integrations/assistant-plugins/listing.json")' >> "$repo/openbank-c-service/src/test/kotlin/Scan.kt"
+  expect pr-assistant-plugin-selects-direct-reader "openbank-c-service " "$(run pull_request)"
+  sg_do restore openbank-c-service/src/test/kotlin/Scan.kt || return 1
+  echo x > "$repo/integrations/assistant-plugins/build.gradle.kts"
+  sg_do add integrations/assistant-plugins/build.gradle.kts && sg_do commit -q -m unknown-plugin-input || return 1
+  expect pr-unknown-assistant-plugin-input-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run pull_request)"
+  expect push-unknown-assistant-plugin-input-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run push)"
   # Negative control: .dockerignore is an image input and stays full-fleet.
   pr_from_base pr-dockerignore || return 1
   echo x >> "$repo/.dockerignore"; sg_do commit -q -am di || return 1
@@ -544,7 +557,7 @@ self_test() {
   echo y >> "$repo/.gitleaks.toml"; sg_do commit -q -am glr || return 1
   expect pr-gitleaks-builds-its-literal-path-reader "openbank-b-service " "$(run pull_request)"
   expect push-gitleaks-builds-its-literal-path-reader "openbank-b-service " "$(run push)"
-  echo "SUBJECTS=20  # scenarios exercised"
+  echo "SUBJECTS=25  # scenarios exercised"
   return $rc
 }
 

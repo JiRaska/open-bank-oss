@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: platform
+  name: mcp-bound-read-tls
+data:
+  runtime.properties: 'quarkus.tls.mcp-bound-read.key-store.pem.read-client.cert=/mnt/mcp-bound-client/tls.crt
+
+    quarkus.tls.mcp-bound-read.key-store.pem.read-client.key=/mnt/mcp-bound-client/tls.key
+
+    quarkus.tls.mcp-bound-read.trust-store.pem.certs=/mnt/mcp-bound-server-trust/ca.crt
+
+    quarkus.tls.mcp-bound-read.protocols=TLSv1.3
+
+    quarkus.tls.mcp-bound-read.reload-period=1h
+
+    '

@@ -65,7 +65,11 @@ info:
   # 1.94.0 -> 1.95.0 (#16000): additive — documents the 409 PAYMENT_NOT_ACCEPTED and the 503
   # PAYMENT_TEMPORARILY_UNAVAILABLE / PAYMENT_STATUS_UNKNOWN that POST /domestic-payments answers for a DELEGATED payment
   # once the reservation-bound create is switched on. Request shape unchanged.
-  version: 1.96.0
+  # 1.96.0 -> 1.97.0 (ADR-0383 D6, #16590): additive — /mcp-proposals routes (list, read, reject,
+  # approve with SCA bound to the proposal's payload hash). App session only.
+  # 1.97.0 -> 1.98.0 (ADR-0385, #16650): additive app-only MCP connect review and account selection.
+  # 1.98.0 -> 1.99.0 (#16650): additive app-only MCP connection list and customer revocation.
+  version: 1.101.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3670,6 +3674,311 @@ paths:
                         status: {type: string, enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]}
                         performedAt: {type: string, format: date-time}
 
+  /mcp/connections:
+    get:
+      tags: [Delegation]
+      summary: List this customer's assistant connections
+      description: >-
+        Requires the customer's own first-party app session, including eligible native sessions when enabled.
+        Includes retained revoked and expired connections.
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Owned connections and their granted accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnection' }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: MCP connect is disabled }
+        '503': { description: The authoritative connection store is unavailable }
+  /mcp/connections/{connectionId}/revoke:
+    post:
+      tags: [Delegation]
+      summary: Revoke one of this customer's assistant connections
+      description: >-
+        The customer is derived from the first-party app session, including eligible native sessions when enabled.
+        No request body is needed.
+      security: [{customerOidc: []}]
+      parameters:
+        - name: connectionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: The connection has been revoked }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: The connection is unavailable to this customer or MCP connect is disabled }
+        '503': { description: Revocation could not be confirmed }
+  /mcp/connect-requests:
+    get:
+      tags: [Delegation]
+      summary: List this customer's pending assistant connection requests
+      description: Requires the customer's own bank app session. Disabled until the bank enables MCP connect.
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Pending requests owned by the authenticated customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnectReview' }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: MCP connect is disabled }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests/{requestRef}:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    get:
+      tags: [Delegation]
+      summary: Read the bank-owned context for one assistant connection request
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Owned connection request and its SCA linkage when the challenge is bound
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReview' }
+        '400': { description: Malformed request reference }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: Request is unavailable to this customer or MCP connect is disabled }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests/{requestRef}/selection:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    post:
+      tags: [Delegation]
+      summary: Submit the accounts and capabilities to review for an assistant connection
+      description: The selection does not approve the challenge or establish a connection.
+      security: [{customerOidc: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accounts]
+              properties:
+                accounts:
+                  type: array
+                  items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+      responses:
+        '200':
+          description: The current authoritative review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReview' }
+        '400': { description: Invalid request reference or account selection }
+        '403': { description: An eligible personal app session and ownership of the selected accounts are required }
+        '404': { description: Request is unavailable to this customer or MCP connect is disabled }
+        '409': { description: Request is no longer selectable }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests-v2:
+    get:
+      tags: [Delegation]
+      summary: List this customer's pending assistant connection requests
+      description: Requires the customer's own bank app session. Disabled until the bank enables MCP connect.
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Pending requests owned by the authenticated customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnectReviewV2' }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: MCP connect is disabled }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests-v2/{requestRef}:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    get:
+      tags: [Delegation]
+      summary: Read the bank-owned context for one assistant connection request
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: Owned connection request and its SCA linkage when the challenge is bound
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReviewV2' }
+        '400': { description: Malformed request reference }
+        '403': { description: An eligible personal app session is required }
+        '404': { description: Request is unavailable to this customer or MCP connect is disabled }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests-v2/{requestRef}/selection:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    post:
+      tags: [Delegation]
+      summary: Submit the accounts and capabilities to review for an assistant connection
+      description: The selection does not approve the challenge or establish a connection.
+      security: [{customerOidc: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accounts]
+              properties:
+                accounts:
+                  type: array
+                  items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+      responses:
+        '200':
+          description: The current authoritative review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReviewV2' }
+        '400': { description: Invalid request reference or account selection }
+        '403': { description: An eligible personal app session and ownership of the selected accounts are required }
+        '404': { description: Request is unavailable to this customer or MCP connect is disabled }
+        '409': { description: Request is no longer selectable }
+        '503': { description: The authoritative connect request store is unavailable }
+  /mcp/connect-requests-v2/native-handoff/claim:
+    post:
+      tags: [Delegation]
+      summary: Claim a native assistant Connect handoff for the authenticated app customer
+      security: [{customerOidc: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handoff]
+              properties:
+                handoff: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+      responses:
+        '200':
+          description: The reference of the customer-bound Connect request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requestRef]
+                properties:
+                  requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        '400': { description: Invalid handoff }
+        '401': { description: A valid customer app token is required }
+        '403': { description: The customer's own app session and unclaimed handoff are required }
+        '404': { description: Handoff unavailable or native Connect disabled }
+        '409': { description: Connect is not ready for this step }
+        '503': { description: Connect authority unavailable }
+  /mcp/connect-requests-v2/{requestRef}/native-passkey/begin:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    post:
+      tags: [Delegation]
+      summary: Begin native passkey verification for the bank-confirmed selected accounts
+      security: [{customerOidc: []}]
+      responses:
+        '200':
+          description: One-use challenge bound to the selected Connect request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthenticationChallenge' }
+        '400': { description: Invalid Connect reference }
+        '401': { description: A valid customer app token is required }
+        '403': { description: The customer's own app session is required }
+        '404': { description: Connect request unavailable or native Connect disabled }
+        '409': { description: Connect is not ready for this step }
+        '503': { description: Connect authority unavailable }
+  /mcp/connect-requests-v2/{requestRef}/native-passkey/complete:
+    parameters:
+      - $ref: '#/components/parameters/McpConnectRequestRef'
+    post:
+      tags: [Delegation]
+      summary: Verify the selected Connect request with a native passkey
+      description: Confirms only the passkey step. Customer SCA is separate.
+      security: [{customerOidc: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuthCompleteRequest' }
+      responses:
+        '204': { description: The bank authority recorded the verified step without returning credentials }
+        '400': { description: Malformed request body or Connect reference }
+        '401': { description: A valid customer app token is required }
+        '403': { description: The caller or passkey proof was refused }
+        '404': { description: Connect request unavailable or native Connect disabled }
+        '409': { description: Connect is not ready for this step }
+        '503': { description: Connect authority unavailable }
+  /mcp-proposals:
+    get:
+      tags: [Payments]
+      summary: List open payment proposals from connected MCP clients
+      description: >-
+        ADR-0383 D6. Proposals a connected MCP client asked the bank to show the customer. Nothing
+        has been paid. Available only to the customer's own app session (azp openbank-app, no act).
+      responses:
+        '200': { description: Open proposals with canonical instruction, payloadSha256 and approvalRequestId }
+        '403': { description: Not the customer's own app session }
+  /mcp-proposals/{id}:
+    get:
+      tags: [Payments]
+      summary: Read one proposal with its exact canonical instruction
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The proposal }
+        '403': { description: Not the customer's own app session }
+        '404': { description: No such proposal for this customer }
+  /mcp-proposals/{id}/reject:
+    post:
+      tags: [Payments]
+      summary: Reject a proposal
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Rejected }
+        '403': { description: Not the customer's own app session }
+        '409': { description: Not PENDING }
+  /mcp-proposals/{id}/approve:
+    post:
+      tags: [Payments]
+      summary: Approve a proposal with SCA and pay it as the customer's own payment
+      description: >-
+        The X-SCA-Challenge-Id must be an APPROVAL challenge whose dynamic linking covers amount,
+        currency, payee, approvalRequestId (mcp-proposal:<id>) and payloadSha256. The edge
+        recomputes the hash from the stored instruction; no SCA exemption applies. Idempotent per
+        proposal. The response is the payment initiation response.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: X-SCA-Challenge-Id, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payloadSha256]
+              properties:
+                payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        '201': { description: Payment initiated from the approved proposal }
+        '400': { description: Missing or malformed payloadSha256 }
+        '403': { description: SCA required or rejected, or not the app session }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Proposal not PENDING, hash mismatch, or stored hash invalid }
+        '503': { description: Proposal store temporarily unavailable; retry with a fresh SCA challenge }
   /domestic-payments:
     post:
       tags: [Payments]
@@ -7135,6 +7444,11 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   parameters:
+    McpConnectRequestRef:
+      name: requestRef
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{64}$' }
     PensionContractId:
       name: contractId
       in: path
@@ -7148,6 +7462,76 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    McpConnection:
+      type: object
+      required: [connectionId, partyId, clientId, resource, expiresAtEpochSecond, status, accounts]
+      properties:
+        connectionId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string }
+        resource: { type: string, format: uri }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string, enum: [ACTIVE, REVOKED, EXPIRED] }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+    McpConnectAccountScope:
+      type: object
+      required: [accountId, capabilities]
+      properties:
+        accountId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          items: { type: string }
+    McpConnectReview:
+      type: object
+      required: [requestRef, partyId, clientId, redirectHost, resource, scopes, parJkt, expiresAtEpochSecond, status, accounts]
+      properties:
+        requestRef:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the authorizer's PAR request URI.
+        partyId: { type: string, format: uuid, description: Canonical party owning this request }
+        clientId: { type: string }
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes:
+          type: array
+          items: { type: string }
+        parJkt: { type: string }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+        challengeId: { type: string, format: uuid }
+        approvalRequestId: { type: string }
+        contextSha256: { type: string }
+    McpConnectReviewV2:
+      type: object
+      required: [requestRef, partyId, clientId, redirectHost, resource, scopes, expiresAtEpochSecond, status, accounts]
+      properties:
+        requestRef:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the authorizer's PAR request URI.
+        partyId: { type: string, format: uuid, description: Canonical party owning this request }
+        clientId: { type: string }
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes:
+          type: array
+          items: { type: string }
+        parJkt: { type: [string, 'null'], pattern: '^[A-Za-z0-9_-]{43}$' }
+        parBinding: { type: string, enum: [confidential_client] }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountScope' }
+        challengeId: { type: string, format: uuid }
+        approvalRequestId: { type: string }
+        contextSha256: { type: string }
     DomesticPaymentSubmission:
       oneOf:
         - type: object

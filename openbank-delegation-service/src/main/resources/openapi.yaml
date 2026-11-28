@@ -13,9 +13,11 @@ info:
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
-  # 1.28 -> 1.30 (#12317): original domestic submission claim and receipt lookup (1.29 is claimed by #15682).
-  # 1.32 -> 1.33 (#15732): the same claim and receipt lookup rebased over main's 1.31/1.32.
-  version: 1.33.0
+  # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes,
+  # on top of main's 1.33.0 (#16793, mcp-client resolve).
+  # 1.39 -> 1.40: additive internal native MCP handoff protocol, disabled by default.
+  # 1.40 -> 1.41 (#15732): additive domestic submission claim, receipt lookup and release claim.
+  version: 1.41.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -26,6 +28,7 @@ tags:
   - name: Delegation lifecycle approvals
   - name: External disclosures
   - name: Business signing
+  - name: Payment proposals
 paths:
   /api/v1/external-disclosures/{id}/verify-otp:
     post:
@@ -61,6 +64,133 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
         '404': { description: External disclosure unavailable }
+  /api/v1/payment-proposals:
+    post:
+      tags: [Payment proposals]
+      summary: Record a customer MCP client's payment proposal (mcp-service only)
+      description: >-
+        ADR-0383 D6. Creates an immutable PENDING proposal under the ACTIVE MCP_CLIENT grant found
+        from (partyId, mcpClientId, keyThumbprint). Moves no money. An identical open proposal is
+        returned instead (200, deduplicated). Callable only by mcp-service's own service account.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePaymentProposalRequest' }
+      responses:
+        '201':
+          description: Proposal created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpProposalReceipt' }
+        '200':
+          description: Identical open proposal already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpProposalReceipt' }
+        '400': { description: Invalid instruction }
+        '403': { description: Caller is not mcp-service, or no active grant permits it }
+        '409': { description: Idempotency-Key reused for a different request, or in progress }
+        '429': { description: Per-customer proposal limit reached }
+    get:
+      tags: [Payment proposals]
+      summary: List the customer's open proposals (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/ProposalPartyId'
+      responses:
+        '200':
+          description: Open proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+  /api/v1/payment-proposals/{id}:
+    get:
+      tags: [Payment proposals]
+      summary: Read one of the customer's proposals with its exact canonical instruction
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/ProposalPartyId'
+      responses:
+        '200':
+          description: The proposal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+  /api/v1/payment-proposals/{id}/approve:
+    post:
+      tags: [Payment proposals]
+      summary: Record the customer's SCA-consumed approval (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposalApproveRequest' }
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Hash mismatch, or not PENDING (expired, replayed, rejected, grant inactive) }
+  /api/v1/payment-proposals/{id}/reject:
+    post:
+      tags: [Payment proposals]
+      summary: Record the customer's rejection (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposalDecisionRequest' }
+      responses:
+        '200':
+          description: Rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Not PENDING }
+  /api/v1/payment-proposals/{id}/execution:
+    post:
+      tags: [Payment proposals]
+      summary: Record the outcome of the customer's own payment for an APPROVED proposal (customer-edge only)
+      parameters:
+        - $ref: '#/components/parameters/PaymentProposalId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 255 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposalExecutionRequest' }
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalView' }
+        '403': { description: Not the customer edge, or party mismatch }
+        '404': { description: No such proposal for this customer }
+        '409': { description: Hash mismatch or not APPROVED }
   /api/v1/delegation-portfolios:
     post:
       tags: [Delegation portfolios]
@@ -641,6 +771,886 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationCheckResponse' }
+  /api/v1/delegations/mcp-connect/requests:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Register the authenticated Keycloak PAR binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerRegistration' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests/{requestRef}/selection:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Read the committed selection for the Keycloak authorization session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerBinding' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests/{requestRef}/challenge:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Bind the selected accounts to the verified SCA context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerChallenge' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests/{requestRef}/stage:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Reserve an authorization code after consumed SCA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerStage' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests/staged:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical codeBindingRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Locate a staged authorization by verified code binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerCodeLookup' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+  /api/v1/delegations/mcp-connect/requests/{requestRef}/activate:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Atomically activate grants for a verified refresh family
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerActivation' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests/family-status:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical refreshFamilyRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Check that the exact refresh family remains active
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerFamilyLookup' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerState' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/issue:
+    post:
+      tags:
+        - Delegations
+      summary: Issue a one-time native MCP handoff
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffIssuerRequest'
+      responses:
+        '204':
+          description: Handoff recorded
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+        '409':
+          description: Immutable handoff state, expiry or selected context refused
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/claimed-party:
+    post:
+      tags:
+        - Delegations
+      summary: Read only the provisionally claimed party
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffIssuerRequest'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffClaimedParty'
+        '204':
+          description: Matching proof or claim is unavailable
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/attest-selection:
+    post:
+      tags:
+        - Delegations
+      summary: Verify the native handoff selection context
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffAttestation'
+      responses:
+        '204':
+          description: Exact selected context attested
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+        '409':
+          description: Immutable handoff state, expiry or selected context refused
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/consume:
+    post:
+      tags:
+        - Delegations
+      summary: Consume the proven identity once
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffIssuerRequest'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffProofReceipt'
+        '204':
+          description: Matching proof or claim is unavailable
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/customer/native-handoffs/claim:
+    post:
+      tags:
+        - Delegations
+      summary: Register a bank app claim for a native MCP handoff
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffClaim'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffClaimReceipt'
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/customer/native-handoffs/{requestRef}/selected-binding:
+    post:
+      tags:
+        - Delegations
+      summary: Read the attested binding for the verified app owner
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the request reference.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: requestRef
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffSubject'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffSelection'
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/customer/native-handoffs/{requestRef}/mark-verified:
+    post:
+      tags:
+        - Delegations
+      summary: Record verified native app evidence for the attested selection
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the request reference.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: requestRef
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffVerifiedProof'
+      responses:
+        '204':
+          description: Exact app proof recorded
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/requests-v2:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Register the authenticated Keycloak PAR binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerRegistrationV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests-v2/{requestRef}/selection:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Read the committed selection for the Keycloak authorization session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerBindingV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests-v2/{requestRef}/challenge:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Bind the selected accounts to the verified SCA context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerChallengeV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests-v2/{requestRef}/stage:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Reserve an authorization code after consumed SCA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerStageV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests-v2/staged:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical codeBindingRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Locate a staged authorization by verified code binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerCodeLookupV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+  /api/v1/delegations/mcp-connect/requests-v2/{requestRef}/activate:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical requestRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Atomically activate grants for a verified refresh family
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerActivationV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+        '409': { description: Conflicting or expired transition }
+  /api/v1/delegations/mcp-connect/requests-v2/family-status:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical refreshFamilyRef of this operation.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Check that the exact refresh family remains active
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/McpConnectIssuerFamilyLookupV2' }
+      responses:
+        '200':
+          description: Verified connect authority state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectIssuerStateV2' }
+        '400': { description: Invalid binding }
+        '403': { description: Caller or authenticated evidence refused }
+        '404': { description: Resource unavailable or Connect disabled }
+  /api/v1/delegations/mcp-connect/customer/connections:
+    get:
+      tags: [Delegations]
+      summary: List MCP connections owned by the authenticated app customer
+      responses:
+        '200':
+          description: Active and previous connections
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnection' }
+        '403': { description: Caller is not the customer edge }
+        '404': { description: Connect is disabled }
+  /api/v1/delegations/mcp-connect/customer/connections/{connectionId}/revoke:
+    parameters:
+      - { name: connectionId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical connectionId of this operation.
+          schema: { type: string, format: uuid }
+      tags: [Delegations]
+      summary: Revoke a customer connection and its active grants
+      responses:
+        '204': { description: Connection revoked }
+        '400': { description: Missing or mismatched Idempotency-Key }
+        '403': { description: Caller is not the customer edge }
+        '404': { description: Connection unavailable to this customer }
+  /api/v1/delegations/mcp-connect/customer/requests:
+    get:
+      tags: [Delegations]
+      summary: List live MCP connect requests for the authenticated app customer
+      responses:
+        '200':
+          description: Live requests for the customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnectReview' }
+        '403': { description: Caller is not the customer edge }
+        '404': { description: Connect is disabled }
+  /api/v1/delegations/mcp-connect/customer/requests/{requestRef}:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    get:
+      tags: [Delegations]
+      summary: Review one live MCP connect request
+      responses:
+        '200':
+          description: Customer review context
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReview' }
+        '403': { description: Caller is not the customer edge }
+        '404': { description: Request is unavailable to this customer }
+  /api/v1/delegations/mcp-connect/customer/requests/{requestRef}/selection:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    put:
+      tags: [Delegations]
+      summary: Select owned accounts and capabilities for an MCP connect request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accounts]
+              properties:
+                accounts:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { $ref: '#/components/schemas/McpConnectAccountSelection' }
+      responses:
+        '200':
+          description: Customer review context with the committed selection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReview' }
+        '400': { description: Invalid account selection }
+        '403': { description: Caller or selected account ownership could not be established }
+        '404': { description: Request is unavailable to this customer }
+        '409': { description: An incompatible selection is already committed }
+  /api/v1/delegations/mcp-connect/customer/requests-v2:
+    get:
+      tags: [Delegations]
+      summary: List live MCP connect requests for the authenticated app customer
+      responses:
+        '200':
+          description: Live requests for the customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpConnectReviewV2' }
+        '403': { description: Caller is not the customer edge }
+        '404': { description: Connect is disabled }
+  /api/v1/delegations/mcp-connect/customer/requests-v2/{requestRef}:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    get:
+      tags: [Delegations]
+      summary: Review one live MCP connect request
+      responses:
+        '200':
+          description: Customer review context
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReviewV2' }
+        '403': { description: Caller is not the customer edge }
+        '404': { description: Request is unavailable to this customer }
+  /api/v1/delegations/mcp-connect/customer/requests-v2/{requestRef}/selection:
+    parameters:
+      - { name: requestRef, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{64}$' } }
+    put:
+      tags: [Delegations]
+      summary: Select owned accounts and capabilities for an MCP connect request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accounts]
+              properties:
+                accounts:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { $ref: '#/components/schemas/McpConnectAccountSelection' }
+      responses:
+        '200':
+          description: Customer review context with the committed selection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReviewV2' }
+        '400': { description: Invalid account selection }
+        '403': { description: Caller or selected account ownership could not be established }
+        '404': { description: Request is unavailable to this customer }
+        '409': { description: An incompatible selection is already committed }
+  /api/v1/delegations/mcp-client/resolve:
+    post:
+      tags: [Delegations]
+      summary: Active MCP_CLIENT grants for a grantor party, client id and DPoP key thumbprint (ADR-0383 D3)
+      description: |
+        mcp-service's per-call lookup on the customer MCP channel. Reserved to mcp-service's own
+        service-account (OPA action `delegation.mcp-client.resolve`, re-checked in code); refused
+        when the customer-edge party header is present. Only ACTIVE, in-window MCP_CLIENT grants
+        matching all three keys are returned; an empty list is the refusal. Never returns names,
+        limits, approval policy or the recorded key thumbprint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveMcpClientGrantRequest' }
+      responses:
+        '200':
+          description: Matching active grants (possibly none)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolveMcpClientGrantResponse' }
+        '400': { description: Missing grantorPartyId, clientId, or a malformed key thumbprint }
+        '403': { description: Caller is not mcp-service, or the request carries a customer-party header }
+  /api/v1/delegations/mcp-client/authorize-balance-read:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical proofKey.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      tags: [Delegations]
+      summary: Authorize one balance read for the internal token issuer
+      description: |
+        Reserved to the dedicated bank read issuer service account after independent customer credential verification.
+        A permit requires an active account grant, current ownership and a committed first proof claim.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partyId, clientId, keyThumbprint, accountId, proofKey]
+              properties:
+                partyId: { type: string, format: uuid }
+                clientId: { type: string, minLength: 1, maxLength: 255 }
+                keyThumbprint:
+                  type: [string, 'null']
+                  pattern: '^[A-Za-z0-9_-]{43}$'
+                  description: Verified DPoP thumbprint or null for a hosted grant with a connectionId.
+                accountId: { type: string, format: uuid }
+                proofKey: { type: string, pattern: '^[0-9a-f]{64}$' }
+                connectionId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Committed balance-read permit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grantId, accountId, validUntil]
+                properties:
+                  grantId: { type: string, format: uuid }
+                  accountId: { type: string, format: uuid }
+                  validUntil: { type: string, format: date-time }
+                  connectionId: { type: [string, 'null'], format: uuid }
+        '400': { description: Missing or invalid request fields }
+        '401': { description: Issuer credential required }
+        '403': { description: Caller, grant, ownership or proof claim refused }
+  /api/v1/delegations/mcp-client/check-balance-grant:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the canonical grantId.
+          schema: { type: string, format: uuid }
+      tags: [Delegations]
+      summary: Check one current balance-read grant for the dedicated balance-service identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grantId, partyId, clientId, accountId]
+              properties:
+                grantId: { type: string, format: uuid }
+                partyId: { type: string, format: uuid }
+                clientId: { type: string, minLength: 1, maxLength: 255 }
+                accountId: { type: string, format: uuid }
+                connectionId: { type: string, format: uuid }
+      responses:
+        '204': { description: An active balance-read grant matches the entire binding }
+        '400': { description: Invalid request }
+        '401': { description: Service credential required }
+        '403': { description: Caller or grant binding refused }
   /api/v1/delegations/{id}/reservations:
     post:
       tags: [Delegations]
@@ -1158,6 +2168,16 @@ paths:
 
 components:
   parameters:
+    PaymentProposalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ProposalPartyId:
+      name: partyId
+      in: query
+      required: true
+      schema: { type: string, format: uuid }
     EntityId:
       name: entityId
       in: path
@@ -1262,6 +2282,498 @@ components:
               message: { type: string }
               timestamp: { type: string, format: date-time }
   schemas:
+    McpNativeHandoffBinding:
+      type: object
+      required:
+        - requestRef
+        - issuer
+        - clientId
+        - resource
+        - redirectUri
+        - sessionRef
+        - kind
+        - scopes
+        - expiresAtEpochSecond
+      properties:
+        requestRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        issuer:
+          type: string
+          format: uri
+          maxLength: 2048
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        resource:
+          type: string
+          format: uri
+          maxLength: 2048
+        redirectUri:
+          type: string
+          format: uri
+          maxLength: 2048
+        sessionRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        kind:
+          type: string
+          enum:
+            - HOSTED
+            - DPOP
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        expiresAtEpochSecond:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 253402300799
+        parJkt:
+          oneOf:
+            - type: string
+              pattern: ^[A-Za-z0-9_-]{43}$
+            - type: 'null'
+      allOf:
+        - if:
+            properties:
+              kind:
+                const: DPOP
+          then:
+            required:
+              - parJkt
+            properties:
+              parJkt:
+                type: string
+                pattern: ^[A-Za-z0-9_-]{43}$
+          else:
+            properties:
+              parJkt:
+                type: 'null'
+    McpNativeHandoffIssuerRequest:
+      type: object
+      required:
+        - tokenSha256
+        - binding
+      properties:
+        tokenSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        binding:
+          $ref: '#/components/schemas/McpNativeHandoffBinding'
+    McpNativeHandoffAttestation:
+      type: object
+      required:
+        - tokenSha256
+        - binding
+        - contextSha256
+      properties:
+        tokenSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        binding:
+          $ref: '#/components/schemas/McpNativeHandoffBinding'
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffClaimedParty:
+      type: object
+      required:
+        - partyId
+      properties:
+        partyId:
+          type: string
+          format: uuid
+    McpNativeHandoffProofReceipt:
+      type: object
+      required:
+        - partyId
+        - keycloakSubject
+        - contextSha256
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffClaim:
+      type: object
+      required:
+        - tokenSha256
+        - keycloakSubject
+      properties:
+        tokenSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+    McpNativeHandoffClaimReceipt:
+      type: object
+      required:
+        - requestRef
+      properties:
+        requestRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffSubject:
+      type: object
+      required:
+        - keycloakSubject
+      properties:
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+    McpNativeHandoffVerifiedProof:
+      type: object
+      required:
+        - keycloakSubject
+        - contextSha256
+      properties:
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffSelection:
+      type: object
+      required:
+        - requestRef
+        - contextSha256
+        - clientId
+        - parBinding
+        - parJkt
+        - expiresAtEpochSecond
+      properties:
+        requestRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        parBinding:
+          type: string
+          enum:
+            - confidential_client
+            - dpop
+        parJkt:
+          oneOf:
+            - type: string
+              pattern: ^[A-Za-z0-9_-]{43}$
+            - type: 'null'
+        expiresAtEpochSecond:
+          type: integer
+          format: int64
+          minimum: 1
+    McpConnectIssuerBinding:
+      type: object
+      required: [partyId, clientId, parJkt]
+      properties:
+        partyId: { type: string, format: uuid }
+        clientId: { type: string, minLength: 1, maxLength: 255 }
+        parJkt: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+    McpConnectIssuerRegistration:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBinding'
+        - type: object
+          required: [requestRef, redirectHost, resource, scopes, expiresAtEpochSecond]
+          properties:
+            requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+            redirectHost: { type: string }
+            resource: { type: string, format: uri }
+            scopes: { type: array, items: { type: string } }
+            expiresAtEpochSecond: { type: integer, format: int64 }
+    McpConnectIssuerChallenge:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBinding'
+        - type: object
+          required: [challengeId, approvalRequestId, contextSha256]
+          properties:
+            challengeId: { type: string, format: uuid }
+            approvalRequestId: { type: string }
+            contextSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerStage:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerChallenge'
+        - type: object
+          required: [codeBindingRef]
+          properties:
+            codeBindingRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerActivation:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerStage'
+        - type: object
+          required: [refreshFamilyRef]
+          properties:
+            refreshFamilyRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerCodeLookup:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBinding'
+        - type: object
+          required: [codeBindingRef]
+          properties:
+            codeBindingRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerFamilyLookup:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBinding'
+        - type: object
+          required: [refreshFamilyRef]
+          properties:
+            refreshFamilyRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerState:
+      type: object
+      required: [status, partyId, clientId, parJkt]
+      properties:
+        requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string, minLength: 1, maxLength: 255 }
+        parJkt: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes: { type: array, items: { type: string } }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        challengeId: { type: string, format: uuid }
+        approvalRequestId: { type: string }
+        contextSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        codeBindingRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        refreshFamilyRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        connectionId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING_SELECTION, SELECTED, CHALLENGE_BOUND, APPROVED_AWAITING_FAMILY, ACTIVE] }
+        accounts: { type: array, items: { $ref: '#/components/schemas/McpConnectAccountSelection' } }
+    McpConnectIssuerBindingV2:
+      type: object
+      required: [partyId, clientId, parJkt]
+      properties:
+        partyId: { type: string, format: uuid }
+        clientId: { type: string, minLength: 1, maxLength: 255 }
+        parJkt:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Verified PAR DPoP thumbprint, or null for a confidential hosted client.
+    McpConnectIssuerRegistrationV2:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBindingV2'
+        - type: object
+          required: [requestRef, redirectHost, resource, scopes, expiresAtEpochSecond]
+          properties:
+            requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+            redirectHost: { type: string }
+            resource: { type: string, format: uri }
+            scopes: { type: array, items: { type: string } }
+            expiresAtEpochSecond: { type: integer, format: int64 }
+    McpConnectIssuerChallengeV2:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBindingV2'
+        - type: object
+          required: [challengeId, approvalRequestId, contextSha256]
+          properties:
+            challengeId: { type: string, format: uuid }
+            approvalRequestId: { type: string }
+            contextSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerStageV2:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerChallengeV2'
+        - type: object
+          required: [codeBindingRef]
+          properties:
+            codeBindingRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerActivationV2:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerStageV2'
+        - type: object
+          required: [refreshFamilyRef]
+          properties:
+            refreshFamilyRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerCodeLookupV2:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBindingV2'
+        - type: object
+          required: [codeBindingRef]
+          properties:
+            codeBindingRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerFamilyLookupV2:
+      allOf:
+        - $ref: '#/components/schemas/McpConnectIssuerBindingV2'
+        - type: object
+          required: [refreshFamilyRef]
+          properties:
+            refreshFamilyRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+    McpConnectIssuerStateV2:
+      type: object
+      required: [status, partyId, clientId, parJkt]
+      properties:
+        requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string, minLength: 1, maxLength: 255 }
+        parJkt:
+          type: [string, 'null']
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: Verified PAR DPoP thumbprint, or null for a confidential hosted client.
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes: { type: array, items: { type: string } }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        challengeId: { type: string, format: uuid }
+        approvalRequestId: { type: string }
+        contextSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        codeBindingRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        refreshFamilyRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        connectionId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING_SELECTION, SELECTED, CHALLENGE_BOUND, APPROVED_AWAITING_FAMILY, ACTIVE] }
+        accounts: { type: array, items: { $ref: '#/components/schemas/McpConnectAccountSelection' } }
+    McpConnection:
+      type: object
+      required: [connectionId, partyId, clientId, resource, expiresAtEpochSecond, status, accounts]
+      properties:
+        connectionId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string }
+        resource: { type: string, format: uri }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/McpConnectionStatus' }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountSelection' }
+    McpConnectionStatus:
+      type: string
+      enum: [ACTIVE, REVOKED, EXPIRED]
+    McpConnectAccountSelection:
+      type: object
+      required: [accountId, capabilities]
+      properties:
+        accountId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string }
+    McpConnectReview:
+      type: object
+      required: [requestRef, partyId, clientId, redirectHost, resource, scopes, parJkt, expiresAtEpochSecond, status, accounts]
+      properties:
+        requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string }
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes:
+          type: array
+          items: { type: string }
+        parJkt: { type: string }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string, enum: [PENDING_SELECTION, SELECTED, CHALLENGE_BOUND, ACTIVE] }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountSelection' }
+        challengeId: { type: [string, 'null'], format: uuid }
+        approvalRequestId: { type: [string, 'null'] }
+        contextSha256: { type: [string, 'null'] }
+    McpConnectReviewV2:
+      type: object
+      required: [requestRef, partyId, clientId, redirectHost, resource, scopes, expiresAtEpochSecond, status, accounts]
+      properties:
+        requestRef: { type: string, pattern: '^[0-9a-f]{64}$' }
+        partyId: { type: string, format: uuid }
+        clientId: { type: string }
+        redirectHost: { type: string }
+        resource: { type: string, format: uri }
+        scopes:
+          type: array
+          items: { type: string }
+        parJkt: { type: [string, 'null'], pattern: '^[A-Za-z0-9_-]{43}$' }
+        parBinding: { type: string, enum: [confidential_client] }
+        expiresAtEpochSecond: { type: integer, format: int64 }
+        status: { type: string, enum: [PENDING_SELECTION, SELECTED, CHALLENGE_BOUND, ACTIVE] }
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/McpConnectAccountSelection' }
+        challengeId: { type: [string, 'null'], format: uuid }
+        approvalRequestId: { type: [string, 'null'] }
+        contextSha256: { type: [string, 'null'] }
+    CreatePaymentProposalRequest:
+      type: object
+      required: [partyId, mcpClientId, keyThumbprint, operationType, debtorAccountId, creditorIban, creditorName, amount, currency]
+      properties:
+        partyId: { type: string, format: uuid }
+        mcpClientId: { type: string, maxLength: 255 }
+        keyThumbprint: { type: string, maxLength: 43 }
+        connectionId:
+          type: string
+          format: uuid
+          description: Verified V2 MCP connection ID. Omit for a legacy unbound grant.
+        operationType: { type: string, enum: [DOMESTIC_PAYMENT, SEPA_PAYMENT] }
+        debtorAccountId: { type: string, format: uuid }
+        creditorIban: { type: string, maxLength: 42 }
+        creditorName: { type: string, maxLength: 70 }
+        amount: { type: string, description: 'Positive decimal, at most two fractional digits' }
+        currency: { type: string, enum: [CZK, EUR] }
+        reference: { type: string, maxLength: 140 }
+    McpProposalReceipt:
+      type: object
+      required: [proposalId, status, deduplicated, expiresAt, summary]
+      properties:
+        proposalId: { type: string, format: uuid }
+        status: { type: string }
+        deduplicated: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+        summary: { type: string }
+    ProposalDecisionRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    ProposalApproveRequest:
+      type: object
+      required: [partyId, payloadSha256]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$', description: 'Must equal the stored hash the device signed' }
+    ProposalExecutionRequest:
+      type: object
+      required: [partyId, payloadSha256]
+      properties:
+        partyId: { type: string, format: uuid }
+        payloadSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        paymentId: { type: [string, 'null'], format: uuid, description: 'Null records EXECUTION_FAILED' }
+    PaymentProposalView:
+      type: object
+      required: [id, status, mcpClientId, operationType, debtorAccountId, creditorIban, creditorName, amount, currency, payloadSha256, approvalRequestId, createdAt, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXPIRED, EXECUTED, EXECUTION_FAILED] }
+        mcpClientId: { type: string }
+        operationType: { type: string, enum: [DOMESTIC_PAYMENT, SEPA_PAYMENT] }
+        debtorAccountId: { type: string, format: uuid }
+        creditorIban: { type: string }
+        creditorName: { type: string }
+        amount: { type: string }
+        currency: { type: string }
+        reference: { type: [string, 'null'] }
+        payloadSha256: { type: string }
+        approvalRequestId: { type: string, description: 'mcp-proposal:<id>; the SCA APPROVAL challenge must link it' }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        executedPaymentId: { type: [string, 'null'], format: uuid }
     ExternalDisclosureOtpRequest:
       type: object
       additionalProperties: false
@@ -1651,6 +3163,36 @@ components:
         updatedAt: { type: string, format: date-time }
         closedAt: { type: string, format: date-time }
         closedReason: { type: string }
+    ResolveMcpClientGrantRequest:
+      type: object
+      required: [grantorPartyId, clientId, keyThumbprint]
+      properties:
+        grantorPartyId: { type: string, format: uuid }
+        clientId: { type: string, maxLength: 255 }
+        keyThumbprint:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: RFC 7638 SHA-256 thumbprint of the DPoP key (the token's cnf.jkt)
+        connectionId: { type: string, format: uuid }
+    ResolveMcpClientGrantResponse:
+      type: object
+      required: [grants]
+      properties:
+        grants:
+          type: array
+          items: { $ref: '#/components/schemas/McpClientGrant' }
+    McpClientGrant:
+      type: object
+      required: [grantId, resourceType, resourceId, capabilities]
+      properties:
+        grantId: { type: string, format: uuid }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          items: { type: string }
+          description: Delegation capability names; an MCP_CLIENT grant holds only read capabilities and ACCOUNT_PROPOSE_PAYMENT
+        validTo: { type: string, format: date-time, nullable: true }
     DelegationCheckResponse:
       type: object
       properties:

@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: keycloak-mcp-read-issuer-oidc
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-mcp-read-issuer-oidc
+    creationPolicy: Owner
+  data:
+  - secretKey: MCP_READ_ISSUER_CLIENT_SECRET
+    remoteRef:
+      key: keycloak/mcp-read-issuer
+      property: client_secret
+      decodingStrategy: None
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mcp-read-nonce
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: mcp-read-nonce
+    creationPolicy: Owner
+  data:
+  - secretKey: key
+    remoteRef:
+      key: keycloak/mcp-read-nonce
+      property: key
+      decodingStrategy: None
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mcp-read-proof
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: mcp-read-proof
+    creationPolicy: Owner
+  data:
+  - secretKey: key
+    remoteRef:
+      key: keycloak/mcp-read-proof
+      property: key
+      decodingStrategy: None
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: keycloak-mcp-read-client-truststore
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-mcp-read-client-truststore
+    creationPolicy: Owner
+  data:
+  - secretKey: truststore.p12
+    remoteRef:
+      key: keycloak/mcp-read-client-truststore
+      property: truststore
+      decodingStrategy: Base64
+  - secretKey: password
+    remoteRef:
+      key: keycloak/mcp-read-client-truststore
+      property: password
+      decodingStrategy: None
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-mcp-read-server-tls
+  namespace: iam
+spec:
+  secretName: keycloak-mcp-read-server-tls
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+  - keycloak-mcp-read.iam.svc
+  - keycloak-mcp-read.iam.svc.cluster.local
+  usages:
+  - server auth
+  - digital signature
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: 2160h
+  renewBefore: 720h
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: keycloak-mcp-read-oauth-client-ca
+  namespace: iam
+  annotations:
+    open-bank.tech/rotation-deadline: "2027-02-22"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: keycloak-mcp-read-oauth-client-ca
+    creationPolicy: Owner
+  data:
+  - secretKey: ca.crt
+    remoteRef:
+      key: keycloak/mcp-balance-client-trust
+      property: ca.crt
+      decodingStrategy: None

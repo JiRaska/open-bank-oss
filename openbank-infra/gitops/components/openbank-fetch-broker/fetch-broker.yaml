@@ -1,0 +1,231 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# openbank-fetch-broker (ADR-0387): the ONE way a governed agent reads the public web. A stateless
+# MCP server exposing a single tool, `web.fetch` (GET-only), authorised per call as an AI_AGENT on
+# resource `read.public_web` by the OPA sidecar below (data.openbank.rest.allow -> agents.rego,
+# which also requires the host to be in the caller charter's data_scope.public_web.hosts).
+#
+# Containment by layer (ADR-0387 D7): this is the only agent-plane pod whose NetworkPolicy reaches
+# 0.0.0.0/0, on TCP 443 only, minus RFC 1918 and link-local (networkpolicy-fetch-broker-egress.yaml).
+# The network layer matches CIDRs, never hostnames, so the per-host allowlist is enforced by OPA
+# and by the broker's SafeHttpClient after DNS resolution.
+#
+# Defaults kept deliberately conservative:
+#   - the JS renderer is OPTIONAL: both renderer keys come from the browser-run-api-token Secret
+#     with `optional: true`; absent, the broker fetches plain HTTP only and `render: js` hosts
+#     answer NOT_RENDERABLE;
+#   - PDF extraction is OFF (in-process PDFBox cannot be bounded against a decompression bomb, #16754).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbank-fetch-broker
+  namespace: fetch-broker
+  labels:
+    app.kubernetes.io/name: openbank-fetch-broker
+    app.kubernetes.io/part-of: fetch-broker
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbank-fetch-broker
+  namespace: fetch-broker
+  labels:
+    app.kubernetes.io/name: openbank-fetch-broker
+    app.kubernetes.io/part-of: fetch-broker
+spec:
+  replicas: 1
+  # Terminate-first (#3545): single replica, so the default surge needs room for two pods.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openbank-fetch-broker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: openbank-fetch-broker
+        app.kubernetes.io/part-of: fetch-broker
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-fetch-broker-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "afb892926e055f8f"
+    spec:
+      serviceAccountName: openbank-fetch-broker
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: openbank-fetch-broker
+          # Pinned to the S2 commit that introduced the module. That image is not built yet:
+          # auto-deploy builds it on the first merge touching openbank-fetch-broker/ and re-pins
+          # this line to sandbox-<sha>@sha256; until then the pod cannot pull and stays Pending.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fetch-broker:sandbox-4d9ef15b
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8172
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            # ADR-0034 PDP: the OPA sidecar in this pod. A PDP error fails CLOSED in the endpoint.
+            - name: OPA_URL
+              value: http://localhost:8181
+            - name: OPA_PATH
+              value: /v1/data/openbank/rest/allow
+            # Tracing OFF on purpose: the fleet's OTLP path to Tempo is plaintext (ASVS V9.1
+            # baseline debt) and this is the one pod facing the internet, so it gets no new
+            # plaintext edge and no Tempo egress. Evidence is the audit log line per call
+            # (ADR-0387 D5), collected node-side.
+            - name: QUARKUS_OTEL_SDK_DISABLED
+              value: "true"
+            # Declared only for otel-endpoint-declared, which has no opt-out: with the SDK disabled
+            # above nothing exports, and the egress policy still grants no Tempo edge. Enabling
+            # tracing therefore needs BOTH this flag flipped and an egress rule -- it cannot happen
+            # by this line alone. https:// on purpose (ASVS V9.1): this pod must not add a new
+            # plaintext edge to the baseline, so enabling tracing here also needs a TLS Tempo
+            # endpoint -- it fails closed rather than exporting in clear.
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "https://tempo.observability.svc:4317"
+            # Stated explicitly, not left to application.yaml: this is where an operator looks.
+            - name: OPENBANK_FETCH_BROKER_PDF_ENABLED
+              value: "false"
+            # Optional JS renderer (ADR-0387 D3). Absent keys = plain HTTP only.
+            - name: OPENBANK_FETCH_BROKER_KITESURF_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: browser-run-api-token
+                  key: base_url
+                  optional: true
+            - name: OPENBANK_FETCH_BROKER_KITESURF_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: browser-run-api-token
+                  key: api_token
+                  optional: true
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: management
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow; the bundle is
+        # the shared policy set (rest.rego + agents.rego + derived charter/rules data).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: "/health?bundles=true", port: 8181}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8181}
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: fetch-broker-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbank-fetch-broker
+  namespace: fetch-broker
+  labels:
+    app.kubernetes.io/name: openbank-fetch-broker
+spec:
+  selector:
+    app.kubernetes.io/name: openbank-fetch-broker
+  ports:
+    - name: http
+      port: 8172
+      targetPort: http
+    - name: management
+      port: 8085
+      targetPort: management

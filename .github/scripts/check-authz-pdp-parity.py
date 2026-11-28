@@ -91,6 +91,8 @@ IMAGE_SVC = re.compile(r"openbank-([a-z0-9][a-z0-9-]*)\b")
 # and stale in BOTH directions: an entry no longer seen in any workload is an error, so this
 # cannot quietly become the place unmatched workloads go to die.
 NON_MODULE_IMAGES = {
+    "openbank-mcp-harness": "Node router and browser fixture in e2e/mcp-harness; "
+                            "it has no Quarkus @Authorize surface",
     "openbank-keycloak": "our own Keycloak build (upstream image + realm), not a Quarkus module; "
                          "it has no src/main and therefore no @Authorize surface",
     "openbank-litellm": "our own build of the upstream LiteLLM gateway (openbank-infra/docker/litellm), "

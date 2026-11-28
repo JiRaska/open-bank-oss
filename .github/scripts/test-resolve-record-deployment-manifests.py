@@ -11,6 +11,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 RESOLVER = ROOT / ".github/scripts/resolve-record-deployment-version.sh"
@@ -183,6 +184,66 @@ def resolve(repo: pathlib.Path, bin_dir: pathlib.Path, published: str, deployed:
     return result.stdout.strip(), result.returncode, result.stderr
 
 
+def check_recording_caller(fixture: pathlib.Path) -> list[str]:
+    workflow = (ROOT / ".github/workflows/record-deployment-on-merge.yml").read_text()
+    # Execute the workflow's recording loop, leaving version resolution and the broker offline.
+    marker = '          rec_failed="$resolve_failed"\n'
+    _, found, tail = workflow.partition(marker)
+    if not found:
+        return ["recording loop start missing from the workflow"]
+    lines = [marker]
+    for line in tail.splitlines(keepends=True):
+        if line.strip() and not line.startswith("          "):
+            break
+        lines.append(line)
+    body = textwrap.dedent("".join(lines))
+
+    scripts = ".github/scripts"
+    write(fixture, f"{scripts}/record-deployment-selection.sh",
+          (ROOT / scripts / "record-deployment-selection.sh").read_text())
+    write(fixture, f"{scripts}/resolve-record-deployment-version.sh", '''
+if [ "$1" = missing ]; then
+    echo none
+else
+    printf 'exact:%s\\n' "$2"
+fi
+''')
+    write(fixture, "broker", '''#!/usr/bin/env python3
+import json, sys
+with open("recorded.jsonl", "a") as log:
+    print(json.dumps(sys.argv[1:]), file=log)
+''')
+    (fixture / "broker").chmod(0o700)
+    # Decimal tags work as sparse indexed array keys even on Bash 3.2 (macOS).
+    missing_tag, valid_tag = "1234567", "2345678"
+    missing_sha, valid_sha = missing_tag + "a" * 33, valid_tag + "b" * 33
+    expected = [["record-deployment", "--pacticipant", "valid", "--version", valid_sha,
+                 "--environment", "sandbox", "--broker-base-url", "https://fixture.invalid",
+                 "--broker-username", "fixture", "--broker-password", "fixture"]]
+    errors = []
+    log = fixture / "recorded.jsonl"
+    for pairs, expected_rc in ((f"missing:sandbox-{missing_tag} valid:sandbox-{valid_tag}", 1),
+                               (f"valid:sandbox-{valid_tag}", 0)):
+        log.unlink(missing_ok=True)
+        setup = f'''
+CLI=./broker
+PAIRS=({pairs})
+FULL=([{missing_tag}]={missing_sha} [{valid_tag}]={valid_sha})
+resolve_failed=0
+PACT_BROKER_URL=https://fixture.invalid
+PACT_BROKER_USERNAME=fixture
+PACT_BROKER_PASSWORD=fixture
+'''
+        result = run(["bash", "-euo", "pipefail", "-c", setup + body], fixture, check=False)
+        calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        batch_failed = "one or more record-deployments failed" in result.stdout
+        if result.returncode != expected_rc or calls != expected or batch_failed != bool(expected_rc):
+            errors.append(f"recording caller ({pairs}): expected exit {expected_rc} and only the valid "
+                          f"record, got exit {result.returncode}, calls={calls!r}, "
+                          f"stdout={result.stdout!r}, stderr={result.stderr!r}")
+    return errors
+
+
 def main() -> int:
     failed = []
     results = []
@@ -268,13 +329,7 @@ def main() -> int:
             if not ok:
                 failed.append(f"{name}: expected {expected}, got {output!r} rc={rc}; stderr={err[-300:]!r}")
 
-        # No record-deployment command is invoked by the resolver. The production caller must
-        # continue before its CLI record on the `none` arm; pin this source-level control flow.
-        workflow = (ROOT / ".github/workflows/record-deployment-on-merge.yml").read_text()
-        none_arm = workflow.find("*)            echo \"::warning::${svc}: no published version")
-        record_call = workflow.find('"$CLI" record-deployment', none_arm)
-        if none_arm < 0 or record_call < 0 or "continue ;;" not in workflow[none_arm:record_call]:
-            failed.append("caller does not continue past record-deployment when resolver returns none")
+        failed.extend(check_recording_caller(tmp / "caller"))
 
     for row in results:
         print(f"{row['case']}: {'PASS' if row['ok'] else 'FAIL'} expected={row['expected']} actual={row['actual']}")

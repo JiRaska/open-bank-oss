@@ -19,6 +19,8 @@ on:
   workflow_run:
     workflows: ["Services CI", "CI", "Security scan"]
     types: [completed]
+    # The main train workflow already receives carrier completions directly.
+    branches-ignore: ["train/**"]
 
 permissions:
   contents: read
@@ -32,6 +34,21 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository
+    # Coalesce wakes PER HEAD (2026-11-19: 13 of the first 100 queued hosted runs repo-wide were
+    # this workflow, ahead of fleet CI jobs). One head completes up to three watched workflows (CI,
+    # Services CI, Security scan), and each completion asks the SAME question — "does this head
+    # contain main?" — whose only effect is a dispatch that carries no authority: merge-train reads
+    # live state and coalesces dispatches itself. So a newer wake for the same head is a strict
+    # superset of an older one: same question, main at least as new, and more of the head's CI
+    # finished. Nothing here is a status, check or evidence anyone requires, so cancelling the
+    # older one can drop no verdict. Two rules keep that true:
+    #   * keyed by head SHA, never coarser: a wake for head B says nothing about head A, and
+    #     cancelling A's wake would strand a green holder until the */10 heartbeat GitHub drops;
+    #   * JOB-level, not workflow-level: the `if:` above runs first, so a completion that is not a
+    #     wake candidate (a failure, a push) never enters the group and cannot cancel a real wake.
+    concurrency:
+      group: merge-train-wake-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: true
     permissions:
       contents: read
       actions: write   # POST /actions/workflows/merge-train.yml/dispatches, nothing else

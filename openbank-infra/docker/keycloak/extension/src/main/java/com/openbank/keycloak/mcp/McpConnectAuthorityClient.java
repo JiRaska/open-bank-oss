@@ -1,0 +1,391 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+package com.openbank.keycloak.mcp;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import org.jboss.logging.Logger;
+import org.keycloak.util.JsonSerialization;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/** Delegation's internal, machine-authenticated authority for a V2 connect. */
+final class McpConnectAuthorityClient {
+    private static final Logger LOG = Logger.getLogger(McpConnectAuthorityClient.class);
+    private static final String REQUESTS = "/api/v1/delegations/mcp-connect/requests";
+
+    private static final String NATIVE_HANDOFFS = "/api/v1/delegations/mcp-connect/native-handoffs/issuer";
+
+    private final String origin;
+    private final ScaClient transport;
+
+    McpConnectAuthorityClient(String origin, ScaClient transport) {
+        URI uri = URI.create(origin);
+        if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getRawUserInfo() != null
+                || uri.getRawQuery() != null || uri.getRawFragment() != null
+                || !List.of("", "/").contains(uri.getRawPath())) {
+            throw new IllegalArgumentException("expected the HTTPS origin of the connect authority");
+        }
+        this.origin = origin.replaceAll("/+$", "");
+        this.transport = transport;
+    }
+
+    record Request(McpConnectContext base, String partyId, String parJkt) {
+        Request {
+            if (base == null || canonicalUuid(partyId) == null) {
+                throw new IllegalArgumentException("connect identity is incomplete");
+            }
+            if (parJkt != null) {
+                McpConnectContextV2.requireCanonicalThumbprint(parJkt);
+            }
+        }
+
+        String reference() {
+            return base.requestUriSha256();
+        }
+
+        String approvalRequestId() {
+            return "mcp-connect:" + reference();
+        }
+
+        Map<String, Object> identity() {
+            return bindingIdentity(partyId, base.clientId(), parJkt);
+        }
+
+        Map<String, Object> registration() {
+            var body = new LinkedHashMap<>(identity());
+            body.put("requestRef", reference());
+            body.put("redirectHost", base.redirectHost());
+            body.put("resource", base.resource());
+            body.put("scopes", List.of(base.scopes().split(" ")));
+            body.put("expiresAtEpochSecond", base.expiresAt());
+            return body;
+        }
+    }
+
+    record Challenge(String id, String contextSha256) {
+        Challenge {
+            if (canonicalUuid(id) == null || !validReference(contextSha256)) {
+                throw new IllegalArgumentException("expected a canonical challenge and digest");
+            }
+        }
+
+        Map<String, Object> binding(Request request) {
+            var body = new LinkedHashMap<>(request.identity());
+            body.put("approvalRequestId", request.approvalRequestId());
+            body.put("challengeId", id);
+            body.put("contextSha256", contextSha256);
+            return body;
+        }
+    }
+
+    /**
+     * This reference must come from the verified, issued Keycloak refresh family. It does not
+     * identify a browser tab, authentication session or whole client session.
+     */
+    record FamilyReference(String value) {
+        FamilyReference {
+            if (!validReference(value)) {
+                throw new IllegalArgumentException("expected a verified refresh family reference");
+            }
+        }
+    }
+
+    record Activation(UUID connectionId, FamilyReference family) {
+    }
+
+    record NativeReceipt(String partyId, String keycloakSubject, String contextSha256) {
+    }
+
+    void issueNativeHandoff(String tokenSha256, McpNativeHandoff.Binding binding) throws IOException {
+        if (nativeHandoff("issue", tokenSha256, binding, null) != null) {
+            throw new IOException("unexpected native handoff issue response");
+        }
+    }
+
+    String claimedNativeParty(String tokenSha256, McpNativeHandoff.Binding binding) throws IOException {
+        JsonNode evidence = nativeHandoff("claimed-party", tokenSha256, binding, null);
+        if (evidence == null) {
+            return null;
+        }
+        UUID party = canonicalUuid(requiredText(evidence, "partyId"));
+        if (party == null) {
+            throw new IOException("native handoff party is invalid");
+        }
+        return party.toString();
+    }
+
+    void attestNativeSelection(String tokenSha256, McpNativeHandoff.Binding binding, String digest)
+            throws IOException {
+        if (!validReference(digest) || nativeHandoff("attest-selection", tokenSha256, binding, digest) != null) {
+            throw new IOException("native handoff selection was not attested");
+        }
+    }
+
+    NativeReceipt consumeNativeHandoff(String tokenSha256, McpNativeHandoff.Binding binding) throws IOException {
+        JsonNode evidence = nativeHandoff("consume", tokenSha256, binding, null);
+        if (evidence == null) {
+            return null;
+        }
+        UUID party = canonicalUuid(requiredText(evidence, "partyId"));
+        String subject = requiredText(evidence, "keycloakSubject");
+        String digest = requiredText(evidence, "contextSha256");
+        if (party == null || subject.length() > 255 || !validReference(digest)) {
+            throw new IOException("native handoff receipt is invalid");
+        }
+        return new NativeReceipt(party.toString(), subject, digest);
+    }
+
+    private JsonNode nativeHandoff(String action, String tokenSha256, McpNativeHandoff.Binding binding,
+                                   String contextSha256) throws IOException {
+        if (!validReference(tokenSha256)) {
+            throw new IllegalArgumentException("expected a native handoff digest");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("tokenSha256", tokenSha256);
+        body.put("binding", binding);
+        if (contextSha256 != null) {
+            body.put("contextSha256", contextSha256);
+        }
+        var response = transport.postWithBankIdentity(
+                HttpRequest.newBuilder(URI.create(origin + NATIVE_HANDOFFS + "/" + action))
+                        .header("Idempotency-Key", tokenSha256),
+                body);
+        if (response.statusCode() == 204) {
+            return null;
+        }
+        if ("issue".equals(action)) {
+            LOG.warnf("MCP native handoff issuer returned HTTP status=%d", response.statusCode());
+        }
+        if (response.statusCode() == 200) {
+            return JsonSerialization.readValue(response.body(), JsonNode.class);
+        }
+        throw new IOException("native handoff authority refused the operation");
+    }
+
+    void register(Request request) throws IOException {
+        JsonNode response = post(requestsPath(request.parJkt()), request.reference(), request.registration(), 200, 201);
+        requireIdentity(request, response);
+        if (!textIs(response, "status", "PENDING_SELECTION")
+                || !textIs(response, "redirectHost", request.base().redirectHost())
+                || !textIs(response, "resource", request.base().resource())
+                || !canonicalScopes(response).equals(request.base().scopes())) {
+            throw new IOException("connect authority did not register a pending request");
+        }
+    }
+
+    List<McpConnectContextV2.AccountScope> selectedAccounts(Request request) throws IOException {
+        return selectionOf(request, post(path(request, "/selection"), request.reference(), request.identity(), 200));
+    }
+
+    void bindChallenge(Request request, Challenge challenge) throws IOException {
+        JsonNode response = post(path(request, "/challenge"), request.reference(), challenge.binding(request), 200, 201);
+        requireChallenge(request, challenge, response, "CHALLENGE_BOUND");
+    }
+
+    void stage(Request request, Challenge challenge, String codeBindingRef) throws IOException {
+        var body = challenge.binding(request);
+        body.put("codeBindingRef", codeBindingRef);
+        JsonNode response = post(path(request, "/stage"), request.reference(), body, 200, 201);
+        requireChallenge(request, challenge, response, "APPROVED_AWAITING_FAMILY");
+        if (!textIs(response, "codeBindingRef", codeBindingRef)) {
+            throw new IOException("connect staging did not attest the code binding");
+        }
+    }
+
+    record Stage(Request request, Challenge challenge, String codeBindingRef) {
+        Stage {
+            if (!validReference(codeBindingRef)) {
+                throw new IllegalArgumentException("invalid staged code binding");
+            }
+        }
+    }
+
+    Stage staged(String partyId, String clientId, String jkt, String codeBindingRef) throws IOException {
+        var body = bindingIdentity(partyId, clientId, jkt);
+        body.put("codeBindingRef", codeBindingRef);
+        JsonNode response = post(requestsPath(jkt) + "/staged", codeBindingRef, body, 200);
+        // The bank authority binds the same immutable registered context to the verified code reference.
+        var base = new McpConnectContext(clientId, response.path("redirectHost").textValue(),
+                response.path("resource").textValue(), canonicalScopes(response),
+                response.path("requestRef").textValue(), response.path("expiresAtEpochSecond").longValue());
+        Request request = new Request(base, partyId, jkt);
+        Challenge challenge = new Challenge(requiredText(response, "challengeId"),
+                requiredText(response, "contextSha256"));
+        requireChallenge(request, challenge, response, "APPROVED_AWAITING_FAMILY");
+        if (!textIs(response, "codeBindingRef", codeBindingRef)) {
+            throw new IOException("connect staging did not attest the code binding");
+        }
+        return new Stage(request, challenge, codeBindingRef);
+    }
+
+    UUID activeFamily(String partyId, String clientId, String jkt, FamilyReference family) throws IOException {
+        var body = bindingIdentity(partyId, clientId, jkt);
+        body.put("refreshFamilyRef", family.value());
+        JsonNode response = post(requestsPath(jkt) + "/family-status", family.value(), body, 200);
+        UUID connection = canonicalUuid(response.path("connectionId").textValue());
+        if (!textIs(response, "status", "ACTIVE") || !textIs(response, "partyId", partyId)
+                || !textIs(response, "clientId", clientId) || !bindingIs(response, jkt)
+                || !textIs(response, "refreshFamilyRef", family.value()) || connection == null) {
+            throw new IOException("connect authority did not attest an active refresh family");
+        }
+        return connection;
+    }
+
+    Activation activate(Stage stage, FamilyReference family) throws IOException {
+        var body = stage.challenge().binding(stage.request());
+        body.put("codeBindingRef", stage.codeBindingRef());
+        body.put("refreshFamilyRef", family.value());
+        JsonNode response = post(path(stage.request(), "/activate"), stage.request().reference(), body, 200, 201);
+        requireChallenge(stage.request(), stage.challenge(), response, "ACTIVE");
+        if (!textIs(response, "codeBindingRef", stage.codeBindingRef())) {
+            throw new IOException("connect activation did not attest the staged code");
+        }
+        if (!textIs(response, "refreshFamilyRef", family.value())) {
+            throw new IOException("connect activation did not attest the refresh family");
+        }
+        UUID id = canonicalUuid(response.path("connectionId").textValue());
+        if (id == null) {
+            throw new IOException("connect activation did not attest a connection");
+        }
+        return new Activation(id, family);
+    }
+
+    private static boolean validReference(String value) {
+        return value != null && value.matches("[0-9a-f]{64}");
+    }
+
+    private static UUID canonicalUuid(String value) {
+        if (value == null || value.length() != 36) {
+            return null;
+        }
+        try {
+            UUID id = UUID.fromString(value);
+            return id.toString().equals(value) ? id : null;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static String canonicalScopes(JsonNode response) throws IOException {
+        JsonNode array = response.path("scopes");
+        if (!array.isArray() || array.isEmpty()) {
+            throw new IOException("connect authority response requires a scope array");
+        }
+        var scopes = new ArrayList<String>();
+        String previous = "";
+        for (JsonNode item : array) {
+            String scope = item.textValue();
+            if (scope == null || !scope.matches("[A-Za-z0-9._:/-]{1,100}") || "offline_access".equals(scope)
+                    || previous.compareTo(scope) >= 0) {
+                throw new IOException("connect authority did not attest canonical scopes");
+            }
+            scopes.add(scope);
+            previous = scope;
+        }
+        return String.join(" ", scopes);
+    }
+
+    private static String requiredText(JsonNode response, String field) throws IOException {
+        String value = response.path(field).textValue();
+        if (value == null || value.isBlank()) {
+            throw new IOException("connect authority response is incomplete");
+        }
+        return value;
+    }
+
+    static List<McpConnectContextV2.AccountScope> selectionOf(Request request, JsonNode response) throws IOException {
+        requireIdentity(request, response);
+        JsonNode accounts = response.path("accounts");
+        boolean noAccounts = accounts.isMissingNode() || (accounts.isArray() && accounts.isEmpty());
+        if (textIs(response, "status", "PENDING_SELECTION") && noAccounts) {
+            return List.of();
+        }
+        if (!textIs(response, "status", "SELECTED") || !accounts.isArray() || accounts.isEmpty()) {
+            throw new IOException("connect selection was not attested");
+        }
+        var selected = new ArrayList<McpConnectContextV2.AccountScope>();
+        for (JsonNode account : accounts) {
+            if (!account.path("accountId").isTextual() || !account.path("capabilities").isArray()) {
+                throw new IOException("connect selection has an invalid account scope");
+            }
+            var capabilities = new ArrayList<String>();
+            for (JsonNode capability : account.path("capabilities")) {
+                if (!capability.isTextual()) {
+                    throw new IOException("connect selection has an invalid capability");
+                }
+                capabilities.add(capability.textValue());
+            }
+            selected.add(new McpConnectContextV2.AccountScope(account.path("accountId").textValue(),
+                    List.copyOf(capabilities)));
+        }
+        return List.copyOf(selected);
+    }
+
+    static void requireChallenge(Request request, Challenge challenge, JsonNode response, String expectedStatus)
+            throws IOException {
+        requireIdentity(request, response);
+        if (!textIs(response, "status", expectedStatus)
+                || !textIs(response, "approvalRequestId", request.approvalRequestId())
+                || !textIs(response, "challengeId", challenge.id())
+                || !textIs(response, "contextSha256", challenge.contextSha256())) {
+            throw new IOException("connect challenge binding was not attested");
+        }
+    }
+
+    private static void requireIdentity(Request request, JsonNode response) throws IOException {
+        JsonNode expiry = response.path("expiresAtEpochSecond");
+        if (!textIs(response, "requestRef", request.reference())
+                || !textIs(response, "partyId", request.partyId())
+                || !textIs(response, "clientId", request.base().clientId())
+                || !bindingIs(response, request.parJkt())
+                || !expiry.isIntegralNumber() || !expiry.canConvertToLong()
+                || expiry.longValue() != request.base().expiresAt()) {
+            throw new IOException("connect authority did not attest the exact request");
+        }
+    }
+
+    private static Map<String, Object> bindingIdentity(String partyId, String clientId, String jkt) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("partyId", partyId);
+        body.put("clientId", clientId);
+        body.put("parJkt", jkt);
+        return body;
+    }
+
+    private static boolean bindingIs(JsonNode response, String jkt) {
+        return jkt == null ? response.path("parJkt").isNull() : textIs(response, "parJkt", jkt);
+    }
+
+    private static boolean textIs(JsonNode response, String name, String expected) {
+        return expected.equals(response.path(name).textValue());
+    }
+
+    private static String requestsPath(String jkt) {
+        return jkt == null ? REQUESTS + "-v2" : REQUESTS;
+    }
+
+    private static String path(Request request, String suffix) {
+        return requestsPath(request.parJkt()) + "/" + request.reference() + suffix;
+    }
+
+    private JsonNode post(String path, String idempotencyKey, Object body, int... successStatuses) throws IOException {
+        HttpResponse<String> response = transport.postWithBankIdentity(HttpRequest.newBuilder(URI.create(origin + path))
+                        .header("Idempotency-Key", idempotencyKey),
+                body);
+        for (int allowed : successStatuses) {
+            if (response.statusCode() == allowed) {
+                return JsonSerialization.readValue(response.body(), JsonNode.class);
+            }
+        }
+        throw new IOException("connect authority did not return successful evidence");
+    }
+}

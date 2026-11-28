@@ -8,11 +8,13 @@ import re
 import sys
 import tempfile
 import zipfile
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 ENVELOPE_NAME = re.compile(r"(?:^|/)run(?:-[a-z0-9-]+)?\.json$")
+MAX_RECONCILE_ENVELOPE_BYTES = 32 * 1024 * 1024
 COLLECTOR_PATH = Path(__file__).with_name("collect-test-run-evidence.py")
 SPEC = importlib.util.spec_from_file_location("test_run_evidence_collector", COLLECTOR_PATH)
 assert SPEC and SPEC.loader
@@ -44,8 +46,23 @@ def extract(archive: bytes) -> bytes:
         return validate(zipped.read(names[0]))
 
 
-def prune_cache(directory: Path) -> int:
-    """Drop pre-validator cache entries that must not enter a new image."""
+def extract_reconcile(archive: Path, component: str, commit: str, run_id: str, attempt: int) -> bytes:
+    with zipfile.ZipFile(archive) as zipped:
+        entries = zipped.infolist()
+        if len(entries) != 1 or entries[0].filename != "run.json":
+            raise ValueError("expected a single root run.json")
+        if entries[0].file_size > MAX_RECONCILE_ENVELOPE_BYTES:
+            raise ValueError("run envelope exceeds the reconcile size limit")
+        payload = validate(zipped.read(entries[0]))
+    envelope = json.loads(payload)
+    run = envelope["run"]
+    if (envelope["component"], run["commit"], run["id"], run["attempt"]) != (component, commit, run_id, attempt):
+        raise ValueError("run envelope provenance differs from the reconcile plan")
+    return payload
+
+
+def prune_history(directory: Path) -> int:
+    """Drop invalid retained envelopes before deployment."""
     if not directory.is_dir():
         raise ValueError(f"run history is not a directory: {directory}")
     removed = 0
@@ -56,6 +73,24 @@ def prune_cache(directory: Path) -> int:
             path.unlink()
             removed += 1
     return removed
+
+
+def main_artifacts(inventory: dict, repository_id: int, prefix: str) -> Iterator[tuple[int, str]]:
+    """Yield same-repository main artifacts with names safe to stage locally."""
+    for artifact in inventory["artifacts"]:
+        run = artifact.get("workflow_run") or {}
+        name = artifact["name"]
+        artifact_id = artifact["id"]
+        if (
+            artifact["expired"] is False
+            and run.get("head_branch") == "main"
+            and run.get("head_repository_id") == repository_id
+            and type(artifact_id) is int
+            and artifact_id > 0
+            and name.startswith(prefix)
+            and re.fullmatch(r"test-intelligence-run-[a-z0-9-]+", name)
+        ):
+            yield artifact_id, name
 
 
 def self_test() -> None:
@@ -74,6 +109,27 @@ def self_test() -> None:
                 "observedAt": datetime.now(timezone.utc).isoformat()},
     }
     good = json.dumps(example).encode()
+    with tempfile.TemporaryDirectory() as temp:
+        candidate = Path(temp) / "artifact.zip"
+        binding = (example["component"], example["run"]["commit"], "123", 1)
+        candidate.write_bytes(archive({"run.json": good}))
+        assert extract_reconcile(candidate, *binding) == good
+        for index, wrong in enumerate(("other-service", "wrong-commit", "456", 2)):
+            mismatched = list(binding)
+            mismatched[index] = wrong
+            try:
+                extract_reconcile(candidate, *mismatched)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"mismatched reconcile binding accepted at index {index}")
+        candidate.write_bytes(archive({"nested/run.json": good}))
+        try:
+            extract_reconcile(candidate, *binding)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("nested reconcile envelope accepted")
     v2 = json.dumps(example | {"schemaVersion": 2}).encode()
     for name in ("run.json", "run-chromium.json", "nested/run-security-excellence-firefox.json"):
         assert extract(archive({name: good})) == good
@@ -110,6 +166,18 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"invalid artifact was accepted: {list(files)}")
+    entry = {"id": 42, "name": "test-intelligence-run-openbank-test-42-a1", "expired": False}
+    main = {"head_branch": "main", "head_repository_id": 17}
+    inventory = {"artifacts": [
+        entry | {"workflow_run": main},
+        entry | {"workflow_run": main | {"head_repository_id": 99}},
+        entry | {"workflow_run": main | {"head_branch": "feature"}},
+        entry | {"workflow_run": main, "expired": True},
+        entry | {"workflow_run": main, "name": "test-intelligence-run-../invalid"},
+        entry | {"workflow_run": main, "name": "test-intelligence-run-other-project"},
+        entry,
+    ]}
+    assert list(main_artifacts(inventory, 17, "test-intelligence-run-openbank-")) == [(42, entry["name"])]
     with tempfile.TemporaryDirectory() as temp:
         cache = Path(temp)
         (cache / "valid.json").write_bytes(good)
@@ -117,29 +185,37 @@ def self_test() -> None:
             json.dumps(example | {"run": example["run"] | {"branch": "feature"}}).encode()
         )
         (cache / "malformed.json").write_bytes(b"not-json")
-        (cache / ".staged-ids").write_text("42\n43\n")
-        assert prune_cache(cache) == 2
+        assert prune_history(cache) == 2
         assert (cache / "valid.json").read_bytes() == good
         assert not (cache / "wrong-branch.json").exists()
         assert not (cache / "malformed.json").exists()
-        assert (cache / ".staged-ids").read_text() == "42\n43\n"
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
+    elif len(sys.argv) == 8 and sys.argv[1] == "--reconcile":
+        _, _, archive, output, component, commit, run_id, attempt = sys.argv
+        try:
+            Path(output).write_bytes(extract_reconcile(Path(archive), component, commit, run_id, int(attempt)))
+        except (OSError, ValueError, TypeError, zipfile.BadZipFile) as error:
+            print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
+            sys.exit(1)
     elif len(sys.argv) == 4 and sys.argv[1] == "--validate-component":
         try:
             validate_component(Path(sys.argv[2]), sys.argv[3])
         except (OSError, ValueError, UnicodeError, TypeError) as error:
             print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
             sys.exit(1)
-    elif len(sys.argv) == 3 and sys.argv[1] == "--prune-cache":
+    elif len(sys.argv) == 4 and sys.argv[1] == "--main-artifacts":
+        for artifact_id, name in main_artifacts(json.load(sys.stdin), int(sys.argv[2]), sys.argv[3]):
+            print(artifact_id, name)
+    elif len(sys.argv) == 3 and sys.argv[1] == "--prune-history":
         try:
-            removed = prune_cache(Path(sys.argv[2]))
-            print(f"Pruned {removed} invalid cached Test Intelligence run envelope(s).")
+            removed = prune_history(Path(sys.argv[2]))
+            print(f"Pruned {removed} invalid retained Test Intelligence run envelope(s).")
         except (OSError, ValueError) as error:
-            print(f"Test Intelligence cache validation failed: {error}", file=sys.stderr)
+            print(f"Test Intelligence history validation failed: {error}", file=sys.stderr)
             sys.exit(1)
     elif len(sys.argv) == 3:
         try:
@@ -148,5 +224,5 @@ if __name__ == "__main__":
             print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
             sys.exit(1)
     else:
-        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-cache DIRECTORY | --validate-component PATH COMPONENT", file=sys.stderr)
+        print("usage: extract-test-intelligence-envelope.py ARCHIVE OUTPUT | --prune-history DIRECTORY | --main-artifacts REPOSITORY_ID PREFIX | --validate-component PATH COMPONENT", file=sys.stderr)
         sys.exit(2)

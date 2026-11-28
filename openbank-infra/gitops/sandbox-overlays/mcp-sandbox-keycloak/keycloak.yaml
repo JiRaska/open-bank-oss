@@ -1,0 +1,206 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: mcp-synthetic-sandbox
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - start
+        - --optimized
+        - --import-realm
+        env:
+        - name: KC_DB_URL
+          value: jdbc:postgresql://database.sandbox.invalid:5432/keycloak?sslmode=verify-full&sslrootcert=/mnt/sandbox-keycloak-postgres/ca.crt
+        - name: KC_DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: mcp-synthetic-keycloak-db-app
+        - name: KC_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: mcp-synthetic-keycloak-db-app
+        - name: KC_HOSTNAME
+          value: SITE_OVERRIDE_REQUIRED
+        - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+          value: 'true'
+        - name: KC_PROXY_HEADERS
+          value: xforwarded
+        - name: KC_PROXY_TRUSTED_ADDRESSES
+          value: 127.0.0.1
+        - name: KC_HTTP_ENABLED
+          value: 'true'
+        - name: KC_HTTP_PORT
+          value: '8080'
+        - name: KC_HTTP_MANAGEMENT_SCHEME
+          value: http
+        - name: KC_HTTPS_PORT
+          value: '8443'
+        - name: KC_HTTPS_CERTIFICATE_FILE
+          value: /tls/native/tls.crt
+        - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+          value: /tls/native/tls.key
+        - name: KC_HTTPS_PROTOCOLS
+          value: TLSv1.3
+        - name: KC_HTTPS_CLIENT_AUTH
+          value: required
+        - name: KC_HTTPS_TRUST_STORE_FILE
+          value: /tls/read-issuer-client-trust/truststore.p12
+        - name: KC_HTTPS_TRUST_STORE_TYPE
+          value: PKCS12
+        - name: KC_HTTPS_TRUST_STORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: mcp-synthetic-read-issuer-client-trust
+        image: registry.invalid/openbank/keycloak-optimized@sha256:0000000000000000000000000000000000000000000000000000000000000000
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: management
+          periodSeconds: 10
+        name: keycloak
+        ports:
+        - containerPort: 8443
+          name: sandbox-read
+        - containerPort: 8080
+          name: http
+        - containerPort: 9000
+          name: management
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: management
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1536Mi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        startupProbe:
+          failureThreshold: 36
+          httpGet:
+            path: /health/started
+            port: management
+          periodSeconds: 5
+        volumeMounts:
+        - mountPath: /tls/native
+          name: mcp-synthetic-keycloak-native
+          readOnly: true
+        - mountPath: /tls/read-issuer-client-trust
+          name: read-issuer-client-trust
+          readOnly: true
+        - mountPath: /opt/keycloak/data
+          name: data
+        - mountPath: /opt/keycloak/data/import
+          name: realm-import
+          readOnly: true
+        - mountPath: /mnt/sandbox-keycloak-postgres
+          name: postgres-ca
+          readOnly: true
+        - mountPath: /tmp
+          name: tmp
+      - command:
+        - node
+        - /app/keycloak-frontchannel.mjs
+        env:
+        - name: FRONTCHANNEL_HOST
+          value: sandbox.sandbox.invalid
+        - name: FRONTCHANNEL_SERVICE
+          value: sandbox-oidc.sandbox.invalid
+        - name: FRONTCHANNEL_CUSTOMER_REALM
+          value: openbank-customers
+        - name: FRONTCHANNEL_STAFF_REALM
+          value: ''
+        image: registry.invalid/openbank-mcp-harness@sha256:769ba1d4df5a2c37ae29a107f7a3a5a706dd85f8d71993bfb453e13c8c66de10
+        name: sandbox-oauth-frontchannel
+        ports:
+        - containerPort: 8444
+          name: sandbox-oauth
+        readinessProbe:
+          tcpSocket:
+            port: sandbox-oauth
+        resources:
+          limits:
+            cpu: 125m
+            memory: 96Mi
+          requests:
+            cpu: 25m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 1001
+          runAsNonRoot: true
+          runAsUser: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - mountPath: /tls/frontchannel
+          name: mcp-synthetic-keycloak-frontchannel
+          readOnly: true
+        - mountPath: /app
+          name: mcp-synthetic-keycloak-frontchannel-code
+          readOnly: true
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: postgres-ca
+        secret:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          secretName: mcp-synthetic-keycloak-db-ca
+      - name: mcp-synthetic-keycloak-frontchannel
+        secret:
+          secretName: mcp-synthetic-keycloak-frontchannel
+      - name: mcp-synthetic-keycloak-native
+        secret:
+          secretName: mcp-synthetic-keycloak-native
+      - name: read-issuer-client-trust
+        secret:
+          items:
+          - key: truststore.p12
+            path: truststore.p12
+          secretName: mcp-synthetic-read-issuer-client-trust
+      - configMap:
+          name: mcp-synthetic-keycloak-frontchannel-code
+        name: mcp-synthetic-keycloak-frontchannel-code
+      - emptyDir: {}
+        name: data
+      - emptyDir: {}
+        name: tmp
+      - name: realm-import
+        secret:
+          defaultMode: 288
+          secretName: sandbox-keycloak-realm-import

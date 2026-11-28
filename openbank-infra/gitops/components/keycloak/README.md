@@ -253,6 +253,18 @@ negative audience, identity and signature cases. Apply the reviewed attributes t
 the live realm separately; persist the verified template using runbook 0009 so a
 fresh realm has the same behavior. No custom provider or image rebuild is needed.
 
+### `clients[openbank-app].redirectUris` / `webOrigins`
+
+Exactly two callbacks, both matched literally: the claimed HTTPS link
+`https://open-bank.tech/app/oauth/callback` (App Links / AASA) and the private-scheme floor
+`tech.openbank.app://oauth/callback`. Those are the only two the app sends (its
+`RedirectUriNegotiator` picks one of them). There is no loopback entry: a `http://localhost:*`
+pattern let any local process start an authorize request, ride the browser SSO session and mint
+a token with `azp=openbank-app`, which defeats the app-session checks downstream (#16612).
+A local or desktop flow that needs loopback gets its own dev-only client, never this one.
+`webOrigins` is empty because the app is a native client and makes no CORS requests; `+` would
+have widened CORS to every redirect origin.
+
 ### `clients[openbank-app].protocolMappers[sub]`
 
 This realm import defines explicit (non-default) client scopes, so Keycloak does NOT
@@ -349,6 +361,47 @@ audience (impersonation + a token-exchange fine-grained-authz permission on
 `openbank-app`). Kept separate from `customer-edge-admin`, whose blast radius is
 deliberately narrower (`party_id` attribute writes only).
 
+## MCP connect (ADR-0385 D3, #16672) — REQUIRED owner apply step
+
+Nothing in this section is live until an owner does it: realm import runs on cold start
+only, and there is no in-repo job that applies a realm change to a running Keycloak (by
+design — the admin API is 403 at the edge and reached only through a port-forward). Until
+every step is done the MCP connect fails CLOSED: the authenticator refuses every connect.
+Do them in this order; each is idempotent.
+
+1. **Image.** Build and push the Keycloak image that carries the extension
+   (`openbank-infra/scripts/build-push-keycloak.sh`), then bump the `openbank-keycloak` tag in
+   `keycloak.yaml` in a PR. The `KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__*` env in
+   `keycloak.yaml` is runtime config read by that extension at boot.
+2. **Client + secret (`openbank` realm).** Create client `openbank-keycloak-mcp` from
+   `realm-template.json` **without** its `secret` (Keycloak generates it), give
+   `service-account-openbank-keycloak-mcp` the realm role `ROLE_API` and nothing else, and write
+   the generated secret to OpenBao `openbank/keycloak/keycloak-mcp`, property `client_secret`,
+   with the narrow SSO writer role (runbook 0027 — never the root token).
+   `provision-synthetic-customer.sh` is the worked example of this exact sequence. External Secrets
+   then fills `iam/keycloak-mcp-sca-client` within the hour (`refreshInterval: 1h`); the
+   Keycloak pod reads it at boot, so **restart the Deployment** after the Secret exists
+   (`kubectl -n iam rollout restart deploy/keycloak`). Then move `keycloak/keycloak-mcp` from
+   `openbao.unprovisioned` to `openbao.keys` in `.github/config-inventory.yaml`.
+3. **Customers realm (`openbank-customers`).** Over `kubectl -n iam port-forward svc/keycloak 8080:8080`,
+   apply from `customers-realm-template.json`, in this order (a policy naming a missing profile,
+   or a client override naming a missing flow, is refused):
+   - the user profile (`PUT /admin/realms/openbank-customers/users/profile`) — `party_id`
+     admin-view/admin-edit only;
+   - the flow `openbank-mcp-fresh-passkey` and its executions;
+   - client profiles, then client policies (`PUT .../client-policies/profiles`, then
+     `PUT .../client-policies/policies`) — profiles `openbank-mcp-oauth-hardening`,
+     `openbank-mcp-dpop`, `openbank-mcp`; policies `openbank-mcp-tier-h`, `openbank-mcp-tier-l`,
+     `openbank-mcp`; these PUTs REPLACE the realm's whole list, so send the template's full list;
+   - the MCP clients and their `offline_access` scope mappings (they ship `enabled: false`).
+   Rehearse the exact calls against a local Keycloak first (recipe at the top of this file);
+   `openbank-infra/e2e/keycloak_mcp_client_admission_test.py` is the end-to-end check of the result.
+4. **Import artifact.** Add the same client (with its real secret) and the customers-realm
+   changes to the OpenBao realm-import blobs (runbook 0009), so a cold start keeps them.
+
+Verify: the Keycloak boot log carries **no** `openbank-mcp-withheld-code is NOT configured`
+WARN, and an MCP connect against the live realm reaches the in-app approval.
+
 ## What this does NOT fix
 
 The committed templates feed **nothing** today. Keycloak reads the Secrets
@@ -357,3 +410,98 @@ from Vault KV, and those are a strict stale ancestor of these files (measured in
 4 roles / 2 clients against 14 / 10). Making the templates importable is the precondition
 for the reconcile, not the reconcile itself — that is an owner-gated `vault kv put`,
 runbook 0009.
+
+## Customers realm: MCP clients and the MCP token exchange (ADR-0385 D1, ADR-0383 D4)
+
+Every `customers-realm-template.json` entry carrying the `openbank.mcp.tier` or `openbank.mcp.exchange`
+attribute is DERIVED from `openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml` by
+`.github/scripts/gen-mcp-realm-clients.py`; never hand-edit them, and the `mcp-client-realm-parity`
+gate fails on any drift. The exchange entries are: `openbank-mcp-service`, the confidential RFC 8693
+requester (no flow, no service account, exchange enabled on this client only, 60 s tokens, optional
+scopes = the declared read scopes, secret `__MCP_CUSTOMER_EXCHANGE_CLIENT_SECRET__` from OpenBao
+`keycloak/mcp-service-customer-exchange`); one bearer-only audience client per downstream service;
+and one client scope per downstream carrying exactly one audience mapper. Adding the requester to the
+OpenBao import artifact is an operator step (runbook 0009). The exchange of a DPoP-bound subject token
+has not yet been run against a live Keycloak of the deployed version.
+
+### Customer MCP certificate-bound read grant
+
+The staff realm template declares two disabled confidential service accounts. Both have only
+`ROLE_API`, with browser, implicit and password flows disabled. `openbank-mcp-read-issuer`
+requests a balance-read permit from delegation-service. `openbank-balance-mcp-reader` rechecks
+the live grant there. The delegation policy limits each to its own action.
+
+For a separate, owner-approved sandbox rollout, provision their credentials at the OpenBao
+sources declared in `keycloak-realm-import-secret-sources.yaml`. Configure the issuer's
+`MCP_READ_ISSUER_TOKEN_URL` and the reader's `BALANCE_MCP_SERVICE_OIDC_URL` against the staff
+realm. The customer access and certificate-bound balance tokens still use the customers realm.
+The two service clients remain disabled on import, and this template adds no route.
+
+The Keycloak extension registers the customer MCP read grant. It starts disabled. The local
+sandbox configuration must supply all of the following before enabling it:
+
+- `MCP_READ_GRANT_ENABLED=true` and `MCP_READ_CONNECTION_BINDING_ENABLED=true`
+- The HTTPS `MCP_READ_CUSTOMER_ISSUER_URL`, `MCP_READ_RESOURCE_URL` and
+  `MCP_READ_DELEGATION_ORIGIN`
+- Match `MCP_READ_RESOURCE_URL` to the canonical resource in the MCP client allowlist.
+  The customer route change (#16996) aligns that allowlist and the generated customer realm
+  with the external route. Keep customer admission and the read grant disabled until the route,
+  allowlist and deployed realm agree.
+- The HTTPS `MCP_READ_ISSUER_TOKEN_URL` and `MCP_READ_ISSUER_CLIENT_SECRET` for the dedicated
+  `openbank-mcp-read-issuer` service account
+- Separate base64url-encoded `MCP_READ_NONCE_KEY` and `MCP_READ_PROOF_KEY` values of at least 32
+  bytes, and a unique `MCP_READ_DEPLOYMENT` namespace
+
+The requester uses the dedicated confidential X.509 client. The issuer verifies the original
+proof and the resource nonce. The resource nonce authenticates version, exact resource URI,
+DPoP key thumbprint, expiry and random challenge. PostgreSQL independently enforces first use of
+the original proof via a reference derived with the separate proof key. The nonce key is shared
+between the MCP resource and Keycloak. Both services must use the same key and resource URI.
+
+### Admin REST service accounts on Keycloak 26.8.2
+
+Keycloak 26.8.2 requires its built-in `kc-admin-api` client scope and realm Admin
+REST audience on Admin REST bearer tokens. The customers template assigns the scope
+as an optional scope to `customer-edge-admin` and `openbank-edge-webauthn`. Their
+Admin REST clients request it when obtaining a service token. Inherited default
+scopes, role mappings, and the WebAuthn token exchange scope remain in place.
+
+When upgrading an existing realm, first upgrade Keycloak and use the built-in
+administrator to add the new scope as a default on both clients. The upgrade
+assigns the scope automatically only to the built-in administrator clients.
+The default assignment lets the previous customer-edge release obtain usable
+tokens while the new release rolls out. Replace it with the optional assignment
+after every customer-edge instance requests the scope. Verify each workload's
+normal Admin REST operation with a fresh token before reopening traffic.
+Invalidate cached tokens minted before the upgrade by restarting the affected clients.
+
+### Verify the pinned ChatGPT client metadata
+
+Before approving a ChatGPT static CIMD pin or key rotation, run
+`python3 .github/scripts/verify-chatgpt-cimd-pin.py` from an approved operator workstation.
+It reads the two exact public vendor documents, compares them with the reviewed registration
+and inline public key, and prints the digest to compare with the sandbox deployment pin.
+
+Promote and verify the signed, optimized Keycloak image containing the scoped static-CIMD
+provider before applying its digest pin in the shared sandbox Deployment. The exact registered
+ChatGPT client must independently pass the enabled, callback, native browser flow, confidential
+RS256, S256 and PAR checks. Vendor activation and a successful authenticated PAR remain separate
+from the pin rollout.
+
+After the new pod is Ready and the old pod is gone, GET the customers realm's OpenID
+configuration and issuer-rooted OAuth authorization-server metadata. Both omit CIMD while the
+exact client is disabled. During the approved pilot, both advertise CIMD with the same issuer,
+PAR endpoints and authentication methods. Confirm an unrelated realm still omits CIMD. Roll back
+by reverting only the pin and verifying omission after the replacement pod is Ready.
+
+#### Bank-owned hosted adapter identities
+
+The disabled registrations `mcp-bank-hosted-chatgpt` and `mcp-bank-hosted-claude` use distinct
+signing keys and the same exact bank callback. The authenticated bank client identifies the
+assistant in the native handoff and stays bound to the grant and session. Each registration
+requires authenticated PAR, S256 PKCE and verified DPoP. The native app verifies the passkey and
+obtains separate strong customer authentication before activation.
+
+The committed public keys are disposable references whose private halves were discarded.
+Controlled activation requires vendor-specific bank-held keys, the vendor-facing adapter,
+a reviewed site-specific admission change, and actual read and revocation evidence.

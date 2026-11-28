@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.4.21"
-quarkus = "3.40.1.1"
-quarkus-plugin = "3.40.1.1"
+quarkus = "3.40.1.2"
+quarkus-plugin = "3.40.1.2"
 # Transaction pilot only; other workers retain 1.25.1 until their versioned rollout.
 temporal = "1.40.0"
 coroutines = "1.11.0"
@@ -173,7 +173,7 @@ kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "ko
 quarkus = { id = "io.quarkus", version.ref = "quarkus-plugin" }
 jandex = { id = "org.kordamp.gradle.jandex", version = "2.3.0" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
-cyclonedx = { id = "org.cyclonedx.bom", version = "2.3.0" }
+cyclonedx = { id = "org.cyclonedx.bom", version = "3.6.1" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }
 # pitest = { id = "info.solidsoft.pitest", version.ref = "pitest-plugin" }  # deferred Gradle 9

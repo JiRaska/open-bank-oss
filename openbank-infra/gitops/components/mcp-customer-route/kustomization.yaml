@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# The customer MCP route (ADR-0383, #16590). NOT referenced by any ArgoCD Application today.
+# docs/runbooks/mcp-customer-channel-go-live.md adds the Application at step 1 with ONLY
+# grants.yaml listed, and adds httproute.yaml here at step 5, after the listener, the #17004 mTLS hop and
+# the channel switch are live.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - grants.yaml
+  - httproute.yaml

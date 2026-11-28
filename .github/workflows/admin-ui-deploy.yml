@@ -143,7 +143,7 @@ jobs:
       - name: Mint repository read token
         id: read_token
         if: env.GITOPS_APP_ID != ''
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
@@ -247,7 +247,7 @@ jobs:
       - name: Mint repository read token
         id: read_token
         if: env.GITOPS_APP_ID != ''
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
@@ -337,7 +337,7 @@ jobs:
 
       - name: ECR login
         if: steps.build_admission.outputs.proceed == 'true'
-        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+        uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
 
       - name: Rebuild ob-deploy-builder with native arm64 image
         if: steps.build_admission.outputs.proceed == 'true'
@@ -620,22 +620,70 @@ jobs:
           done <<< "${ARTIFACTS}"
           echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 
-      - name: Restore staged test-run history (diff-forward, #8690 option B1)
+      - name: Stage identifier spec-conformance evidence (ADR-0273)
         if: steps.build_admission.outputs.proceed == 'true'
-        # This step cost ~105 installation-API requests per build (5 inventory pages + up to
-        # 100 zip downloads) and re-downloaded the whole envelope set every time, for a set
-        # that is almost entirely identical to the previous build's. The staged history is
-        # small JSON envelopes, so it lives in an Actions cache that persists across builds:
-        # restore the previous staging, download only envelopes the cache has never seen
-        # (tracked by artifact id in .staged-ids), save under this run's key; restore-keys
-        # picks the most recent prior staging. Steady state is ~5 requests (the inventory
-        # pages) instead of ~105. Side effect measured as desirable in #8690 option A: the
-        # cache outlives artifact expiry, so the history stops being a 0.6-hour snapshot.
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # identifier-differential.yml uploads `identifier-conformance` from its scheduled main
+        # run. Spec conformance is its own dimension, so an unavailable lookup or download
+        # stages nothing and the snapshot renders "no evidence" — absence is never green, and
+        # it must not fail the image the way an incomplete execution snapshot does.
+        env:
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage service_ti)" || true
+          dest=openbank-admin-ui/identifier-conformance
+          mkdir -p "${dest}"
+          if ! art_id="$(python3 .github/scripts/find-latest-main-artifacts.py --repo "${REPO}" identifier-conformance)"; then
+            echo "::warning title=Spec conformance unavailable::artifact inventory lookup failed; the snapshot shows no spec-conformance evidence"
+            exit 0
+          fi
+          if [ -z "${art_id}" ]; then
+            echo "No identifier-conformance artifact from a scheduled main run; spec conformance renders as no evidence."
+            exit 0
+          fi
+          tmp="$(mktemp -d)"
+          if python3 .github/scripts/trace-admin-ui-curl.py --stage service_ti --auth github -- curl -fsS --retry 3 --retry-all-errors --retry-delay 2 \
+              -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" -L -o "${tmp}/a.zip" \
+              && unzip -tq "${tmp}/a.zip" >/dev/null 2>&1 \
+              && unzip -p "${tmp}/a.zip" identifier-conformance.json > "${dest}/identifier-conformance.json"; then
+            echo "Staged identifier-conformance artifact ${art_id}."
+          else
+            rm -f "${dest}/identifier-conformance.json"
+            echo "::warning title=Spec conformance unavailable::artifact ${art_id} could not be staged; the snapshot shows no spec-conformance evidence"
+          fi
+
+      - name: Find the previous main deployment history
+        id: history
+        if: steps.build_admission.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Keep downloaded evidence in a run-scoped artifact, outside the Actions cache.
+          # Select the exact artifact name, then verify the producing workflow for its run.
+          artifact_name=admin-ui-deploy-evidence-history
+          candidates=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=20" \
+            --jq ".artifacts[] | select(.expired == false and .workflow_run.head_branch == \"main\" and .workflow_run.head_repository_id == ${GITHUB_REPOSITORY_ID}) | .workflow_run.id")
+          for run_id in $candidates; do
+            [[ "$run_id" =~ ^[0-9]+$ ]] || exit 1
+            [[ "$run_id" != "$GITHUB_RUN_ID" ]] || continue
+            eligible=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+              --jq ".path == \".github/workflows/admin-ui-deploy.yml\" and .head_branch == \"main\" and .head_repository.id == ${GITHUB_REPOSITORY_ID} and .conclusion == \"success\"")
+            if [ "$eligible" = true ]; then
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+
+      - name: Restore history from the previous main deployment
+        if: steps.build_admission.outputs.proceed == 'true' && steps.history.outputs.run_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: admin-ui-deploy-evidence-history
+          run-id: ${{ steps.history.outputs.run_id }}
+          github-token: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           path: openbank-admin-ui/test-run-history
-          key: test-run-history-${{ github.run_id }}
-          restore-keys: test-run-history-
 
       - name: Stage immutable per-attempt Test Intelligence history
         if: steps.build_admission.outputs.proceed == 'true'
@@ -649,14 +697,12 @@ jobs:
           eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage immutable_ti)" || true
           api() { python3 .github/scripts/trace-admin-ui-curl.py --stage immutable_ti --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
-          touch openbank-admin-ui/test-run-history/.staged-ids
-          # The restored cache can predate ZIP validation. Remove non-main or malformed
-          # envelopes before the collector reads them; a missing file overrides its old
-          # .staged-ids entry so an available artifact is re-fetched, not suppressed.
+          # Validate restored envelopes again before the collector reads them. Missing
+          # files are re-fetched from the original producer while still available.
           python3 .github/scripts/extract-test-intelligence-envelope.py \
-            --prune-cache openbank-admin-ui/test-run-history || exit 1
-          # The cache preserves history past artifact expiry. Bound only the number of
-          # candidates downloaded by this build, not the retained history.
+            --prune-history openbank-admin-ui/test-run-history || exit 1
+          # The deployment snapshot preserves history past producer artifact expiry.
+          # Bound the number of new candidates downloaded by this build.
           MAX_ENVELOPES=100
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero
@@ -669,64 +715,58 @@ jobs:
           # repository-wide artifact pages (observed 2026-09-18). Fetch that producer's
           # latest completed main run directly so a valid browser verdict cannot vanish
           # merely because unrelated branches uploaded many artifacts.
-          KNOWN_BEFORE=$(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ')
           {
             browser_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-browser-synthetic.yml/runs?branch=main&status=completed&per_page=1" \
               | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
             if [ -n "${browser_run_id}" ]; then
               api "https://api.github.com/repos/${REPO}/actions/runs/${browser_run_id}/artifacts?per_page=100" \
-                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+                | python3 .github/scripts/extract-test-intelligence-envelope.py --main-artifacts "$GITHUB_REPOSITORY_ID" 'test-intelligence-run-openbank-admin-ui-' 2>/dev/null || true
             fi
             synthetic_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/synthetic-journeys.yml/runs?branch=main&status=completed&per_page=1" \
               | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
             if [ -n "${synthetic_run_id}" ]; then
               api "https://api.github.com/repos/${REPO}/actions/runs/${synthetic_run_id}/artifacts?per_page=100" \
-                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-platform-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+                | python3 .github/scripts/extract-test-intelligence-envelope.py --main-artifacts "$GITHUB_REPOSITORY_ID" 'test-intelligence-run-openbank-platform-' 2>/dev/null || true
             fi
             deployed_session_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-deployed-auth-gate.yml/runs?branch=main&status=completed&per_page=1" \
               | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
             if [ -n "${deployed_session_run_id}" ]; then
               api "https://api.github.com/repos/${REPO}/actions/runs/${deployed_session_run_id}/artifacts?per_page=100" \
-                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-deployed-session-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+                | python3 .github/scripts/extract-test-intelligence-envelope.py --main-artifacts "$GITHUB_REPOSITORY_ID" 'test-intelligence-run-openbank-admin-ui-deployed-session-' 2>/dev/null || true
             fi
             for page in 1 2 3 4 5; do
               api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+                | python3 .github/scripts/extract-test-intelligence-envelope.py --main-artifacts "$GITHUB_REPOSITORY_ID" 'test-intelligence-run-' 2>/dev/null || true
             done
           } \
             | awk '!seen[$1]++' \
             | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
-                [ -n "${artifact_id}" ] || continue
-                # Diff-forward: a validated cached file is authoritative, even if its ID
-                # ledger entry is missing. A stale ID without a file must not suppress repair.
-                # The candidate list is bounded before any download.
-                cached="openbank-admin-ui/test-run-history/${artifact_name}.json"
-                if [ -f "${cached}" ]; then
-                  grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
-                    || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
+                envelope="openbank-admin-ui/test-run-history/${artifact_name}.json"
+                if [ -f "${envelope}" ]; then
                   continue
                 fi
-                archive="/tmp/${artifact_name}.zip"
+                archive="${RUNNER_TEMP}/test-intelligence-${artifact_id}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
                 # Browser variants retain run-chromium.json / run-firefox.json,
                 # unlike service envelopes named run.json. Require exactly one
                 # schema-valid main envelope; never guess among ZIP members.
                 if ! python3 .github/scripts/extract-test-intelligence-envelope.py \
-                  "${archive}" "${cached}"; then
+                  "${archive}" "${envelope}"; then
                   continue
                 fi
-                grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids \
-                  || echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
               done
-          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
+          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
-      - name: Save staged test-run history
+      - name: Publish the deployment evidence history
         if: steps.build_admission.outputs.proceed == 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: openbank-admin-ui/test-run-history
-          key: test-run-history-${{ github.run_id }}
+          name: admin-ui-deploy-evidence-history
+          path: openbank-admin-ui/test-run-history/*.json
+          retention-days: 30
+          overwrite: true
+          if-no-files-found: ignore
 
       - name: Stage pitest mutation results from latest completed weekly run
         if: steps.build_admission.outputs.proceed == 'true'
@@ -1227,7 +1267,7 @@ jobs:
       - name: Mint a GitHub App installation token
         id: app_token
         if: ${{ steps.build_admission.outputs.proceed == 'true' }}
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}

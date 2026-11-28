@@ -1,0 +1,205 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# mcp.open-bank.tech on the shared Gateway: the customer MCP channel (ADR-0383 / ADR-0384 /
+# ADR-0385, #16590). Same shape as customer-edge/httproute.yaml and copilot/httproute.yaml.
+#
+# DISABLED BY DEFAULT. Merging this directory exposes nothing, for two independent reasons:
+#   1. No ArgoCD Application points at this directory (apps/ has none), and its kustomization
+#      lists only grants.yaml, so this file is applied by nothing. Argo applies components/mcp
+#      non-recursively, and this is a sibling directory.
+#   2. Even if it were applied, the route names listener `https-mcp`, which the Gateway in
+#      envoy-gateway/gateway.yaml does not declare, so the route is never Accepted and
+#      external-dns publishes no record for it.
+# The NetworkPolicy generator DOES read this file (it globs every component), so
+# mcp/network-policies.yaml admits envoy-gateway-system on :8443 already. That admits a peer
+# which has no route to the service; the edge forwards only what a route attaches.
+#
+# THE EDGE HOP IS mTLS (#16847, #17004, owner decision 2026-11-21). The backend is mcp-service's
+# :8443 listener (TLS 1.3, client auth REQUIRED), never plain :8150. The Gateway presents
+# edge-backend-client-tls (EnvoyProxy/edge spec.backendTLS.clientCertificateRef, gateway-wide), and
+# BackendTLSPolicy mcp-customer-backend below makes Envoy validate the server certificate against
+# openbank-ca with hostname mcp-service.platform.svc. mcp-service trusts the hop by that client
+# certificate's pinned DNS SAN (MCP_EDGE_GATEWAY_IDENTITY), never by source IP, and sets NO
+# quarkus.http.proxy.* forwarding at all.
+#
+# Going live is docs/runbooks/mcp-customer-channel-go-live.md, in order. Never collapse its
+# steps into one sync: a listener switched in the same sync as its grant was left
+# RefNotPermitted (2026-10-03), because the two are different Argo apps with no ordering.
+#
+# FORWARDED HEADERS. mcp-service reads none: DPoP `htu` is compared with absoluteURI() on :8443,
+# which is https://<Host>/customer/mcp, and Envoy passes the client's Host through unchanged (the
+# route matches only mcp.open-bank.tech, so that is the only Host that arrives). This route still
+# REMOVES every client-supplied forwarding header, so none reaches the service whatever it reads:
+#   X-Forwarded-For, Forwarded, X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Port,
+#   X-Forwarded-Prefix, X-Forwarded-Server, X-Real-IP
+#   X-Envoy-External-Address -> written by Envoy itself from the TCP peer (externalTrafficPolicy
+#                         Local keeps the device address), numTrustedHops 0 below; this is the
+#                         one header MCP_EDGE_CLIENT_ADDRESS_HEADER names, honoured only from the
+#                         pinned client SAN. Verify on go-live that a client-supplied value is
+#                         overwritten (runbook step 6).
+#
+# Edge controls (ADR-0383 D5.1, before any token is parsed):
+#   body cap 64Ki           -> requestBuffer, same as the service's quarkus.http.limits
+#   per-IP rate 10/s        -> local rate limit per distinct client address, per proxy replica
+#   request timeout 30s     -> JSON-RPC calls are short; nothing on this host streams
+#   paths                   -> customer MCP, its RFC 9728 metadata, and the exact hosted OAuth
+#                              endpoints; staff `/mcp` never routes here
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-customer
+  namespace: platform
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-mcp
+  hostnames:
+    - mcp.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /customer/mcp
+        - path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource
+        - path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource/customer/mcp
+        - method: POST
+          path:
+            type: Exact
+            value: /customer/hosted-mcp
+        - method: GET
+          path:
+            type: Exact
+            value: /.well-known/oauth-protected-resource/customer/hosted-mcp
+        - method: GET
+          path:
+            type: Exact
+            value: /.well-known/oauth-authorization-server/oauth/hosted
+        - method: GET
+          path:
+            type: Exact
+            value: /oauth/hosted/authorize
+        - method: GET
+          path:
+            type: Exact
+            value: /oauth/hosted/callback
+        - method: POST
+          path:
+            type: Exact
+            value: /oauth/hosted/token
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - X-Forwarded-For
+              - Forwarded
+              - X-Forwarded-Proto
+              - X-Forwarded-Host
+              - X-Forwarded-Port
+              - X-Forwarded-Prefix
+              - X-Forwarded-Server
+              - X-Real-IP
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: mcp-service
+          port: 8443
+---
+# Envoy -> mcp-service is TLS, and the server certificate is VALIDATED: without this policy Envoy
+# would speak plain HTTP to :8443 and the handshake fails (fail closed, never cleartext). Standard
+# channel (envoy-gateway-crds.yaml pins `channel: standard`), Gateway API v1 as bundled by Envoy
+# Gateway v1.9.2. The CA is the `ca.crt` key of the cert-manager Secret mcp-service-internal-tls
+# (same namespace, issued by openbank-ca; #17004): Envoy Gateway accepts a Secret as well as a
+# ConfigMap here, and no trust-manager exists to publish a CA ConfigMap. Envoy Gateway reads only
+# `ca.crt` from it. The client certificate Envoy presents is gateway-wide (EnvoyProxy/edge
+# spec.backendTLS), not set here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: mcp-customer-backend
+  namespace: platform
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: mcp-service
+      sectionName: https
+  validation:
+    caCertificateRefs:
+      - group: ""
+        kind: Secret
+        name: mcp-service-internal-tls
+    hostname: mcp-service.platform.svc
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: mcp-customer
+  namespace: platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: mcp-customer
+  requestBuffer:
+    limit: 64Ki
+  timeout:
+    http:
+      requestTimeout: 30s
+  rateLimit:
+    local:
+      rules:
+        # One bucket per distinct client address. No rule without clientSelectors, so there is
+        # no route-wide ceiling: a shared bucket would let one noisy client starve every other.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 10
+            unit: Second
+---
+# Listener-scoped client policy for https-mcp. A listener-scoped ClientTrafficPolicy REPLACES the
+# Gateway-scoped edge-security-headers one for that listener (no merge), so it repeats the TLS
+# groups and late response headers, as api-edge does in envoy-gateway/gateway.yaml.
+# numTrustedHops 0: no client-supplied X-Forwarded-For hop is ever trusted for the client address;
+# the NLB preserves the source address (externalTrafficPolicy: Local).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: mcp-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: edge
+      sectionName: https-mcp
+  clientIPDetection:
+    xForwardedFor:
+      numTrustedHops: 0
+  connection:
+    connectionLimit:
+      value: 500
+  tls:
+    ecdhCurves: [X25519MLKEM768, X25519, P-256]
+  headers:
+    lateResponseHeaders:
+      set:
+        - name: Strict-Transport-Security
+          value: "max-age=63072000; includeSubDomains; preload"
+        - name: X-Content-Type-Options
+          value: nosniff

@@ -118,6 +118,7 @@ data class DelegationGrant(
      * client supplies. Null for PARTY grants, required for MCP_CLIENT grants.
      */
     val granteeKeyThumbprint: String? = null,
+    val mcpConnectionId: UUID? = null,
     /**
      * Counterparty labels SNAPSHOTTED at offer time from the eligibility lookup this service
      * already performs (issue #3604). Deliberately part of the authorisation record rather than a
@@ -190,6 +191,7 @@ data class DelegationGrant(
         }
         require(validTo == null || validTo.isAfter(validFrom)) { "validTo must be after validFrom" }
         require(lifecycleRevision >= 0) { "lifecycleRevision must not be negative" }
+        require(mcpConnectionId == null || granteeType == DelegationGranteeType.MCP_CLIENT)
         requireGranteeShape()
     }
 
@@ -214,13 +216,14 @@ data class DelegationGrant(
             }
             DelegationGranteeType.MCP_CLIENT -> {
                 val clientId = requireNotNull(granteeClientId) { "an MCP_CLIENT grant must record the client id (azp)" }
-                val jkt = requireNotNull(granteeKeyThumbprint) {
-                    "an MCP_CLIENT grant must record the DPoP key thumbprint (cnf.jkt)"
+                val jkt = granteeKeyThumbprint
+                require(jkt != null || mcpConnectionId != null) {
+                    "an MCP_CLIENT grant without a DPoP thumbprint must record its approved MCP connection"
                 }
                 require(clientId.isNotBlank() && clientId.length <= CLIENT_ID_MAX_LENGTH) {
                     "MCP client id must be non-blank and at most $CLIENT_ID_MAX_LENGTH characters"
                 }
-                require(JKT_PATTERN.matches(jkt)) {
+                require(jkt == null || JKT_PATTERN.matches(jkt)) {
                     "DPoP key thumbprint must be a base64url SHA-256 JWK thumbprint (43 characters)"
                 }
                 require(granteePartyId == mcpClientGranteeId(clientId)) {

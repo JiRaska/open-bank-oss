@@ -36,7 +36,21 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+    mcp-customer:
+      tenant-enabled: ${BALANCE_MCP_ENABLED:false}
+      tenant-paths: /api/v1/mcp-balances/*
+      auth-server-url: ${BALANCE_MCP_ISSUER:http://localhost:8080/realms/openbank-customers}
+      client-id: openbank-balance-service
+      token:
+        audience: openbank-balance-service
+
   oidc-client:
+    mcp-balance-reader:
+      client-enabled: ${BALANCE_MCP_ENABLED:false}
+      auth-server-url: ${BALANCE_MCP_SERVICE_OIDC_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-balance-mcp-reader
+      credentials:
+        secret: ${BALANCE_MCP_READER_SECRET:}
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
     credentials:
@@ -46,6 +60,10 @@ quarkus:
     hosts: redis://localhost:6379
 
   rest-client:
+    mcp-balance-grant:
+      url: ${BALANCE_MCP_DELEGATION_URL:http://localhost:8126}
+      connect-timeout: 1000
+      read-timeout: 2000
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       connect-timeout: 2000
@@ -223,6 +241,11 @@ openbank:
     opa-pdp-producer:
       enabled: true
   balance:
+    mcp:
+      enabled: ${BALANCE_MCP_ENABLED:false}
+      issuer: ${BALANCE_MCP_ISSUER:}
+      connection-binding:
+        enabled: ${BALANCE_MCP_CONNECTION_BINDING_ENABLED:false}
     projection:
       # ADR-0039 Phase D-2 (cutover, 2026-06-17): the balance is now a projection of the ledger — it
       # consumes AccountBookedChanged and is the SOLE booked-mover. Flipped ON in lock-step with the
@@ -265,3 +288,18 @@ authz:
   # runbook is reviewed, not bundled with the wiring itself.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%prod":
+  quarkus:
+    http:
+      # Ask for the peer certificate on the TLS listener. The MCP balance resource requires
+      # that certificate and checks its binding to the bearer token before reading.
+      # This is a build-time setting. Builds for the test profile keep their existing listener.
+      ssl:
+        client-auth: request
+      auth:
+        permission:
+          api-bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer

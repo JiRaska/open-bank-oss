@@ -18,12 +18,14 @@ import zipfile
 
 
 class EvidenceError(ValueError):
-    pass
+    def __init__(self, reason, code="EVIDENCE_REJECTED"):
+        super().__init__(reason)
+        self.code = code
 
 
-def require(condition, reason):
+def require(condition, reason, code="EVIDENCE_REJECTED"):
     if not condition:
-        raise EvidenceError(reason)
+        raise EvidenceError(reason, code)
 
 
 def unique_object(pairs):
@@ -99,17 +101,17 @@ def verify(sbom, resolved, package):
         if project is not None:
             require(project not in components, "duplicate library component")
             components[project] = component
-    require(set(components) == set(expected), "SBOM/resolved library inventory mismatch")
+    require(set(components) == set(expected), "SBOM/resolved library inventory mismatch", "LIBRARY_INVENTORY_MISMATCH")
     matched, rows, original_classes = set(), [], set()
     for project, digest in sorted(expected.items()):
         hashes = components[project].get("hashes")
-        require(isinstance(hashes, list), "missing library hashes (resolution-only SBOM is incomplete)")
+        require(isinstance(hashes, list), "missing library hashes (resolution-only SBOM is incomplete)", "LIBRARY_HASH_MISSING")
         require(all(isinstance(h, dict) for h in hashes), "invalid hash entry")
         declared = [h.get("content") for h in hashes if h.get("alg") == "SHA-256"]
-        require(len(declared) == 1 and isinstance(declared[0], str) and re.fullmatch(r"[0-9a-f]{64}", declared[0]), "invalid or duplicate library SHA-256")
-        require(declared[0] == digest, "SBOM/resolved artifact hash mismatch")
+        require(len(declared) == 1 and isinstance(declared[0], str) and re.fullmatch(r"[0-9a-f]{64}", declared[0]), "invalid or duplicate library SHA-256", "LIBRARY_HASH_INVALID")
+        require(declared[0] == digest, "SBOM/resolved artifact hash mismatch", "LIBRARY_HASH_MISMATCH")
         candidates = [p for p, actual in digests.items() if actual == digest]
-        require(len(candidates) == 1, "missing or ambiguous packaged artifact bytes")
+        require(len(candidates) == 1, "missing or ambiguous packaged artifact bytes", "PACKAGED_ARTIFACT_MISMATCH")
         packed = candidates[0]
         require(packed not in matched, "artifact assigned to multiple projects")
         matched.add(packed)
@@ -153,13 +155,23 @@ def main():
     source.add_argument("--runtime-artifacts")
     source.add_argument("--receipt", help="Recheck mapping from an already authenticated producer bundle")
     parser.add_argument("--quarkus-app", required=True)
+    parser.add_argument("--redact-failure", action="store_true", help="Emit only a stable failure code on stdout")
     args = parser.parse_args()
     try:
         result = (verify_receipt(read_json(args.sbom), read_json(args.receipt), args.quarkus_app) if args.receipt
                   else verify(read_json(args.sbom), read_json(args.runtime_artifacts), args.quarkus_app))
     except (EvidenceError, OSError, ValueError, zipfile.BadZipFile) as error:
-        print(json.dumps({"outcome": "incomplete", "claim": "packaged-original-library-artifacts",
-                          "reason": str(error)}))
+        if args.redact_failure:
+            if isinstance(error, EvidenceError):
+                code = error.code
+            elif isinstance(error, OSError):
+                code = "INPUT_IO_ERROR"
+            else:
+                code = "INVALID_INPUT"
+            print(code)
+        else:
+            print(json.dumps({"outcome": "incomplete", "claim": "packaged-original-library-artifacts",
+                              "reason": str(error)}))
         return 1
     print(json.dumps(result, sort_keys=True))
     return 0

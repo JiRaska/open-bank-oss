@@ -1,0 +1,11 @@
+---
+- op: test
+  path: /spec/ports/0/name
+  value: http
+- op: add
+  path: /spec/ports/-
+  value:
+    name: sandbox-https
+    protocol: TCP
+    port: 8443
+    targetPort: sandbox-https

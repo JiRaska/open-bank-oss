@@ -1,0 +1,381 @@
+{
+  "version": "openbank-mcp-connect-context/v2",
+  "cases": [
+    {
+      "name": "account-specific capability sets",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "canonical": "openbank-mcp-connect-context/v2\nclient_id=synthetic-local-assistant\nredirect_host=127.0.0.1\nresource=https://mcp.test/customer/mcp\nscopes=offline_access openid\nrequest_uri_sha256=3ac4199aef5748e1d98ec333c97819868623cba35277c39c2f9260b7904fc47b\nexpires_at=1800000123\nparty_id=7639cb30-e287-4821-9ef8-78134bbc1140\npar_jkt=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\naccount_scope=00d0391b-4266-4fd4-b574-074b32bacf21:ACCOUNT_READ_BALANCES,ACCOUNT_VIEW_DETAILS\naccount_scope=9f5a41ed-cf4a-464a-8cd2-56509626a507:ACCOUNT_PROPOSE_PAYMENT",
+        "payload_sha256": "59e15b3c830ab802ecaffc863dd98347be505577e4fd58500b2bb8e171ac771b"
+      }
+    },
+    {
+      "name": "reordered inputs preserve the digest",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_READ_BALANCES",
+              "ACCOUNT_VIEW_DETAILS"
+            ]
+          },
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "canonical": "openbank-mcp-connect-context/v2\nclient_id=synthetic-local-assistant\nredirect_host=127.0.0.1\nresource=https://mcp.test/customer/mcp\nscopes=offline_access openid\nrequest_uri_sha256=3ac4199aef5748e1d98ec333c97819868623cba35277c39c2f9260b7904fc47b\nexpires_at=1800000123\nparty_id=7639cb30-e287-4821-9ef8-78134bbc1140\npar_jkt=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\naccount_scope=00d0391b-4266-4fd4-b574-074b32bacf21:ACCOUNT_READ_BALANCES,ACCOUNT_VIEW_DETAILS\naccount_scope=9f5a41ed-cf4a-464a-8cd2-56509626a507:ACCOUNT_PROPOSE_PAYMENT",
+        "payload_sha256": "59e15b3c830ab802ecaffc863dd98347be505577e4fd58500b2bb8e171ac771b"
+      }
+    },
+    {
+      "name": "same capabilities on different accounts changes digest",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "canonical": "openbank-mcp-connect-context/v2\nclient_id=synthetic-local-assistant\nredirect_host=127.0.0.1\nresource=https://mcp.test/customer/mcp\nscopes=offline_access openid\nrequest_uri_sha256=3ac4199aef5748e1d98ec333c97819868623cba35277c39c2f9260b7904fc47b\nexpires_at=1800000123\nparty_id=7639cb30-e287-4821-9ef8-78134bbc1140\npar_jkt=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\naccount_scope=00d0391b-4266-4fd4-b574-074b32bacf21:ACCOUNT_PROPOSE_PAYMENT\naccount_scope=9f5a41ed-cf4a-464a-8cd2-56509626a507:ACCOUNT_READ_BALANCES,ACCOUNT_VIEW_DETAILS",
+        "payload_sha256": "fd0cdbf1fbd0faaccc2c9043e96fb57483608c2dfff615b45fbc5ae7b8a96b85"
+      }
+    },
+    {
+      "name": "different verified holder changes digest",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "Hx4dHBsaGRgXFhUUExIREA8ODQwLCgkIBwYFBAMCAQA",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "canonical": "openbank-mcp-connect-context/v2\nclient_id=synthetic-local-assistant\nredirect_host=127.0.0.1\nresource=https://mcp.test/customer/mcp\nscopes=offline_access openid\nrequest_uri_sha256=3ac4199aef5748e1d98ec333c97819868623cba35277c39c2f9260b7904fc47b\nexpires_at=1800000123\nparty_id=7639cb30-e287-4821-9ef8-78134bbc1140\npar_jkt=Hx4dHBsaGRgXFhUUExIREA8ODQwLCgkIBwYFBAMCAQA\naccount_scope=00d0391b-4266-4fd4-b574-074b32bacf21:ACCOUNT_READ_BALANCES,ACCOUNT_VIEW_DETAILS\naccount_scope=9f5a41ed-cf4a-464a-8cd2-56509626a507:ACCOUNT_PROPOSE_PAYMENT",
+        "payload_sha256": "b419a1cc6de8f43cfae4c985d8cf7d53bbb5ec056172f9611c8d1e2fb923f547"
+      }
+    },
+    {
+      "name": "different authenticated party changes digest",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "0abb4d1d-c27d-438e-8b3a-e70ec655f264",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "canonical": "openbank-mcp-connect-context/v2\nclient_id=synthetic-local-assistant\nredirect_host=127.0.0.1\nresource=https://mcp.test/customer/mcp\nscopes=offline_access openid\nrequest_uri_sha256=3ac4199aef5748e1d98ec333c97819868623cba35277c39c2f9260b7904fc47b\nexpires_at=1800000123\nparty_id=0abb4d1d-c27d-438e-8b3a-e70ec655f264\npar_jkt=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\naccount_scope=00d0391b-4266-4fd4-b574-074b32bacf21:ACCOUNT_READ_BALANCES,ACCOUNT_VIEW_DETAILS\naccount_scope=9f5a41ed-cf4a-464a-8cd2-56509626a507:ACCOUNT_PROPOSE_PAYMENT",
+        "payload_sha256": "a6b5d8e67bec0744b6102876d1d1b8ccf6183e292f0029dada205c2b05db5187"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "noncanonical thumbprint padding bits",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing accounts",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": []
+      }
+    },
+    {
+      "name": "duplicate account",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          },
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "write capability refused",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_INITIATE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty account permission set refused",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": []
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "delimiter inside capability refused",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS,ACCOUNT_READ_BALANCES"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "noncanonical UUID refused",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "7639cb30-e287-4821-9ef8-78134bbc1140",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9F5A41ED-CF4A-464A-8CD2-56509626A507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid party UUID",
+      "input": {
+        "client_id": "synthetic-local-assistant",
+        "redirect_uri": "http://127.0.0.1:49123/return",
+        "resource": "https://mcp.test/customer/mcp",
+        "scope": "offline_access openid offline_access",
+        "request_uri": "urn:ietf:params:oauth:request_uri:synthetic-flow-456",
+        "expires_at": 1800000123,
+        "party_id": "1-2-3-4-5",
+        "par_jkt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "accounts": [
+          {
+            "id": "9f5a41ed-cf4a-464a-8cd2-56509626a507",
+            "capabilities": [
+              "ACCOUNT_PROPOSE_PAYMENT"
+            ]
+          },
+          {
+            "id": "00d0391b-4266-4fd4-b574-074b32bacf21",
+            "capabilities": [
+              "ACCOUNT_VIEW_DETAILS",
+              "ACCOUNT_READ_BALANCES"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

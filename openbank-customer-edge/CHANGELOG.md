@@ -1,5 +1,101 @@
 # Changelog
 
+## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.17.0...customer-edge-v1.17.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **customer-edge:** resolve shared MCP age after synthetic denial ([#17420](https://github.com/JiRaska/open-bank-oss/issues/17420)) ([01f4456](https://github.com/JiRaska/open-bank-oss/commit/01f4456f14a2c73dc0036f4bc094ff6f43c80529))
+
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.16.0...customer-edge-v1.17.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** configure the shared sandbox passkey age ([#17407](https://github.com/JiRaska/open-bank-oss/issues/17407)) ([647fa7e](https://github.com/JiRaska/open-bank-oss/commit/647fa7ea3ead2bca6752474c5b4376c73d670084))
+
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.3...customer-edge-v1.16.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
+## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.2...customer-edge-v1.15.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** meter native MCP passkey proof refusals ([#17385](https://github.com/JiRaska/open-bank-oss/issues/17385)) ([0649d1b](https://github.com/JiRaska/open-bank-oss/commit/0649d1b0b065b69b072c3f15c0d50b82662ce820))
+
+## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.1...customer-edge-v1.15.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** meter native MCP app guard refusals ([#17378](https://github.com/JiRaska/open-bank-oss/issues/17378)) ([ecaadcb](https://github.com/JiRaska/open-bank-oss/commit/ecaadcb2e4dbeba60d926218d893c3393c384067))
+
+## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.0...customer-edge-v1.15.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** manage owned MCP connections from native app ([#17350](https://github.com/JiRaska/open-bank-oss/issues/17350)) ([c556334](https://github.com/JiRaska/open-bank-oss/commit/c55633439b9bfa8650f5d5c9dcf79b3b11a6da66))
+
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.1...customer-edge-v1.15.0) (2026-11-26)
+
+
+### Features
+
+* **infra:** connect hosted MCP OAuth through the native bank passkey ([#17327](https://github.com/JiRaska/open-bank-oss/issues/17327)) ([ceb01bb](https://github.com/JiRaska/open-bank-oss/commit/ceb01bb689e593447527363b86b16f5a4439709b))
+
+## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.0...customer-edge-v1.14.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** record verified native passkey age ([#17315](https://github.com/JiRaska/open-bank-oss/issues/17315)) ([20bd46f](https://github.com/JiRaska/open-bank-oss/commit/20bd46f52112b0a8e3ea786f9fcb40457e7ab559))
+
+## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.3...customer-edge-v1.14.0) (2026-11-24)
+
+
+### Features
+
+* **mcp-service:** support hosted Tier H balance authorization ([#17232](https://github.com/JiRaska/open-bank-oss/issues/17232)) ([619f58b](https://github.com/JiRaska/open-bank-oss/commit/619f58bb7c49fd6a3aaf39d501f66acbc54d0a8e))
+
+## [1.13.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.2...customer-edge-v1.13.3) (2026-11-23)
+
+
+### Security
+
+* **customer-edge:** adopt the patched Keycloak runtime and Admin API scope ([#17180](https://github.com/JiRaska/open-bank-oss/issues/17180)) ([af6e356](https://github.com/JiRaska/open-bank-oss/commit/af6e3560e8f14fb62089a00868f690f97555f0de))
+
+## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.1...customer-edge-v1.13.2) (2026-11-23)
+
+
+### Security
+
+* **sca:** Keycloak MCP extension - withheld code, 72 h passkey floor, no token exchange (ADR-0385 C, [#16667](https://github.com/JiRaska/open-bank-oss/issues/16667)) ([#16672](https://github.com/JiRaska/open-bank-oss/issues/16672)) ([699eaf9](https://github.com/JiRaska/open-bank-oss/commit/699eaf9e7e0b3d2b0604d964d35497ab774367aa))
+
+## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.13.0...customer-edge-v1.13.1) (2026-11-22)
+
+
+### Security
+
+* **customer-edge:** approve MCP payment proposals in the app with hash-bound SCA ([#16845](https://github.com/JiRaska/open-bank-oss/issues/16845)) ([060aafa](https://github.com/JiRaska/open-bank-oss/commit/060aafa1990aab37fbd35dd9a3397bc1eb902bb0))
+
+## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.2...customer-edge-v1.13.0) (2026-11-20)
+
+
+### Features
+
+* **customer-edge:** enable OpenTelemetry tracing + WebAuthn challenge trace contract ([#16751](https://github.com/JiRaska/open-bank-oss/issues/16751)) ([abaa92c](https://github.com/JiRaska/open-bank-oss/commit/abaa92c7a779beda55ead57bd14106a741b0f132))
+
+
+### Bug Fixes
+
+* **customer-edge:** refuse malformed VS/SS/KS on domestic payments ([#16780](https://github.com/JiRaska/open-bank-oss/issues/16780)) ([6e8da93](https://github.com/JiRaska/open-bank-oss/commit/6e8da936b2a7347879437fd8c1f567188135f6b6))
+
 ## [1.12.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.12.1...customer-edge-v1.12.2) (2026-11-18)
 
 

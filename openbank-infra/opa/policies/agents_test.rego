@@ -543,3 +543,164 @@ test_allow_draft_ticket_without_ref if {
 	agents.allow with data.agents as tier_charters
 		with input as {"agent": "flaky-test-hunter", "tool": "draft.ticket", "resource": "github-pr", "tier": "write_proposal"}
 }
+
+# ---------------------------------------------------------------------------------------
+# ADR-0387: read.public_web via the fetch broker. The broker sends the REST-bridged shape
+# {tool: "read.public_web", attributes: {tool: web.fetch, tier, host}} -- no tier, no resource.
+# ---------------------------------------------------------------------------------------
+web_charters := {
+	"agents": [
+		{
+			"id": "regulatory-obligations-watcher",
+			"tools": {"allow": [{"tier": "read", "resources": ["read.public_web"]}], "deny": [{"tier": "write", "resources": ["*"]}]},
+			"data_scope": {"public_web": {"hosts": ["eur-lex.europa.eu", {"host": "www.cnb.cz", "render": "js"}]}},
+		},
+		{
+			"id": "no-web-agent",
+			"tools": {"allow": [{"tier": "read", "resources": ["read.governance"]}]},
+			"data_scope": {"public_web": {"hosts": ["eur-lex.europa.eu"]}},
+		},
+		{
+			"id": "web-denied-agent",
+			"tools": {"allow": [{"tier": "read", "resources": ["read.public_web"]}], "deny": [{"tier": "read", "resources": ["read.*"]}]},
+			"data_scope": {"public_web": {"hosts": ["eur-lex.europa.eu"]}},
+		},
+	],
+	"tool_tiers": {"read": ["read.governance"], "write_proposal": [], "deny": []},
+}
+
+web_input(agent, tier, host) := {
+	"agent": agent,
+	"tool": "read.public_web",
+	"resource": null,
+	"attributes": {"tool": "web.fetch", "tier": tier, "host": host},
+}
+
+test_allow_public_web_listed_host if {
+	agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "eur-lex.europa.eu")
+}
+
+test_allow_public_web_listed_host_mapping_entry if {
+	agents.allow with data.agents as web_charters
+		with input as web_input("agent:regulatory-obligations-watcher", "read", "www.cnb.cz")
+}
+
+test_deny_public_web_host_not_in_charter if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "evil.example.com")
+}
+
+# A suffix or a parent of a listed host is not the listed host.
+test_deny_public_web_host_suffix_and_parent if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "europa.eu")
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "read", "eur-lex.europa.eu.evil.com")
+}
+
+test_deny_public_web_charter_without_resource if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("no-web-agent", "read", "eur-lex.europa.eu")
+}
+
+test_deny_public_web_write_tier if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("regulatory-obligations-watcher", "write", "eur-lex.europa.eu")
+}
+
+test_deny_public_web_other_tool if {
+	not agents.allow with data.agents as web_charters
+		with input as {"agent": "regulatory-obligations-watcher", "tool": "read.public_web", "resource": null, "attributes": {"tool": "web.post", "tier": "read", "host": "eur-lex.europa.eu"}}
+}
+
+test_deny_public_web_missing_host if {
+	not agents.allow with data.agents as web_charters
+		with input as {"agent": "regulatory-obligations-watcher", "tool": "read.public_web", "resource": null, "attributes": {"tool": "web.fetch", "tier": "read"}}
+}
+
+test_deny_public_web_charter_deny_beats_allow if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("web-denied-agent", "read", "eur-lex.europa.eu")
+}
+
+test_deny_public_web_unknown_agent if {
+	not agents.allow with data.agents as web_charters
+		with input as web_input("ghost", "read", "eur-lex.europa.eu")
+}
+
+# ---------------------------------------------------------------------------------------
+# `enabled: false` is the per-agent halt (agents.yaml). A disabled charter grants NOTHING on
+# any path; an enabled one -- explicit `true` or the key absent -- is unchanged. Each pair is a
+# must-DENY next to a must-ALLOW that differs only in the `enabled` value, so a test that
+# passed because the grant itself was broken cannot read as the guard working.
+# ---------------------------------------------------------------------------------------
+enabled_charters(enabled) := {
+	"agents": [
+		object.union(
+			{
+				"id": "halt-probe",
+				"plane": "control",
+				"tools": {
+					"allow": ["draft.ticket", "query.ledger.readonly", {"tier": "write_proposal", "resources": ["draft.ticket"]}],
+					"deny": [{"tier": "write", "resources": ["*"]}],
+				},
+			},
+			enabled,
+		),
+	],
+	"tool_tiers": {
+		"deny": ["money.transfer"],
+		"read": ["query.ledger.readonly"],
+		"write_proposal": ["draft.ticket"],
+	},
+}
+
+mcp_input := {"agent": "halt-probe", "tool": "draft.ticket", "resource": null}
+
+tier_input := {"agent": "halt-probe", "tool": "draft.ticket", "tier": "write_proposal", "resource": "draft.ticket"}
+
+# rest.rego's bridge: prefixed principal id, the REST action as the tool.
+rest_input := {"agent": "agent:halt-probe", "tool": "ledger.list", "resource": null, "attributes": {}}
+
+test_disabled_charter_denies_plain_mcp_tool if {
+	not agents.allow with data.agents as enabled_charters({"enabled": false}) with input as mcp_input
+}
+
+test_enabled_charter_allows_plain_mcp_tool if {
+	agents.allow with data.agents as enabled_charters({"enabled": true}) with input as mcp_input
+}
+
+test_charter_without_enabled_key_allows_plain_mcp_tool if {
+	agents.allow with data.agents as enabled_charters({}) with input as mcp_input
+}
+
+test_disabled_charter_denies_tier_resource_grant if {
+	not agents.allow with data.agents as enabled_charters({"enabled": false}) with input as tier_input
+}
+
+test_enabled_charter_allows_tier_resource_grant if {
+	agents.allow with data.agents as enabled_charters({"enabled": true}) with input as tier_input
+}
+
+test_disabled_charter_denies_rest_bridge_read if {
+	not agents.allow with data.agents as enabled_charters({"enabled": false}) with input as rest_input
+}
+
+test_enabled_charter_allows_rest_bridge_read if {
+	agents.allow with data.agents as enabled_charters({"enabled": true}) with input as rest_input
+}
+
+test_disabled_charter_decision_reason_is_auditable if {
+	d := agents.decision with data.agents as enabled_charters({"enabled": false}) with input as mcp_input
+	d.allow == false
+	d.reason == "agent charter disabled"
+}
+
+# Only an explicit boolean false halts: a missing key must never be read as disabled, and the
+# reason for an unknown agent stays "no matching allow rule" rather than claiming a charter.
+test_unknown_agent_reason_is_not_disabled if {
+	d := agents.decision with data.agents as enabled_charters({"enabled": false}) with input as {"agent": "nobody", "tool": "draft.ticket", "resource": null}
+	d.allow == false
+	d.reason == "no matching allow rule"
+}

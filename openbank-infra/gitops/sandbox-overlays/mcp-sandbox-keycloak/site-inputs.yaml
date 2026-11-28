@@ -1,0 +1,20 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    open-bank.tech/rotation-deadline: '2027-02-22'
+  name: sandbox-keycloak-realm-import
+  namespace: mcp-synthetic-sandbox
+spec:
+  data:
+  - remoteRef:
+      key: mcp-synthetic-sandbox/sandbox-keycloak-realm-import
+      property: openbank-customers-realm.json
+    secretKey: openbank-customers-realm.json
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    creationPolicy: Owner
+    name: sandbox-keycloak-realm-import

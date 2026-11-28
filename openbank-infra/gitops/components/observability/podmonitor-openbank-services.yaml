@@ -72,6 +72,7 @@ spec:
       - docs-truth-agent
       - documents
       - engagement
+      - fetch-broker
       - finops-agent
       - finrep
       - flaky-test-hunter

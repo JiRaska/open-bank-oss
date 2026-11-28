@@ -60,7 +60,7 @@ spec:
           # live in the Dockerfile now and MUST NOT be re-set as env below, or
           # `--optimized` aborts on a build-option mismatch. Bump = rebuild via
           # openbank-infra/scripts/build-push-keycloak.sh, then bump this tag.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.1-optimized-fa2356eb19f3@sha256:10ef7cae6bb848d032407162de46a6b6220d9c774c78122c77359ebe08c949d4
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.2-3-optimized-08d0e3fd6e82@sha256:1d48e37e0545832c9fd23203566489f8d5b2252f36c091a199e9a3dbc4593af7
           args: ["start", "--optimized", "--import-realm"]
           env:
             # --- front/back-channel hostname split ---
@@ -96,6 +96,21 @@ spec:
                 secretKeyRef:
                   name: keycloak-bootstrap
                   key: admin-password
+            # --- ADR-0385 D3: MCP withheld-code authenticator (server-level SPI config) ---
+            # The authenticator uses SCA's private mTLS listener and the scoped staff OAuth client.
+            # The secret ref is OPTIONAL on purpose: this is the
+            # bank's only IdP, and an unseeded OpenBao key must not keep it from starting. Unset,
+            # the authenticator refuses every MCP connect (fail closed) and logs a WARN at boot.
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__SCA_URL
+              value: https://sca-service.sca.svc:8443
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CLIENT_ID
+              value: openbank-keycloak-mcp
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-mcp-sca-client
+                  key: client-secret
+                  optional: true
             # KC_HEALTH_ENABLED, KC_CACHE=local, KC_METRICS_ENABLED and KC_FEATURES
             # (token-exchange, admin-fine-grained-authz:v1 — mobile/SCA, ADR-0021/0065)
             # are BUILD-TIME options, now baked into the optimized image
@@ -106,12 +121,100 @@ spec:
             # here: under --optimized, re-declaring a differing build option aborts
             # startup. KC_FEATURES had drifted out of gitops on the live pod; baking
             # it re-declares the feature set as code.
+            # Keep Kubernetes health probes on the private management HTTP port.
+            - name: KC_HTTP_MANAGEMENT_SCHEME
+              value: "http"
+            - name: KC_HTTPS_PORT
+              value: "8443"
+            - name: KC_HTTPS_CERTIFICATE_FILE
+              value: /tls/mcp-read-server/tls.crt
+            - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+              value: /tls/mcp-read-server/tls.key
+            - name: KC_HTTPS_PROTOCOLS
+              value: TLSv1.3
+            - name: KC_HTTPS_CLIENT_AUTH
+              value: required
+            - name: KC_HTTPS_TRUST_STORE_FILE
+              value: /tls/mcp-read-client-trust/truststore.p12
+            # The OAuth X.509 authenticator validates the chain again using Keycloak's system trust.
+            - name: KC_TRUSTSTORE_PATHS
+              value: /tls/mcp-read-oauth-client-ca/ca.crt
+            - name: KC_HTTPS_TRUST_STORE_TYPE
+              value: PKCS12
+            - name: KC_HTTPS_TRUST_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-mcp-read-client-truststore
+                  key: password
+            - name: MCP_READ_GRANT_ENABLED
+              value: "true"
+            - name: MCP_READ_ISSUER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-mcp-read-issuer-oidc
+                  key: MCP_READ_ISSUER_CLIENT_SECRET
+            - name: MCP_READ_NONCE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-read-nonce
+                  key: key
+            - name: MCP_READ_PROOF_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-read-proof
+                  key: key
+            - name: MCP_AUTHORITY_TLS_KEYSTORE
+              value: /tls/mcp-authority/identity.p12
+            - name: MCP_AUTHORITY_TLS_TRUSTSTORE
+              value: /tls/mcp-authority/trust.p12
+            - name: MCP_AUTHORITY_TLS_PASSWORD_FILE
+              value: /tls/mcp-authority/password
+            - name: MCP_READ_CUSTOMER_ISSUER_URL
+              value: https://kc.open-bank.tech/realms/openbank-customers
+            - name: MCP_READ_RESOURCE_URL
+              value: https://mcp.open-bank.tech/customer/mcp
+            # The Delegation component owns the pod-scoped 8443 ingress rule for Keycloak.
+            - name: MCP_READ_DELEGATION_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-mcp-authority-origins
+                  key: delegation-url
+            - name: MCP_READ_ISSUER_TOKEN_URL
+              value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__TOKEN_URL
+              value: $(MCP_READ_ISSUER_TOKEN_URL)
+            - name: KC_SPI_AUTHENTICATOR__OPENBANK_MCP_WITHHELD_CODE__CONNECT_AUTHORITY_URL
+              value: $(MCP_READ_DELEGATION_ORIGIN)
+            - name: MCP_CONNECT_V2_ENABLED
+              value: "true"
+            # Reviewed inline public key digest for the customer-only static CIMD discovery provider.
+            # Promote the provider-bearing image before applying this pin.
+            - name: MCP_CHATGPT_CIMD_STATIC_JWKS_SHA256
+              value: "54142eab824791d7891f1eb448dda346420072ebbbd9294ee802a8f7b5a0244c"
+            - name: MCP_READ_DEPLOYMENT
+              value: shared-sandbox
+            - name: MCP_READ_CONNECTION_BINDING_ENABLED
+              value: "true"
           ports:
+            - name: mcp-read
+              containerPort: 8443
             - name: http
               containerPort: 8080
             - name: management
               containerPort: 9000
           volumeMounts:
+            - name: mcp-authority-tls
+              mountPath: /tls/mcp-authority
+              readOnly: true
+            - name: mcp-read-server
+              mountPath: /tls/mcp-read-server
+              readOnly: true
+            - name: mcp-read-oauth-client-ca
+              mountPath: /tls/mcp-read-oauth-client-ca
+              readOnly: true
+            - name: mcp-read-client-trust
+              mountPath: /tls/mcp-read-client-trust
+              readOnly: true
             # Realm import dir: Keycloak reads every *.json here on --import-realm.
             - name: realm-import
               mountPath: /opt/keycloak/data/import
@@ -166,6 +269,21 @@ spec:
               cpu: "1"
               memory: 1Gi
       volumes:
+        - name: mcp-authority-tls
+          secret:
+            secretName: keycloak-mcp-authority-tls
+        - name: mcp-read-server
+          secret:
+            secretName: keycloak-mcp-read-server-tls
+        - name: mcp-read-oauth-client-ca
+          secret:
+            secretName: keycloak-mcp-read-oauth-client-ca
+        - name: mcp-read-client-trust
+          secret:
+            secretName: keycloak-mcp-read-client-truststore
+            items:
+              - key: truststore.p12
+                path: truststore.p12
         # projected: combine both realm JSONs into one /opt/keycloak/data/import dir so
         # Keycloak's --import-realm picks up both *.json files on cold start (ADR-0065).
         - name: realm-import

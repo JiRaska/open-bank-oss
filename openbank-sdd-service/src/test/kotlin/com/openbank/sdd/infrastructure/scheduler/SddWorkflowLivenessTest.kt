@@ -50,6 +50,7 @@ class SddWorkflowLivenessTest {
         every { mandates.listLive() } returns Uni.createFrom().item(emptyList<SddMandate>())
         val scheduler = MandateExpiryScheduler(
             mandates = mandates,
+            writer = mockk(),
             clock = Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC),
             enabled = true,
             domainMetrics = metricsOver(registry),
@@ -81,6 +82,7 @@ class SddWorkflowLivenessTest {
         every { mandates.listLive() } returns Uni.createFrom().failure(IllegalStateException("db down"))
         val scheduler = MandateExpiryScheduler(
             mandates = mandates,
+            writer = mockk(),
             clock = Clock.fixed(Instant.parse("2026-08-01T00:00:00Z"), ZoneOffset.UTC),
             enabled = true,
             domainMetrics = metricsOver(registry),

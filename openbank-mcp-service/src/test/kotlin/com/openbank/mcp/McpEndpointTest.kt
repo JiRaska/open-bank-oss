@@ -58,7 +58,8 @@ class McpEndpointTest {
         val stub = StubReads(mapper)
         val toolRegistry =
             McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
-        val caller = CallerContextResolver(jwt, oboEnabled, fakeSessionRepo())
+        val caller =
+            CallerContextResolver(jwt, oboEnabled, fakeSessionRepo(), customerIssuer = java.util.Optional.empty())
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -69,6 +70,7 @@ class McpEndpointTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(registry)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, toolsListCacheTtlMs)
@@ -155,6 +157,20 @@ class McpEndpointTest {
         )
         assertThat(resp.path("result").path("content").first().path("text").asText())
             .isEqualTo("Authorization unavailable")
+    }
+
+    @Test
+    fun `the tool-call series carries the channel the resolver admitted the caller on (ADR-0384 D1)`() {
+        endpoint(allowAll(), jwt = staffOboJwt(), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val byChannel = registry.find("openbank.mcp.tool_calls").counters()
+            .groupBy { it.id.getTag("channel") }
+            .mapValues { (_, c) -> c.sumOf { it.count() } }
+        assertThat(byChannel).containsEntry("operator", 1.0).containsEntry("agent", 1.0)
     }
 
     @Test
@@ -630,6 +646,12 @@ class McpEndpointTest {
 
         assertThat(toolCalls("list_accounts", "UNAVAILABLE", "DENIED")).isEqualTo(1.0)
         assertThat(toolCalls("list_accounts", "DENY", "DENIED")).isEqualTo(1.0)
+
+        // Availability SLI input: the outage is a server fault; the policy DENY is not a failure at all.
+        assertThat(
+            registry.get("openbank.mcp.tool_call.failures").tag("kind", "error").counter().count(),
+        ).isEqualTo(1.0)
+        assertThat(registry.find("openbank.mcp.tool_call.failures").counters().sumOf { it.count() }).isEqualTo(1.0)
     }
 
     @Test

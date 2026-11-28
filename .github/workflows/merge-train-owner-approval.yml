@@ -57,6 +57,10 @@ jobs:
   decide:
     # Check BOTH actors before minting credentials; reruns never re-apply old decisions.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner && github.run_attempt == 1
+    # Least-privilege: the App credential is read from the protected `merge-train` environment
+    # (deployment branches: main only). An environment secret overrides a repository secret
+    # of the same name, so this works before and after the repo-level copy is removed.
+    environment: merge-train
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -77,7 +81,7 @@ jobs:
           persist-credentials: false
       - name: Mint the GitHub App installation token
         id: app_token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}

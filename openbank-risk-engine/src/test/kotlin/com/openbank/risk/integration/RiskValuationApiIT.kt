@@ -220,17 +220,21 @@ class RiskValuationApiIT {
     }
 
     private fun assertPinnedTreasuryRevision(snapshot: String, curveSet: String) {
-        val capture = UUID.randomUUID()
         val deal = UUID.randomUUID()
         val revisions = "treasury_deal_cash_flow_revision"
+        var capture: UUID? = null
         try {
             TestDb.execute(
                 "INSERT INTO $revisions (deal_id, deal_version, schedule_hash, flows) VALUES ('$deal', 1, 'h1', '[]')",
             )
-            TestDb.query(
-                "SELECT capture_planning_inputs('$capture', '$snapshot', '$curveSet', " +
-                    "ARRAY(SELECT revision_id FROM $revisions WHERE deal_id = '$deal'))",
-            ) { assertThat(it).isEqualTo(capture.toString()) }
+            val ids = mutableListOf<Long>()
+            TestDb.query("SELECT revision_id FROM $revisions WHERE deal_id = '$deal'") { ids.add(it.toLong()) }
+            val path = "/api/v1/risk/planning/input-captures"
+            val request = """{"snapshotId":"$snapshot","curveSetId":"$curveSet","treasuryRevisionIds":$ids}"""
+            capture = UUID.fromString(
+                given().contentType("application/json").body(request).`when`().post(path)
+                    .then().statusCode(201).extract().path("id"),
+            )
             TestDb.execute(
                 "INSERT INTO $revisions (deal_id, deal_version, schedule_hash, flows) VALUES ('$deal', 2, 'h2', '[]')",
             )
@@ -242,8 +246,10 @@ class RiskValuationApiIT {
                 TestDb.count("SELECT count(*) FROM planning_input_capture_treasury WHERE capture_id = '$capture'"),
             ).isEqualTo(1)
         } finally {
-            TestDb.execute("DELETE FROM planning_input_capture_treasury WHERE capture_id = '$capture'")
-            TestDb.execute("DELETE FROM planning_input_capture WHERE id = '$capture'")
+            if (capture != null) {
+                TestDb.execute("DELETE FROM planning_input_capture_treasury WHERE capture_id = '$capture'")
+                TestDb.execute("DELETE FROM planning_input_capture WHERE id = '$capture'")
+            }
             TestDb.execute("DELETE FROM $revisions WHERE deal_id = '$deal'")
         }
     }

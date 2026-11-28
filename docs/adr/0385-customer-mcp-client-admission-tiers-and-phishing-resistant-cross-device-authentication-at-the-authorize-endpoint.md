@@ -1,13 +1,14 @@
 ---
 date: 2026-11-17
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: [openbank-app]
 tags: [ai-agents, authn, security]
-summary: "Amends ADR-0383: MCP clients are admitted by allowlist tier — hosted ones only as authenticated confidential clients, local ones only with DPoP; authorize = fresh passkey in the starting browser plus a context-linked SCA in the app."
+followup: "#16590 — realm tier admission and its parity gate are built; the authorize-endpoint passkey + in-app SCA flow is not yet"
+summary: "Amends ADR-0383: MCP clients are admitted by allowlist tier — hosted ones only as authenticated confidential clients, local ones only with DPoP; authorize = fresh request-bound passkey plus a separate context-linked SCA in the app."
 ---
 
 # ADR-0385 — Customer MCP client admission tiers and phishing-resistant cross-device authentication at the authorize endpoint
@@ -192,6 +193,25 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
    - Parameters sent beside the `request_uri` that differ from the stored request are rejected.
    - A `request_uri` presented by another `client_id` is rejected.
    - PKCE that is absent or `plain` is rejected.
+   - **Proposed hosted interoperability profile (pending review and live verification).**
+     A hosted assistant may initiate standard OAuth at a bank-operated adapter. Keycloak
+     remains a separate authorization server and requires PAR for every adapter request.
+     The adapter selects a dedicated bank client and key per admitted provider. It validates
+     the exact provider client, redirect and resource, and requires S256 PKCE and authenticated
+     code exchange. It builds a fresh, bank-authenticated PAR request from the validated
+     transaction. The provider cannot supply bank-side redirect or authentication controls.
+   - The existing QR or app link, native passkey and transaction-bound SCA apply to the
+     same bank transaction. The adapter may issue a short-lived, single-use code after it
+     confirms the approved connection belongs to the expected provider. Provider and bank
+     credentials have distinct issuers and audiences. Provider access and refresh must
+     resolve to the active bank connection and fail after revocation.
+   - The hosted resource is `/customer/hosted-mcp`. Its protected-resource metadata
+     advertises the adapter as its sole authorization server. The existing `/customer/mcp`
+     resource continues to advertise the bank issuer and validate bank tokens. The adapter
+     uses that existing resource for its internal DPoP-bound requests.
+   - The adapter's OAuth metadata (RFC 8414) advertises `mcp:balance:read` as the pilot
+     scope. On discovery and dispatch, the scope permits only `list_accounts` and
+     `get_balance` for accounts approved in the app. The internal Keycloak flow uses `openid`.
 2. **A fresh passkey in the browser that started the flow.**
    - Every MCP client is bound per client to a dedicated authentication flow override with
      **no `auth-cookie` alternative**. That binding is the control.
@@ -207,8 +227,8 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
      the OS-provided QR with the phone camera, and the protocol requires proximity.
    - Authenticator attachment is relaxed for this flow if `platform` hides hybrid. P3 verifies
      that hybrid is offered in real browsers under the realm policy.
-   - This is authenticate-then-initiate. There is no bank-made QR, and no password, SMS, e-mail
-     link or device-code fallback.
+   - The browser WebAuthn variant authenticates first and then initiates SCA. Its cross-device QR
+     is provided by the OS. Password, SMS, e-mail links and device-code grants are outside this flow.
 3. **Registration and recovery are unreachable** from an MCP authorize. A passkey, or an SCA
    device, enrolled less than 72 h ago cannot authorize an MCP connect. Account recovery is
    explicitly out of this path.
@@ -221,6 +241,36 @@ confirm a context-linked SCA challenge in the bank app before a code is issued.
    - A handle presented by another party's app is refused.
    - The app approval completes only that session, and the code is returned only to that session.
      A handle presented from another browser session is refused.
+
+5. **Native passkey path for approved hosted clients.**
+   - Keycloak creates a short-lived handoff after validating the original client, PAR and S256
+     challenge. A bank link or QR opens the first-party app. The opaque handle travels in the URL
+     fragment and Delegation stores only its digest, together with the immutable OAuth request and
+     browser-session binding.
+   - The app authenticates as the owner, claims the pending request, and displays the client and
+     account permissions before the customer selects accounts. Customer Edge requires a fresh
+     user-verified assertion against a one-use challenge bound to the exact customer, Keycloak
+     subject, guarded request and selected-account context. Its server-observed credential age
+     must meet the same 72-hour minimum. Older records without a trustworthy time acquire a
+     conservative lower bound at first verified use.
+   - In a dedicated sandbox configuration, a staff administrator may temporarily lower only
+     the native passkey minimum for one active synthetic individual. Party records the exact
+     administrator, beneficiary, expiry and reason. Loss of synthetic eligibility revokes the
+     grant permanently. The native assertion, credential age evidence, binding and separate
+     SCA device age check remain required. Outside that sandbox configuration and on lookup
+     failure, the 72-hour native minimum applies.
+   - A separately enabled shared sandbox may use an expiring site-wide native passkey
+     minimum for active individual customer and synthetic profiles. A staff administrator sets
+     a positive minimum in Admin UI and supplies a reason and expiry. Party records the change
+     and serves the active value only for an eligible bound party to the Edge service identity.
+     Ordinary deployment defaults and SCA device age do not inherit the sandbox setting.
+   - Keycloak consumes only a single matching bank-internal receipt. It rechecks the user,
+     selected context and session expiry before initiating the existing context-bound SCA.
+     Keycloak releases the original OAuth code after SCA consumption, with the original redirect
+     and S256 exchange. The app receives only the bank review and approval state.
+   - The browser WebAuthn and native flows have distinct per-client binding. Enable the native
+     flow only for an approved hosted client after the app, authority and issuer are deployed.
+
    - The link path is new and claimed only by the `tech.openbank.app` app id. It is not matched
      by `/pay/v1*` and is not claimed by any other app id.
    - The web fallback page only tells the customer to install the app.
@@ -402,6 +452,15 @@ exists. Fixing `openbank-app` `http://localhost:*` is tracked in #16612.
 - Rotating the client key or secret → existing grants still refresh.
 - Realm assertion over `customers-realm-template.json`, for every MCP client: no direct grant,
   implicit grant, device grant or service account; exact redirects; `refreshTokenMaxReuse` = 0.
+
+**Hosted adapter pilot**
+- ChatGPT and Claude independently connect through their registered clients, reach the bank
+  QR or native handoff, and return from an approved TestFlight request.
+- Each assistant reads only the chosen synthetic account and can reuse the connection in
+  a new chat. Unapproved accounts and payment proposals are rejected.
+- Wrong client, browser binding, redirect or PKCE, expired state, and replay are rejected.
+- After revocation in the app, both the previous access token and refresh fail. A repeated
+  refresh token invalidates its family without affecting the other assistant.
 
 **PAR and authorize**
 - `request_uri` reused, older than 60 s, used by another `client_id`, or with differing parameters

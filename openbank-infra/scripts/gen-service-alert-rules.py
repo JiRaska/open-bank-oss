@@ -30,6 +30,7 @@ The drift gate `gen-service-alert-rules-drift-gate` re-runs this and fails on an
 """
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import yaml
 
@@ -99,7 +100,9 @@ and on (namespace, workload) openbank:expected_service:info
 
 
 def inventory(gitops: Path) -> list[tuple[str, str]]:
-    return sorted((ns, w) for ns, ws in management_port_workloads(gitops).items() for w in ws)
+    # A zero-scaled opt-in sandbox template is not yet part of the expected fleet.
+    workloads = management_port_workloads(gitops, exclude_dormant_sandbox=True)
+    return sorted((ns, w) for ns, ws in workloads.items() for w in ws)
 
 
 def build(inv: list[tuple[str, str]]) -> dict:
@@ -202,6 +205,30 @@ def self_test() -> int:
         "ExpectedWorkloadAbsent", "ServiceHttp5xxRatioHigh", "ServiceRestartBurst"]
     assert render(inv) == text, "output must be deterministic"
     assert render(inv + [("x", "new-service")]) != text, "a new service must change the output"
+    with TemporaryDirectory() as tmp:
+        gitops = Path(tmp)
+        kind = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n"
+        template = """  template:
+    spec:
+      containers:
+        - name: app
+          ports:
+            - name: management
+              containerPort: 8085
+"""
+        for group, name, replicas in (
+            ("sandbox-overlays", "dormant", "  replicas: 0\n"),
+            ("sandbox-overlays", "active", "  replicas: 1\n"),
+            ("sandbox-overlays", "default", ""),
+            ("components", "scaled-down", "  replicas: 0\n"),
+        ):
+            f = gitops / group / f"{name}.yaml"
+            f.parent.mkdir(exist_ok=True)
+            f.write_text(kind + f"  name: {name}\n  namespace: example\nspec:\n" + replicas + template)
+        assert inventory(gitops) == [("example", name) for name in ("active", "default", "scaled-down")]
+        dormant = gitops / "sandbox-overlays" / "dormant.yaml"
+        dormant.write_text(dormant.read_text().replace("replicas: 0", "replicas: 1"))
+        assert ("example", "dormant") in inventory(gitops)
     real = inventory(REPO / "openbank-infra/gitops")
     assert len(real) >= 30, f"inventory lost its corpus: {len(real)}"
     print("self-test OK")
