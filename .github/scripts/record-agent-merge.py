@@ -386,7 +386,8 @@ def execute(args):
             if (not isinstance(canonical, dict) or canonical.get("merged") is not True
                     or canonical.get("state") != "closed" or canonical.get("number") != args.pr
                     or canonical.get("html_url") != f"https://github.com/{repo}/pull/{args.pr}"
-                    or (canonical.get("base") or {}).get("ref") != "main"
+                    or (canonical.get("base") or {}).get("ref") not in
+                    ("main", "qualification/flaky-test-hunter")
                     or ((canonical.get("base") or {}).get("repo") or {}).get("full_name") != repo):
                 raise ValueError("backfill requires an actually merged PR")
             event = {"pull_request": canonical}

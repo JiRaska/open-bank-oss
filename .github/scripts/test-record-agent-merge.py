@@ -432,11 +432,11 @@ class ReadOnlyTest(unittest.TestCase):
 
     def observe(self, flags, capability=None, row_status=200, bad_row=False,
                 bad_json=False, actor='JiRaska', merged=True, proof_error=False,
-                policy=False, env_overrides=None):
+                policy=False, base_ref='main', env_overrides=None):
         calls = []
         canonical = pull(number=7, branch='agent/read-proof', merged=merged, state='closed',
                          head={'ref': 'agent/read-proof', 'sha': 'a' * 40},
-                         base={'ref': 'main', 'repo': {'full_name': 'JiRaska/open-bank-oss'}})
+                         base={'ref': base_ref, 'repo': {'full_name': 'JiRaska/open-bank-oss'}})
         proof = {'mergedByType': 'GITHUB_APP', 'mergedById': 12, 'headSha': 'a' * 40,
                  'mergeCommitSha': 'b' * 40,
                  'policyAuthorization': {'kind': 'POLICY_PR_AUTO_MERGE', 'scope': 'PR',
@@ -552,6 +552,24 @@ class ReadOnlyTest(unittest.TestCase):
         self.assertEqual([path for _, path, _ in calls], [
             '/api/v1/agent-merge-records/capabilities', '/api/v1/agent-merge-records/7'])
 
+    def test_only_main_and_hunter_qualification_are_canonical_backfill_targets(self):
+        # ADR-0031 requires a merge record for the hunter's human qualification merge.
+        # This is an exact second target, not permission to reconstruct arbitrary base refs.
+        for base_ref in ('main', 'qualification/flaky-test-hunter'):
+            with self.subTest(base_ref=base_ref, accepted=True):
+                result, calls, _, _ = self.observe(['--pr', '7', '--read-existing'],
+                                                   base_ref=base_ref)
+                self.assertEqual(result, 0)
+                self.assertEqual([path for _, path, _ in calls], [
+                    '/api/v1/agent-merge-records/capabilities',
+                    '/api/v1/agent-merge-records/7'])
+        for base_ref in ('release', 'qualification/other-agent', 'qualification'):
+            with self.subTest(base_ref=base_ref, accepted=False):
+                result, calls, _, _ = self.observe(['--pr', '7', '--read-existing'],
+                                                   base_ref=base_ref)
+                self.assertEqual(result, 1)
+                self.assertEqual(calls, [])
+
     def test_policy_row_uses_existing_evidence_comparator(self):
         result, _, _, _ = self.observe(['--pr', '7', '--read-existing'], policy=True)
         self.assertEqual(result, 0)
@@ -616,7 +634,8 @@ class WorkflowWiringTest(unittest.TestCase):
         # PyYAML 1.1 parses the bare key `on:` as boolean True.
         events = workflow.get('on', workflow.get(True))
         self.assertEqual(events['pull_request']['types'], ['closed'])
-        self.assertEqual(events['pull_request']['branches'], ['main'])
+        self.assertEqual(events['pull_request']['branches'],
+                         ['main', 'qualification/flaky-test-hunter'])
         self.assertIn('concurrency', workflow)
         record = workflow['jobs']['record']
         self.assertIn('merged == true', record['if'])

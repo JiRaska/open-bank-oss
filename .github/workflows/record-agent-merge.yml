@@ -40,7 +40,9 @@ name: Record agent PR merge
 on:
   pull_request:
     types: [closed]
-    branches: [main]
+    # ADR-0031: the hunter's human qualification merge needs the same execution
+    # evidence as main. Do not widen this to arbitrary qualification targets.
+    branches: [main, qualification/flaky-test-hunter]
   workflow_dispatch:
     inputs:
       operation:
