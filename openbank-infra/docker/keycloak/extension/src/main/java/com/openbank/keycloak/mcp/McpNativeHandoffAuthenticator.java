@@ -124,7 +124,7 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
         PollRejection rejection;
         try {
             user = ctx.getSession().users().getUserById(ctx.getRealm(), receipt.keycloakSubject());
-            rejection = receiptRejection(existing, user, party, digest, receipt);
+            rejection = receiptRejection(auth, existing, user, party, digest, receipt);
         } catch (RuntimeException e) {
             refusePoll(ctx, PollRejection.USER_LOOKUP);
             return;
@@ -141,14 +141,15 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
         ctx.success();
     }
 
-    private static PollRejection receiptRejection(UserModel existing, UserModel user, String party, String digest,
+    private static PollRejection receiptRejection(AuthenticationSessionModel auth, UserModel existing, UserModel user,
+                                                   String party, String digest,
                                                    McpConnectAuthorityClient.NativeReceipt receipt) {
         if (!party.equals(receipt.partyId()) || !digest.equals(receipt.contextSha256())) {
             return PollRejection.RECEIPT_CONTEXT;
         }
         if (user == null) return PollRejection.USER_NOT_FOUND;
         if (!user.isEnabled()) return PollRejection.USER_DISABLED;
-        if (user.getRequiredActionsStream().findAny().isPresent()) return PollRejection.REQUIRED_ACTIONS;
+        if (McpNativeEnrollment.blocks(auth, user, true)) return PollRejection.REQUIRED_ACTIONS;
         if (!McpWithheldCodeAuthenticator.partyOf(user).map(party::equals).orElse(false)) {
             return PollRejection.PARTY_MISMATCH;
         }

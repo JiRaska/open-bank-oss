@@ -53,6 +53,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 KC = ROOT / "openbank-infra/gitops/components/keycloak"
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 H, L = "mcp-hosted-reference", "mcp-local-reference"
+BANK, BANK_CB = "mcp-bank-hosted-chatgpt", "https://mcp.open-bank.tech/oauth/hosted/callback"
+WEB_ENROLLMENT = "webauthn-register-passwordless"
 H_CB, L_CB = "https://client.test/cb", "http://127.0.0.1:53682/callback"
 USER, PARTY = "mcp-it@example.test", "11111111-1111-4111-8111-111111111111"
 USER_ID = "9a7e0c1e-0385-4d00-8000-00000000a11c"
@@ -153,9 +155,9 @@ class Browser:
     """A minimal cookie-carrying user agent. Keycloak marks its cookies Secure; this disposable
     instance is plain http, so the jar returns them regardless (test transport only)."""
 
-    def __init__(self, base):
+    def __init__(self, base, tls=None):
         self.base, self.cookies = base, {}
-        self.opener = urllib.request.build_opener(NoRedirect)
+        self.opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=tls))
 
     def request(self, method, url, data=None, headers=None):
         hdrs = dict(headers or {})
@@ -202,8 +204,11 @@ class ScaStub:
                 pass
 
             def reply(self, status, body):
-                data = json.dumps(body).encode()
                 self.send_response(status)
+                if status == 204:
+                    self.end_headers()
+                    return
+                data = json.dumps(body).encode()
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -218,7 +223,7 @@ class ScaStub:
                 if self.headers.get("Authorization") != f"Bearer {stub.token}":
                     return self.reply(401, {})
                 body = json.loads(raw or b"{}")
-                if authority and self.path.startswith(ConnectAuthority.PATH):
+                if authority and self.path.startswith((ConnectAuthority.PATH, ConnectAuthority.NATIVE_PATH)):
                     return self.reply(*authority.answer(self.path, body, self.headers.get("Idempotency-Key")))
                 if self.path == "/api/v1/sca/challenges":
                     return self.reply(*stub.initiate(body, self.headers.get("Idempotency-Key")))
@@ -301,6 +306,7 @@ class ConnectAuthority:
 
     PATH = "/api/v1/delegations/mcp-connect/requests"
     ACCOUNT = "11111111-0000-4000-8000-111111111111"
+    NATIVE_PATH = "/api/v1/delegations/mcp-connect/native-handoffs/issuer/"
 
     def __init__(self):
         self.connection = str(uuid.uuid4())
@@ -310,8 +316,12 @@ class ConnectAuthority:
         self.family = None
         self.revoked = False
         self.checks = []
+        self.handoff = self.attested = None
+        self.native_proved = False
 
     def answer(self, path, body, idempotency_key):
+        if path.startswith(self.NATIVE_PATH):
+            return self.answer_native(path.removeprefix(self.NATIVE_PATH), body, idempotency_key)
         if path == self.PATH:
             assert idempotency_key == body["requestRef"]
             assert body["partyId"] == PARTY and body["clientId"] == L
@@ -353,9 +363,34 @@ class ConnectAuthority:
             return 200, {**body, "status": "ACTIVE", "connectionId": self.connection}
         return 404, {}
 
+    def answer_native(self, operation, body, idempotency_key):
+        assert idempotency_key == body["tokenSha256"]
+        binding = body["binding"]
+        assert binding["clientId"] == BANK and binding["redirectUri"] == BANK_CB
+        assert binding["resource"] == RESOURCE and binding["scopes"] == ["openid"] and binding["kind"] == "DPOP"
+        if operation == "issue":
+            self.handoff = body
+            self.request = {"partyId": PARTY, "clientId": BANK, "parJkt": binding["parJkt"],
+                            "requestRef": binding["requestRef"], "resource": RESOURCE, "scopes": ["openid"],
+                            "expiresAtEpochSecond": binding["expiresAtEpochSecond"], "redirectHost": urllib.parse.urlparse(BANK_CB).hostname}
+            return 204, {}
+        assert all(body[key] == value for key, value in self.handoff.items())
+        if operation == "claimed-party":
+            return 200, {"partyId": PARTY}
+        if operation == "attest-selection":
+            self.attested = body["contextSha256"]
+            return 204, {}
+        if operation == "consume":
+            if not self.native_proved:
+                return 204, {}
+            self.native_proved = False
+            return 200, {"keycloakSubject": USER_ID, "partyId": PARTY, "contextSha256": self.attested}
+        return 404, {}
+
 
 class McpClientAdmission(unittest.TestCase):
     V2 = False
+    NATIVE = False
 
     @classmethod
     def setUpClass(cls):
@@ -396,7 +431,11 @@ class McpClientAdmission(unittest.TestCase):
         weak["attributes"]["dpop.bound.access.tokens"] = "false"
         weak["attributes"]["require.pushed.authorization.requests"] = "false"
         realm["clients"].append(weak)
-        clients[H]["attributes"]["jwks.string"] = json.dumps({"keys": [{**cls.hkey.jwk(), "alg": "ES256", "use": "sig", "kid": "it-1"}]})
+        keyset = json.dumps({"keys": [{**cls.hkey.jwk(), "alg": "ES256", "use": "sig", "kid": "it-1"}]})
+        clients[H]["attributes"]["jwks.string"] = keyset
+        if cls.NATIVE:
+            clients[BANK]["enabled"] = True
+            clients[BANK]["attributes"]["jwks.string"] = keyset
         realm["clients"].append({"clientId": "local-cookie-seeder", "publicClient": True, "enabled": True,
                                  "standardFlowEnabled": True, "directAccessGrantsEnabled": False,
                                  "redirectUris": ["https://client.test/*"], "protocol": "openid-connect",
@@ -446,6 +485,9 @@ class McpClientAdmission(unittest.TestCase):
                             passkey_credential(cls.passkey, cls.cred_id, 100)],
             "clientRoles": {"account": ["manage-account", "view-profile"]},
             "realmRoles": ["ROLE_CUSTOMER", "offline_access", "default-roles-openbank-customers"]})
+        if cls.NATIVE:
+            realm["users"][-1]["credentials"] = realm["users"][-1]["credentials"][:1]
+            realm["users"][-1]["requiredActions"] = [WEB_ENROLLMENT]
         realm["users"].append({
             "id": YOUNG_USER_ID, "username": YOUNG_USER, "email": YOUNG_USER, "firstName": "Young", "lastName": "It",
             "enabled": True, "emailVerified": True, "attributes": {"party_id": [YOUNG_PARTY]},
@@ -477,9 +519,23 @@ class McpClientAdmission(unittest.TestCase):
             test_mode = [f"{spi}connect-v2-enabled=true", f"{spi}connect-authority-url={sca}"]
             docker_tls = ["-v", f"{trust_certificate}:/fixture-authority.crt:ro",
                           "-e", "KC_TRUSTSTORE_PATHS=/fixture-authority.crt"]
+        cls.browser_tls = None
+        container_port = "8080"
+        if cls.NATIVE:
+            # The native handoff enforces an HTTPS issuer, including in this disposable fixture.
+            certificate = work / "browser.crt"
+            key = certificate.with_suffix(".key")
+            run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+                "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1",
+                "-keyout", str(key), "-out", str(certificate))
+            key.chmod(0o644)
+            docker_tls.extend(["-v", f"{certificate}:/fixture-browser.crt:ro", "-v", f"{key}:/fixture-browser.key:ro"])
+            test_mode.extend(["--https-certificate-file=/fixture-browser.crt", "--https-certificate-key-file=/fixture-browser.key"])
+            container_port = "8443"
+            cls.browser_tls = ssl.create_default_context(cafile=str(certificate))
         run("docker", "run", "--detach", "--name", cls.container, "--memory=1g",
             "--add-host=host.docker.internal:host-gateway",
-            "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2", "-p", "127.0.0.1::8080",
+            "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2", "-p", f"127.0.0.1::{container_port}",
             "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=it-admin", "-e", f"KC_BOOTSTRAP_ADMIN_PASSWORD={cls.admin_password}",
             "-v", f"{realm_file}:/opt/keycloak/data/import/openbank-customers-realm.json:ro",
             "-v", f"{providers}:/opt/keycloak/providers:ro", *docker_tls, image,
@@ -487,8 +543,8 @@ class McpClientAdmission(unittest.TestCase):
             *test_mode,
             f"{spi}sca-url={sca}", f"{spi}token-url={sca}/token", f"{spi}client-id=openbank-keycloak-mcp",
             f"{spi}client-secret={secrets.token_urlsafe(16)}", f"{spi}session-lifespan-seconds={SESSION_LIFESPAN_S}")
-        port = run("docker", "port", cls.container, "8080/tcp").decode().strip().splitlines()[0].rsplit(":", 1)[1]
-        cls.origin = f"http://127.0.0.1:{port}"
+        port = run("docker", "port", cls.container, f"{container_port}/tcp").decode().strip().splitlines()[0].rsplit(":", 1)[1]
+        cls.origin = f"{'https' if cls.NATIVE else 'http'}://127.0.0.1:{port}"
         cls.iss = f"{cls.origin}/realms/openbank-customers"
         oidc = f"{cls.iss}/protocol/openid-connect"
         cls.par_url, cls.auth_url, cls.token_url = f"{oidc}/ext/par/request", f"{oidc}/auth", f"{oidc}/token"
@@ -496,7 +552,7 @@ class McpClientAdmission(unittest.TestCase):
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             try:
-                with urllib.request.urlopen(cls.iss, timeout=2) as response:
+                with urllib.request.urlopen(cls.iss, timeout=2, context=cls.browser_tls) as response:
                     if response.status == 200:
                         return
             except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected, ConnectionError):
@@ -505,12 +561,12 @@ class McpClientAdmission(unittest.TestCase):
 
     # ---- protocol helpers -------------------------------------------------------------------
     def post(self, url, data, headers=None):
-        return Browser(self.origin).request("POST", url, data, headers)
+        return Browser(self.origin, self.browser_tls).request("POST", url, data, headers)
 
-    def client_auth(self):
+    def client_auth(self, client=H):
         now = int(time.time())
         assertion = self.hkey.jws({"alg": "ES256", "typ": "JWT", "kid": "it-1"},
-                                  {"iss": H, "sub": H, "aud": self.iss, "jti": str(uuid.uuid4()), "iat": now, "exp": now + 60})
+                                  {"iss": client, "sub": client, "aud": self.iss, "jti": str(uuid.uuid4()), "iat": now, "exp": now + 60})
         return {"client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer", "client_assertion": assertion}
 
     def proof(self, key=None, htu=None):
@@ -525,8 +581,8 @@ class McpClientAdmission(unittest.TestCase):
         if pkce:
             data["code_challenge"] = b64(hashlib.sha256(verifier.encode()).digest()) if method == "S256" else verifier
             data["code_challenge_method"] = method
-        if client == H and authenticate:
-            data.update(self.client_auth())
+        if client in (H, BANK) and authenticate:
+            data.update(self.client_auth(client))
         data.update(extra)
         headers = {"DPoP": self.proof(htu=self.par_url)} if self.V2 else None
         return self.post(self.par_url, data, headers), verifier
@@ -1149,11 +1205,73 @@ class McpV2Admission(McpClientAdmission):
         self.assertEqual(self.authority.checks, [True, False])
 
 
+class McpNativeEnrollmentAdmission(McpV2Admission):
+    NATIVE = True
+
+    def assert_native_poll(self, page):
+        if page.status != 200 or 'id="native-mcp-check"' not in page.text:
+            details = subprocess.run(("docker", "logs", self.container), capture_output=True, check=True)
+            events = re.findall(r'stage=[A-Z_]+(?: reason=[A-Z_]+)?|error="[a-z_]+"', (details.stdout + details.stderr).decode())
+            self.fail(f"native handoff did not wait (HTTP {page.status}, events {events})")
+
+    def test_native_sca_does_not_complete_browser_enrollment(self):
+        browser = Browser(self.origin, self.browser_tls)
+        uri, verifier = self.request_uri(BANK, BANK_CB, scope="openid", resource=RESOURCE,
+                                         dpop_jkt=self.dpop.thumbprint())
+        page = self.authorize(browser, BANK, uri)
+        self.assert_native_poll(page)
+        action = html.unescape(re.search(r'id="native-mcp-check" method="post" action="([^"]+)"', page.text).group(1))
+        handoff = re.search(r'name="handoff" value="([^"]+)"', page.text).group(1)
+        waiting = browser.follow(browser.request("POST", action, {"handoff": handoff, "check": "1"}))
+        self.assert_native_poll(waiting)
+        self.assertNotIn("code", waiting.query())
+        self.assertIsNone(self.authority.challenge)
+        self.authority.native_proved = True
+        time.sleep(2.1)
+        action = html.unescape(re.search(r'id="native-mcp-check" method="post" action="([^"]+)"', waiting.text).group(1))
+        sca = browser.follow(browser.request("POST", action, {"check": "1"}))
+        self.assertTrue(self.is_waiting_page(sca), "proved app handoff must reach separate SCA")
+        self.assertNotIn("code", sca.query())
+        self.assertIsNotNone(self.authority.challenge)
+        self.assertIsNone(self.authority.code)
+        self.sca.approve(uri, v2=True)
+        time.sleep(2.1)
+        callback = self.poll(browser, sca)
+        self.assertIn("code", callback.query())
+        self.assertEqual(self.sca.for_request(uri, v2=True)["spent"], 1)
+        tokens = self.post(self.token_url, {
+            "grant_type": "authorization_code", "client_id": BANK, "code": callback.query()["code"][0],
+            "redirect_uri": BANK_CB, "code_verifier": verifier, **self.client_auth(BANK),
+        }, {"DPoP": self.proof()})
+        self.assertEqual(tokens.status, 200)
+        access = claims(tokens.json()["access_token"])
+        self.assertEqual(access["openbank_mcp_connection_id"], self.authority.connection)
+        self.assertEqual(access["cnf"]["jkt"], self.dpop.thumbprint())
+
+        user_info = Browser(self.origin, self.browser_tls).request("GET",
+            f"{self.origin}/admin/realms/openbank-customers/users/{USER_ID}",
+            headers={"Authorization": f"Bearer {self.admin_token()}"})
+        self.assertEqual(user_info.status, 200)
+        self.assertEqual(user_info.json()["requiredActions"], [WEB_ENROLLMENT])
+
+        # Reuse the genuinely authenticated browser session for an ordinary client. Its code
+        # remains withheld behind the stock browser enrollment despite the completed native link.
+        verifier = b64(secrets.token_bytes(32))
+        ordinary = browser.follow(browser.request("GET", self.auth_url + "?" + urllib.parse.urlencode({
+            "client_id": "local-cookie-seeder", "response_type": "code", "redirect_uri": "https://client.test/x",
+            "scope": "openid", "code_challenge": b64(hashlib.sha256(verifier.encode()).digest()),
+            "code_challenge_method": "S256"})))
+        self.assertEqual(ordinary.status, 200)
+        self.assertIn('id="registerWebAuthn"', ordinary.text)
+        self.assertNotIn("code", ordinary.query())
+
+
 def load_tests(loader, _suite, _pattern):
     return unittest.TestSuite((
         loader.loadTestsFromTestCase(McpClientAdmission),
         McpV2Admission("test_v2_code_and_refresh_family"),
         McpV2Admission("test_chatgpt_cimd_discovery_is_scoped"),
+        McpNativeEnrollmentAdmission("test_native_sca_does_not_complete_browser_enrollment"),
     ))
 
 

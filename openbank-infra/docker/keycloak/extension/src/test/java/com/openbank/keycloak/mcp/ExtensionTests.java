@@ -10,8 +10,13 @@ import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
 import com.google.zxing.common.HybridBinarizer;
 import javax.imageio.ImageIO;
 
+import org.keycloak.authentication.RequiredActionContext;
+import org.keycloak.authentication.RequiredActionFactory;
+import org.keycloak.authentication.requiredactions.WebAuthnPasswordlessRegisterFactory;
 import org.keycloak.models.ClientModel;
+import org.keycloak.models.Constants;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
 import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
@@ -94,6 +99,7 @@ public final class ExtensionTests {
         }
         policy();
         nativeHandoff();
+        nativeEnrollmentScope();
         nativeHandoffPage();
         scopedCimdMetadata();
         if (!FAILURES.isEmpty()) {
@@ -220,6 +226,83 @@ public final class ExtensionTests {
                 () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
                         1001, 120));
 
+    }
+
+    private static void nativeEnrollmentScope() {
+        var attributes = Map.of(
+                "openbank.mcp.tier", "H", "openbank.mcp.profile", "bank-hosted-v2",
+                "use.jwks.string", "true", "use.jwks.url", "false",
+                "token.endpoint.auth.signing.alg", "ES256", "dpop.bound.access.tokens", "true",
+                "require.pushed.authorization.requests", "true", "pkce.code.challenge.method", "S256");
+        var client = adapterClient("mcp-bank-hosted-chatgpt", attributes,
+                "https://mcp.open-bank.tech/oauth/hosted/callback", true);
+        var actions = new java.util.HashSet<>(Set.of(WebAuthnPasswordlessRegisterFactory.PROVIDER_ID));
+        var sessionActions = new java.util.HashSet<String>();
+        var notes = new java.util.HashMap<String, String>();
+        String party = "7d098455-61ef-4978-a300-18bc96e0be90";
+        String context = "a".repeat(64);
+        var user = testInterface(UserModel.class, (method, args) -> switch (method) {
+            case "isEnabled" -> true;
+            case "getFirstAttribute" -> party;
+            case "getRequiredActionsStream" -> actions.stream();
+            default -> throw new UnsupportedOperationException(method);
+        });
+        var customerRealm = testInterface(RealmModel.class, (method, args) -> "openbank-customers");
+        var staffRealm = testInterface(RealmModel.class, (method, args) -> "openbank");
+        var auth = enrollmentSession(customerRealm, client, notes, sessionActions);
+        var staff = enrollmentSession(staffRealm, client, notes, sessionActions);
+        check("unverified browser enrollment still blocks", McpNativeEnrollment.blocks(auth, user, false));
+        check("verified native handoff reaches independent SCA", !McpNativeEnrollment.blocks(auth, user, true));
+        check("staff realm preserves normal enrollment", McpNativeEnrollment.blocks(staff, user, true));
+        notes.put(McpNotes.NATIVE_PROOF, context);
+        notes.put(McpNotes.CONNECT_CONTEXT_SHA256, context);
+        notes.put(McpNotes.CONNECT_V2, "1");
+        notes.put(McpNotes.PAR_PROOF_JKT, "A".repeat(43));
+        notes.put(McpNotes.PARTY_ID, party);
+        check("native proof before SCA cannot defer the browser action", !McpNativeEnrollment.browserEnrollmentDeferred(auth, user));
+        notes.put(McpNotes.BURNED, "1");
+        notes.put(McpNotes.NATIVE_STAGED_CONTEXT, context);
+        check("only staged native SCA permits deferral", McpNativeEnrollment.browserEnrollmentDeferred(auth, user));
+        check("staff realm cannot defer with the same notes", !McpNativeEnrollment.browserEnrollmentDeferred(staff, user));
+        for (String actionNote : List.of(Constants.KC_ACTION, Constants.KC_ACTION_EXECUTING)) {
+            notes.put(actionNote, WebAuthnPasswordlessRegisterFactory.PROVIDER_ID);
+            check("explicit enrollment uses the stock challenge", !McpNativeEnrollment.browserEnrollmentDeferred(auth, user));
+            notes.remove(actionNote);
+        }
+        sessionActions.add("UPDATE_PROFILE");
+        check("session required actions still block", !McpNativeEnrollment.browserEnrollmentDeferred(auth, user));
+        sessionActions.clear();
+        actions.add("UPDATE_PROFILE");
+        check("user required actions still block", !McpNativeEnrollment.browserEnrollmentDeferred(auth, user));
+        actions.remove("UPDATE_PROFILE");
+
+        var factory = java.util.ServiceLoader.load(RequiredActionFactory.class).stream()
+                .filter(provider -> provider.type() == McpNativeEnrollmentFactory.class)
+                .findFirst().orElseThrow().get();
+        var stock = new WebAuthnPasswordlessRegisterFactory();
+        eq("override stays on exact built-in action id", stock.getId(), factory.getId());
+        check("override order outranks stock for named provider", factory.order() > stock.order());
+        boolean[] ignored = {false};
+        var provider = ((McpNativeEnrollmentFactory) factory).createProvider(null, null);
+        provider.requiredActionChallenge(testInterface(RequiredActionContext.class, (method, args) -> switch (method) {
+            case "getAuthenticationSession" -> auth;
+            case "getUser" -> user;
+            case "ignore" -> { ignored[0] = true; yield null; }
+            default -> throw new UnsupportedOperationException(method);
+        }));
+        check("provider only ignores this request", ignored[0]);
+        eq("account enrollment remains assigned", Set.of(WebAuthnPasswordlessRegisterFactory.PROVIDER_ID), actions);
+    }
+
+    private static AuthenticationSessionModel enrollmentSession(RealmModel realm, ClientModel client, Map<String, String> notes,
+                                                                  Set<String> sessionActions) {
+        return testInterface(AuthenticationSessionModel.class, (method, args) -> switch (method) {
+            case "getRealm" -> realm;
+            case "getClient" -> client;
+            case "getAuthNote", "getClientNote" -> notes.get(args[0]);
+            case "getRequiredActions" -> sessionActions;
+            default -> throw new UnsupportedOperationException(method);
+        });
     }
 
     private static AuthenticationSessionModel handoffSession(Map<String, String> notes, String tab) {

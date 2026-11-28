@@ -86,12 +86,13 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
         }
         UserModel user = ctx.getUser();
         Optional<String> party = partyOf(user);
-        if (party.isEmpty() || user.getRequiredActionsStream().findAny().isPresent()) {
+        boolean nativeVerified = auth.getAuthNote(McpNotes.NATIVE_PROOF) != null;
+        if (party.isEmpty() || McpNativeEnrollment.blocks(auth, user, nativeVerified)) {
             // A pending required action would be served AFTER the consume; refuse before it instead.
             refuse(ctx, AuthenticationFlowError.INVALID_USER, "no party, or required actions pending");
             return;
         }
-        if (auth.getAuthNote(McpNotes.NATIVE_PROOF) != null) {
+        if (nativeVerified) {
             if (!connectV2 || !party.get().equals(auth.getAuthNote(McpNotes.PARTY_ID))) {
                 burn(ctx, AuthenticationFlowError.ACCESS_DENIED, "native connect identity mismatch");
                 return;
@@ -283,7 +284,7 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
             }
             auth.setAuthNote(McpNotes.BURNED, "1");
             if (result != ScaClient.Outcome.CONSUMED || !ctx.getUser().isEnabled()
-                    || ctx.getUser().getRequiredActionsStream().findAny().isPresent()
+                    || McpNativeEnrollment.blocks(auth, ctx.getUser(), nativeProof != null)
                     || context.expiresAt() <= now()) {
                 refuse(ctx, AuthenticationFlowError.ACCESS_DENIED, "v2 post-consume checks failed");
                 return;
@@ -292,6 +293,9 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
             if (context.expiresAt() <= now()) {
                 refuse(ctx, AuthenticationFlowError.EXPIRED_CODE, "v2 staged request expired");
                 return;
+            }
+            if (nativeProof != null && McpNativeEnrollment.appliesTo(auth)) {
+                auth.setAuthNote(McpNotes.NATIVE_STAGED_CONTEXT, digest);
             }
             // The guarded token response links the now-created refresh family and activates the
             // connection before any OAuth token can leave Keycloak. The code is only staging.
