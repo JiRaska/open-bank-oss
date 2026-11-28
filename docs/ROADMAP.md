@@ -5,6 +5,9 @@
 > 2026-07-06 and is historical); this page is the current overview. Per-decision delivery state is
 > tracked machine-readably in [`docs/adr/index.json`](adr/index.json) (`delivery_status`).
 
+For a review of the entry guides and their evidence sources, see the
+[repository audit](audits/2026-11-26-root-and-entry-docs.md).
+
 Milestones are **outcome-oriented** and **gated** — none is "done" until every acceptance criterion is
 verified. Effort is measured in engineer-weeks (a focused solo engineer), deliberately **without calendar
 dates**: elapsed time depends on maintainer availability and community participation. Track progress by

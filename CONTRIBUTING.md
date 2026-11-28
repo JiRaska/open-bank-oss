@@ -174,15 +174,20 @@ npm run dev
 # Open http://localhost:3000
 ```
 
+### Repository layout
+
+Follow the [root-layout policy](docs/repository-layout.md) when adding files or
+modules. The CI gate and pre-commit hook inspect the Git index.
+
 ### Local infrastructure stack (Docker Compose)
 
 The full local infrastructure stack (Postgres, Kafka, Keycloak, OpenBao, OPA, Valkey, observability)
-is in `openbank-infra/docker/docker-compose.yml`:
+is in `openbank-infra/docker-compose.yml`:
 
 ```bash
 cd openbank-infra
 cp .env.example .env   # adjust secrets for local dev
-make up-infra          # start Postgres, Kafka, Keycloak, Vault, OPA, Valkey
+make up-infra          # start Postgres, Kafka, Keycloak, OpenBao, OPA, Valkey
 make up-all            # build + start all application services
 make health-all        # verify health endpoints
 ```
