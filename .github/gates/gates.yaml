@@ -3677,13 +3677,15 @@ gates:
     mode: enforced
     selftest_exempt: >-
       is-a-test-suite — the run: below exercises the selector with eligible, irrelevant,
-      expired, and duplicate runs and asserts the exact retry and flake matrices.
+      expired, and duplicate runs and asserts the exact retry and flake matrices;
+      collector fixtures verify bounded retries and complete, single-object API pages.
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
     min_subjects: 33
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
+      python3 .github/scripts/test_reconcile_fetch_pages.py
 
   - id: gh-retry-selftest
     name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
