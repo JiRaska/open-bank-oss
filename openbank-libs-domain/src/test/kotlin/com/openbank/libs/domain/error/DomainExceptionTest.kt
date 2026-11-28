@@ -75,6 +75,15 @@ class DomainExceptionTest {
     }
 
     @Test
+    fun `legacy error is optional and preserved verbatim`() {
+        assertThat(NotFound("Widget not found").legacyError).isNull()
+        assertThat(NotFound("Widget not found", legacyError = "widget missing").legacyError)
+            .isEqualTo("widget missing")
+        assertThat(Conflict("Widget exists", legacyError = "duplicate widget").legacyError)
+            .isEqualTo("duplicate widget")
+    }
+
+    @Test
     fun `a domain code keeps its own spelling`() {
         val e = NotFound("Widget not found", WidgetErrorCode.WIDGET_NOT_FOUND)
 

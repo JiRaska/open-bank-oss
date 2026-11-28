@@ -122,6 +122,52 @@ class DomainExceptionMapperTest {
     }
 
     @Test
+    fun `a missing legacy error is omitted from the serialised document`() {
+        val problem = body(NotFound("Widget w-1 not found", WidgetErrorCode.WIDGET_NOT_FOUND))
+        val json = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+        val tree = json.readTree(json.writeValueAsString(problem))
+
+        assertThat(problem.error).isNull()
+        assertThat(tree.has("error")).isFalse()
+    }
+
+    @Test
+    fun `a supplied legacy error is preserved without changing the typed members`() {
+        val notFound = body(
+            NotFound(
+                "Widget w-1 not found",
+                WidgetErrorCode.WIDGET_NOT_FOUND,
+                legacyError = "widget w-1 missing",
+            ),
+        )
+        val conflict = body(Conflict("Widget already exists", legacyError = "duplicate widget"))
+
+        assertThat(notFound.status).isEqualTo(404)
+        assertThat(notFound.error).isEqualTo("widget w-1 missing")
+        assertThat(notFound.code).isEqualTo("WIDGET_NOT_FOUND")
+        assertThat(notFound.message).isEqualTo("Widget w-1 not found")
+        assertThat(conflict.status).isEqualTo(409)
+        assertThat(conflict.error).isEqualTo("duplicate widget")
+        assertThat(conflict.code).isEqualTo("CONFLICT")
+        assertThat(conflict.message).isEqualTo("Widget already exists")
+    }
+
+    @Test
+    fun `an inconsistent exception never carries its legacy error into the internal response`() {
+        val problem = body(
+            NotFound(
+                "should not be shown",
+                PlatformErrorCode.CONFLICT,
+                legacyError = "legacy detail must not be shown",
+            ),
+        )
+
+        assertThat(problem.status).isEqualTo(500)
+        assertThat(problem.code).isEqualTo("INTERNAL_ERROR")
+        assertThat(problem.error).isNull()
+    }
+
+    @Test
     fun `the internal detail and the cause never reach the body`() {
         val secret = "SELECT * FROM widget WHERE tenant=7 -- policy rule r42 denied"
         val problem = body(

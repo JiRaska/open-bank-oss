@@ -4613,6 +4613,57 @@ gates:
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
+  # ADR-0326 phase b (#11610): derive every production ErrorCode enum, hold its
+  # published semantics append-only, and keep the generated reference/OpenAPI component fresh.
+  - id: error-code-catalogue
+    name: "closed, unique, append-only fleet error-code catalogue (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Stable client-facing error codes cannot safely be renamed, re-categorised or reused; deriving
+      the closed enum catalogue and its generated contracts prevents silent API and metric-label drift.
+    review_after: 2027-05-28
+    budget_seconds: 30
+    min_subjects: 1000   # 3835 Kotlin src/main files measured 2026-11-28
+    selftest: |
+      python3 .github/scripts/check-error-code-catalogue.py --self-test
+      python3 .github/scripts/gen-error-code-catalogue.py --self-test
+      python3 .github/scripts/test_error_code_catalogue.py
+      python3 .github/scripts/test_gen_error_code_catalogue.py
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/check-error-code-catalogue.py
+      - .github/scripts/error_code_catalogue.py
+      - .github/scripts/test_error_code_catalogue.py
+      - .github/scripts/gen-error-code-catalogue.py
+      - .github/scripts/test_gen_error_code_catalogue.py
+    run: |
+      python3 .github/scripts/check-error-code-catalogue.py --root .
+      python3 .github/scripts/gen-error-code-catalogue.py --check
+
+  # ADR-0326 phase b (#11610): no new service-local ExceptionMapper declarations;
+  # the current estate is an exact, individually enumerable shrink-only baseline.
+  - id: service-local-exceptionmapper-ratchet
+    name: "service-local ExceptionMapper baseline only shrinks (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      A second local mapper fragments the kernel-owned error contract and can race shared mapping;
+      counting named and anonymous declarations against exact identities stops new debt immediately.
+    review_after: 2027-05-28
+    budget_seconds: 30
+    min_subjects: 1000   # 3468 service Kotlin src/main files measured 2026-11-28
+    selftest: |
+      python3 .github/scripts/check-service-local-exception-mappers.py --self-test
+      python3 .github/scripts/test_service_local_exception_mappers.py
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/check-service-local-exception-mappers.py
+      - .github/scripts/error_code_catalogue.py
+      - .github/scripts/test_service_local_exception_mappers.py
+    run: |
+      python3 .github/scripts/check-service-local-exception-mappers.py --root .
+
   # A required @QueryParam/@HeaderParam/@MatrixParam declared with a NON-NULLABLE
   # Kotlin reference type answers 500 when the caller omits it, never 400 — the
   # caller cannot tell "I sent a bad request" from "the server is broken", and on
