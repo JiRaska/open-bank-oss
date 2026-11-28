@@ -232,3 +232,18 @@ Připojený MCP klient může platbu pouze navrhnout; rozhoduje zákazník v apl
 SCA výzva musí být schvalovací a její dynamic linking musí pokrývat částku, měnu a příjemce plus `approvalRequestId` (`mcp-proposal:<id>`) a `payloadSha256`; žádná výjimka ze SCA neplatí. Pořadí: spotřebování výzvy, schválení v úložišti, poté vytvoření tuzemské nebo SEPA platby jako vlastní platby zákazníka sestavené pouze z uložené instrukce. `Idempotency-Key` platby je `mcp-proposal-<id>`, takže opakování po neúspěšné platbě (nutná nová SCA) platbu zopakuje, nikdy ji nezdvojí. Vytvořená platba se poté zapíše k návrhu jako provedená.
 
 Auditní události: `CUSTOMER_MCP_PROPOSAL_APPROVED` po schválení v úložišti, `CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED`, když platba existuje, ale úložiště provedení nezaznamenalo (návrh zůstává `APPROVED` do odsouhlasení), a `CUSTOMER_MCP_PROPOSAL_REFUSED` pro odmítnuté schválení.
+
+## Nativní passkey pro MCP Connect V2
+
+Bankovní aplikace převezme jednorázovou žádost přes
+`POST /mcp/connect-requests-v2/native-handoff/claim`. Po potvrzení výběru účtů vrátí
+`POST /mcp/connect-requests-v2/{requestRef}/native-passkey/begin` krátkodobou výzvu WebAuthn.
+Odpovídající endpoint `/native-passkey/complete` zaznamená ověření u bankovní autority
+a vrátí stav 204. Samostatné schválení SCA zůstává povinné. Nativní Connect je ve výchozím
+nastavení vypnutý.
+
+Po zapnutí nativního Connect může zákazník ve vlastní nativní relaci zobrazit svá připojení
+pomocí `GET /mcp/connections` a odvolat konkrétní připojení přes
+`POST /mcp/connections/{connectionId}/revoke`. Edge odvodí identitu zákazníka z ověřené relace
+a Delegation ověří vlastnictví připojení. Úspěšné odvolání vrací 204. Připojení mimo rozsah
+zákazníka vrací 404. Při opakování požadavku zůstává klíčem idempotence stejné ID připojení.

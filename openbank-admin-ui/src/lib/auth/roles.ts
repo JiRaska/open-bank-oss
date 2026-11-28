@@ -192,6 +192,7 @@ export const PERMISSIONS = {
   // must never be offered a customer-creation workflow.
   "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "mcp-native-passkey-age-exception:manage": [ROLES.ADMIN],
   // PID-service's party list/detail/create and BankID sync endpoints accept only
   // OPERATOR/ADMIN. Keep this PII workspace narrower than the generic payments area.
   "pid:view":             [ROLES.ADMIN, ROLES.OPERATOR],

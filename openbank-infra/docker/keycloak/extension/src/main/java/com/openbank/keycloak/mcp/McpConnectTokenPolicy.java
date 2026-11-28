@@ -42,6 +42,7 @@ final class McpConnectTokenPolicy {
         requireHostedClientAuthentication(client);
         var factory = factory(session);
         if (factory.allowsLegacyV1()) {
+            if (McpConnectPolicy.bankAdapterReserved(client)) throw deny();
             return;
         }
         try {
@@ -74,6 +75,7 @@ final class McpConnectTokenPolicy {
         requireHostedClientAuthentication(client);
         var factory = factory(session);
         if (factory.allowsLegacyV1()) {
+            if (McpConnectPolicy.bankAdapterReserved(client)) throw deny();
             return;
         }
         try {
@@ -91,6 +93,9 @@ final class McpConnectTokenPolicy {
      * bank's allowed authenticator and the runtime exception deadline even on an imported realm.
      */
     private static void requireHostedClientAuthentication(ClientModel client) throws ClientPolicyException {
+        if (McpConnectPolicy.bankAdapterReserved(client) && !McpConnectPolicy.bankAdapterAllowed(client)) {
+            throw deny();
+        }
         if (!"H".equals(client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE))) {
             return;
         }
@@ -138,6 +143,10 @@ final class McpConnectTokenPolicy {
         String party = McpWithheldCodeAuthenticator.partyOf(user).orElseThrow(McpConnectTokenPolicy::deny);
         String sid = userSession.getId();
         String tier = client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE);
+        boolean bankAdapter = McpConnectPolicy.bankAdapterReserved(client);
+        if (bankAdapter && (!McpConnectPolicy.bankAdapterAllowed(client) || proof == null)) {
+            throw deny();
+        }
         if (!"openbank-customers".equals(realm.getName()) || !McpConnectPolicy.isMcpClient(tier)
                 || !client.getId().equals(clientSession.getClient().getId()) || userSession.isOffline()
                 || !realm.isRevokeRefreshToken() || realm.getRefreshTokenMaxReuse() != 0
@@ -154,9 +163,18 @@ final class McpConnectTokenPolicy {
         if (proof != null) {
             jkt = proof.getThumbprint();
             if (jkt == null || !DPoPUtil.DPOP_TOKEN_TYPE.equals(access.getType())
-                    || access.getConfirmation() == null || refresh.getConfirmation() == null
-                    || !jkt.equals(access.getConfirmation().getKeyThumbprint())
-                    || !jkt.equals(refresh.getConfirmation().getKeyThumbprint())) {
+                    || access.getConfirmation() == null
+                    || !jkt.equals(access.getConfirmation().getKeyThumbprint())) {
+                throw deny();
+            }
+            // Bind the confidential online family before serialization using the already verified proof.
+            if (bankAdapter && refresh.getConfirmation() == null) {
+                var confirmation = new AccessToken.Confirmation();
+                confirmation.setKeyThumbprint(jkt);
+                confirmation.setJktType(DPoPUtil.DPOP_TOKEN_TYPE);
+                refresh.setConfirmation(confirmation);
+            }
+            if (refresh.getConfirmation() == null || !jkt.equals(refresh.getConfirmation().getKeyThumbprint())) {
                 throw deny();
             }
         } else if (!"H".equals(tier) || !"Bearer".equals(access.getType())

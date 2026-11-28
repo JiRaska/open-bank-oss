@@ -56,6 +56,18 @@ spec:
           env:
             - name: NODE_ENV
               value: production
+            - name: OPENBANK_MCP_SANDBOX_PASSKEY_AGE_EXCEPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: enabled
+                  optional: true
+            - name: OPENBANK_MCP_SANDBOX_PASSKEY_AGE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: globalEnabled
+                  optional: true
             - name: PORT
               value: "3000"
             - name: NEXTAUTH_URL

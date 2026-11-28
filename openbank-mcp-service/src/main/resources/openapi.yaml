@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank MCP Server
-  version: 1.3.1
+  version: 1.4.0
   description: >
     Model Context Protocol (JSON-RPC 2.0 over HTTP POST) exposing curated consent-scoped read tools
     and a HITL payment proposal to governed AI agents (ADR-0181). Every tools/call is authorized by
@@ -192,6 +192,193 @@ paths:
                 $ref: "#/components/schemas/ProtectedResourceMetadata"
         "404":
           description: The customer channel is disabled
+  /customer/hosted-mcp:
+    post:
+      summary: Hosted customer MCP account and balance tools
+      description: >-
+        Accepts access tokens issued by the hosted OAuth adapter for this resource.
+        The bank-side request requires its own live grant, DPoP proof and mTLS identity.
+      operationId: dispatchHostedCustomerMcp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jsonrpc, method]
+              properties:
+                jsonrpc: { type: string, example: "2.0" }
+                id: {}
+                method: { type: string, example: tools/list }
+                params: { type: object }
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema: { type: object }
+        "204": { description: Notification accepted }
+        "400": { description: Invalid MCP envelope }
+        "401":
+          description: Hosted authorization required
+          headers:
+            WWW-Authenticate:
+              schema: { type: string }
+        "403": { description: Tool or method not permitted by the hosted scope }
+        "404": { description: Hosted OAuth unavailable }
+        "502": { description: Bank MCP transport unavailable }
+  /.well-known/oauth-protected-resource/customer/hosted-mcp:
+    get:
+      summary: Hosted customer MCP protected-resource metadata
+      operationId: hostedCustomerMcpMetadata
+      responses:
+        "200":
+          description: Metadata for the hosted MCP resource
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resource, authorization_servers, bearer_methods_supported]
+                properties:
+                  resource: { type: string, format: uri }
+                  authorization_servers:
+                    type: array
+                    items: { type: string, format: uri }
+                  bearer_methods_supported:
+                    type: array
+                    items: { type: string }
+                  scopes_supported:
+                    type: array
+                    items: { type: string }
+        "404": { description: Hosted OAuth unavailable }
+  /.well-known/oauth-authorization-server/oauth/hosted:
+    get:
+      summary: Discover the hosted OAuth issuer
+      operationId: hostedOAuthMetadata
+      responses:
+        "200":
+          description: OAuth authorization server metadata for the enabled hosted clients
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { description: Hosted OAuth unavailable }
+  /oauth/hosted/authorize:
+    get:
+      summary: Start bank approval for a registered hosted OAuth client
+      operationId: startHostedOAuth
+      parameters:
+        - name: client_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: redirect_uri
+          in: query
+          required: true
+          schema: { type: string }
+        - name: response_type
+          in: query
+          required: true
+          schema: { type: string }
+        - name: code_challenge
+          in: query
+          required: true
+          schema: { type: string }
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string }
+        - name: resource
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "303":
+          description: Continue with the bank or return to the registered hosted client
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        "400": { description: Invalid authorization request or browser transaction }
+        "404": { description: Hosted OAuth unavailable }
+  /oauth/hosted/callback:
+    get:
+      summary: Complete the bank-approved browser transaction
+      operationId: completeHostedOAuth
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "303":
+          description: Continue with the bank or return to the registered hosted client
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        "400": { description: Invalid authorization request or browser transaction }
+        "404": { description: Hosted OAuth unavailable }
+  /oauth/hosted/token:
+    post:
+      summary: Exchange a hosted authorization code or rotate a hosted refresh token
+      operationId: issueHostedOAuthToken
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, resource]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [authorization_code, refresh_token]
+                resource: { type: string, format: uri }
+                client_id: { type: string }
+                client_assertion: { type: string }
+                client_assertion_type: { type: string }
+                client_secret: { type: string }
+                code: { type: string }
+                code_verifier: { type: string }
+                redirect_uri: { type: string, format: uri }
+                refresh_token: { type: string }
+                scope: { type: string }
+      responses:
+        "200":
+          description: A read-only token pair for the approved connection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, refresh_token, token_type, expires_in, scope]
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  token_type:
+                    type: string
+                    enum: [Bearer]
+                  expires_in: { type: integer, minimum: 1 }
+                  scope: { type: string }
+        "400":
+          description: OAuth request rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+        "404": { description: Hosted OAuth unavailable }
 components:
   schemas:
     ProtectedResourceMetadata:

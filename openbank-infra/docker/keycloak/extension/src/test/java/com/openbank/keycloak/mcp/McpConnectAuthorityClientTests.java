@@ -162,6 +162,7 @@ public final class McpConnectAuthorityClientTests {
         McpConnectTokenPolicy.authorizationCode(unrelatedClient, null);
         McpConnectTokenPolicy.refresh(unrelatedClient, null);
         verifySignedAccessToken(activation.connectionId());
+        nativeHandoffContract();
         System.out.println("MCP connect authority: activation, default denial and signed access-token connection binding passed");
     }
 
@@ -213,7 +214,12 @@ public final class McpConnectAuthorityClientTests {
     }
 
     private static KeycloakSession tokenPolicySession(String tier) {
-        ClientModel client = proxy(ClientModel.class, "getAttribute", tier);
+        ClientModel client = ClientModel.class.cast(Proxy.newProxyInstance(ClientModel.class.getClassLoader(),
+                new Class<?>[] {ClientModel.class}, (unused, method, arguments) -> switch (method.getName()) {
+                    case "getClientId" -> "synthetic-fixture";
+                    case "getAttribute" -> McpConnectPolicy.TIER_ATTRIBUTE.equals(arguments[0]) ? tier : null;
+                    default -> throw new UnsupportedOperationException(method.getName());
+                }));
         KeycloakContext context = proxy(KeycloakContext.class, "getClient", client);
         var authenticator = new McpWithheldCodeAuthenticatorFactory();
         KeycloakSessionFactory factory = proxy(KeycloakSessionFactory.class, "getProviderFactory", authenticator);
@@ -248,6 +254,32 @@ public final class McpConnectAuthorityClientTests {
             return;
         }
         throw new AssertionError(description);
+    }
+
+    private static void nativeHandoffContract() throws IOException {
+        String tokenSha256 = "a".repeat(64);
+        String digest = "c".repeat(64);
+        var binding = new McpNativeHandoff.Binding("b".repeat(64), "https://bank.example/realms/test",
+                "hosted-fixture", "https://bank.example/customer/mcp", "https://assistant.example/callback",
+                "d".repeat(64), "HOSTED", null, List.of("balance:read"), EXPIRY);
+        var transport = new Transport(List.of(new Reply(204, null), new Reply(204, null),
+                new Reply(200, Map.of("partyId", PARTY)), new Reply(204, null),
+                new Reply(200, Map.of("partyId", PARTY, "keycloakSubject", "verified-subject",
+                        "contextSha256", digest))));
+        var client = new McpConnectAuthorityClient("https://connect.test", transport);
+        client.issueNativeHandoff(tokenSha256, binding);
+        require(client.claimedNativeParty(tokenSha256, binding) == null, "204 is pending without identity");
+        require(PARTY.equals(client.claimedNativeParty(tokenSha256, binding)), "claimed party parses exactly");
+        client.attestNativeSelection(tokenSha256, binding, digest);
+        var receipt = client.consumeNativeHandoff(tokenSha256, binding);
+        require(receipt.equals(new McpConnectAuthorityClient.NativeReceipt(PARTY, "verified-subject", digest)),
+                "native receipt binds identity and selected context");
+        String prefix = "/api/v1/delegations/mcp-connect/native-handoffs/issuer/";
+        require(transport.paths.equals(List.of(prefix + "issue", prefix + "claimed-party",
+                prefix + "claimed-party", prefix + "attest-selection", prefix + "consume")), "native issuer paths");
+        require(transport.keys.stream().allMatch(tokenSha256::equals), "native issuer idempotency uses digest");
+        require(digest.equals(((Map<?, ?>) transport.posted.get(3)).get("contextSha256")),
+                "exact selected digest is sent only on attestation");
     }
 
     private record Reply(int status, Map<String, Object> body) {

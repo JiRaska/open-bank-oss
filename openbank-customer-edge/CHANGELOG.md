@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.17.0...customer-edge-v1.17.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **customer-edge:** resolve shared MCP age after synthetic denial ([#17420](https://github.com/JiRaska/open-bank-oss/issues/17420)) ([01f4456](https://github.com/JiRaska/open-bank-oss/commit/01f4456f14a2c73dc0036f4bc094ff6f43c80529))
+
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.16.0...customer-edge-v1.17.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** configure the shared sandbox passkey age ([#17407](https://github.com/JiRaska/open-bank-oss/issues/17407)) ([647fa7e](https://github.com/JiRaska/open-bank-oss/commit/647fa7ea3ead2bca6752474c5b4376c73d670084))
+
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.3...customer-edge-v1.16.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
+## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.2...customer-edge-v1.15.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** meter native MCP passkey proof refusals ([#17385](https://github.com/JiRaska/open-bank-oss/issues/17385)) ([0649d1b](https://github.com/JiRaska/open-bank-oss/commit/0649d1b0b065b69b072c3f15c0d50b82662ce820))
+
+## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.1...customer-edge-v1.15.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** meter native MCP app guard refusals ([#17378](https://github.com/JiRaska/open-bank-oss/issues/17378)) ([ecaadcb](https://github.com/JiRaska/open-bank-oss/commit/ecaadcb2e4dbeba60d926218d893c3393c384067))
+
+## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.15.0...customer-edge-v1.15.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** manage owned MCP connections from native app ([#17350](https://github.com/JiRaska/open-bank-oss/issues/17350)) ([c556334](https://github.com/JiRaska/open-bank-oss/commit/c55633439b9bfa8650f5d5c9dcf79b3b11a6da66))
+
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.1...customer-edge-v1.15.0) (2026-11-26)
+
+
+### Features
+
+* **infra:** connect hosted MCP OAuth through the native bank passkey ([#17327](https://github.com/JiRaska/open-bank-oss/issues/17327)) ([ceb01bb](https://github.com/JiRaska/open-bank-oss/commit/ceb01bb689e593447527363b86b16f5a4439709b))
+
 ## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.14.0...customer-edge-v1.14.1) (2026-11-26)
 
 

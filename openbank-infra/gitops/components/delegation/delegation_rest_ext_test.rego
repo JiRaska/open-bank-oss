@@ -443,3 +443,34 @@ test_mcp_connect_issuer_actions_require_keycloak_machine if {
         prohibited with input as {"action": operation, "principal": object.remove(issuer, {"service_account"})}
     }
 }
+
+test_native_handoff_roles_are_issuer_and_edge_scoped if {
+    issuer := {
+        "id": "service-account-openbank-keycloak-mcp",
+        "type": "HUMAN",
+        "client_id": "openbank-keycloak-mcp",
+        "service_account": true,
+        "roles": ["ROLE_API"],
+    }
+    edge := {
+        "id": "service-account-openbank-edge",
+        "type": "HUMAN",
+        "client_id": "openbank-edge",
+        "service_account": true,
+        "roles": ["ROLE_OPERATOR"],
+    }
+    every action in {"native-issue", "native-claimed-party", "native-attest-selection", "native-consume"} {
+        operation := sprintf("delegation.mcp-connect.issuer.%s", [action])
+        "mcp-native-handoff-issuer" in allowed_reasons with input as {"action": operation, "principal": issuer}
+        prohibited with input as {"action": operation, "principal": edge}
+        prohibited with input as {"action": operation, "principal": object.remove(issuer, {"service_account"})}
+        prohibited with input as {"action": operation, "principal": object.union(issuer, {"roles": ["ROLE_OPERATOR"]})}
+    }
+    every action in {"native-claim", "native-selected-binding", "native-mark-verified"} {
+        operation := sprintf("delegation.mcp-connect.customer.%s", [action])
+        "mcp-native-handoff-edge" in allowed_reasons with input as {"action": operation, "principal": edge}
+        prohibited with input as {"action": operation, "principal": issuer}
+        prohibited with input as {"action": operation, "principal": object.remove(edge, {"service_account"})}
+        prohibited with input as {"action": operation, "principal": object.union(edge, {"roles": ["ROLE_API"]})}
+    }
+}

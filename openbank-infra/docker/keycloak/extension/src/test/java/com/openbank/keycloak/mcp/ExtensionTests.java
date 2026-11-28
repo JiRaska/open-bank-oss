@@ -4,15 +4,38 @@
 
 package com.openbank.keycloak.mcp;
 
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.MultiFormatReader;
+import com.google.zxing.client.j2se.BufferedImageLuminanceSource;
+import com.google.zxing.common.HybridBinarizer;
+import javax.imageio.ImageIO;
+
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.RealmModel;
+import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
+import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.util.JsonSerialization;
 
+import java.io.ByteArrayInputStream;
+import java.lang.reflect.Proxy;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.regex.Pattern;
 
 /**
  * Unit tests for the extension's pure logic. A plain runner, not JUnit: the extension compiles
@@ -70,12 +93,234 @@ public final class ExtensionTests {
             check("invalid refused: " + c.get("name"), refused);
         }
         policy();
+        nativeHandoff();
+        nativeHandoffPage();
+        scopedCimdMetadata();
         if (!FAILURES.isEmpty()) {
             FAILURES.forEach(f -> System.err.println("FAIL " + f));
             System.err.printf("%d of %d checks failed%n", FAILURES.size(), checks);
             System.exit(1);
         }
         System.out.printf("extension tests: %d checks, 0 failed%n", checks);
+    }
+
+    private static void nativeHandoffPage() throws Exception {
+        var issued = McpNativeHandoff.issue();
+        var response = McpNativeHandoffPage.render("/login-actions/authenticate?one=1&two=2", "<assistant>", issued);
+        String html = response.getEntity().toString();
+        check("page contains both Czech and English instructions",
+                html.contains("Propojení AI asistenta") && html.contains("Connect your AI assistant")
+                        && html.contains("schvalte") && html.contains("approve"));
+        check("page escapes dynamic client name and action URL",
+                html.contains("&lt;assistant&gt;") && !html.contains("<assistant>")
+                        && html.contains("one=1&amp;two=2"));
+        check("direct link and form keep exact bank handoff",
+                html.contains("href=\"" + issued.appLink() + "\"")
+                        && html.contains("name=\"handoff\" value=\"" + issued.formValue() + "\""));
+        check("page retains automatic 3-second polling and cancel",
+                html.contains("requestSubmit();") && html.contains("},3000)")
+                        && html.contains("name=\"cancel\" value=\"1\""));
+        var nonce = Pattern.compile("<style nonce=\"([0-9a-f-]+)\">").matcher(html);
+        check("style nonce exists", nonce.find());
+        String nonceValue = nonce.group(1);
+        String csp = response.getHeaderString("Content-Security-Policy");
+        check("CSP permits only nonce styles/scripts and embedded artwork",
+                csp.contains("default-src 'none'") && csp.contains("img-src data:")
+                        && csp.contains("style-src 'nonce-" + nonceValue + "'")
+                        && csp.contains("script-src 'nonce-" + nonceValue + "'")
+                        && !csp.contains("unsafe-inline") && html.contains("<script nonce=\"" + nonceValue + "\">"));
+        eq("handoff page is not cached", "no-store", response.getHeaderString("Cache-Control"));
+        eq("handoff page referrer omitted", "no-referrer", response.getHeaderString("Referrer-Policy"));
+
+        var qr = Pattern.compile("data:image/png;base64,([A-Za-z0-9+/=]+)").matcher(html);
+        check("handoff QR is served as local PNG", qr.find());
+        var image = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode(qr.group(1))));
+        var bitmap = new BinaryBitmap(new HybridBinarizer(new BufferedImageLuminanceSource(image)));
+        eq("QR encodes exactly the direct universal link", issued.appLink(), new MultiFormatReader().decode(bitmap).getText());
+
+        var art = Pattern.compile("data:image/webp;base64,([A-Za-z0-9+/=]+)").matcher(html);
+        check("standalone Lípa artwork is bundled as a local WebP", art.find());
+        try (var source = McpNativeHandoffPage.class.getResourceAsStream("lipa-mascot.webp")) {
+            check("bundled mascot artwork bytes match the page", source != null
+                    && Arrays.equals(source.readAllBytes(), Base64.getDecoder().decode(art.group(1))));
+        }
+
+        String waiting = McpNativeHandoffPage.render("/login-actions/authenticate", "Assistant", null).getEntity().toString();
+        check("waiting page introduces no handoff material",
+                waiting.contains("Continue in the app") && !waiting.contains("name=\"handoff\"")
+                        && !waiting.contains("data:image/png") && waiting.contains("requestSubmit();"));
+    }
+
+    private static void nativeHandoff() {
+        var first = McpNativeHandoff.issue();
+        URI uri = URI.create(first.appLink());
+        String token = uri.getRawFragment().substring("handoff=".length());
+        eq("handoff host", "open-bank.tech", uri.getHost());
+        eq("handoff path", "/app/mcp/connect", uri.getPath());
+        check("handoff has no query", uri.getRawQuery() == null);
+        check("early browser poll can keep the original QR with the expected digest",
+                first.appLink().equals(McpNativeHandoff.recover(token, first.tokenSha256()).appLink()));
+        check("a different browser handoff cannot be recovered",
+                McpNativeHandoff.recover(token, McpNativeHandoff.issue().tokenSha256()) == null);
+        check("malformed retry token cannot be reflected",
+                McpNativeHandoff.recover("<script>", first.tokenSha256()) == null);
+        check("handoff has exactly 32 opaque bytes", Base64.getUrlDecoder().decode(token).length == 32);
+        eq("handoff state stores the raw 32-byte token digest",
+                McpConnectContext.sha256Hex(Base64.getUrlDecoder().decode(token)), first.tokenSha256());
+        check("a new browser handoff gets a distinct token",
+                !first.tokenSha256().equals(McpNativeHandoff.issue().tokenSha256()));
+        check("handoff's diagnostic form does not print the token", !first.toString().contains(token));
+
+        var notes = new HashMap<>(Map.of(
+                McpNotes.PKCE_CHALLENGE, "A".repeat(43), McpNotes.STARTED_AT, "1000",
+                McpNotes.REDIRECT_URI, "https://assistant.example/oauth/callback",
+                McpNotes.RESOURCE, "https://bank.example/customer/mcp",
+                McpNotes.SCOPE, "read", McpNotes.REQUEST_URI, McpConnectContext.PAR_REQUEST_URI_PREFIX + "request"));
+        var binding = McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                1001, 120);
+        eq("handoff expires with its configured OAuth session", 1120L, binding.expiresAtEpochSecond());
+        eq("handoff binds hosted confidential PAR", "HOSTED", binding.kind());
+        var otherTab = McpNativeHandoff.binding(handoffSession(notes, "tab-b"), "https://bank.example/realms/test",
+                1001, 120);
+        check("handoff cannot move between browser tabs", !binding.sessionRef().equals(otherTab.sessionRef()));
+        notes.put(McpNotes.PAR_PROOF_JKT, "A".repeat(43));
+        eq("handoff preserves verified DPoP PAR", "DPOP",
+                McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                        1001, 120).kind());
+        expectThrow("handoff expiry is exclusive",
+                () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                        1120, 120));
+        var attributes = Map.of(
+                "openbank.mcp.tier", "H", "openbank.mcp.profile", "bank-hosted-v2",
+                "use.jwks.string", "true", "use.jwks.url", "false",
+                "token.endpoint.auth.signing.alg", "ES256", "dpop.bound.access.tokens", "true",
+                "require.pushed.authorization.requests", "true", "pkce.code.challenge.method", "S256");
+        String callback = "https://mcp.open-bank.tech/oauth/hosted/callback";
+        notes.put(McpNotes.REDIRECT_URI, callback);
+        var chatgpt = adapterClient("mcp-bank-hosted-chatgpt", attributes, callback, true);
+        var claude = adapterClient("mcp-bank-hosted-claude", attributes, callback, true);
+        for (ClientModel client : List.of(chatgpt, claude)) {
+            var host = McpNativeHandoff.binding(handoffSession(notes, "tab-a", client),
+                    "https://bank.example/realms/test", 1001, 120);
+            eq("adapter handoff binds vendor identity", client.getClientId(), host.clientId());
+            eq("adapter handoff preserves verified DPoP", "DPOP", host.kind());
+        }
+        notes.remove(McpNotes.PAR_PROOF_JKT);
+        expectThrow("bank adapter cannot fall back to bearer PAR",
+                () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a", chatgpt),
+                        "https://bank.example/realms/test", 1001, 120));
+        check("unregistered vendor cannot copy the adapter profile", !McpConnectPolicy.bankAdapterAllowed(
+                adapterClient("mcp-unknown-vendor", attributes, callback, true)));
+        check("disabled adapter stays unavailable", !McpConnectPolicy.bankAdapterAllowed(
+                adapterClient(chatgpt.getClientId(), attributes, callback, false)));
+        check("adapter callback must match exactly", !McpConnectPolicy.bankAdapterAllowed(
+                adapterClient(claude.getClientId(), attributes, callback + "/other", true)));
+        notes.remove(McpNotes.PKCE_CHALLENGE);
+        expectThrow("handoff refuses a missing guarded PKCE challenge",
+                () -> McpNativeHandoff.binding(handoffSession(notes, "tab-a"), "https://bank.example/realms/test",
+                        1001, 120));
+
+    }
+
+    private static AuthenticationSessionModel handoffSession(Map<String, String> notes, String tab) {
+        var client = testInterface(ClientModel.class, (method, args) -> switch (method) {
+            case "getAttribute" -> "H";
+            case "isPublicClient" -> false;
+            case "getClientAuthenticatorType" -> "client-jwt";
+            case "getId" -> "client-internal";
+            case "getClientId" -> "hosted-fixture";
+            default -> throw new UnsupportedOperationException(method);
+        });
+        return handoffSession(notes, tab, client);
+    }
+
+    private static ClientModel adapterClient(String clientId, Map<String, String> attributes, String callback,
+                                             boolean enabled) {
+        return testInterface(ClientModel.class, (method, args) -> switch (method) {
+            case "getAttribute" -> attributes.get(args[0]);
+            case "isEnabled" -> enabled;
+            case "isPublicClient" -> false;
+            case "getClientAuthenticatorType" -> "client-jwt";
+            case "getId", "getClientId" -> clientId;
+            case "getRedirectUris" -> Set.of(callback);
+            default -> throw new UnsupportedOperationException(method);
+        });
+    }
+
+    private static AuthenticationSessionModel handoffSession(Map<String, String> notes, String tab, ClientModel client) {
+        var root = testInterface(RootAuthenticationSessionModel.class, (method, args) -> "browser-root");
+        var realm = testInterface(RealmModel.class, (method, args) -> "realm-id");
+        return testInterface(AuthenticationSessionModel.class, (method, args) -> switch (method) {
+            case "getClient" -> client;
+            case "getAuthNote" -> notes.get(args[0]);
+            case "getParentSession" -> root;
+            case "getRealm" -> realm;
+            case "getTabId" -> tab;
+            default -> throw new UnsupportedOperationException(method);
+        });
+    }
+
+    private static <T> T testInterface(Class<T> type, BiFunction<String, Object[], Object> behavior) {
+        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
+                (proxy, method, args) -> behavior.apply(method.getName(), args)));
+    }
+
+    private static void scopedCimdMetadata() throws Exception {
+        String clientId = "https://chatgpt.com/oauth/client.json";
+        String callback = "https://chatgpt.com/connector_platform_oauth_redirect";
+        String issuer = "https://kc.open-bank.tech/realms/openbank-customers";
+        String jwks = "{\"keys\":[{\"kid\":\"synthetic-test-key\"}]}";
+        String pin = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(jwks.getBytes(StandardCharsets.UTF_8)));
+        Map<String, String> attributes = new HashMap<>(Map.of(
+                "openbank.mcp.tier", "H",
+                "openbank.mcp.resource", "https://mcp.open-bank.tech/customer/mcp",
+                "pkce.code.challenge.method", "S256",
+                "require.pushed.authorization.requests", "true",
+                "token.endpoint.auth.signing.alg", "RS256",
+                "use.jwks.string", "true",
+                "use.jwks.url", "false",
+                "jwks.string", jwks));
+        ClientModel client = testInterface(ClientModel.class, (method, args) -> switch (method) {
+            case "getClientId" -> clientId;
+            case "isEnabled", "isStandardFlowEnabled" -> true;
+            case "isPublicClient", "isImplicitFlowEnabled", "isDirectAccessGrantsEnabled",
+                    "isServiceAccountsEnabled" -> false;
+            case "getClientAuthenticatorType" -> "client-jwt";
+            case "getRedirectUris" -> Set.of(callback);
+            case "getAuthenticationFlowBindingOverride" -> "efd9751b-94d8-4ae5-80dc-3f078a671b2d";
+            case "getAttribute" -> attributes.get(args[0]);
+            default -> throw new UnsupportedOperationException(method);
+        });
+        RealmModel realm = testInterface(RealmModel.class, (method, args) -> switch (method) {
+            case "getName" -> "openbank-customers";
+            case "getClientByClientId" -> clientId.equals(args[0]) ? client : null;
+            default -> throw new UnsupportedOperationException(method);
+        });
+        RealmModel unrelated = testInterface(RealmModel.class, (method, args) -> "master");
+        check("scoped CIMD without deployment pin", advertisedCimd(realm, issuer, null) == null);
+        check("scoped CIMD with differing pin", advertisedCimd(realm, issuer, "f".repeat(64)) == null);
+        check("scoped CIMD does not claim another issuer", advertisedCimd(realm, "https://other.invalid", pin) == null);
+        check("scoped CIMD does not claim another realm", advertisedCimd(unrelated, issuer, pin) == null);
+        eq("exact static CIMD advertisement", true, advertisedCimd(realm, issuer, pin));
+        var inherited = new OIDCConfigurationRepresentation();
+        inherited.setClientIdMetadataDocumentSupported(true);
+        McpChatGptCimdDiscoveryFactory.advertise(inherited, unrelated, null);
+        eq("scoped CIMD leaves unrelated inherited metadata unchanged", true,
+                inherited.getClientIdMetadataDocumentSupported());
+        McpChatGptCimdDiscoveryFactory.advertise(inherited, realm, null);
+        check("scoped CIMD clears unsupported inherited advertisement",
+                inherited.getClientIdMetadataDocumentSupported() == null);
+        attributes.put("require.pushed.authorization.requests", "false");
+        check("scoped CIMD requires client PAR", advertisedCimd(realm, issuer, pin) == null);
+    }
+
+    private static Boolean advertisedCimd(RealmModel realm, String issuer, String pin) {
+        var config = new OIDCConfigurationRepresentation();
+        config.setIssuer(issuer);
+        config.setPushedAuthorizationRequestEndpoint(issuer + "/protocol/openid-connect/ext/par/request");
+        McpChatGptCimdDiscoveryFactory.advertise(config, realm, pin);
+        return config.getClientIdMetadataDocumentSupported();
     }
 
     private static void policy() {
@@ -134,6 +379,15 @@ public final class ExtensionTests {
         }
         eq("waiting page escapes markup", "&lt;script&gt;&amp;&quot;&#39;",
                 McpWithheldCodeAuthenticator.escape("<script>&\"'"));
+    }
+
+    private static void expectThrow(String what, Runnable action) {
+        try {
+            action.run();
+            check(what, false);
+        } catch (IllegalArgumentException expected) {
+            check(what, true);
+        }
     }
 
     private static void eq(String what, Object expected, Object actual) {

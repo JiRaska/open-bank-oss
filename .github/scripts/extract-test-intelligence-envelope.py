@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 ENVELOPE_NAME = re.compile(r"(?:^|/)run(?:-[a-z0-9-]+)?\.json$")
+MAX_RECONCILE_ENVELOPE_BYTES = 32 * 1024 * 1024
 COLLECTOR_PATH = Path(__file__).with_name("collect-test-run-evidence.py")
 SPEC = importlib.util.spec_from_file_location("test_run_evidence_collector", COLLECTOR_PATH)
 assert SPEC and SPEC.loader
@@ -43,6 +44,21 @@ def extract(archive: bytes) -> bytes:
         if len(names) != 1:
             raise ValueError(f"expected one run envelope, found {len(names)}")
         return validate(zipped.read(names[0]))
+
+
+def extract_reconcile(archive: Path, component: str, commit: str, run_id: str, attempt: int) -> bytes:
+    with zipfile.ZipFile(archive) as zipped:
+        entries = zipped.infolist()
+        if len(entries) != 1 or entries[0].filename != "run.json":
+            raise ValueError("expected a single root run.json")
+        if entries[0].file_size > MAX_RECONCILE_ENVELOPE_BYTES:
+            raise ValueError("run envelope exceeds the reconcile size limit")
+        payload = validate(zipped.read(entries[0]))
+    envelope = json.loads(payload)
+    run = envelope["run"]
+    if (envelope["component"], run["commit"], run["id"], run["attempt"]) != (component, commit, run_id, attempt):
+        raise ValueError("run envelope provenance differs from the reconcile plan")
+    return payload
 
 
 def prune_history(directory: Path) -> int:
@@ -93,6 +109,27 @@ def self_test() -> None:
                 "observedAt": datetime.now(timezone.utc).isoformat()},
     }
     good = json.dumps(example).encode()
+    with tempfile.TemporaryDirectory() as temp:
+        candidate = Path(temp) / "artifact.zip"
+        binding = (example["component"], example["run"]["commit"], "123", 1)
+        candidate.write_bytes(archive({"run.json": good}))
+        assert extract_reconcile(candidate, *binding) == good
+        for index, wrong in enumerate(("other-service", "wrong-commit", "456", 2)):
+            mismatched = list(binding)
+            mismatched[index] = wrong
+            try:
+                extract_reconcile(candidate, *mismatched)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"mismatched reconcile binding accepted at index {index}")
+        candidate.write_bytes(archive({"nested/run.json": good}))
+        try:
+            extract_reconcile(candidate, *binding)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("nested reconcile envelope accepted")
     v2 = json.dumps(example | {"schemaVersion": 2}).encode()
     for name in ("run.json", "run-chromium.json", "nested/run-security-excellence-firefox.json"):
         assert extract(archive({name: good})) == good
@@ -157,6 +194,13 @@ def self_test() -> None:
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
+    elif len(sys.argv) == 8 and sys.argv[1] == "--reconcile":
+        _, _, archive, output, component, commit, run_id, attempt = sys.argv
+        try:
+            Path(output).write_bytes(extract_reconcile(Path(archive), component, commit, run_id, int(attempt)))
+        except (OSError, ValueError, TypeError, zipfile.BadZipFile) as error:
+            print(f"Test Intelligence envelope rejected: {error}", file=sys.stderr)
+            sys.exit(1)
     elif len(sys.argv) == 4 and sys.argv[1] == "--validate-component":
         try:
             validate_component(Path(sys.argv[2]), sys.argv[3])

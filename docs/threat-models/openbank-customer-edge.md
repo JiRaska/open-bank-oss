@@ -393,3 +393,29 @@ The named TLS bucket reloads certificate material hourly. A matching `Certificat
 ## Synthetic transfer admission (#7284)
 
 The synthetic transfer admission requires the verified canary client and the authenticated taint decision. It resolves an active SYNTHETIC party and checks ownership of the configured account pair before calling Transaction. The customer supplies only the run date and direction.
+
+## Native MCP passkey verification
+
+The app presents an opaque handoff only through an authenticated own-party session. Edge resolves the selected accounts and request binding from Delegation. It consumes a dedicated one-use WebAuthn challenge, verifies user presence and user verification, and accepts only the stored credential for the same customer and Keycloak subject. Missing age evidence fails closed until the verified 72-hour lower bound is met. Successful proof is recorded only at the bank authority. The app still requires a separate SCA approval and receives no OAuth code or passkey evidence from Edge.
+
+With the same feature enabled, the app can list and revoke its owned MCP connections from a native
+session. Edge requires the exact first-party WebAuthn client, Edge audience, canonical party and
+subject claims, and an absent actor context. It forwards only the authenticated party and the
+existing idempotency key to Delegation. Delegation enforces ownership against the connection
+record, and Edge rejects a list response containing another party. The pending-request collection,
+OAuth approval and payment approval continue to use their existing authorization rules.
+
+An explicitly enabled sandbox can apply an expiring, administrator-issued exception to the
+native passkey minimum for one active synthetic party. Edge looks up the policy for the verified
+party through its authenticated Party client. The policy changes only the age comparison and
+requires a recorded timestamp, the original WebAuthn assertion and the existing bound SCA.
+Unavailable or invalid policy falls back to 72 hours. Party appends an audit record on issuance
+or revocation and revokes when the party loses synthetic eligibility. Disable the sandbox policy
+switch to restore the standard minimum immediately at the next deployment.
+
+The separately enabled shared-sandbox policy can supply a temporary minimum for all eligible
+active individual profiles. The Party authority rechecks the bound party and the policy expiry.
+Edge validates the returned duration and expiry and retains its 72-hour default when no valid
+policy is available. The synthetic per-party policy has precedence. The new site switches
+default off independently of the original synthetic setting. Disable the Edge site switch to
+revert immediately after its pods restart, then disable Party and Admin UI.

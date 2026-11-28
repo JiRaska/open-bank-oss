@@ -5,6 +5,9 @@
 package com.openbank.keycloak.mcp;
 
 import java.time.Duration;
+import java.util.Set;
+
+import org.keycloak.models.ClientModel;
 
 /**
  * ADR-0385 D2.3/D3 decisions, kept free of Keycloak types so they are unit-tested directly.
@@ -30,6 +33,34 @@ public final class McpConnectPolicy {
 
     public static boolean isMcpClient(String tierAttribute) {
         return tierAttribute != null && !tierAttribute.isBlank();
+    }
+
+    private static final Set<String> BANK_ADAPTERS = Set.of("mcp-bank-hosted-chatgpt", "mcp-bank-hosted-claude");
+    private static final String BANK_ADAPTER_CALLBACK = "https://mcp.open-bank.tech/oauth/hosted/callback";
+    private static final String PROFILE_ATTRIBUTE = "openbank.mcp.profile";
+
+    private static boolean bankAdapterId(ClientModel client) {
+        String id = client.getClientId();
+        return id != null && BANK_ADAPTERS.contains(id);
+    }
+
+    static boolean bankAdapterReserved(ClientModel client) {
+        return bankAdapterId(client)
+                || "bank-hosted-v2".equals(client.getAttribute(PROFILE_ATTRIBUTE));
+    }
+
+    static boolean bankAdapterAllowed(ClientModel client) {
+        return bankAdapterId(client) && client.isEnabled()
+                && "bank-hosted-v2".equals(client.getAttribute(PROFILE_ATTRIBUTE))
+                && "H".equals(client.getAttribute(TIER_ATTRIBUTE)) && !client.isPublicClient()
+                && "client-jwt".equals(client.getClientAuthenticatorType())
+                && "true".equals(client.getAttribute("use.jwks.string"))
+                && "false".equals(client.getAttribute("use.jwks.url"))
+                && "ES256".equals(client.getAttribute("token.endpoint.auth.signing.alg"))
+                && "true".equals(client.getAttribute("dpop.bound.access.tokens"))
+                && "true".equals(client.getAttribute("require.pushed.authorization.requests"))
+                && "S256".equals(client.getAttribute("pkce.code.challenge.method"))
+                && Set.of(BANK_ADAPTER_CALLBACK).equals(client.getRedirectUris());
     }
 
     /** Lifespan in seconds: configuration may shorten it, never lengthen it past 300 s. */

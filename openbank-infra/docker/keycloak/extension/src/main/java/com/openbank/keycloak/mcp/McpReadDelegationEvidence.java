@@ -130,6 +130,8 @@ final class McpReadDelegationEvidence {
         if (client == null || !client.isEnabled()) throw invalid();
         String tier = client.getAttribute(McpConnectPolicy.TIER_ATTRIBUTE);
         boolean hostedClient = "H".equals(tier) && McpConnectTokenPolicy.hostedClientAuthenticationAllowed(client);
+        boolean bankAdapter = McpConnectPolicy.bankAdapterReserved(client);
+        if (bankAdapter && (hosted || !McpConnectPolicy.bankAdapterAllowed(client))) throw invalid();
         if (hosted) {
             if (!hostedClient || !"Bearer".equals(token.getType()) || token.getConfirmation() != null) throw invalid();
             return null;

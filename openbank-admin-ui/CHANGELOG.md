@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.28.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.28.0...admin-ui-v4.28.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **admin-ui:** link the MCP explainer to channel observability ([#17318](https://github.com/JiRaska/open-bank-oss/issues/17318)) ([45d31db](https://github.com/JiRaska/open-bank-oss/commit/45d31db573e7f344489537a8364f1b128a0e1b47)), closes [#16606](https://github.com/JiRaska/open-bank-oss/issues/16606)
+
+## [4.28.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.27.0...admin-ui-v4.28.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** configure the shared sandbox passkey age ([#17407](https://github.com/JiRaska/open-bank-oss/issues/17407)) ([647fa7e](https://github.com/JiRaska/open-bank-oss/commit/647fa7ea3ead2bca6752474c5b4376c73d670084))
+
+## [4.27.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.5...admin-ui-v4.27.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
 ## [4.26.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.26.4...admin-ui-v4.26.5) (2026-11-25)
 
 

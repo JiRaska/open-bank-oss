@@ -137,3 +137,7 @@ the selected rail applies its own account validation.
 ### Hosted MCP grants
 
 A hosted grant without a DPoP thumbprint is bound to the approved connection ID. Lookup uses the exact customer, client and connection. It does not return grants with a DPoP thumbprint. The dedicated read issuer must also prove current account ownership and commit a first-use read reference before receiving a permit.
+
+## Native MCP handoff
+
+Delegation stores the digest of a short-lived handoff and its guarded OAuth context. Claiming the handoff and registering the customer's pending Connect request commit in one transaction. The issuer attests the immutable selection before Customer Edge verifies the native passkey for that context. An issuer can consume the verified receipt only once. The existing SCA approval remains separate. Native handoff operations are disabled by default.

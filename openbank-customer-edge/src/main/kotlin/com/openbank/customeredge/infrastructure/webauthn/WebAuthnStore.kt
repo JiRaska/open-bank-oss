@@ -38,21 +38,26 @@ data class RegisteredCredential(
  * No TTL — a passkey is a durable credential, not an ephemeral session artifact.
  */
 @ApplicationScoped
-class WebAuthnStore(redis: RedisDataSource, private val objectMapper: ObjectMapper) {
+class WebAuthnStore(private val redis: RedisDataSource, private val objectMapper: ObjectMapper) {
     private val values = redis.value(String::class.java)
 
     fun save(credential: RegisteredCredential) {
         values.set(key(credential.credentialId), objectMapper.writeValueAsString(credential))
     }
 
-    fun recordAssertion(credential: RegisteredCredential, signCount: Long) {
-        save(
-            credential.copy(
-                signCount = signCount,
-                firstVerifiedAtEpochMillis = credential.firstVerifiedAtEpochMillis ?: System.currentTimeMillis(),
-            ),
-        )
-    }
+    fun recordAssertion(credential: RegisteredCredential, signCount: Long): Boolean = redis.execute(
+        "EVAL",
+        UPDATE_ASSERTION,
+        "1",
+        key(credential.credentialId),
+        credential.partyId,
+        credential.keycloakUserId,
+        credential.attestedCredentialDataB64,
+        credential.signCount.toString(),
+        credential.firstVerifiedAtEpochMillis?.toString().orEmpty(),
+        signCount.toString(),
+        System.currentTimeMillis().toString(),
+    ).toInteger() == 1
 
     fun find(credentialId: String): RegisteredCredential? {
         val json = values.get(key(credentialId)) ?: return null
@@ -63,4 +68,23 @@ class WebAuthnStore(redis: RedisDataSource, private val objectMapper: ObjectMapp
     }
 
     private fun key(credentialId: String) = "edge:webauthn:cred:$credentialId"
+
+    private companion object {
+        val UPDATE_ASSERTION = """
+            local raw = redis.call('GET', KEYS[1])
+            if not raw then return 0 end
+            local record = cjson.decode(raw)
+            if record.partyId ~= ARGV[1] or record.keycloakUserId ~= ARGV[2]
+                or record.attestedCredentialDataB64 ~= ARGV[3] or record.signCount ~= tonumber(ARGV[4]) then
+                return 0
+            end
+            local firstVerified = record.firstVerifiedAtEpochMillis
+            if firstVerified == cjson.null then firstVerified = nil end
+            if firstVerified ~= tonumber(ARGV[5]) then return 0 end
+            record.firstVerifiedAtEpochMillis = firstVerified or tonumber(ARGV[7])
+            record.signCount = tonumber(ARGV[6])
+            redis.call('SET', KEYS[1], cjson.encode(record))
+            return 1
+        """.trimIndent()
+    }
 }

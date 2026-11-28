@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.34.0...party-service-v0.34.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **party:** match MCP age reads to the Edge workload role ([#17422](https://github.com/JiRaska/open-bank-oss/issues/17422)) ([7fa2741](https://github.com/JiRaska/open-bank-oss/commit/7fa274167f8573e82f92595fdab648e6599a7ce5))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.33.0...party-service-v0.34.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** configure the shared sandbox passkey age ([#17407](https://github.com/JiRaska/open-bank-oss/issues/17407)) ([647fa7e](https://github.com/JiRaska/open-bank-oss/commit/647fa7ea3ead2bca6752474c5b4376c73d670084))
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.2...party-service-v0.33.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** manage sandbox passkey age in Admin UI ([#17396](https://github.com/JiRaska/open-bank-oss/issues/17396)) ([9e9f101](https://github.com/JiRaska/open-bank-oss/commit/9e9f101371d086dda011ed3040418a8ac6af22f5))
+
 ## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.32.1...party-service-v0.32.2) (2026-11-20)
 
 

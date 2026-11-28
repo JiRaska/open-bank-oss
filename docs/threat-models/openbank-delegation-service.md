@@ -629,3 +629,7 @@ It validates the Delegation service hostname and CA, then presents a staff token
 the read issuer account. The explicit port 8443 policy admits the Keycloak and Balance pod
 identities. The authorization decision still requires the exact service account and a current
 customer grant.
+
+## Native MCP authorization handoff
+
+The private HTTPS listener admits only Customer Edge workload pods for the new app-facing authority calls. Keycloak and Customer Edge use distinct staff identities. Delegation stores the hash of a short-lived handoff and binds it to the exact guarded OAuth request and browser session. Claim and request registration commit together. A native proof must match the authenticated customer and the frozen account selection. The issuer consumes the evidence once and separately requires SCA before any OAuth code is released. A rollback disables native handoff and removes the additional Edge peer from the private listener.

@@ -184,3 +184,23 @@ test_party_pii_reveal_requires_kyc_or_admin_human if {
 	machine_admin := object.union(admin, {"service_account": true})
 	not allow.allow with input as {"principal": machine_admin, "action": "party.pii.reveal"}
 }
+
+test_native_passkey_age_authority_is_exact if {
+	admin := {"service_account": false, "type": "HUMAN", "id": "admin-fixture", "roles": ["ROLE_ADMIN"]}
+	operator := {"service_account": false, "type": "HUMAN", "id": "operator-fixture", "roles": ["ROLE_OPERATOR"]}
+	edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+	edge_wrong_role := object.union(edge, {"roles": ["ROLE_API"]})
+	other_workload := object.union(edge, {"id": "service-account-openbank-services", "client_id": "openbank-services"})
+	every action in {"party.mcpNativePasskeyAgeException.inspect", "party.mcpNativePasskeyAgeException.manage", "party.mcpNativePasskeyAgePolicy.inspect", "party.mcpNativePasskeyAgePolicy.manage"} {
+		allow.allow with input as {"principal": admin, "action": action}
+		not allow.allow with input as {"principal": operator, "action": action}
+		not allow.allow with input as {"principal": edge, "action": action}
+	}
+	every action in {"party.mcpNativePasskeyAgeException.effective", "party.mcpNativePasskeyAgePolicy.effective"} {
+		allow.allow with input as {"principal": edge, "action": action}
+		not allow.allow with input as {"principal": shared_api_only, "action": action}
+		not allow.allow with input as {"principal": operator, "action": action}
+		not allow.allow with input as {"principal": other_workload, "action": action}
+		not allow.allow with input as {"principal": edge_wrong_role, "action": action}
+	}
+}

@@ -211,6 +211,7 @@ public final class McpReadDelegationEvidenceTests {
         ClientModel client = fixture(ClientModel.class, (method, arguments) -> switch (method) {
             case "isEnabled" -> true;
             case "getAttribute" -> "L";
+            case "getClientId" -> CLIENT;
             default -> throw new UnsupportedOperationException(method);
         });
         RealmModel realm = fixture(RealmModel.class, (method, arguments) -> switch (method) {

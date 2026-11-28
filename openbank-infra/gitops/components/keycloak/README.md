@@ -474,3 +474,34 @@ tokens while the new release rolls out. Replace it with the optional assignment
 after every customer-edge instance requests the scope. Verify each workload's
 normal Admin REST operation with a fresh token before reopening traffic.
 Invalidate cached tokens minted before the upgrade by restarting the affected clients.
+
+### Verify the pinned ChatGPT client metadata
+
+Before approving a ChatGPT static CIMD pin or key rotation, run
+`python3 .github/scripts/verify-chatgpt-cimd-pin.py` from an approved operator workstation.
+It reads the two exact public vendor documents, compares them with the reviewed registration
+and inline public key, and prints the digest to compare with the sandbox deployment pin.
+
+Promote and verify the signed, optimized Keycloak image containing the scoped static-CIMD
+provider before applying its digest pin in the shared sandbox Deployment. The exact registered
+ChatGPT client must independently pass the enabled, callback, native browser flow, confidential
+RS256, S256 and PAR checks. Vendor activation and a successful authenticated PAR remain separate
+from the pin rollout.
+
+After the new pod is Ready and the old pod is gone, GET the customers realm's OpenID
+configuration and issuer-rooted OAuth authorization-server metadata. Both omit CIMD while the
+exact client is disabled. During the approved pilot, both advertise CIMD with the same issuer,
+PAR endpoints and authentication methods. Confirm an unrelated realm still omits CIMD. Roll back
+by reverting only the pin and verifying omission after the replacement pod is Ready.
+
+#### Bank-owned hosted adapter identities
+
+The disabled registrations `mcp-bank-hosted-chatgpt` and `mcp-bank-hosted-claude` use distinct
+signing keys and the same exact bank callback. The authenticated bank client identifies the
+assistant in the native handoff and stays bound to the grant and session. Each registration
+requires authenticated PAR, S256 PKCE and verified DPoP. The native app verifies the passkey and
+obtains separate strong customer authentication before activation.
+
+The committed public keys are disposable references whose private halves were discarded.
+Controlled activation requires vendor-specific bank-held keys, the vendor-facing adapter,
+a reviewed site-specific admission change, and actual read and revocation evidence.

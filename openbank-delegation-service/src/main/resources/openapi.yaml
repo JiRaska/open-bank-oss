@@ -15,7 +15,8 @@ info:
   # 1.27 -> 1.28 (#15716): approval replay binds to the frozen payload; 409 on a reused SCA challenge.
   # 1.33 -> 1.34 (ADR-0383 D6, #16590): additive — customer MCP payment-proposal store routes,
   # on top of main's 1.33.0 (#16793, mcp-client resolve).
-  version: 1.39.0
+  # 1.39 -> 1.40: additive internal native MCP handoff protocol, disabled by default.
+  version: 1.40.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -950,6 +951,270 @@ paths:
         '400': { description: Invalid binding }
         '403': { description: Caller or authenticated evidence refused }
         '404': { description: Resource unavailable or Connect disabled }
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/issue:
+    post:
+      tags:
+        - Delegations
+      summary: Issue a one-time native MCP handoff
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffIssuerRequest'
+      responses:
+        '204':
+          description: Handoff recorded
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+        '409':
+          description: Immutable handoff state, expiry or selected context refused
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/claimed-party:
+    post:
+      tags:
+        - Delegations
+      summary: Read only the provisionally claimed party
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffIssuerRequest'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffClaimedParty'
+        '204':
+          description: Matching proof or claim is unavailable
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/attest-selection:
+    post:
+      tags:
+        - Delegations
+      summary: Verify the native handoff selection context
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffAttestation'
+      responses:
+        '204':
+          description: Exact selected context attested
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+        '409':
+          description: Immutable handoff state, expiry or selected context refused
+  /api/v1/delegations/mcp-connect/native-handoffs/issuer/consume:
+    post:
+      tags:
+        - Delegations
+      summary: Consume the proven identity once
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffIssuerRequest'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffProofReceipt'
+        '204':
+          description: Matching proof or claim is unavailable
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/customer/native-handoffs/claim:
+    post:
+      tags:
+        - Delegations
+      summary: Register a bank app claim for a native MCP handoff
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the handoff token digest.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffClaim'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffClaimReceipt'
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/customer/native-handoffs/{requestRef}/selected-binding:
+    post:
+      tags:
+        - Delegations
+      summary: Read the attested binding for the verified app owner
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the request reference.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: requestRef
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffSubject'
+      responses:
+        '200':
+          description: Verified authority state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeHandoffSelection'
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
+  /api/v1/delegations/mcp-connect/customer/native-handoffs/{requestRef}/mark-verified:
+    post:
+      tags:
+        - Delegations
+      summary: Record verified native app evidence for the attested selection
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must equal the request reference.
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: requestRef
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{64}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeHandoffVerifiedProof'
+      responses:
+        '204':
+          description: Exact app proof recorded
+        '400':
+          description: Invalid binding or idempotency key
+        '401':
+          description: Staff service authentication required
+        '403':
+          description: Caller not authorized for this operation
+        '404':
+          description: Handoff unavailable or feature disabled
   /api/v1/delegations/mcp-connect/requests-v2:
     post:
       parameters:
@@ -1916,6 +2181,207 @@ components:
               message: { type: string }
               timestamp: { type: string, format: date-time }
   schemas:
+    McpNativeHandoffBinding:
+      type: object
+      required:
+        - requestRef
+        - issuer
+        - clientId
+        - resource
+        - redirectUri
+        - sessionRef
+        - kind
+        - scopes
+        - expiresAtEpochSecond
+      properties:
+        requestRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        issuer:
+          type: string
+          format: uri
+          maxLength: 2048
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        resource:
+          type: string
+          format: uri
+          maxLength: 2048
+        redirectUri:
+          type: string
+          format: uri
+          maxLength: 2048
+        sessionRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        kind:
+          type: string
+          enum:
+            - HOSTED
+            - DPOP
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        expiresAtEpochSecond:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 253402300799
+        parJkt:
+          oneOf:
+            - type: string
+              pattern: ^[A-Za-z0-9_-]{43}$
+            - type: 'null'
+      allOf:
+        - if:
+            properties:
+              kind:
+                const: DPOP
+          then:
+            required:
+              - parJkt
+            properties:
+              parJkt:
+                type: string
+                pattern: ^[A-Za-z0-9_-]{43}$
+          else:
+            properties:
+              parJkt:
+                type: 'null'
+    McpNativeHandoffIssuerRequest:
+      type: object
+      required:
+        - tokenSha256
+        - binding
+      properties:
+        tokenSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        binding:
+          $ref: '#/components/schemas/McpNativeHandoffBinding'
+    McpNativeHandoffAttestation:
+      type: object
+      required:
+        - tokenSha256
+        - binding
+        - contextSha256
+      properties:
+        tokenSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        binding:
+          $ref: '#/components/schemas/McpNativeHandoffBinding'
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffClaimedParty:
+      type: object
+      required:
+        - partyId
+      properties:
+        partyId:
+          type: string
+          format: uuid
+    McpNativeHandoffProofReceipt:
+      type: object
+      required:
+        - partyId
+        - keycloakSubject
+        - contextSha256
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffClaim:
+      type: object
+      required:
+        - tokenSha256
+        - keycloakSubject
+      properties:
+        tokenSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+    McpNativeHandoffClaimReceipt:
+      type: object
+      required:
+        - requestRef
+      properties:
+        requestRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffSubject:
+      type: object
+      required:
+        - keycloakSubject
+      properties:
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+    McpNativeHandoffVerifiedProof:
+      type: object
+      required:
+        - keycloakSubject
+        - contextSha256
+      properties:
+        keycloakSubject:
+          type: string
+          minLength: 1
+          maxLength: 255
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+    McpNativeHandoffSelection:
+      type: object
+      required:
+        - requestRef
+        - contextSha256
+        - clientId
+        - parBinding
+        - parJkt
+        - expiresAtEpochSecond
+      properties:
+        requestRef:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        contextSha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        clientId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        parBinding:
+          type: string
+          enum:
+            - confidential_client
+            - dpop
+        parJkt:
+          oneOf:
+            - type: string
+              pattern: ^[A-Za-z0-9_-]{43}$
+            - type: 'null'
+        expiresAtEpochSecond:
+          type: integer
+          format: int64
+          minimum: 1
     McpConnectIssuerBinding:
       type: object
       required: [partyId, clientId, parJkt]

@@ -45,6 +45,7 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -54,8 +55,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = ROOT / "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml"
 TEMPLATE = ROOT / "openbank-infra/gitops/components/keycloak/customers-realm-template.json"
 TIER_ATTR = "openbank.mcp.tier"
+HOSTED_PROFILE_ATTR = "openbank.mcp.profile"
+HOSTED_PROFILE = "bank-hosted-v2"
+HOSTED_CLIENTS = {"mcp-bank-hosted-chatgpt", "mcp-bank-hosted-claude"}
+HOSTED_CALLBACK = "https://mcp.open-bank.tech/oauth/hosted/callback"
 RESOURCE_ATTR = "openbank.mcp.resource"
 WITHHELD = "openbank-mcp-withheld-code"
+NATIVE_HANDOFF = "openbank-mcp-native-handoff"
 GUARD = "openbank-mcp-client-guard"
 EXCHANGE_ATTR = "openbank.mcp.exchange"
 EXCHANGE_MAX_LIFESPAN_S = 60
@@ -80,6 +86,11 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
             f.append(f"allowlist: `{key}` is required (ADR-0385 D1)")
     if not (decl.get("flow") or {}).get("id") or not (decl.get("flow") or {}).get("alias"):
         f.append("allowlist: `flow.id` and `flow.alias` are required")
+    native_flow = decl.get("native_flow") or {}
+    if not native_flow.get("id") or not native_flow.get("alias"):
+        f.append("allowlist: `native_flow.id` and `native_flow.alias` are required")
+    elif any(native_flow[key] == (decl.get("flow") or {}).get(key) for key in ("id", "alias")):
+        f.append("allowlist: native_flow must have a distinct ID and alias")
     seen = set()
     for c in decl.get("clients") or []:
         cid = c.get("client_id")
@@ -87,11 +98,22 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
             f.append(f"allowlist: client `{cid}` declared twice")
         seen.add(cid)
         tier = c.get("tier")
+        if "browser_flow" in c and (c["browser_flow"] != "native-passkey" or tier != "H"):
+            f.append(f"allowlist `{cid}`: browser_flow must be native-passkey on a Tier H client")
         uris = c.get("redirect_uris") or []
         if not uris:
             f.append(f"allowlist `{cid}`: no redirect_uris")
         if any("*" in u for u in uris):
             f.append(f"allowlist `{cid}`: wildcard redirect URI — redirects must be exact")
+        profile = c.get("profile")
+        if profile is not None or cid in HOSTED_CLIENTS:
+            auth = c.get("auth") or {}
+            if (cid not in HOSTED_CLIENTS or profile != HOSTED_PROFILE or tier != "H" or c.get("enabled") is not False
+                    or c.get("browser_flow") != "native-passkey"
+                    or uris != [HOSTED_CALLBACK] or auth.get("method") != "private_key_jwt"
+                    or auth.get("signing_alg") != "ES256"
+                    or auth.get("jwks_file") != f"mcp-clients/{cid}.jwks.json"):
+                f.append(f"allowlist `{cid}`: bank hosted adapter must be the exact disabled confidential profile")
         if tier == "H":
             if any(not u.startswith("https://") for u in uris):
                 f.append(f"allowlist `{cid}`: Tier H redirect must be a fixed https URI (ADR-0385 D1)")
@@ -140,6 +162,13 @@ def check_allowlist(decl: dict, base: Path, today: dt.date) -> tuple[list[str], 
                 f.append(f"allowlist `{cid}`: a Tier L client is public and declares no auth")
         else:
             f.append(f"allowlist `{cid}`: tier must be H or L, got {tier!r}")
+    if HOSTED_CLIENTS <= jwks.keys():
+        identities = [set((key.get("crv"), key.get("x"), key.get("y"))
+                          for key in json.loads(jwks[cid]).get("keys", [])) for cid in sorted(HOSTED_CLIENTS)]
+        if any(not keys or any(curve != "P-256" or not x or not y for curve, x, y in keys) for keys in identities):
+            f.append("allowlist: each bank hosted adapter requires an inline P-256 public key")
+        if identities[0] & identities[1]:
+            f.append("allowlist: bank hosted adapters must use distinct public keys")
     return f, jwks
 
 
@@ -213,6 +242,31 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
                 f.append(f"realm: flow `{flow_alias}` execution {e.get('authenticator')} is "
                          f"{e.get('requirement')}, must be REQUIRED (no alternative path)")
 
+    native_flow = decl.get("native_flow") or {}
+    native_alias = native_flow.get("alias")
+    if native_alias and realm.get("browserFlow") == native_alias:
+        f.append("realm: native flow may only be bound to a declared Tier H client")
+    for cid, client in clients.items():
+        if cid not in declared and native_flow.get("id") and (
+            (client.get("authenticationFlowBindingOverrides") or {}).get("browser") == native_flow["id"]
+        ):
+            f.append(f"realm client `{cid}`: native flow may only be bound to a declared Tier H client")
+    matches = [x for x in realm.get("authenticationFlows") or [] if x.get("alias") == native_alias]
+    if len(matches) != 1:
+        f.append(f"realm: native flow `{native_alias}` must exist exactly once, found {len(matches)}")
+    else:
+        native = matches[0]
+        if native.get("id") != native_flow.get("id") or native.get("topLevel") is not True:
+            f.append(f"realm: native flow `{native_alias}` must match the declared ID and be top-level")
+        execs = native.get("authenticationExecutions") or []
+        ordered = sorted(execs, key=lambda e: e.get("priority") or 0)
+        if [e.get("authenticator") for e in ordered] != [NATIVE_HANDOFF, WITHHELD] or any(
+            e.get("requirement") != "REQUIRED" or e.get("authenticatorFlow") or e.get("flowAlias")
+            for e in ordered
+        ):
+            f.append(f"realm: native flow `{native_alias}` must contain exactly two REQUIRED flat steps, "
+                     f"{NATIVE_HANDOFF} then {WITHHELD}")
+
     # #16667: the guard executor must be bound to every client by an enabled any-client policy.
     profiles = {p.get("name"): p for p in (realm.get("clientProfiles") or {}).get("profiles") or []}
     bound = False
@@ -226,8 +280,15 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
                  f"token-exchange (#16667) and the withheld-code step would have no request facts")
 
     # Review of #16672 (6): Keycloak's built-in executors, bound per tier by the tier attribute.
-    for tier in sorted({c.get("tier") for c in decl.get("clients") or []} & set(BUILTIN_EXECUTORS)):
-        have: set[str] = set()
+    configured = decl.get("clients") or []
+    policies_to_check = [
+        (TIER_ATTR, tier, BUILTIN_EXECUTORS[tier])
+        for tier in sorted({c.get("tier") for c in configured} & set(BUILTIN_EXECUTORS))
+    ]
+    if any(c.get("client_id") in HOSTED_CLIENTS for c in configured):
+        policies_to_check.append((HOSTED_PROFILE_ATTR, HOSTED_PROFILE, {"dpop-bind-enforcer"}))
+    for key, value, expected_executors in policies_to_check:
+        executors: list[dict] = []
         for pol in (realm.get("clientPolicies") or {}).get("policies") or []:
             if pol.get("enabled") is not True or len(pol.get("conditions") or []) != 1:
                 continue
@@ -238,12 +299,16 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             except ValueError:
                 attrs = None
             if (cond.get("condition") != "client-attributes" or conf.get("is_negative_logic") not in (None, False, "false")
-                    or attrs != [{"key": TIER_ATTR, "value": tier}]):
+                    or attrs != [{"key": key, "value": value}]):
                 continue
-            have |= {e.get("executor") for n in pol.get("profiles") or [] for e in (profiles.get(n) or {}).get("executors") or []}
-        missing = BUILTIN_EXECUTORS[tier] - have
+            executors.extend(e for name in pol.get("profiles") or []
+                             for e in (profiles.get(name) or {}).get("executors") or [])
+        missing = expected_executors - {e.get("executor") for e in executors}
+        if any(e.get("executor") == "reject-ropc-grant"
+               and (e.get("configuration") or {}).get("auto-configure") != "false" for e in executors):
+            f.append(f"realm: {key}={value} reject-ropc-grant requires explicit auto-configure=false")
         if missing:
-            f.append(f"realm: no enabled client-attributes policy on {TIER_ATTR}={tier} binds the built-in "
+            f.append(f"realm: no enabled client-attributes policy on {key}={value} binds the built-in "
                      f"executor(s) {sorted(missing)} (review of #16672: a weakened client attribute must not reopen them)")
 
     # Review of #16672: the MCP token's party_id claim and the withheld-code consume's
@@ -270,6 +335,14 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
                      f"{decl.get('resource')!r} (RFC 8707 binding, ADR-0385 D1)")
         if a.get(TIER_ATTR) != tier:
             f.append(f"{p}: realm {TIER_ATTR}={a.get(TIER_ATTR)!r} disagrees with the allowlist")
+        hosted = cid in HOSTED_CLIENTS
+        if hosted:
+            if (a.get(HOSTED_PROFILE_ATTR) != HOSTED_PROFILE or c.get("enabled") is not False
+                    or not _true(a.get("dpop.bound.access.tokens"))
+                    or a.get("token.endpoint.auth.signing.alg") != "ES256"):
+                f.append(f"{p}: realm must preserve the exact disabled confidential DPoP profile")
+        elif HOSTED_PROFILE_ATTR in a:
+            f.append(f"{p}: bank hosted adapter profile is reserved")
         if tier == "H":
             if c.get("publicClient") is not False:
                 f.append(f"{p}: publicClient must be false — no public hosted clients (ADR-0385 D1)")
@@ -325,8 +398,9 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             f.append(f"{p}: wildcard redirect URI in the realm")
         if c.get("defaultClientScopes") != []:
             f.append(f"{p}: defaultClientScopes must be exactly [], got {c.get('defaultClientScopes')}")
-        if c.get("optionalClientScopes") != ["offline_access"]:
-            f.append(f"{p}: optionalClientScopes must be exactly ['offline_access'], got {c.get('optionalClientScopes')}")
+        optional = [] if hosted else ["offline_access"]
+        if c.get("optionalClientScopes") != optional:
+            f.append(f"{p}: optionalClientScopes must be exactly {optional}, got {c.get('optionalClientScopes')}")
         if c.get("consentRequired") is not False:
             f.append(f"{p}: consentRequired must be false (consent is the D3 SCA challenge, not a Keycloak screen)")
         mapper_names = sorted(str(m.get("name")) for m in c.get("protocolMappers") or [])
@@ -334,10 +408,13 @@ def check_realm(decl: dict, realm: dict, jwks: dict[str, str]) -> list[str]:
             f.append(f"{p}: protocol mappers must be exactly {sorted(EXPECTED_MAPPERS)}, got {mapper_names}")
         if c.get("fullScopeAllowed") is not False:
             f.append(f"{p}: fullScopeAllowed must be false")
-        if mappings.get(cid) != ["offline_access"]:
-            f.append(f"{p}: scopeMappings must be exactly ['offline_access'], got {mappings.get(cid)}")
-        if (c.get("authenticationFlowBindingOverrides") or {}).get("browser") != flow_id:
-            f.append(f"{p}: browser flow override must bind the MCP flow {flow_id} — that binding is the control (ADR-0385 D2.2)")
+        expected_mapping = None if hosted else ["offline_access"]
+        if mappings.get(cid) != expected_mapping:
+            f.append(f"{p}: scopeMappings must be exactly {expected_mapping}, got {mappings.get(cid)}")
+        expected_flow_id = native_flow.get("id") if d.get("browser_flow") == "native-passkey" else flow_id
+        if (c.get("authenticationFlowBindingOverrides") or {}).get("browser") != expected_flow_id:
+            f.append(f"{p}: browser flow override must bind the MCP flow {expected_flow_id} — "
+                     "that binding is the control (ADR-0385 D2.2)")
         auds = [m for m in c.get("protocolMappers") or [] if m.get("protocolMapper") == "oidc-audience-mapper"]
         aud_values = sorted({(m.get("config") or {}).get("included.custom.audience") or
                              (m.get("config") or {}).get("included.client.audience") for m in auds})
@@ -479,6 +556,39 @@ def self_test() -> int:
     L = next(c["client_id"] for c in decl0["clients"] if c["tier"] == "L")
 
     run("committed allowlist + realm pass", expect_clean=True)
+
+    hosted_reference = "mcp-hosted-reference"
+    native_id = decl0["native_flow"]["id"]
+    native_alias = decl0["native_flow"]["alias"]
+
+    def select_native(d, cid):
+        next(c for c in d["clients"] if c["client_id"] == cid)["browser_flow"] = "native-passkey"
+
+    opted_in = copy.deepcopy(decl0)
+    select_native(opted_in, hosted_reference)
+    render = runpy.run_path(str(Path(__file__).with_name("gen-mcp-realm-clients.py")))["render"]
+    generated = render(realm0, opted_in, base)
+    expected = copy.deepcopy(realm0)
+    client(expected, hosted_reference)["authenticationFlowBindingOverrides"]["browser"] = native_id
+    generated_clean = generated == expected and check(opted_in, generated, base, today) == []
+    cases.append(("generator changes only the selected hosted client's browser flow", generated_clean))
+    print(f"  {'PASS' if generated_clean else 'FAIL'}  {cases[-1][0]}")
+
+    run("native opt-in requires realm parity", mutate_decl=lambda d: select_native(d, hosted_reference),
+        needle="browser flow override")
+    run("native opt-in rejects Tier L", mutate_decl=lambda d: select_native(d, L), needle="on a Tier H client")
+    run("native override without declaration rejected",
+        mutate_realm=lambda r: client(r, hosted_reference)["authenticationFlowBindingOverrides"].update(browser=native_id),
+        needle="browser flow override")
+    run("native flow cannot replace the realm browser default",
+        mutate_realm=lambda r: r.update(browserFlow=native_alias), needle="only be bound to a declared Tier H client")
+
+    def remove_native_withheld(r):
+        native = next(f for f in r["authenticationFlows"] if f["alias"] == native_alias)
+        native["authenticationExecutions"].pop()
+
+    run("native flow requires the final withheld-code step", mutate_realm=remove_native_withheld,
+        needle="exactly two REQUIRED flat steps")
     run("Tier H publicClient=true flagged", mutate_realm=lambda r: client(r, H).update(publicClient=True), needle="publicClient")
     run("Tier H without client authenticator flagged",
         mutate_realm=lambda r: client(r, H).pop("clientAuthenticatorType"), needle="client authenticator")
@@ -536,6 +646,10 @@ def self_test() -> int:
     run("built-in reject-ropc-grant dropped flagged",
         mutate_realm=lambda r: [p.update(executors=[e for e in p["executors"] if e["executor"] != "reject-ropc-grant"])
                                 for p in r["clientProfiles"]["profiles"]], needle="reject-ropc-grant")
+    run("reject-ropc-grant without explicit auto-configure flagged",
+        mutate_realm=lambda r: [e.update(configuration={}) for p in r["clientProfiles"]["profiles"]
+                                for e in p["executors"] if e["executor"] == "reject-ropc-grant"],
+        needle="reject-ropc-grant requires explicit auto-configure=false")
     run("Tier L DPoP profile unbound flagged",
         mutate_realm=lambda r: tier_policy(r, "L").update(profiles=["openbank-mcp-oauth-hardening"]), needle="dpop-bind-enforcer")
     run("tier condition with two values for one key (inert in Keycloak) flagged",
@@ -661,6 +775,14 @@ def self_test() -> int:
         needle="not declared under `exchange`")
     run("exchange entries without a declaration flagged",
         mutate_decl=lambda d: d.pop("exchange"), needle="declares no `exchange`")
+
+    run("hosted adapter enabled in committed realm flagged",
+        mutate_realm=lambda r: client(r, 'mcp-bank-hosted-chatgpt').update(enabled=True), needle="disabled confidential DPoP")
+    run("hosted adapter DPoP policy removed flagged",
+        mutate_realm=lambda r: tier_policy(r, HOSTED_PROFILE).update(enabled=False), needle="dpop-bind-enforcer")
+    run("hosted adapter callback drift flagged",
+        mutate_decl=lambda d: next(c for c in d["clients"] if c["client_id"] == "mcp-bank-hosted-claude").update(
+            redirect_uris=["https://mcp.open-bank.tech/oauth/other"]), needle="exact disabled confidential profile")
 
     failed = [n for n, ok in cases if not ok]
     print(f"self-test: {len(cases) - len(failed)}/{len(cases)} passed")

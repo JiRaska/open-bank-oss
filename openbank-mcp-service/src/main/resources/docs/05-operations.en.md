@@ -188,9 +188,9 @@ credential, not that the token was rejected.
 - **Tier H (hosted):** a confidential client with a fixed HTTPS redirect and client authentication at the token and refresh endpoints. The default is `private_key_jwt`, whose key set is committed under `mcp-clients/` and pinned by its sha256 in the declaration. Keycloak receives it inline, so it never fetches keys. A client secret is allowed only under a recorded `secret_exception` of at most six months, and it fails CI after its `expires` date.
 - **Tier L (local):** a public client with loopback redirects (`http://127.0.0.1/…`, `http://[::1]/…`, any port; `localhost` is not accepted). Its tokens must be DPoP-bound.
 
-The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow. The `mcp-client-realm-parity` gate fails CI on any mismatch between the declaration and the realm.
+The declaration currently drives the customers-realm client config. `.github/scripts/gen-mcp-realm-clients.py` writes each client into `customers-realm-template.json`. Every client gets PAR, PKCE S256, exact redirects, no direct, implicit, device or token-exchange grant, `offline_access` as its only role, the `openbank-mcp-service` audience, and the cookie-free fresh-passkey browser flow by default. A reviewed Tier H registration can declare `browser_flow: native-passkey` to use the dedicated mobile handoff and withheld-code flow. The app verifies a passkey bound to the authorization request, and Keycloak withholds the code until separate SCA completes. The `mcp-client-realm-parity` gate verifies the client-specific binding and the required flow steps.
 
-While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order.
+While the customer channel is on, this service also reads the file at boot and admits by `azp` against it (see *Customer channel admission* below). Every declared client stays `enabled: false` in line with ADR-0383's exposure order. The ChatGPT and Claude registrations select the native flow in the generated template. Activation in an existing sandbox realm requires a separate, targeted runtime reconciliation and a readback of the client bindings before enabling either registration.
 
 ## Customer channel admission (ADR-0385)
 
@@ -201,6 +201,13 @@ RFC 9728: `GET /.well-known/oauth-protected-resource` and its path-suffixed form
 `authorization_servers`, DPoP signing algorithms) built from the allowlist and the configured
 issuer only, never from request headers. While the channel is off both endpoints answer 404 —
 nothing advertises a channel that does not admit anyone.
+
+`McpEndpoint` receives the customer-branch collaborators through the CDI bean
+`CustomerChannelDeps`. The dependency bundle supplies grant lookup, read tools, auditing,
+metrics, throttling and client-address resolution. The endpoint creates the customer branch only
+when the channel supplies an admission policy. Direct endpoint tests leave the customer branch off without
+injected customer dependencies or an HTTP request. Client-address lookup remains deferred until a
+subject-less refusal needs an audit key.
 
 ## Customer reads: grant lookup and token exchange (ADR-0383 D3/D4)
 
@@ -383,3 +390,43 @@ The customer MCP endpoint accepts bearer tokens for enabled Tier H clients with 
 The allowlist declares ChatGPT's exact published OAuth client ID and callback. The generated realm client pins the reviewed RS256 key set and uses private-key JWT authentication. The declaration stays disabled until sandbox deployment verifies the hosted authorization and refresh flow. Review key rotation against the vendor's published JWKS before updating the pin.
 
 The Claude sandbox registration is disabled by default and uses a confidential client exception authorized for 30 days. Start the sandbox with a dedicated secret from the bank secret store and supply it only to the authorized connector operator. Keep the callback fixed to the published Claude URL. Remove the sandbox registration and revoke its token families when the exception ends.
+
+### Hosted OAuth adapter
+
+The adapter serves `/customer/hosted-mcp` and publishes its own authorization-server metadata. It starts a bank
+PAR transaction for the registered client and returns through the existing native approval flow.
+The issued session exposes account listing and balance reads. The bank token remains in encrypted
+OpenBao-backed custody and the balance call uses the existing customer authorization boundary.
+
+Hosted OAuth starts disabled. To activate it in the shared sandbox, configure the customer channel,
+its shared replay store and the approved projected site file. The site file selects explicit public
+key pins and references the OpenBao CA, service account token, dedicated bank client TLS pair,
+bank TLS CA and any confidential client secret. Mount those references read-only through the
+site configuration. Register the bank-owned identities before enabling their corresponding hosted
+vendor. Verify the issuer and token endpoint in discovery before testing the connector.
+
+The site-managed Secret supplies the `vendors` selector and `site.json`. Deployments project
+the service account token to `/mnt/mcp-hosted-oauth-identity/token` and the adapter client key
+pair under `/mnt/mcp-hosted-oauth-client`. The JSON describes those absolute paths and the
+approved CA and public key files. The `vendors` selector accepts `disabled`, `chatgpt`, `claude`,
+or `chatgpt,claude`. Change the selector through GitOps and roll the pod to pick up the new
+configuration.
+
+Verify gateway access logs with a synthetic query marker before enabling real authorization.
+Application events report the vendor and a derived correlation value for the PAR and callback stages.
+Confirm both ChatGPT and Claude can display the bank approval, return to the original session,
+list the test account, read its known balance after token renewal, and lose access after revocation.
+To roll back, disable hosted OAuth and revoke the hosted test grants through the supported
+connection-management flow.
+
+For a private ChatGPT MCP registration, add an optional `chatgpt-scoped.json` file next to
+`site.json` in the projected Secret. It contains `clientId`, `callback`, `jwksBase64` and `jwksSha256`. Use the
+exact HTTPS client identifier and single callback from the approved client metadata document.
+Encode the exact reviewed JWKS bytes from the document as base64 and pin their SHA-256.
+Startup reads the projected file and verifies the digest. The generic ChatGPT registration retains its
+original client and key configuration.
+
+Before rolling back to an older release, remove the scoped site registration. The additive
+`scoped_client_id` database field remains in place. Tokens issued for the scoped client use a
+separate format that the older runtime refuses. Re-enable the same registration to preserve its
+unexpired sessions, or revoke the associated connections before changing the registration.

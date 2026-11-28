@@ -42,6 +42,8 @@ class McpConnectProxyTest {
         act: Boolean = false,
         tokenAudience: Set<String> = setOf("openbank-edge"),
         enabled: Boolean = true,
+        nativeEnabled: Boolean = false,
+        actingFor: String? = null,
     ) = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
@@ -61,6 +63,10 @@ class McpConnectProxyTest {
         partyMergeResolver = mockk { every { resolve(caller) } returns mergedParty }
         delegationServiceUrl = delegationOrigin
         configureMcpConnect(enabled)
+        mcpNativeConnectEnabled = nativeEnabled
+        if (actingFor != null) {
+            requestHeaders = mockk { every { getHeaderString("X-Acting-For") } returns actingFor }
+        }
     }
 
     private fun reviewJson(party: UUID = mergedParty) = """
@@ -115,6 +121,44 @@ class McpConnectProxyTest {
         assertThat(json).contains("confidential_client").doesNotContain("parJkt", "ownerOnly")
         assertThat(OpenApiWireValidator().violations(json, "/mcp/connect-requests-v2/{requestRef}")).isEmpty()
         verify(exactly = 1) { upstream.getToService(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `native app session may review and select V2 only for its authenticated party`() {
+        val upstream = mockk<UpstreamClient>()
+        val path = "/api/v1/delegations/mcp-connect/customer/requests-v2/$requestRef"
+        val selection = CustomerMcpConnectSelection(
+            listOf(CustomerMcpConnectAccountScope(account, listOf("ACCOUNT_READ_BALANCES"))),
+        )
+        every { upstream.getToService(delegationOrigin, path, emptyMap(), caller.toString()) } returns
+            Response.ok(reviewJson(caller)).build()
+        every {
+            upstream.putToService(
+                delegationOrigin,
+                "$path/selection",
+                caller.toString(),
+                mapper.writeValueAsString(selection),
+            )
+        } returns Response.ok(reviewJson(caller)).build()
+        val nativeClient = "openbank-edge-webauthn"
+        val allowed = edge(upstream, azp = nativeClient, nativeEnabled = true)
+        assertThat(allowed.getMcpConnectRequestV2(requestRef).status).isEqualTo(200)
+        assertThat(allowed.selectMcpConnectAccountsV2(requestRef, selection).status).isEqualTo(200)
+        assertThat(allowed.getMcpConnectRequest(requestRef).status).isEqualTo(403)
+        assertThat(allowed.listMcpConnectRequestsV2().status).isEqualTo(403)
+
+        val refused = listOf(
+            edge(upstream, azp = nativeClient),
+            edge(upstream, azp = nativeClient, nativeEnabled = true, act = true),
+            edge(upstream, azp = nativeClient, nativeEnabled = true, actingFor = account.toString()),
+            edge(upstream, azp = nativeClient, nativeEnabled = true, tokenAudience = setOf("openbank-app")),
+        )
+        refused.forEach { candidate ->
+            assertThat(candidate.getMcpConnectRequestV2(requestRef).status).isEqualTo(403)
+            assertThat(candidate.selectMcpConnectAccountsV2(requestRef, selection).status).isEqualTo(403)
+        }
+        verify(exactly = 1) { upstream.getToService(any(), any(), any(), any()) }
+        verify(exactly = 1) { upstream.putToService(any(), any(), any(), any()) }
     }
 
     @Test
@@ -211,6 +255,40 @@ class McpConnectProxyTest {
         every { upstream.get(connectionsUrl, mergedParty.toString()) } returns
             Response.ok(connectionListJson(caller)).build()
         assertThat(edge.listMcpConnections().status).isEqualTo(503)
+    }
+
+    @Test
+    fun `native connection management is limited to the authenticated party`() {
+        val upstream = mockk<UpstreamClient>()
+        val nativeClient = "openbank-edge-webauthn"
+        val revokeUrl = "$connectionsUrl/$connectionId/revoke"
+        every { upstream.get(connectionsUrl, caller.toString()) } returnsMany listOf(
+            Response.ok(connectionListJson(caller)).build(),
+            Response.ok(connectionListJson(mergedParty)).build(),
+        )
+        every {
+            upstream.post(revokeUrl, caller.toString(), "", idempotencyKey = connectionId.toString())
+        } returnsMany listOf(Response.noContent().build(), Response.status(404).build())
+
+        val native = edge(upstream, azp = nativeClient, nativeEnabled = true)
+        assertThat(native.listMcpConnections().status).isEqualTo(200)
+        assertThat(native.listMcpConnections().status).isEqualTo(503)
+        assertThat(native.revokeMcpConnection(connectionId).status).isEqualTo(204)
+        assertThat(native.revokeMcpConnection(connectionId).status).isEqualTo(404)
+
+        val refused = listOf(
+            edge(upstream, azp = nativeClient),
+            edge(upstream, azp = "synthetic-assistant", nativeEnabled = true),
+            edge(upstream, azp = nativeClient, nativeEnabled = true, act = true),
+            edge(upstream, azp = nativeClient, nativeEnabled = true, actingFor = account.toString()),
+            edge(upstream, azp = nativeClient, nativeEnabled = true, tokenAudience = setOf("openbank-app")),
+        )
+        refused.forEach { candidate ->
+            assertThat(candidate.listMcpConnections().status).isEqualTo(403)
+            assertThat(candidate.revokeMcpConnection(connectionId).status).isEqualTo(403)
+        }
+        verify(exactly = 2) { upstream.get(any(), any()) }
+        verify(exactly = 2) { upstream.post(any(), any(), any(), idempotencyKey = any()) }
     }
 
     @Test

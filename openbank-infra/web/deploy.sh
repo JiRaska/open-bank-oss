@@ -33,6 +33,7 @@ aws s3 sync "$SITE" "s3://$BUCKET" \
   --exclude "*" \
   --include "*.html" \
   --exclude "pay/*" \
+  --exclude "app/mcp/connect.html" \
   --content-type "text/html; charset=utf-8" \
   --cache-control "public, max-age=0, must-revalidate"
 
@@ -71,6 +72,11 @@ for page in v1 v1/9998 v1/9999; do
     --cache-control "public, max-age=0, must-revalidate"
 done
 
-# 7) Bust the edge cache.
+# 7) Customer MCP app-install fallback (ADR-0385). Match the exact universal-link path.
+aws s3 cp "$SITE/app/mcp/connect.html" "s3://$BUCKET/app/mcp/connect" \
+  --content-type "text/html; charset=utf-8" \
+  --cache-control "public, max-age=0, must-revalidate"
+
+# 8) Bust the edge cache.
 aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*" >/dev/null
 echo "✓ deployed — https://open-bank.tech"

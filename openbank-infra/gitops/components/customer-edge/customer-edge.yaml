@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "82c28ee66794802f"
+        openbank.tech/policy-checksum: "2368c958ddbe8525"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -108,7 +108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-1dddb8c2@sha256:217c358c44b9c4b5c02e07f141e3e192263c6e3f62f346f1a92607bddaa526fc
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-49d1972f@sha256:6dbc355b9b0098f9ef2e633bf8e0a36d1baf1e9c1e35ab08564fd5d5021e0872
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -257,6 +257,24 @@ spec:
             # -> delegation call timed out for as long as this line was missing.
             - name: MCP_CONNECT_ENABLED
               value: "true"
+            # Enable the private native handoff transport in the shared sandbox.
+            # Hosted OAuth client binding is managed separately in Keycloak.
+            - name: MCP_NATIVE_CONNECT_ENABLED
+              value: "true"
+            - name: EDGE_SANDBOX_MCP_NATIVE_AGE_EXCEPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: enabled
+                  optional: true
+            - name: EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: globalEnabled
+                  optional: true
+            - name: MCP_NATIVE_CONNECT_AUTHORITY_URL
+              value: https://delegation-service.delegation.svc:8443
             - name: DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
             # #10281 multi-signature hold on payments under X-Acting-For. Fail-closed (a policy that

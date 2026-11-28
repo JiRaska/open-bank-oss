@@ -1,0 +1,13 @@
+{
+  "keys": [
+    {
+      "kty": "EC",
+      "crv": "P-256",
+      "use": "sig",
+      "alg": "ES256",
+      "kid": "mcp-bank-hosted-chatgpt-synthetic-reference",
+      "x": "YjafRAl4ccJOds2lzTjR1K773cQvvDsAZAQyu3Pr8LM",
+      "y": "YqWH6opHAHAKXkMI_pIizp5ex7OhqWN4vnAHLsc2PII"
+    }
+  ]
+}

@@ -138,3 +138,54 @@ pro izolovanou sandboxovou sadu. Subjekt musí být ve službě Party aktivní s
 a vlastnit oba účty. `GET /customer/v1/synthetic/transfers` vrací ověřené sadě aktuální datum
 účtování v zóně Europe/Prague. POST na stejné cestě přijímá toto datum a směr převodu. Vyhrazená
 trasa Transaction vyžaduje ověřený Edge a stejný syntetický původ.
+
+## Diagnostika odmítnutí relace aplikace při připojení MCP
+
+Prometheus čítač `openbank_edge_mcp_native_app_rejected_total` se zvýší, když zapnutá nativní
+cesta Connect odmítne relaci aplikace před voláním služby Delegation. Odpověď zůstává obecná
+HTTP 403. Přidává se pouze pevně vymezený štítek `reason`.
+
+| Důvod | Kontrola |
+| --- | --- |
+| `ACTING_FOR` | Požadavek obsahoval neprázdnou hlavičku pro zastupování. Ověřte osobní profil v aplikaci. |
+| `ACTOR` | Token obsahoval údaj o zastupujícím aktérovi. Ověřte, že požadavek používá vlastní relaci zákazníka. |
+| `CLIENT` | Klient tokenu neodpovídal vlastní bankovní aplikaci. Ověřte přihlašovací tok aplikace. |
+| `AUDIENCE` | V publiku tokenu chybělo `openbank-edge`. Ověřte mapování v zákaznickém realmu a tok, který token vystavil. |
+| `SUBJECT` | Identita relace chyběla, byla prázdná nebo příliš dlouhá. Ověřte formát tokenu na syntetickém účtu. |
+| `PARTY` | Identifikátor klienta chyběl nebo nebyl v kanonickém formátu UUID. Ověřte mapování a atribut syntetického účtu. |
+
+Porovnejte nárůst podle důvodu v testovacím okně s počty HTTP požadavků v Customer Edge a Delegation.
+Čítač pokrývá pouze ověření vlastní relace aplikace. Při HTTP 403 bez odpovídajícího nárůstu
+ověřte dřívější autorizaci nebo odpověď navazující služby. Hodnoty tokenů, atributů a hlaviček
+do diagnostiky neukládejte.
+
+## Odmítnutí ověření passkey pro nativní MCP
+
+Čítač `openbank_edge_mcp_native_proof_rejected_total` rozlišuje, kde se nativní Connect po ověření
+relace aplikace zastavil. Jediný nový štítek je pevně vymezený `reason`.
+
+- `EXPIRED`, `CHALLENGE_INVALID`, `CHALLENGE_MISSING` a `CONTEXT_MISMATCH` označují výzvu
+  nepoužitelnou pro aktuální připojení. Zahajte nové připojení v asistentovi.
+- `CREDENTIAL_UNKNOWN`, `OWNER_MISMATCH`, `ASSERTION_INVALID` a `ASSERTION_CONFLICT` označují
+  odmítnutí při kontrole klíče, vlastníka, podpisu nebo uložení výsledku ověření.
+- `AGE_MISSING`, `AGE_INVALID` a `AGE_TOO_YOUNG` označují neplatné nebo nedostatečné stáří klíče
+  ověřené serverem. U starších záznamů zapíše první čas běžné úspěšné ověření passkey.
+  Od tohoto ověření musí uplynout 72 hodin.
+
+Ověřte nárůst čítače ve stejném testovacím okně jako HTTP 403. Veřejná odpověď zůstává obecná.
+Metrika neobsahuje identifikátory klíčů, odkazy na požadavky ani hodnoty tokenů.
+
+## Výjimky pro stáří nativní passkey MCP v sandboxu
+
+Správa výjimek je ve výchozím nastavení vypnutá. Pravidlo 72 hodin platí, dokud služba Party
+nepotvrdí současně aktivní syntetickou fyzickou osobu a platnou výjimku. Přihlášený
+administrátor ji může zapsat nebo odvolat v administraci. Nejkratší nastavitelná lhůta je jedna
+minuta a výjimka vyprší nejpozději za 24 hodin. Party ukládá aktéra, čas, důvod a změnu v jednom
+záznamu. Ověření stáří na základě existujícího záznamu passkey, vlastnictví, podpis a samostatná
+kontrola stáří zařízení pro SCA zůstávají povinné.
+
+### Platnost passkey pro MCP ve sdíleném sandboxu
+
+Customer Edge načte pravidlo z Party pro aktivní fyzickou osobu. Platné individuální pravidlo pro syntetický profil má přednost. Pokud služba odmítne běžného zákazníka u syntetické výjimky a sdílené pravidlo je zapnuté, Edge ověří jeho způsobilost samostatně podle sdíleného pravidla. Nedostupné, neplatné, vypršené nebo odvolané pravidlo ponechá výchozí hodnotu. Výchozí doba je 72 hodin a minimální nastavitelná doba je jedna minuta. Ověření podpisu WebAuthn a samostatná pravidla SCA zůstávají v platnosti.
+
+`EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY` zapínejte pouze ve sdíleném sandboxu. Výchozí hodnota je false.

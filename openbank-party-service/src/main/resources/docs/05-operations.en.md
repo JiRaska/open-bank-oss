@@ -105,3 +105,21 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Sandbox native MCP passkey age exceptions
+
+The sandbox-only control defaults off. Enabled Party and Customer Edge deployments use the
+72-hour rule unless Party confirms that the current customer is an active synthetic individual
+and has an unexpired exception. An interactive administrator can record or revoke a rule in the
+admin console. The minimum is one minute and an exception expires within 24 hours. Party stores
+the operator, timestamp, reason and change together with the effective policy. Turning either
+deployment control off restores the ordinary rule. Existing credential evidence, ownership,
+cryptographic verification and the separate SCA device-age control still apply.
+
+### MCP passkey age in the shared sandbox
+
+Party owns the effective rule and its append-only administrator audit history. A staff administrator records a reason and an expiry at most 24 hours ahead. Revocation appends a record and takes effect immediately. The default is 72 hours and the configurable floor is one minute. WebAuthn signature verification and the independent SCA policy still apply.
+
+Enable `PARTY_SANDBOX_MCP_NATIVE_AGE_POLICY` only in the shared sandbox. It defaults to false.
+
+Both effective MCP age endpoints accept the verified Customer Edge service account with its operator realm role. An operator role by itself gives no access to either endpoint.

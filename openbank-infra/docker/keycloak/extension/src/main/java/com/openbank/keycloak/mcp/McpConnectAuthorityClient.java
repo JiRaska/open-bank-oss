@@ -4,6 +4,7 @@
 package com.openbank.keycloak.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.jboss.logging.Logger;
 import org.keycloak.util.JsonSerialization;
 
 import java.io.IOException;
@@ -18,7 +19,10 @@ import java.util.UUID;
 
 /** Delegation's internal, machine-authenticated authority for a V2 connect. */
 final class McpConnectAuthorityClient {
+    private static final Logger LOG = Logger.getLogger(McpConnectAuthorityClient.class);
     private static final String REQUESTS = "/api/v1/delegations/mcp-connect/requests";
+
+    private static final String NATIVE_HANDOFFS = "/api/v1/delegations/mcp-connect/native-handoffs/issuer";
 
     private final String origin;
     private final ScaClient transport;
@@ -96,6 +100,75 @@ final class McpConnectAuthorityClient {
     }
 
     record Activation(UUID connectionId, FamilyReference family) {
+    }
+
+    record NativeReceipt(String partyId, String keycloakSubject, String contextSha256) {
+    }
+
+    void issueNativeHandoff(String tokenSha256, McpNativeHandoff.Binding binding) throws IOException {
+        if (nativeHandoff("issue", tokenSha256, binding, null) != null) {
+            throw new IOException("unexpected native handoff issue response");
+        }
+    }
+
+    String claimedNativeParty(String tokenSha256, McpNativeHandoff.Binding binding) throws IOException {
+        JsonNode evidence = nativeHandoff("claimed-party", tokenSha256, binding, null);
+        if (evidence == null) {
+            return null;
+        }
+        UUID party = canonicalUuid(requiredText(evidence, "partyId"));
+        if (party == null) {
+            throw new IOException("native handoff party is invalid");
+        }
+        return party.toString();
+    }
+
+    void attestNativeSelection(String tokenSha256, McpNativeHandoff.Binding binding, String digest)
+            throws IOException {
+        if (!validReference(digest) || nativeHandoff("attest-selection", tokenSha256, binding, digest) != null) {
+            throw new IOException("native handoff selection was not attested");
+        }
+    }
+
+    NativeReceipt consumeNativeHandoff(String tokenSha256, McpNativeHandoff.Binding binding) throws IOException {
+        JsonNode evidence = nativeHandoff("consume", tokenSha256, binding, null);
+        if (evidence == null) {
+            return null;
+        }
+        UUID party = canonicalUuid(requiredText(evidence, "partyId"));
+        String subject = requiredText(evidence, "keycloakSubject");
+        String digest = requiredText(evidence, "contextSha256");
+        if (party == null || subject.length() > 255 || !validReference(digest)) {
+            throw new IOException("native handoff receipt is invalid");
+        }
+        return new NativeReceipt(party.toString(), subject, digest);
+    }
+
+    private JsonNode nativeHandoff(String action, String tokenSha256, McpNativeHandoff.Binding binding,
+                                   String contextSha256) throws IOException {
+        if (!validReference(tokenSha256)) {
+            throw new IllegalArgumentException("expected a native handoff digest");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("tokenSha256", tokenSha256);
+        body.put("binding", binding);
+        if (contextSha256 != null) {
+            body.put("contextSha256", contextSha256);
+        }
+        var response = transport.postWithBankIdentity(
+                HttpRequest.newBuilder(URI.create(origin + NATIVE_HANDOFFS + "/" + action))
+                        .header("Idempotency-Key", tokenSha256),
+                body);
+        if (response.statusCode() == 204) {
+            return null;
+        }
+        if ("issue".equals(action)) {
+            LOG.warnf("MCP native handoff issuer returned HTTP status=%d", response.statusCode());
+        }
+        if (response.statusCode() == 200) {
+            return JsonSerialization.readValue(response.body(), JsonNode.class);
+        }
+        throw new IOException("native handoff authority refused the operation");
     }
 
     void register(Request request) throws IOException {

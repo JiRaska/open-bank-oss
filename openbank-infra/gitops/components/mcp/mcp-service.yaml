@@ -41,6 +41,8 @@ spec:
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "a7436b8862f961ac"
     spec:
+      serviceAccountName: mcp-service
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -50,7 +52,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mcp-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-663dae21@sha256:937cb251d49793bdca7b6902f20dd649abe4af8108935d6582ffbcea24b1d579
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-8cd97fab@sha256:62e0f657b5cbe7f5db3309372982a31ff255e2954edd7fee6a6061ff60a470a9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -60,6 +62,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Missing site configuration leaves the adapter disabled.
+            - name: MCP_HOSTED_OAUTH_VENDORS
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-hosted-oauth-site
+                  key: vendors
+                  optional: true
+            - name: MCP_HOSTED_OAUTH_SITE_FILE
+              value: /mnt/mcp-hosted-oauth-site/site.json
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/mcp-read-tls-config/runtime.properties
             - name: MCP_BOUND_TLS_CONFIGURATION
@@ -124,6 +135,14 @@ spec:
             # secret are all set — a misconfigured pod never starts serving. The two secret refs
             # are optional so this pod runs (channel off) before ESO has generated the
             # mcp-customer-store-valkey / -hmac Secrets (customer-store-externalsecret.yaml, in-cluster generator).
+            - name: MCP_CUSTOMER_ENABLED
+              value: "true"
+            - name: MCP_CUSTOMER_CONNECTION_BINDING_ENABLED
+              value: "true"
+            - name: MCP_BOUND_BALANCE_ENABLED
+              value: "true"
+            - name: MCP_CUSTOMER_ALLOWLIST
+              value: /mnt/mcp-customer-allowlist/allowlist.yaml
             - name: MCP_CUSTOMER_SHARED_STORE
               value: valkey
             # Reuse the exchange client registered in the existing customer realm.
@@ -245,6 +264,18 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: mcp-hosted-oauth-site
+              mountPath: /mnt/mcp-hosted-oauth-site
+              readOnly: true
+            - name: mcp-hosted-oauth-client
+              mountPath: /mnt/mcp-hosted-oauth-client
+              readOnly: true
+            - name: mcp-hosted-oauth-identity
+              mountPath: /mnt/mcp-hosted-oauth-identity
+              readOnly: true
+            - name: customer-site-allowlist
+              mountPath: /mnt/mcp-customer-allowlist
+              readOnly: true
             - name: mcp-bound-client
               mountPath: /mnt/mcp-bound-client
               readOnly: true
@@ -327,6 +358,27 @@ spec:
             requests: {cpu: 25m, memory: 32Mi}
             limits: {cpu: 100m, memory: 64Mi}
       volumes:
+        - name: mcp-hosted-oauth-site
+          secret:
+            secretName: mcp-hosted-oauth-site
+            optional: true
+        - name: mcp-hosted-oauth-client
+          secret:
+            secretName: mcp-hosted-oauth-client-tls
+            optional: true
+        - name: mcp-hosted-oauth-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 600
+        - name: customer-site-allowlist
+          configMap:
+            # The allowlist is loaded at boot. A new name couples config with the pod rollout.
+            name: mcp-shared-customer-allowlist-v4
+            items:
+              - key: allowlist.yaml
+                path: allowlist.yaml
         - name: mcp-bound-client
           secret:
             secretName: mcp-bound-read-client-tls
@@ -373,3 +425,14 @@ spec:
     - name: https
       port: 8443
       targetPort: https
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: mcp-service
+    app.kubernetes.io/part-of: platform
+automountServiceAccountToken: false

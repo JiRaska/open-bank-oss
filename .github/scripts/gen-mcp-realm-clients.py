@@ -64,7 +64,8 @@ HARDENING_POLICY_PREFIX = "openbank-mcp-tier-"
 HARDENING_EXECUTORS = [
     {"executor": "pkce-enforcer", "configuration": {"auto-configure": "false"}},
     {"executor": "reject-implicit-grant", "configuration": {"auto-configure": "false"}},
-    {"executor": "reject-ropc-grant", "configuration": {}},
+    # Keycloak 26.8.2 unboxes this Boolean when validating an admin client update.
+    {"executor": "reject-ropc-grant", "configuration": {"auto-configure": "false"}},
 ]
 # Only Tier L is DPoP-bound (Tier H is private_key_jwt-confidential, dpop.bound=false), so the
 # DPoP enforcer is its own profile, bound for Tier L alone.
@@ -126,6 +127,7 @@ def _mapper_sub() -> dict:
 
 def build_client(decl: dict, c: dict, base: Path) -> dict:
     tier = c["tier"]
+    hosted = c.get("profile") == "bank-hosted-v2"
     attrs = {
         TIER_ATTR: tier,
         RESOURCE_ATTR: decl["resource"],
@@ -138,10 +140,16 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "client_credentials.use_refresh_token": "false",
         "access.token.lifespan": str(ACCESS_TOKEN_LIFESPAN_S),
         "exclude.session.state.from.auth.response": "false",
-        "dpop.bound.access.tokens": "true" if tier == "L" else "false",
+        "dpop.bound.access.tokens": "true" if tier == "L" or hosted else "false",
         "frontchannel.logout.session.required": "false",
         "backchannel.logout.session.required": "true",
     }
+    flow = decl["flow"]
+    if "browser_flow" in c:
+        if c["browser_flow"] != "native-passkey" or tier != "H":
+            raise ValueError(f"{c['client_id']}: browser_flow must be native-passkey on a Tier H client")
+        flow = decl["native_flow"]
+
     client: dict = {
         "clientId": c["client_id"],
         "name": c["display_name"],
@@ -158,11 +166,13 @@ def build_client(decl: dict, c: dict, base: Path) -> dict:
         "fullScopeAllowed": False,
         "redirectUris": list(c["redirect_uris"]),
         "webOrigins": [],
-        "authenticationFlowBindingOverrides": {"browser": decl["flow"]["id"]},
+        "authenticationFlowBindingOverrides": {"browser": flow["id"]},
         "defaultClientScopes": [],
-        "optionalClientScopes": ["offline_access"],
+        "optionalClientScopes": [] if hosted else ["offline_access"],
         "protocolMappers": [_mapper_sub(), _mapper_party_id(), _mapper_audience(decl["audience"])],
     }
+    if hosted:
+        attrs["openbank.mcp.profile"] = "bank-hosted-v2"
     if tier == "H":
         auth = c["auth"]
         client["publicClient"] = False
@@ -346,6 +356,16 @@ def build_hardening() -> tuple[list[dict], list[dict]]:
             "conditions": [_tier_condition(tier)],
             "profiles": names,
         })
+    policies.append({
+        "name": f"{HARDENING_POLICY_PREFIX}bank-hosted-v2",
+        "description": "Require DPoP for the dedicated confidential bank hosted adapter.",
+        "enabled": True,
+        "conditions": [{"condition": "client-attributes", "configuration": {
+            "is_negative_logic": False,
+            "attributes": json.dumps([{"key": "openbank.mcp.profile", "value": "bank-hosted-v2"}]),
+        }}],
+        "profiles": [DPOP_PROFILE],
+    })
     return profiles, policies
 
 
@@ -392,13 +412,14 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     out["clientScopes"] = [s for s in out.get("clientScopes", []) if not _owned(s)] + ex_scopes
     # fullScopeAllowed=false, and the offline_access client scope's own role mapping does NOT make
     # the role reachable (measured on Keycloak 26.8.1: "Offline tokens not allowed for the user or
-    # client"). So each MCP client is scope-mapped to offline_access and NOTHING else: the token
+    # client"). Legacy MCP clients are scope-mapped to offline_access and NOTHING else: the token
     # carries no realm role mcp-service could mistake for a grant (realm-template-importable R11
-    # holds MCP clients to exactly this mapping).
+    # holds MCP clients to exactly this mapping). Online-only bank adapters have no role mapping.
     owned = {c["client_id"] for c in decl["clients"]} | {
         c["clientId"] for c in template.get("clients", []) if TIER_ATTR in (c.get("attributes") or {})}
     out["scopeMappings"] = [m for m in out.get("scopeMappings", []) if m.get("client") not in owned] + [
-        {"client": c["client_id"], "roles": ["offline_access"]} for c in decl["clients"]]
+        {"client": c["client_id"], "roles": ["offline_access"]}
+        for c in decl["clients"] if c.get("profile") != "bank-hosted-v2"]
     alias = decl["flow"]["alias"]
     flows = [f for f in out.get("authenticationFlows", []) if f.get("alias") != alias]
     out["authenticationFlows"] = flows + [build_flow(decl)]
@@ -417,8 +438,21 @@ def render(template: dict, decl: dict, base: Path) -> dict:
     return out
 
 
+def unique_json_object(pairs: list[tuple]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
 def serialise(doc: dict) -> str:
-    return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(doc, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
 
 
 def main() -> int:
@@ -426,8 +460,17 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="exit 1 if the template is stale")
     args = ap.parse_args()
     decl = load_allowlist()
-    current = TEMPLATE.read_text()
-    rendered = serialise(render(json.loads(current), decl, ALLOWLIST.parent))
+    current = TEMPLATE.read_bytes()
+    try:
+        template = json.loads(
+            current.decode("utf-8"),
+            object_pairs_hook=unique_json_object,
+            parse_constant=reject_json_constant,
+        )
+        rendered = serialise(render(template, decl, ALLOWLIST.parent)).encode("utf-8")
+    except ValueError:
+        print(f"::error file={TEMPLATE.relative_to(ROOT)}::Invalid or ambiguous MCP realm JSON")
+        return 1
     if args.check:
         if rendered != current:
             print(f"::error file={TEMPLATE.relative_to(ROOT)}::MCP clients are stale - run "
@@ -435,7 +478,7 @@ def main() -> int:
             return 1
         print("MCP realm clients are up to date")
         return 0
-    TEMPLATE.write_text(rendered)
+    TEMPLATE.write_bytes(rendered)
     print(f"wrote {len(decl['clients'])} MCP client(s) + flow {decl['flow']['alias']} into "
           f"{TEMPLATE.relative_to(ROOT)}")
     return 0

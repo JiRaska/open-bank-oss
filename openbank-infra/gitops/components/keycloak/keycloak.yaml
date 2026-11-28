@@ -60,7 +60,7 @@ spec:
           # live in the Dockerfile now and MUST NOT be re-set as env below, or
           # `--optimized` aborts on a build-option mismatch. Bump = rebuild via
           # openbank-infra/scripts/build-push-keycloak.sh, then bump this tag.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.2-3-optimized-cf92f836f5c9@sha256:a7d706fbfec65ae28416edbcc6e0092b1260b93d4ced1c37a68edfe6c539d1ab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.2-3-optimized-08d0e3fd6e82@sha256:1d48e37e0545832c9fd23203566489f8d5b2252f36c091a199e9a3dbc4593af7
           args: ["start", "--optimized", "--import-realm"]
           env:
             # --- front/back-channel hostname split ---
@@ -187,6 +187,10 @@ spec:
               value: $(MCP_READ_DELEGATION_ORIGIN)
             - name: MCP_CONNECT_V2_ENABLED
               value: "true"
+            # Reviewed inline public key digest for the customer-only static CIMD discovery provider.
+            # Promote the provider-bearing image before applying this pin.
+            - name: MCP_CHATGPT_CIMD_STATIC_JWKS_SHA256
+              value: "54142eab824791d7891f1eb448dda346420072ebbbd9294ee802a8f7b5a0244c"
             - name: MCP_READ_DEPLOYMENT
               value: shared-sandbox
             - name: MCP_READ_CONNECTION_BINDING_ENABLED

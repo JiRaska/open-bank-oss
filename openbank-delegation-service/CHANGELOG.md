@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.28.0...delegation-service-v0.29.0) (2026-11-26)
+
+
+### Features
+
+* **infra:** connect hosted MCP OAuth through the native bank passkey ([#17327](https://github.com/JiRaska/open-bank-oss/issues/17327)) ([ceb01bb](https://github.com/JiRaska/open-bank-oss/commit/ceb01bb689e593447527363b86b16f5a4439709b))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.27.3...delegation-service-v0.28.0) (2026-11-24)
 
 

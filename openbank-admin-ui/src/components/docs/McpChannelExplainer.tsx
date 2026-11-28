@@ -216,9 +216,9 @@ export function McpChannelExplainer({ resolved, adr, sourcesAvailable, asOf }: M
           <a href={`${REPO}/blob/main/docs/runbooks/svc-mcp.md`} style={linkBtn} target="_blank" rel="noreferrer">
             {t('Runbook mcp-service', 'mcp-service runbook')} <ExternalLink size={11} aria-hidden="true" />
           </a>
-          <a href={`${REPO}/issues/16605`} style={linkBtn} target="_blank" rel="noreferrer">
-            {t('Pozorovatelnost kanálu (#16605)', 'Channel observability (#16605)')} <ExternalLink size={11} aria-hidden="true" />
-          </a>
+          <Link href="/delegations/mcp-channel" style={linkBtn}>
+            {t('Pozorovatelnost kanálu', 'Channel observability')}
+          </Link>
           <a href={`${REPO}/issues/16590`} style={linkBtn} target="_blank" rel="noreferrer">
             {t('Plán dodávky (#16590)', 'Delivery plan (#16590)')} <ExternalLink size={11} aria-hidden="true" />
           </a>
