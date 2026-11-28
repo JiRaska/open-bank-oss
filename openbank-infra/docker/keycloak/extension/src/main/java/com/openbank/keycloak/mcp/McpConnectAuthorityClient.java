@@ -4,6 +4,7 @@
 package com.openbank.keycloak.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.jboss.logging.Logger;
 import org.keycloak.util.JsonSerialization;
 
 import java.io.IOException;
@@ -18,6 +19,7 @@ import java.util.UUID;
 
 /** Delegation's internal, machine-authenticated authority for a V2 connect. */
 final class McpConnectAuthorityClient {
+    private static final Logger LOG = Logger.getLogger(McpConnectAuthorityClient.class);
     private static final String REQUESTS = "/api/v1/delegations/mcp-connect/requests";
 
     private static final String NATIVE_HANDOFFS = "/api/v1/delegations/mcp-connect/native-handoffs/issuer";
@@ -159,6 +161,9 @@ final class McpConnectAuthorityClient {
                 body);
         if (response.statusCode() == 204) {
             return null;
+        }
+        if ("issue".equals(action)) {
+            LOG.warnf("MCP native handoff issuer returned HTTP status=%d", response.statusCode());
         }
         if (response.statusCode() == 200) {
             return JsonSerialization.readValue(response.body(), JsonNode.class);

@@ -7,6 +7,7 @@ import com.google.zxing.WriterException;
 import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.time.Instant;
+import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
@@ -18,6 +19,10 @@ import org.keycloak.sessions.AuthenticationSessionModel;
 
 /** Resolves the user only from a one-use bank receipt, before the usual Connect V2 SCA step. */
 final class McpNativeHandoffAuthenticator implements Authenticator {
+    private static final Logger LOG = Logger.getLogger(McpNativeHandoffAuthenticator.class);
+
+    private enum InitialStage { BINDING, PAGE, AUTHORITY }
+
     @Override
     public void authenticate(AuthenticationFlowContext ctx) {
         var auth = ctx.getAuthenticationSession();
@@ -25,19 +30,24 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
             refuse(ctx);
             return;
         }
+        InitialStage stage = InitialStage.BINDING;
         try {
             var factory = factory(ctx.getSession());
             var binding = binding(ctx, auth, factory);
+            stage = InitialStage.PAGE;
             if (auth.getAuthNote(McpNotes.NATIVE_HANDOFF) != null) {
                 ctx.challenge(page(ctx, null));
                 return;
             }
             var issued = McpNativeHandoff.issue();
             var page = page(ctx, issued);
+            stage = InitialStage.AUTHORITY;
             factory.tokenAuthority().issueNativeHandoff(issued.tokenSha256(), binding);
+            stage = InitialStage.PAGE;
             auth.setAuthNote(McpNotes.NATIVE_HANDOFF, issued.tokenSha256());
             ctx.challenge(page);
         } catch (IOException | WriterException | RuntimeException e) {
+            LOG.warnf("MCP native handoff rejected at stage=%s", stage);
             refuse(ctx);
         }
     }
