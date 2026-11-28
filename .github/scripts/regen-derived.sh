@@ -71,6 +71,7 @@ GENERATORS=(
   "slo-dashboard|python3 .github/scripts/gen-slo-dashboard.py|pyrra-slo-money-path.yaml slo-dashboard-base.json"
   "mcp-realm-clients|python3 .github/scripts/gen-mcp-realm-clients.py|mcp-client-allowlist.yaml mcp-clients/"
   "changelog-fragments|python3 .github/scripts/gen-changelog-fragments.py|docs/threat-models/"
+  "error-code-catalogue|python3 .github/scripts/gen-error-code-catalogue.py|src/main .github/scripts/error-code-catalogue-baseline.tsv .github/scripts/error-code-duplicate-owners.tsv"
   "bundles|__BUNDLES__|openbank-libs/governance/rules.yaml openbank-libs/governance/agents.yaml .rego"
 )
 
@@ -95,6 +96,8 @@ DERIVED_OUTPUTS=(
   "docs/adr/index.json"
   "docs/adr/checks/*.sh"
   "docs/cards/capability-matrix.md"
+  "docs/reference/error-codes.md"
+  "openbank-libs/governance/error-model.openapi.yaml"
   ".release-please-manifest.json"
   "release-please-config.json"
   "openbank-infra/gitops/components/observability/dashboard-openbank-slo.yaml"
