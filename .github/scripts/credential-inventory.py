@@ -73,9 +73,21 @@ class Cred:
         self.dynamic = (not self.source_unknown and bool(self.keys)
                         and all(DYNAMIC_KEY.search(k) for k in self.keys))
         self.operator_managed = False
-        ann_block = re.search(r"annotations:\n((?:\s{4,}[^\n]*\n?)*)", doc)
-        self.annotations = ann_block.group(1) if ann_block else ""
-        self.deadline = _field(self.annotations, re.escape(DEADLINE) + r':\s*"?([^"\n]+)"?')
+        # None means absent. An empty string keeps unreadable or invalid data out
+        # of the KPI buckets for both known deadlines and missing annotations.
+        self.deadline = ""
+        if parsed is not None and len(parsed) == 1:
+            metadata = parsed[0].get("metadata", {})
+            annotations = metadata.get("annotations", {}) if isinstance(metadata, dict) else None
+            if isinstance(annotations, dict):
+                value = annotations.get(DEADLINE)
+                if DEADLINE not in annotations:
+                    self.deadline = None
+                elif isinstance(value, str) and DATE_RE.fullmatch(value):
+                    try:
+                        self.deadline = dt.date.fromisoformat(value).isoformat()
+                    except ValueError:
+                        pass
 
     @property
     def static(self) -> bool:
@@ -321,8 +333,8 @@ def validate_deadline(c: Cred, today: dt.date) -> str | None:
     """None when OK, else the violation text."""
     if c.deadline is None:
         return f"missing annotation `{DEADLINE}`"
-    if not DATE_RE.match(c.deadline):
-        return f"`{DEADLINE}: {c.deadline}` is not YYYY-MM-DD"
+    if not c.deadline:
+        return f"`{DEADLINE}` is not a valid YYYY-MM-DD date"
     if dt.date.fromisoformat(c.deadline) < today:
         return f"`{DEADLINE}: {c.deadline}` is in the past — rotate or re-date with a reason"
     return None
@@ -335,7 +347,7 @@ def inventory(root: Path, today: dt.date) -> tuple[str, int]:
     dynamic = [c for c in creds if c.dynamic]
     declared = [c for c in statics if c.deadline and not validate_deadline(c, today)]
     overdue = [c for c in statics if c.deadline and validate_deadline(c, today) and "past" in (validate_deadline(c, today) or "")]
-    undeclared = [c for c in statics if not c.deadline]
+    undeclared = [c for c in statics if c.deadline is None]
     lines = [
         "# Long-lived credential inventory", "",
         f"ExternalSecrets: **{len(creds)}** total — {len(statics)} static (long-lived), "
@@ -347,7 +359,7 @@ def inventory(root: Path, today: dt.date) -> tuple[str, int]:
         "| credential | namespace | backend key(s) | rotation deadline |", "|---|---|---|---|",
     ]
     for c in sorted(statics, key=lambda c: (c.namespace, c.name)):
-        dl = c.deadline or "— **UNDECLARED**"
+        dl = "— **UNDECLARED**" if c.deadline is None else c.deadline or "— **INVALID**"
         lines.append(f"| `{c.name}` | {c.namespace} | {', '.join(f'`{k}`' for k in c.keys)} | {dl} |")
     lines += ["", "_Maintained by credential-inventory.yml (ADR-0279 #18). Do not edit by hand. "
               "New static ExternalSecrets must carry `open-bank.tech/rotation-deadline` — enforced "
@@ -457,6 +469,23 @@ def self_test() -> int:
         print("self-test FAIL: static classification"); bad += 1
     if validate_deadline(c, today) is None:
         print("self-test FAIL: missing deadline must be a violation"); bad += 1
+    for scalar, valid in (
+        ("'2030-01-01' # comment", True),
+        ('"2030-01-01"', True),
+        ("2030-01-01", False),
+        ("null", False),
+        ("'2030-02-30'", False),
+    ):
+        doc = doc_static.replace("spec:", f"  annotations:\n    {DEADLINE}: {scalar}\nspec:")
+        annotated = Cred(doc, Path("x.yaml"))
+        if annotated.deadline is None or (validate_deadline(annotated, today) is None) != valid:
+            print(f"self-test FAIL: deadline scalar {scalar}"); bad += 1
+    for annotation_yaml in ("  annotations: []\n",
+                        "  annotations: {}\n  annotations: {}\n",
+                        f"  annotations:\n    {DEADLINE}: |-\n      multiline\n      value |\n"):
+        doc = doc_static.replace("spec:", annotation_yaml + "spec:")
+        if Cred(doc, Path("x.yaml")).deadline != "":
+            print("self-test FAIL: unreadable deadline classified as absent"); bad += 1
     doc_dyn = doc_static.replace("key: account-service", "key: database/creds/foo-db-vault-role")
     if Cred(doc_dyn, Path("x.yaml")).static:
         print("self-test FAIL: dynamic path classified as static"); bad += 1
