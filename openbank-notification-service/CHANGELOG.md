@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.4](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.3...notification-service-v0.40.4) (2026-11-28)
+
+
+### Bug Fixes
+
+* **notification:** render AI assistant connection approvals ([#17498](https://github.com/JiRaska/open-bank-oss/issues/17498)) ([e4b2d6e](https://github.com/JiRaska/open-bank-oss/commit/e4b2d6e4c614810d0fac74744c6238fa09af9afe))
+
 ## [0.40.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.2...notification-service-v0.40.3) (2026-11-16)
 
 

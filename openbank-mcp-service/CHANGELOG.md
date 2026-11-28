@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.22.2...mcp-service-v0.22.3) (2026-11-28)
+
+
+### Bug Fixes
+
+* **mcp-service:** negotiate hosted RPC capabilities accurately ([#17497](https://github.com/JiRaska/open-bank-oss/issues/17497)) ([b9f96bd](https://github.com/JiRaska/open-bank-oss/commit/b9f96bd2a1e80b161ad824e13486998560480a69))
+
 ## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.22.1...mcp-service-v0.22.2) (2026-11-28)
 
 
