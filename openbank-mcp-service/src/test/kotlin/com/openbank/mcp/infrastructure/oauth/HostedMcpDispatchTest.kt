@@ -47,6 +47,16 @@ class HostedMcpDispatchTest {
         assertThat(dispatch.dispatch("revoked", list)).isEqualTo(Outcome.Refused.INVALID_TOKEN)
         assertThat(dispatch.dispatch("bank-expired", list)).isEqualTo(Outcome.Refused.INVALID_TOKEN)
         assertThat(dispatch.dispatch("active", forbidden)).isEqualTo(Outcome.Refused.OUTSIDE_SCOPE)
+        val resource = mapper.readTree("""{"jsonrpc":"2.0","id":"discovery","method":"resources/list"}""")
+        assertThat(dispatch.dispatch("revoked", resource)).isEqualTo(Outcome.Refused.INVALID_TOKEN)
+        val unsupported = dispatch.dispatch("active", resource) as Outcome.Unsupported
+        assertThat(unsupported.id.textValue()).isEqualTo("discovery")
+        val invalidId = mapper.readTree("""{"jsonrpc":"2.0","id":{},"method":"resources/list"}""")
+        assertThat(dispatch.dispatch("active", invalidId)).isEqualTo(Outcome.Refused.INVALID_REQUEST)
+        val invalidParams = mapper.readTree("""{"jsonrpc":"2.0","id":1,"method":"resources/list","params":"invalid"}""")
+        assertThat(dispatch.dispatch("active", invalidParams)).isEqualTo(Outcome.Refused.INVALID_REQUEST)
+        val notification = mapper.readTree("""{"jsonrpc":"2.0","method":"notifications/cancelled"}""")
+        assertThat(dispatch.dispatch("active", notification)).isEqualTo(Outcome.NotificationAccepted)
         assertThat(upstreamCalls).isZero()
 
         val response = dispatch.dispatch("active", list, "2025-03-26") as Outcome.Forwarded
@@ -54,4 +64,41 @@ class HostedMcpDispatchTest {
         assertThat(names).containsExactly("list_accounts", "get_balance")
         assertThat(upstreamCalls).isEqualTo(1)
     }
+
+    @Test
+    fun `hosted initialization advertises only tools and accepts a notification without an entity`(): Unit =
+        runBlocking {
+            val mapper = ObjectMapper()
+            val grant = PgHostedVendorGrants.Identity(Vendor.CHATGPT, UUID.randomUUID())
+            val grants = mockk<HostedVendorGrants>()
+            coEvery { grants.admit("active") } returns grant
+            val bankAccess = mockk<HostedBankAccess>()
+            val tokens = mockk<HostedBankJwtVerifier.OwnedTokens>()
+            every { tokens.access } returns "bank-access-fixture"
+            coEvery { bankAccess.load(grant.vendor, grant.connectionId) } returns tokens
+            val bankInitialize = mapper.readTree(
+                """
+            {"jsonrpc":"2.0","id":1,"result":{
+              "protocolVersion":"2025-03-26","capabilities":{"tools":{},"resources":{},"prompts":{}},
+              "serverInfo":{"name":"OpenBank","version":"fixture"}
+            }}
+                """.trimIndent(),
+            )
+            val upstream = HostedBankMcpUpstream { _, _, request, _ ->
+                when (request.path("method").textValue()) {
+                    "initialize" -> HostedBankMcpUpstream.Reply(200, bankInitialize)
+                    "notifications/initialized" -> HostedBankMcpUpstream.Reply(204, null)
+                    else -> error("unexpected bank call")
+                }
+            }
+            val dispatch = HostedMcpDispatch(grants, bankAccess, upstream)
+            val initialize = mapper.readTree("""{"jsonrpc":"2.0","id":1,"method":"initialize"}""")
+            val reply = (dispatch.dispatch("active", initialize) as Outcome.Forwarded).reply.body!!
+            assertThat(
+                reply.path("result").path("capabilities").fieldNames().asSequence().toList(),
+            ).containsExactly("tools")
+            assertThat(bankInitialize.path("result").path("capabilities").has("resources")).isTrue()
+            val notification = mapper.readTree("""{"jsonrpc":"2.0","method":"notifications/initialized"}""")
+            assertThat(dispatch.dispatch("active", notification)).isEqualTo(Outcome.NotificationAccepted)
+        }
 }

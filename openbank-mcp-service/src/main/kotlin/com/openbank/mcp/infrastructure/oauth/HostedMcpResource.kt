@@ -3,6 +3,9 @@
 package com.openbank.mcp.infrastructure.oauth
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.mcp.application.protocol.McpError
+import com.openbank.mcp.application.protocol.McpErrorCode
+import com.openbank.mcp.application.protocol.McpResponse
 import io.vertx.core.http.HttpServerRequest
 import jakarta.enterprise.inject.Instance
 import jakarta.ws.rs.Consumes
@@ -35,6 +38,10 @@ internal class HostedMcpResource(
         return when (val outcome = active.dispatch.dispatch(token, body, versions.singleOrNull())) {
             is HostedMcpDispatch.Outcome.Forwarded ->
                 Response.status(outcome.reply.status).entity(outcome.reply.body).build()
+            is HostedMcpDispatch.Outcome.Unsupported -> Response.ok(
+                McpResponse(id = outcome.id, error = McpError(McpErrorCode.METHOD_NOT_FOUND, "Method not found")),
+            ).build()
+            HostedMcpDispatch.Outcome.NotificationAccepted -> Response.status(Status.ACCEPTED).build()
             HostedMcpDispatch.Outcome.Refused.INVALID_TOKEN -> challenge(invalid = true)
             HostedMcpDispatch.Outcome.Refused.INVALID_REQUEST -> Response.status(Status.BAD_REQUEST).build()
             HostedMcpDispatch.Outcome.Refused.OUTSIDE_SCOPE -> Response.status(Status.FORBIDDEN).build()
