@@ -14,6 +14,20 @@ OpenAPI Generator 7.24.0 produces the coroutine JAX-RS v2 resource interfaces du
 the runtime resources implement those interfaces. Product Studio generates its operation-typed
 TypeScript client from the same contract before build, type-check and contract tests.
 
+## File-defined savings deposits
+
+Add fixed-rate savings definitions to `catalog-seeds/banking/deposits.json` in
+Product Catalog. The definition includes the code, display name, effective date
+at midnight UTC, deposit v3 attributes and explicit price components. The banking
+pack creates a draft only. A checker publishes it through the usual catalog
+workflow. Removing a seed entry does not retire an existing revision.
+
+Use the specification UUID as the account product ID. The v1 get-by-ID endpoint
+exposes a read-only view only when a revision is effective. The v2 published
+revision lookup uses that same ID for Billing. Interest resolves the offering's
+specification ID from the published event. These definitions do not use the v1
+write endpoints.
+
 ## Authentication
 
 The service is an OIDC resource server. Reads require an authenticated bearer token. OpenBank

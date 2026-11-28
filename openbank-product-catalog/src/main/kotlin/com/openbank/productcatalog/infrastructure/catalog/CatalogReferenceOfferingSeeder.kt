@@ -11,6 +11,7 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.productcatalog.application.GenericCatalogService
 import com.openbank.productcatalog.domain.catalog.LocalizedText
 import com.openbank.productcatalog.domain.catalog.MarketContext
+import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.SchemaRef
@@ -21,6 +22,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -43,6 +45,7 @@ class CatalogReferenceOfferingSeeder(
     private val mapper: ObjectMapper,
     private val catalogJson: CatalogJson,
     private val clock: Clock,
+    private val deposits: DeclarativeDeposits,
     domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.catalog.reference-offerings-enabled", defaultValue = "true")
     private val enabled: Boolean,
@@ -74,28 +77,51 @@ class CatalogReferenceOfferingSeeder(
     private suspend fun seed(plan: SpecificationPlan): Int {
         val existing = service.listSpecifications().firstOrNull { it.code == plan.code }
         val specification = existing ?: service.createSpecification(
-            ProductSpecification(code = plan.code, schemaRef = plan.schema, createdAt = Instant.now(clock)),
+            plan.specification(Instant.now(clock)),
             SEED_ACTOR,
         )
-        val known = service.listOfferings(specification.id).map { it.code }.toSet()
-        return plan.offerings.filter { it.code !in known }.onEach { offering ->
-            val created = service.createOffering(specification.id, offering.code, MARKET, SEED_ACTOR)
+        check(plan.id == null || (specification.id == plan.id && specification.schemaRef == plan.schema)) {
+            "catalog specification ${plan.code} conflicts with its declarative identity"
+        }
+        val known = service.listOfferings(specification.id).associateBy { it.code }
+        return plan.offerings.count { offering ->
+            val existingOffering = known[offering.code]
+            if (existingOffering != null &&
+                (plan.id == null || service.listRevisions(existingOffering.id).isNotEmpty())
+            ) return@count false
+            val created = existingOffering ?: service.createOffering(specification.id, offering.code, MARKET, SEED_ACTOR)
             service.createDraft(
                 offeringId = created.id,
                 schemaRef = plan.schema,
                 content = RevisionContent(
                     name = LocalizedText(mapOf("en" to offering.name)),
                     attributes = catalogJson.toObject(offering.attributes),
+                    prices = offering.prices,
                 ),
-                effectiveFrom = null,
+                effectiveFrom = offering.effectiveFrom,
                 effectiveTo = null,
                 actorId = SEED_ACTOR,
             )
-        }.size
+            true
+        }
     }
 
     internal fun plans(packs: Set<String>): List<SpecificationPlan> = buildList {
-        if ("banking" in packs) add(treasuryPlan())
+        if ("banking" in packs) {
+            add(treasuryPlan())
+            addAll(
+                deposits.definitions.map { definition ->
+                    SpecificationPlan(
+                        code = definition.code,
+                        schema = DeclarativeDeposits.SCHEMA,
+                        offerings = listOf(
+                            OfferingPlan(definition.code, definition.name, definition.attributes, definition.prices, definition.effectiveFrom),
+                        ),
+                        id = definition.productId,
+                    )
+                },
+            )
+        }
         if ("retirement" in packs) addAll(pensionPlans())
     }
 
@@ -132,9 +158,24 @@ class CatalogReferenceOfferingSeeder(
         return OfferingPlan(row["offeringCode"].asText(), row["name"].asText(), attributes)
     }
 
-    internal data class OfferingPlan(val code: String, val name: String, val attributes: JsonNode)
+    internal data class OfferingPlan(
+        val code: String,
+        val name: String,
+        val attributes: JsonNode,
+        val prices: List<PriceComponent> = emptyList(),
+        val effectiveFrom: Instant? = null,
+    )
 
-    internal data class SpecificationPlan(val code: String, val schema: SchemaRef, val offerings: List<OfferingPlan>)
+    internal data class SpecificationPlan(
+        val code: String,
+        val schema: SchemaRef,
+        val offerings: List<OfferingPlan>,
+        val id: UUID? = null,
+    ) {
+        fun specification(at: Instant): ProductSpecification = id?.let {
+            ProductSpecification(id = it, code = code, schemaRef = schema, createdAt = at)
+        } ?: ProductSpecification(code = code, schemaRef = schema, createdAt = at)
+    }
 
     private data class TreasuryInstrument(
         val type: String,

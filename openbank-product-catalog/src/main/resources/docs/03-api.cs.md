@@ -13,6 +13,19 @@ OpenAPI Generator 7.24.0 při kompilaci vytváří coroutine JAX-RS resource roz
 resources je přímo implementují. Product Studio před buildem, type-checkem a kontraktačními testy
 generuje operation-typed TypeScript klienta ze stejného kontraktu.
 
+## Spořicí produkty ze souboru
+
+Definici spořicího produktu s pevnou sazbou přidejte do
+`catalog-seeds/banking/deposits.json`. Soubor určuje kód, název, datum účinnosti
+od půlnoci UTC, atributy schématu depozit v3 a cenové položky. Bankovní balíček
+vytváří pouze koncept. Revizi publikuje schvalovatel běžným postupem katalogu.
+Odstranění položky ze souboru existující revizi nevyřadí.
+
+Jako ID produktu účtu použijte UUID specifikace. Čtení produktu podle ID ve v1
+zpřístupní pouze účinnou revizi a neumožňuje zápis. Billing načte publikovanou
+revizi pod stejným ID ve v2. Interest získá UUID specifikace nabídky z události
+o publikaci.
+
 ## Autentizace
 
 Služba je OIDC resource server. Čtení vyžaduje autentizovaný bearer token. OpenBank deployment může
