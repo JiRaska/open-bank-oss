@@ -150,6 +150,82 @@ class TimingTests(unittest.TestCase):
                 self.assertEqual(REPORT.main(["--input", str(source)]), 1)
 
 
+class CancellationObservationTests(unittest.TestCase):
+    def report(self, batch, *, event="workflow_run", attempt=1):
+        data = fixture([] if batch is None else batch, attempt=attempt)
+        data["workflow_runs"][0].update(event=event, conclusion="cancelled")
+        if batch is None:
+            data["attempt_jobs"].clear()
+        return REPORT.analyze(data, max_runs=20)
+
+    def test_empty_and_unavailable_inventories_are_distinct(self):
+        for batch, expected in [([], "empty_job_inventory"), (None, "unknown")]:
+            with self.subTest(batch=batch):
+                result = self.report(batch)
+                self.assertEqual(result["rows"][0]["cancellation_observation"], expected)
+                self.assertEqual(result["events"]["workflow_run"]["cancellation_observations"][expected], 1)
+                self.assertEqual(result["events"]["workflow_run"]["metrics"]["queue_seconds"]["n"], 0)
+
+    def test_null_starts_are_observations_not_queue_durations(self):
+        result = self.report([job() | {"started_at": None, "conclusion": "cancelled"}])
+        self.assertEqual(result["rows"][0]["cancellation_observation"], "no_recorded_start")
+        metrics = result["events"]["workflow_run"]["metrics"]
+        self.assertTrue(all(stats["n"] == 0 and stats["p50_seconds"] is None for stats in metrics.values()))
+
+    def test_missing_malformed_and_naive_starts_remain_unknown(self):
+        missing = job()
+        del missing["started_at"]
+        for item in [missing, *[job() | {"started_at": value} for value in ["bad", "", [], False, "2026-10-25T12:00:00"]]]:
+            with self.subTest(item=item):
+                self.assertEqual(self.report([item])["rows"][0]["cancellation_observation"], "unknown")
+
+    def test_a_known_start_is_not_erased_by_other_unknown_jobs(self):
+        result = self.report([job(), job(2) | {"started_at": "bad"}])
+        self.assertEqual(result["rows"][0]["cancellation_observation"], "recorded_start")
+        self.assertEqual(result["events"]["workflow_run"]["metrics"]["queue_seconds"]["p50_seconds"], 10)
+
+    def test_skipped_job_timestamp_is_recorded_without_claiming_execution(self):
+        result = self.report([job() | {"conclusion": "skipped"}])
+        self.assertEqual(result["rows"][0]["cancellation_observation"], "recorded_start")
+        self.assertEqual(result["events"]["workflow_run"]["executed_jobs"], 0)
+        self.assertIn("not proof that a job executed", REPORT.markdown(result))
+
+    def test_non_cancelled_empty_run_does_not_count_as_cancellation(self):
+        result = REPORT.analyze(fixture([]), max_runs=20)
+        self.assertIsNone(result["rows"][0]["cancellation_observation"])
+        self.assertEqual(sum(result["events"]["pull_request"]["cancellation_observations"].values()), 0)
+
+    def test_exact_attempt_metadata_controls_observation(self):
+        data = fixture([], attempt=2)
+        data["workflow_runs"][0]["conclusion"] = "success"
+        data["attempts"] = {"1:2": run(attempt=2) | {"conclusion": "cancelled"}}
+        data["attempt_jobs"]["1:1"] = [job()]
+        result = REPORT.analyze(data, max_runs=20)
+        self.assertEqual(result["rows"][0]["attempt"], 2)
+        self.assertEqual(result["rows"][0]["cancellation_observation"], "empty_job_inventory")
+
+    def test_cancellation_counts_are_partitioned_by_event(self):
+        data = {"workflow_runs": [run(1, event="push") | {"conclusion": "cancelled"},
+                                 run(2, event="workflow_run") | {"conclusion": "cancelled"}],
+                "attempt_jobs": {"1:1": [], "2:1": [job()]}}
+        events = REPORT.analyze(data, max_runs=20)["events"]
+        self.assertEqual(events["push"]["cancellation_observations"]["empty_job_inventory"], 1)
+        self.assertEqual(events["workflow_run"]["cancellation_observations"]["recorded_start"], 1)
+        for event in events.values():
+            self.assertEqual(sum(event["cancellation_observations"].values()), event["outcomes"]["cancelled"])
+
+    def test_offline_output_requires_no_api_and_exposes_observation_counts(self):
+        data = fixture([])
+        data["workflow_runs"][0]["conclusion"] = "cancelled"
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / "in.json", Path(directory) / "out.txt"
+            source.write_text(json.dumps(data))
+            for fmt in ["json", "markdown"]:
+                with patch.object(REPORT, "gh_json", side_effect=AssertionError("no extra API reads")):
+                    self.assertEqual(REPORT.main(["--input", str(source), "--output", str(output), "--format", fmt]), 0)
+                self.assertIn("empty_job_inventory", output.read_text())
+
+
 class FetchTests(unittest.TestCase):
     def fake(self, endpoint):
         self.calls.append(endpoint)
