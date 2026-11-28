@@ -36,7 +36,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: party-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-49d1972f@sha256:d55741e8cbc07d4de89231eb37e12a4d30d22416fa37f15ee18c5f32dc023494
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-7fa27416@sha256:43542d71f123d40701fb96530602331a582fbc375e7a4d3213a2a1e33d504383
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
