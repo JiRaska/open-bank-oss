@@ -480,10 +480,10 @@ def self_test() -> int:
         annotated = Cred(doc, Path("x.yaml"))
         if annotated.deadline is None or (validate_deadline(annotated, today) is None) != valid:
             print(f"self-test FAIL: deadline scalar {scalar}"); bad += 1
-    for annotations in ("  annotations: []\n",
+    for annotation_yaml in ("  annotations: []\n",
                         "  annotations: {}\n  annotations: {}\n",
                         f"  annotations:\n    {DEADLINE}: |-\n      multiline\n      value |\n"):
-        doc = doc_static.replace("spec:", annotations + "spec:")
+        doc = doc_static.replace("spec:", annotation_yaml + "spec:")
         if Cred(doc, Path("x.yaml")).deadline != "":
             print("self-test FAIL: unreadable deadline classified as absent"); bad += 1
     doc_dyn = doc_static.replace("key: account-service", "key: database/creds/foo-db-vault-role")
