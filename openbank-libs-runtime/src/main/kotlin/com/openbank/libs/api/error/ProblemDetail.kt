@@ -39,6 +39,7 @@ data class ProblemDetail(
     val message: String,
     val timestamp: Instant,
     val details: List<FieldError>? = null,
+    val error: String? = null,
 ) {
     companion object {
         const val MEDIA_TYPE = "application/problem+json"

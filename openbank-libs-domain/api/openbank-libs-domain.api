@@ -1697,16 +1697,17 @@ public class com/openbank/libs/domain/error/AuthenticationRequired : com/openban
 }
 
 public class com/openbank/libs/domain/error/Conflict : com/openbank/libs/domain/error/DomainException {
-	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;)V
-	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 }
 
 public abstract class com/openbank/libs/domain/error/DomainException : java/lang/RuntimeException {
-	public fun <init> (Lcom/openbank/libs/domain/error/ErrorCategory;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/util/List;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;)V
-	public synthetic fun <init> (Lcom/openbank/libs/domain/error/ErrorCategory;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/util/List;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Lcom/openbank/libs/domain/error/ErrorCategory;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/util/List;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;)V
+	public synthetic fun <init> (Lcom/openbank/libs/domain/error/ErrorCategory;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/util/List;Ljava/time/Duration;Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 	public final fun getCategory ()Lcom/openbank/libs/domain/error/ErrorCategory;
 	public final fun getClientMessage ()Ljava/lang/String;
 	public final fun getErrorCode ()Lcom/openbank/libs/domain/error/ErrorCode;
+	public final fun getLegacyError ()Ljava/lang/String;
 	public final fun getRetryAfter ()Ljava/time/Duration;
 	public final fun getViolations ()Ljava/util/List;
 	public final fun isConsistent ()Z
@@ -1754,8 +1755,8 @@ public final class com/openbank/libs/domain/error/ErrorCode$DefaultImpls {
 }
 
 public class com/openbank/libs/domain/error/NotFound : com/openbank/libs/domain/error/DomainException {
-	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/lang/Throwable;)V
-	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/domain/error/ErrorCode;Ljava/lang/String;Ljava/lang/Throwable;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
 }
 
 public final class com/openbank/libs/domain/error/PlatformErrorCode : java/lang/Enum, com/openbank/libs/domain/error/ErrorCode {
