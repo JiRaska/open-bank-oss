@@ -3,7 +3,9 @@
 import copy
 import io
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -86,6 +88,55 @@ class EvidenceTest(unittest.TestCase):
         self.assertFalse(applicable(["docs/README.md", "openbank-account-service/src/main/X.kt", "openbank-libs-notes.md"]))
 
 
+class ChangedPathsTest(unittest.TestCase):
+    def test_immutable_three_dot_scope_and_rename_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = Path.cwd()
+            os.chdir(tmp)
+            try:
+                self.assert_offline_diff()
+            finally:
+                os.chdir(prior)
+
+    def assert_offline_diff(self):
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "commit.gpgsign=false", *args], text=True,
+            ).strip()
+
+        lib = Path("openbank-libs-runtime/fixture\nname")
+        pin = Path("openbank-infra/gitops/components/keycloak/keycloak.yaml")
+        lib.parent.mkdir()
+        lib.write_text("fixture")
+        git("init", "-q")
+        git("add", "--", str(lib))
+        git("commit", "-qm", "initial")
+        head = git("rev-parse", "HEAD")
+        git("checkout", "--detach", head)
+        Path("openbank-libs-runtime/base-only").write_text("base")
+        git("add", "--", "openbank-libs-runtime/base-only")
+        git("commit", "-qm", "base moves")
+        base = git("rev-parse", "HEAD")
+        git("checkout", "--detach", head)
+        pin.parent.mkdir(parents=True)
+        pin.write_text("pin")
+        git("add", "--", str(pin))
+        git("commit", "-qm", "pin only")
+        pin_head = git("rev-parse", "HEAD")
+        scope = checker.changed_paths(base, pin_head, budget=checker.ReadBudget(30))
+        self.assertEqual([path for path in scope if path], [str(pin)])
+        self.assertFalse(applicable(scope))
+        git("mv", "--", str(lib), "moved-out")
+        git("commit", "-qm", "move library file")
+        moved_head = git("rev-parse", "HEAD")
+        self.assertTrue(applicable(checker.changed_paths(base, moved_head, budget=checker.ReadBudget(30))))
+        with self.assertRaises(checker.EvidenceUnavailable):
+            checker.changed_paths("0" * 40, moved_head, budget=checker.ReadBudget(30))
+        with self.assertRaises(checker.EvidenceUnavailable):
+            checker.changed_paths("main", moved_head, budget=checker.ReadBudget(30))
+
+
 class PollingEvidenceTest(unittest.TestCase):
     runs = EvidenceTest.runs
     def poll(self, frames, *, timeout=900, job_overrides=None):
@@ -95,8 +146,6 @@ class PollingEvidenceTest(unittest.TestCase):
 
         def api(endpoint, **_kwargs):
             reads.append(endpoint)
-            if '/pulls/' in endpoint:
-                return [[{'filename': 'openbank-libs/src/main/Fixture.kt'}]]
             if '/actions/runs?' in endpoint:
                 frame = frames[min(polls[0], len(frames) - 1)]
                 polls[0] += 1
@@ -110,9 +159,10 @@ class PollingEvidenceTest(unittest.TestCase):
                 return [{'jobs': [{'name': JOBS[workflow], 'status': 'completed', 'conclusion': 'success'}]}]
             raise AssertionError(endpoint)
 
-        with patch.object(checker, 'api', side_effect=api), patch.object(checker.time, 'monotonic', side_effect=lambda: now[0]), \
+        with patch.object(checker, 'api', side_effect=api), \
+                patch.object(checker.time, 'monotonic', side_effect=lambda: now[0]), \
                 patch.object(checker.time, 'sleep', side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
-                patch('sys.argv', ['checker', '--repo', 'owner/repo', '--pr', '1', '--head', 'head', '--timeout', str(timeout)]), \
+                patch('sys.argv', ['checker', 'verify', '--repo', 'owner/repo', '--head', 'head', '--applicable', 'true', '--timeout', str(timeout)]), \
                 redirect_stdout(io.StringIO()):
             result = checker.main()
         return result, reads
@@ -126,10 +176,10 @@ class PollingEvidenceTest(unittest.TestCase):
         result, reads = self.poll([frame])
         self.assertEqual(result, 1)
         # Before the budget: a fixed 30 s poll made 31 listings, 34 reads in all, per run.
-        # Backoff 30/60/120/240/240/(210 to deadline) lists 7 times: 10 reads in all.
+        # Backoff 30/60/120/240/240/(210 to deadline) lists 7 times: 9 reads in all.
         self.assertEqual(sum('/actions/runs?' in p for p in reads), 7)
         self.assertEqual(sum('/jobs?' in p for p in reads), 2)
-        self.assertLessEqual(len(reads), 10)
+        self.assertLessEqual(len(reads), 9)
         self.assertLessEqual(len(reads), checker.MAX_API_CALLS)
 
     def test_missing_evidence_still_fails_after_backoff(self):
@@ -203,7 +253,7 @@ class TransportEvidenceTest(unittest.TestCase):
                               else "API rate limit exceeded for installation.")
         return subprocess.CompletedProcess([], 1, self.response(status, {"message": message}, headers), "quota")
 
-    def poll(self, *, faults=None, frames=None, timeout=60, verdict_cost=0, paths=None):
+    def poll(self, *, faults=None, frames=None, timeout=60, verdict_cost=0, scope='true'):
         now = [0.0]
         reads, sleeps, per_endpoint = [], [], {}
         frames = frames or [PollingEvidenceTest().frame()]
@@ -222,9 +272,7 @@ class TransportEvidenceTest(unittest.TestCase):
                 special = faults(endpoint, per_endpoint[endpoint], now)
                 if special is not None:
                     return special
-            if '/pulls/' in endpoint:
-                data = paths if paths is not None else [{'filename': 'openbank-libs-runtime/src/main/Fixture.kt'}]
-            elif '/actions/runs?' in endpoint:
+            if '/actions/runs?' in endpoint:
                 data = {'workflow_runs': copy.deepcopy(frames[min(polls[0], len(frames) - 1)])}
                 polls[0] += 1
             elif '/jobs?' in endpoint:
@@ -250,8 +298,8 @@ class TransportEvidenceTest(unittest.TestCase):
                 patch.object(checker.time, 'time', side_effect=lambda: 1000 + now[0]), \
                 patch.object(checker.time, 'sleep', side_effect=sleep), \
                 patch.object(checker, 'verdict', side_effect=verdict), \
-                patch('sys.argv', ['checker', '--repo', 'owner/repo', '--pr', '1', '--head', 'head',
-                                   '--timeout', str(timeout)]), redirect_stdout(output):
+                patch('sys.argv', ['checker', 'verify', '--repo', 'owner/repo', '--head', 'head',
+                                   '--applicable', scope, '--timeout', str(timeout)]), redirect_stdout(output):
             result = checker.main()
         return result, reads, sleeps, output.getvalue()
 
@@ -399,12 +447,12 @@ class TransportEvidenceTest(unittest.TestCase):
     def test_call_budget_exhaustion_fails_closed_never_passes(self):
         frame = PollingEvidenceTest().frame()
         frame[2]['status'] = 'in_progress'
-        with patch.object(checker, 'MAX_API_CALLS', 4), patch.object(checker, 'POLL_DELAYS', (1,)):
+        with patch.object(checker, 'MAX_API_CALLS', 3), patch.object(checker, 'POLL_DELAYS', (1,)):
             rc, reads, _sleeps, out = self.poll(frames=[frame, PollingEvidenceTest().frame()], timeout=900)
-        # files + list + 2 jobs = 4; the next listing (which would have passed) is refused.
-        self.assertEqual((rc, len(reads)), (1, 4))
+        # list + 2 jobs = 3; the next listing (which would have passed) is refused.
+        self.assertEqual((rc, len(reads)), (1, 3))
         self.assertIn("NOT_EVALUATED", out)
-        self.assertIn("API call budget of 4 exhausted", out)
+        self.assertIn("API call budget of 3 exhausted", out)
 
     def test_quota_retries_and_pages_are_charged_to_the_budget(self):
         with patch.object(checker, 'MAX_API_CALLS', 2):
@@ -418,11 +466,20 @@ class TransportEvidenceTest(unittest.TestCase):
         budget.quota_remaining = checker.LOW_QUOTA_REMAINING - 1
         self.assertEqual(budget.poll_delay(0), checker.POLL_DELAYS[-1])
 
+    def test_missing_and_invalid_scope_fail_before_any_api_read(self):
+        for flag in ([], ['--applicable', ''], ['--applicable', 'unknown']):
+            args = ['checker', 'verify', '--repo', 'owner/repo', '--head', 'head', *flag]
+            with patch('sys.argv', args), patch.object(checker, 'api') as api, \
+                    patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit) as error:
+                checker.main()
+            self.assertEqual(error.exception.code, 2)
+            api.assert_not_called()
+
     def test_normal_success_and_unrelated_scope_do_not_add_reads(self):
         rc, reads, sleeps, _out = self.poll()
-        self.assertEqual((rc, len(reads), sleeps), (0, 5, []))
-        rc, reads, sleeps, _out = self.poll(paths=[{'filename': 'docs/README.md'}])
-        self.assertEqual((rc, len(reads), sleeps), (0, 1, []))
+        self.assertEqual((rc, len(reads), sleeps), (0, 4, []))
+        rc, reads, sleeps, _out = self.poll(scope='false')
+        self.assertEqual((rc, len(reads), sleeps), (0, 0, []))
 
 
 if __name__ == "__main__":

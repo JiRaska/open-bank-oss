@@ -84,6 +84,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       admission: ${{ steps.admit.outputs.proceed }}
+      library-quality-applicable: ${{ steps.library-scope.outputs.applicable }}
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
       renderer-changed: ${{ steps.detect.outputs.renderer-changed }}
@@ -154,6 +155,15 @@ jobs:
       - name: verification module selection self-test
         if: steps.admit.outputs.proceed == 'true'
         run: python3 .github/scripts/derive-verification-modules.py --self-test
+      - id: library-scope
+        name: Classify exact PR library proof scope
+        if: github.event_name == 'pull_request' && steps.admit.outputs.proceed == 'true'
+        env:
+          QUALITY_BASE: ${{ github.event.pull_request.base.sha }}
+          QUALITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 .github/scripts/check_library_quality_evidence.py classify \
+            --base "$QUALITY_BASE" --head "$QUALITY_HEAD" >> "$GITHUB_OUTPUT"
       - id: detect
         if: steps.admit.outputs.proceed == 'true'
         env:
@@ -2970,12 +2980,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           QUALITY_REPO: ${{ github.repository }}
-          QUALITY_PR: ${{ github.event.pull_request.number }}
+          QUALITY_APPLICABLE: ${{ needs.changes.outputs.library-quality-applicable }}
           QUALITY_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           python3 .github/scripts/test_library_quality_evidence.py
-          python3 .github/scripts/check_library_quality_evidence.py \
-            --repo "$QUALITY_REPO" --pr "$QUALITY_PR" --head "$QUALITY_HEAD"
+          python3 .github/scripts/check_library_quality_evidence.py verify \
+            --repo "$QUALITY_REPO" --head "$QUALITY_HEAD" --applicable "$QUALITY_APPLICABLE"
 
       - name: Verify individual build-result offline fixtures
         run: python3 .github/scripts/test-check-service-build-results.py ResultsTest RendererSelectionTest
