@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.34.0...party-service-v0.34.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **party:** match MCP age reads to the Edge workload role ([#17422](https://github.com/JiRaska/open-bank-oss/issues/17422)) ([7fa2741](https://github.com/JiRaska/open-bank-oss/commit/7fa274167f8573e82f92595fdab648e6599a7ce5))
+
 ## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.33.0...party-service-v0.34.0) (2026-11-27)
 
 
