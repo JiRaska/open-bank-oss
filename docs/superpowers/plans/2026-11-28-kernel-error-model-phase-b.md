@@ -304,7 +304,7 @@ bash .github/scripts/check-duplicate-yaml-keys.sh
 
 Expected: BUILD SUCCESSFUL with tests actually executed, no new lint findings, and no duplicate-key finding in changed YAML.
 
-- [ ] **Step 4: Run the full gate manifest with PR context**
+- [x] **Step 4: Run the full gate manifest with PR context**
 
 After opening the draft PR, use its real number/body and current merge base:
 
@@ -316,7 +316,7 @@ python3 .github/scripts/run-gates.py --all
 
 Expected: no newly introduced FAIL. Any environment-specific unresolved input is named explicitly rather than counted as a pass.
 
-- [ ] **Step 5: Commit the contract and publish the stacked PRs**
+- [x] **Step 5: Commit the contract and publish the stacked PRs**
 
 ```bash
 git add openbank-product-catalog/src/main/resources/openapi.yaml docs/superpowers/plans/2026-11-28-kernel-error-model-phase-b.md
