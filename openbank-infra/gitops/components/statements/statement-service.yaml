@@ -54,7 +54,7 @@ spec:
           # Kyverno's verify-openbank-image-sbom-attestation policy blocked every pod
           # (Deployment stuck at 0/1) → the EoM close / Closings screen read "not
           # responding". sandbox-a407c3ae is the #706 main build with a valid attestation.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-44fff644@sha256:b8598874b59eb6a55625021c8cb33d0e59e203c8044c7bc3938b95bc3e30cac4
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-b99b3989@sha256:0a053bd3f6bdb4f0c37df58f39876c7c3a70195cb767172c608638b050f6f214
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
