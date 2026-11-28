@@ -390,9 +390,13 @@ public class McpWithheldCodeAuthenticator implements Authenticator {
 
     private static Response waitingPage(AuthenticationFlowContext ctx, McpConnectContext context, int status, String notice) {
         String action = ctx.getActionUrl(ctx.generateAccessCode()).toString();
-        String name = Optional.ofNullable(ctx.getAuthenticationSession().getClient().getName())
-                .orElse(context.clientId());
-        boolean v2 = ctx.getAuthenticationSession().getAuthNote(McpNotes.CONNECT_V2) != null;
+        var auth = ctx.getAuthenticationSession();
+        String name = Optional.ofNullable(auth.getClient().getName()).orElse(context.clientId());
+        boolean v2 = auth.getAuthNote(McpNotes.CONNECT_V2) != null;
+        if (v2 && auth.getAuthNote(McpNotes.NATIVE_PROOF) != null && McpNativeEnrollment.appliesTo(auth)) {
+            return McpNativeHandoffPage.renderWaiting(action, name, status,
+                    auth.getAuthNote(McpNotes.CHALLENGE_ID) != null);
+        }
         String capabilities = v2
                 ? "Review the selected accounts and permissions in your bank app."
                 : "Reads your data and can propose payments; it can never pay by itself.";

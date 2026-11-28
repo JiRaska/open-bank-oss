@@ -154,7 +154,21 @@ public final class ExtensionTests {
         String waiting = McpNativeHandoffPage.render("/login-actions/authenticate", "Assistant", null).getEntity().toString();
         check("waiting page introduces no handoff material",
                 waiting.contains("Continue in the app") && !waiting.contains("name=\"handoff\"")
-                        && !waiting.contains("data:image/png") && waiting.contains("requestSubmit();"));
+                        && !waiting.contains("data:image/png") && waiting.contains("requestSubmit();")
+                        && !waiting.contains("name=\"check\"") && waiting.contains("name=\"cancel\""));
+
+        var approval = McpNativeHandoffPage.renderWaiting("/login-actions/authenticate", "Assistant", 429, true);
+        String approvalHtml = approval.getEntity().toString();
+        eq("native approval keeps the rate-limit status", 429, approval.getStatus());
+        eq("native approval page is not cached", "no-store", approval.getHeaderString("Cache-Control"));
+        check("native approval uses the same branded, bilingual status without a manual success action",
+                approvalHtml.contains("data:image/webp") && approvalHtml.contains("role=\"status\"")
+                        && approvalHtml.contains("Potvrďte vybrané účty") && approvalHtml.contains("Confirm the selected accounts")
+                        && approvalHtml.contains("The next check will run shortly")
+                        && approvalHtml.contains("id=\"mcp-connect-poll\"")
+                        && approvalHtml.contains("getElementById('mcp-connect-poll').requestSubmit();")
+                        && !approvalHtml.contains("name=\"check\"") && !approvalHtml.contains("I have approved it")
+                        && approvalHtml.contains("name=\"cancel\""));
     }
 
     private static void nativeHandoff() {

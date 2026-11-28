@@ -23,12 +23,25 @@ final class McpNativeHandoffPage {
 
     static Response render(String action, String client, McpNativeHandoff.Issued issued)
             throws IOException, WriterException {
+        if (issued == null) {
+            return render(action, client, 200, WAITING, "native-mcp-check", "", "");
+        }
+        String input = "<input type=\"hidden\" name=\"handoff\" value=\"" + issued.formValue() + "\">";
+        return render(action, client, 200, qrPanel(issued), "native-mcp-check", input, CHECK);
+    }
+
+    static Response renderWaiting(String action, String client, int status, boolean confirmAccounts) {
+        String panel = confirmAccounts ? CONFIRM_ACCOUNTS : WAITING;
+        return render(action, client, status, status == 429 ? panel + WAIT_BEFORE_CHECK : panel,
+                "mcp-connect-poll", "", "");
+    }
+
+    private static Response render(String action, String client, int status, String panel,
+                                   String formId, String input, String check) {
         String nonce = UUID.randomUUID().toString();
-        String input = issued == null ? "" :
-                "<input type=\"hidden\" name=\"handoff\" value=\"" + issued.formValue() + "\">";
         String html = TEMPLATE.formatted(nonce, STYLES, LIPA_MASCOT, McpWithheldCodeAuthenticator.escape(client),
-                issued == null ? WAITING : qrPanel(issued), McpWithheldCodeAuthenticator.escape(action), input, nonce);
-        return Response.ok(html, MediaType.TEXT_HTML_TYPE.withCharset("utf-8"))
+                panel, formId, McpWithheldCodeAuthenticator.escape(action), input, check, nonce, formId);
+        return Response.status(status).entity(html).type(MediaType.TEXT_HTML_TYPE.withCharset("utf-8"))
                 .header("Cache-Control", "no-store")
                 .header("Referrer-Policy", "no-referrer")
                 .header("Content-Security-Policy",
@@ -67,10 +80,27 @@ final class McpNativeHandoffPage {
     }
 
     private static final String WAITING = """
-            <p class="waiting">Pokračujte ve schválení v aplikaci. Pokud jste ji ještě neotevřeli,
-              začněte znovu v asistentovi.
-              <span lang="en">Continue in the app. If you haven't opened it yet, restart from your assistant.</span>
+            <p class="waiting" role="status">
+              Pokračujte ve schválení v aplikaci OpenBank.
+              <span lang="en">Continue in the app to approve OpenBank access.</span>
             </p>
+            """;
+
+    private static final String CONFIRM_ACCOUNTS = """
+            <p class="waiting" role="status">
+              Potvrďte vybrané účty v aplikaci OpenBank. Tato stránka stav průběžně kontroluje.
+              <span lang="en">Confirm the selected accounts in your bank app. This page checks for updates automatically.</span>
+            </p>
+            """;
+
+    private static final String WAIT_BEFORE_CHECK = """
+            <p>Další kontrola proběhne za chvíli.
+              <span lang="en">The next check will run shortly.</span>
+            </p>
+            """;
+
+    private static final String CHECK = """
+            <button type="submit" name="check" value="1">Pokračovat <span lang="en">Continue</span></button>
             """;
 
     private static final String TEMPLATE = """
@@ -96,14 +126,13 @@ final class McpNativeHandoffPage {
                   <span lang="en">In the OpenBank app, select accounts and approve what the assistant can access.</span>
                 </p>
                 %s
-                <form id="native-mcp-check" method="post" action="%s">
-                  %s
-                  <button type="submit" name="check" value="1">Pokračovat <span lang="en">Continue</span></button>
+                <form id="%s" method="post" action="%s">
+                  %s%s
                   <button type="submit" name="cancel" value="1">Zrušit <span lang="en">Cancel</span></button>
                 </form>
               </main>
               <script nonce="%s">setTimeout(function(){
-                document.getElementById('native-mcp-check').requestSubmit();
+                document.getElementById('%s').requestSubmit();
               },3000);</script>
             </body></html>
             """;
@@ -142,6 +171,10 @@ final class McpNativeHandoffPage {
               margin: 0 auto .55rem; background: white; border: 1px solid #dcdaf2; border-radius: .75rem;
             }
             figcaption { font-size: .88rem; }
+            .waiting {
+              border-inline-start: .2rem solid #2357aa; background: #ecf4fe;
+              border-radius: .65rem; padding: .8rem 1rem;
+            }
             .primary, button {
               display: block; min-height: 2.75rem; text-align: center; border-radius: .65rem;
               line-height: 1.26; font: inherit; font-weight: 650;
