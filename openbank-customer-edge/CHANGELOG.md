@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.17.0...customer-edge-v1.17.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **customer-edge:** resolve shared MCP age after synthetic denial ([#17420](https://github.com/JiRaska/open-bank-oss/issues/17420)) ([01f4456](https://github.com/JiRaska/open-bank-oss/commit/01f4456f14a2c73dc0036f4bc094ff6f43c80529))
+
 ## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.16.0...customer-edge-v1.17.0) (2026-11-27)
 
 
