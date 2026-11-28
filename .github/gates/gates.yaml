@@ -4628,6 +4628,8 @@ gates:
     selftest: |
       python3 .github/scripts/check-error-code-catalogue.py --self-test
       python3 .github/scripts/gen-error-code-catalogue.py --self-test
+      python3 .github/scripts/test_error_code_catalogue.py
+      python3 .github/scripts/test_gen_error_code_catalogue.py
     selftest_expect: pass
     selftest_inputs:
       - .github/scripts/check-error-code-catalogue.py
@@ -4651,7 +4653,9 @@ gates:
     review_after: 2027-05-28
     budget_seconds: 30
     min_subjects: 1000   # 3468 service Kotlin src/main files measured 2026-11-28
-    selftest: python3 .github/scripts/check-service-local-exception-mappers.py --self-test
+    selftest: |
+      python3 .github/scripts/check-service-local-exception-mappers.py --self-test
+      python3 .github/scripts/test_service_local_exception_mappers.py
     selftest_expect: pass
     selftest_inputs:
       - .github/scripts/check-service-local-exception-mappers.py
