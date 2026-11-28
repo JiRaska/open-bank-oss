@@ -76,6 +76,29 @@ def run(*args, data=None):
     return result.stdout
 
 
+def export_extension(providers):
+    try:
+        result = subprocess.run(
+            ("docker", "buildx", "build", "--target", "extension-jar",
+             "--output", f"type=local,dest={providers}", str(ROOT / "openbank-infra/docker/keycloak")),
+            capture_output=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Keycloak extension export timed out after 120 seconds") from None
+    if result.returncode:
+        output = (result.stderr + result.stdout).lower()
+        categories = (
+            (b"no space left on device", "runner storage exhausted"),
+            (b"you have reached your pull rate limit", "registry pull rate limit"),
+            (b"failed to authorize", "authorization failure"),
+            (b"connection reset by peer", "connection reset"),
+        )
+        matched = [label for marker, label in categories if marker in output]
+        detail = matched[0] if len(matched) == 1 else "unclassified"
+        raise RuntimeError(f"Keycloak extension export failed (exit {result.returncode}; {detail})")
+
+
 def b64(value):
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
@@ -504,8 +527,7 @@ class McpClientAdmission(unittest.TestCase):
         image = image.replace("${KEYCLOAK_VERSION}", version)
         # The extension, from the committed Dockerfile (compiled and unit-tested in that stage).
         providers = work / "providers"
-        run("docker", "buildx", "build", "--target", "extension-jar", "--output", f"type=local,dest={providers}",
-            str(ROOT / "openbank-infra/docker/keycloak"))
+        export_extension(providers)
         providers.chmod(0o755)
         cls.image, cls.features, cls.providers = image, features, providers
         cls.admin_password = secrets.token_urlsafe(18)
