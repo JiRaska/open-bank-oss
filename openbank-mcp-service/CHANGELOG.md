@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.22.1...mcp-service-v0.22.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **mcp-service:** keep Keycloak refresh credentials opaque ([#17484](https://github.com/JiRaska/open-bank-oss/issues/17484)) ([292f1e2](https://github.com/JiRaska/open-bank-oss/commit/292f1e2ee210e0bb57cd523d5a71bc30c0a50b28))
+
 ## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.22.0...mcp-service-v0.22.1) (2026-11-26)
 
 
