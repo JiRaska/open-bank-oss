@@ -10,6 +10,7 @@ import com.openbank.sca.application.port.out.NotificationSender
 import com.openbank.sca.application.port.out.OtpGenerator
 import com.openbank.sca.application.port.out.OtpStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
+import com.openbank.sca.domain.model.ReservedNamespace
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -68,18 +69,32 @@ class LoggingNotificationSender(
 
     // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
-    // Emit a real PUSH notification request (#4) so the party gets a "payment to approve" alert on
-    // their device. SCA_APPROVAL maps to the SECURITY category in notification-service, so it is
-    // always delivered regardless of the customer's push preferences.
-    override suspend fun sendPushNotification(partyId: UUID, challengeId: UUID, message: String) {
+    private val canonicalMcpReference = Regex("[0-9a-f]{64}")
+
+    // Both approval templates are SECURITY notifications and respect the same delivery guarantees.
+    override suspend fun sendPushNotification(
+        partyId: UUID,
+        challengeId: UUID,
+        message: String,
+        mcpApprovalRequestId: String?,
+    ) {
         log.infof("PUSH → partyId=%s challengeId=%s message=%s", partyId, challengeId, message.sanitizeForLog())
-        val request = mapOf(
-            "partyId" to partyId.toString(),
-            "channel" to "PUSH",
-            "template" to "SCA_APPROVAL",
-            "recipient" to partyId.toString(),
-            "variables" to mapOf("detail" to message),
-        )
+        val request = buildMap<String, Any> {
+            put("partyId", partyId.toString())
+            put("channel", "PUSH")
+            put("recipient", partyId.toString())
+            if (mcpApprovalRequestId == null) {
+                put("template", "SCA_APPROVAL")
+                put("variables", mapOf("detail" to message))
+            } else {
+                put("template", "MCP_CONNECT_APPROVAL")
+                put("variables", emptyMap<String, String>())
+                val reference = mcpApprovalRequestId.removePrefix(ReservedNamespace.MCP_CONNECT.prefix)
+                if (reference != mcpApprovalRequestId && canonicalMcpReference.matches(reference)) {
+                    put("deepLink", "openbank://mcp/connect/$reference")
+                }
+            }
+        }
         notificationEmitter.send(Record.of(partyId.toString(), objectMapper.writeValueAsString(request)))
     }
 }

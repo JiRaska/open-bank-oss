@@ -80,7 +80,7 @@ class McpClientConnectScaTest {
         every { it.verify(any(), any(), any(), any()) } returns true
     }
     private val guard = mockk<NotificationDispatchGuard>().also { g ->
-        coEvery { g.sendPushNotification(any(), any(), any()) } answers { pushed += thirdArg<String>() }
+        coEvery { g.sendPushNotification(any(), any(), any(), any()) } answers { pushed += thirdArg<String>() }
     }
 
     private val service = ScaService(
@@ -141,7 +141,9 @@ class McpClientConnectScaTest {
         val ch = service.initiate(command(linking()))
 
         assertThat(ch.purpose).isEqualTo(ScaPurpose.MCP_CLIENT_CONNECT)
-        assertThat(pushed).containsExactly(STATIC_PUSH_MESSAGES.getValue(ScaPurpose.MCP_CLIENT_CONNECT))
+        val message = STATIC_PUSH_MESSAGES.getValue(ScaPurpose.MCP_CLIENT_CONNECT)
+        assertThat(pushed).containsExactly(message)
+        coVerify(exactly = 1) { guard.sendPushNotification(ch.partyId, ch.id, message, "mcp-connect:req-1") }
     }
 
     // Rule: buildIdempotencyKey includes approvalRequestId + payloadSha256.

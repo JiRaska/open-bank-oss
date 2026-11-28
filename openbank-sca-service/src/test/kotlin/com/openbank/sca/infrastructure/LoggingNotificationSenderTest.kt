@@ -74,6 +74,27 @@ class LoggingNotificationSenderTest {
         assertThat(payload["template"].asText()).isEqualTo("SCA_APPROVAL")
         assertThat(payload["recipient"].asText()).isEqualTo(partyId.toString())
         assertThat(payload["variables"]["detail"].asText()).isEqualTo("Approve payment of 250 EUR")
+        assertThat(payload.has("deepLink")).isFalse()
+    }
+
+    @Test
+    fun `MCP pushes send only a canonical routing reference and no caller supplied content`() {
+        val partyId = UUID.randomUUID()
+        val reference = "ab".repeat(32)
+        val records = mutableListOf<Record<String, String>>()
+        runBlocking {
+            sender.sendPushNotification(partyId, UUID.randomUUID(), "not push copy", "mcp-connect:$reference")
+            sender.sendPushNotification(partyId, UUID.randomUUID(), "not push copy", "mcp-connect:legacy")
+        }
+
+        verify(exactly = 2) { emitter.send(capture(records)) }
+        val payloads = records.map { objectMapper.readTree(it.value()) }
+        assertThat(payloads).allSatisfy {
+            assertThat(it["template"].asText()).isEqualTo("MCP_CONNECT_APPROVAL")
+            assertThat(it["variables"].size()).isZero()
+        }
+        assertThat(payloads.first()["deepLink"].asText()).isEqualTo("openbank://mcp/connect/$reference")
+        assertThat(payloads.last().has("deepLink")).isFalse()
     }
 
     @Test

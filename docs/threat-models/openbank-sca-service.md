@@ -421,3 +421,16 @@ the service path.
 ## Sandbox Connect V2 transport
 
 Keycloak uses SCA's private 8443 listener with the existing authority workload certificate. TLS authenticates the connection. SCA still requires the scoped `openbank-keycloak-mcp` staff OAuth bearer and authorizes only MCP connect challenge initiation and consumption. The connection continues to require the customer's approval, the bound request context and the existing device-age rule. Roll back by reverting the Connect V2 flags and Keycloak endpoint settings through GitOps. Leave the existing SCA listener and policy in place for other consumers.
+
+## MCP connect push delivery
+
+The scoped MCP initiation sends the dedicated `MCP_CONNECT_APPROVAL` security
+notification. Its optional navigation hint is derived from the validated request
+binding and can contain only the canonical public request reference. The payload
+does not contain the browser handoff token or the approval context. Tapping it
+requires a personal app session and an authenticated request lookup. The bound
+challenge and device signature still govern approval.
+
+Deploy Notification before the SCA producer when enabling this event. Notification
+validates the template and route together. Retain the consumer while rolling
+back the SCA producer so any in-flight events remain readable.

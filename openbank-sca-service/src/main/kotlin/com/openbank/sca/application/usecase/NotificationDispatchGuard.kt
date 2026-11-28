@@ -17,7 +17,12 @@ class NotificationDispatchGuard(private val notificationSender: NotificationSend
     @Timeout(2000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
-    suspend fun sendPushNotification(partyId: UUID, challengeId: UUID, message: String) {
-        notificationSender.sendPushNotification(partyId, challengeId, message)
+    suspend fun sendPushNotification(
+        partyId: UUID,
+        challengeId: UUID,
+        message: String,
+        mcpApprovalRequestId: String? = null,
+    ) {
+        notificationSender.sendPushNotification(partyId, challengeId, message, mcpApprovalRequestId)
     }
 }
