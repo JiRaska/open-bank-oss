@@ -120,7 +120,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
     private val baseRef: WriterBaseRef get() = config.writerBaseRef()
 
     private fun getBaseSha(): String? {
-        val response = send("GET", "/git/ref/heads/${baseRef.ref}", null) ?: return null
+        val response = send("get_base_sha", "GET", "/git/ref/heads/${baseRef.ref}", null) ?: return null
         if (response.status !in OK_RANGE) return null
         return objectMapper.readTree(response.bodyAsString()).path("object").path("sha").asText().takeIf {
             it.isNotBlank()
@@ -128,7 +128,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
     }
 
     private fun getFile(path: String): SourceFile? {
-        val response = send("GET", "/contents/$path?ref=${baseRef.ref}", null) ?: return null
+        val response = send("get_file", "GET", "/contents/$path?ref=${baseRef.ref}", null) ?: return null
         if (response.status !in OK_RANGE) return null
         val body = objectMapper.readTree(response.bodyAsString())
         val sha = body.path("sha").asText()
@@ -144,7 +144,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
 
     private fun createBranch(branch: String, sha: String): Boolean {
         val request = objectMapper.writeValueAsString(mapOf("ref" to "refs/heads/$branch", "sha" to sha))
-        val response = send("POST", "/git/refs", request)
+        val response = send("create_branch", "POST", "/git/refs", request)
         return response != null && response.status in OK_RANGE
     }
 
@@ -157,7 +157,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
                 "sha" to sha,
             ),
         )
-        val response = send("PUT", "/contents/$path", request)
+        val response = send("commit_file", "PUT", "/contents/$path", request)
         return response != null && response.status in OK_RANGE
     }
 
@@ -179,7 +179,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
                 "body" to body,
             ),
         )
-        val response = send("POST", "/pulls", request) ?: return null
+        val response = send("open_pr", "POST", "/pulls", request) ?: return null
         if (response.status !in OK_RANGE) return null
         return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
     }
@@ -192,7 +192,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             "prove the live writer path (ADR-0031 D9 amendment 2026-11-14). It is not a repair of `main`."
     }
 
-    private fun send(method: String, path: String, body: String?): EgressResponse? {
+    private fun send(stage: String, method: String, path: String, body: String?): EgressResponse? {
         val request = EgressRequest(
             method = method,
             url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubRepo()}$path",
@@ -205,7 +205,12 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             ),
             body = body?.toByteArray(Charsets.UTF_8),
         )
-        return http.send(request)
+        val response = http.send(request)
+        if (response.status !in OK_RANGE) {
+            // Deliberately no URL, headers, request/response bodies or exception text: stage + status suffice.
+            log.warnf("GitHub API request failed: stage=%s status=%d", stage, response.status)
+        }
+        return response
     }
 
     private data class SourceFile(val content: String, val sha: String)
@@ -224,7 +229,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
  */
 internal class GitHubTicketWriter(
     private val objectMapper: ObjectMapper,
-    private val send: (method: String, path: String, body: String?) -> EgressResponse?,
+    private val send: (stage: String, method: String, path: String, body: String?) -> EgressResponse?,
 ) {
     fun openOrReuse(finding: FlakyTestFinding, diagnosis: String): String? {
         val key = FindingKeys.of(finding)
@@ -248,7 +253,7 @@ internal class GitHubTicketWriter(
     private fun lookup(key: String): Lookup {
         val marker = FindingKeys.marker(key)
         for (page in 1..MAX_PAGES) {
-            val response = send("GET", "/issues?state=open&per_page=$PAGE_SIZE&page=$page", null)
+            val response = send("ticket_lookup", "GET", "/issues?state=open&per_page=$PAGE_SIZE&page=$page", null)
             if (response == null || response.status !in OK_RANGE) return Lookup.Unreadable
             val issues = objectMapper.readTree(response.bodyAsString())
             if (issues == null || !issues.isArray) return Lookup.Unreadable
@@ -269,7 +274,7 @@ internal class GitHubTicketWriter(
         val request = objectMapper.writeValueAsString(
             mapOf("title" to title, "body" to body(finding, diagnosis, key), "labels" to listOf(TICKET_LABEL)),
         )
-        val response = send("POST", "/issues", request) ?: return null
+        val response = send("ticket_create", "POST", "/issues", request) ?: return null
         if (response.status !in OK_RANGE) return null
         return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
     }
