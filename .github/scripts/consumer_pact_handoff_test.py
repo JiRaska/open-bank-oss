@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Falsify source/content binding before any Pact Broker publication."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -71,6 +72,19 @@ class ConsumerPactSourceTest(unittest.TestCase):
     def test_ordinary_main_source(self):
         self.env['GITHUB_SHA'] = self.source
         self.assertEqual(self.publish()['pacticipantVersionNumber'], self.source)
+
+    def test_publish_large_pact_preserves_exact_bytes(self):
+        pact = json.loads(self.pact.read_text())
+        pact['interactions'] = [dict(description='large contract', body='ž' * 600_000)]
+        original = (json.dumps(pact, ensure_ascii=False) + '\n').encode()
+        self.pact.write_bytes(original)
+        self.run_helper('consumer-pact-handoff.sh', 'collect')
+        body = self.publish()
+        contract, = body['contracts']
+        self.assertEqual(body['pacticipantVersionNumber'], self.source)
+        self.assertEqual(contract['consumerName'], SERVICE)
+        self.assertEqual(contract['providerName'], 'openbank-provider-service')
+        self.assertEqual(base64.b64decode(contract['content'], validate=True), original)
 
     def test_provider_overlay_keeps_consumer_build_source(self):
         self.git('commit', '-q', '--allow-empty', '-m', 'provider overlay source')

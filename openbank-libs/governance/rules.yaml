@@ -691,8 +691,6 @@ change_requirements:
         reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce. TRACKING (2026-10-17, #13168): #9774."
       - topic: "openbank.risk.limit.events"
         reason: "ADR-0313 D9, first slice. risk-engine emits risk.limit.early-warning.v1 / breach.v1 from its transactional outbox after the EOD snapshot; D9 routes them to alerting and to the responsible human, and neither consumer exists yet (the admin console reads the same statuses from GET /snapshots/{id}/limits meanwhile). ADR-0006 sequences producers before consumers (#1916). Not the #889 class: the absence is the plan and the producer is fully wired (KafkaTopic CR and Write ACL in openbank-infra/gitops/components/risk). Re-triage: remove this entry with the first consumer PR (#10896). TRACKING (2026-10-17, #13168): #10896."
-      - topic: "openbank.pid.events"
-        reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap. TRACKING (2026-10-17, #13168): #13178."
       - topic: "openbank.referral.reward-requested.v1"
         reason: "#7190's outbox relay is producer-only for this topic: the consumer that would post the reward is ADR-0310 D2, which is Proposed and needs human approval of the money-path owner (billing-service) and the expense account before anything may consume it. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). openbank.referral.qualified.v1, its sibling, left this list when loyalty-service began consuming it (ADR-0310 D3). Re-triage and remove with the first reward-posting consumer. TRACKING (2026-10-17, #13168): #13176."
       - topic: "openbank.referral.reward-outcome.v1"
@@ -824,6 +822,19 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-proposed-staleness.py"
     target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the 4-findings seed tail (0141, 0142, 0155, 0170) is decided, re-affirmed, or baselined
     blocked_on: "first live run flags 4 genuinely open proposals from 2026-06/07; enforcement is safe once that tail is triaged — the gate is sweep-proof by construction (creation-age + deliberate last-reviewed), so no mechanical commit can silently reset it"
+  mcp_redteam_model_verdict:
+    # ADR-0383 D7 / #16617 layer 4. The model-in-the-loop half of the MCP prompt-injection red team:
+    # a recorded model run must not call propose_payment unrequested, fetch beyond the question, or
+    # emit an attacker URL/IBAN when a tool result is poisoned. Advisory only because nothing is
+    # recorded yet (CI holds no model keys) — the gate prints "model verdict: NOT MEASURED".
+    detect: ["evals/mcp-redteam/scenarios.json scenarios vs evals/mcp-redteam/recordings/recording.json"]
+    require:
+      - "a committed recording covers every scenario (partial => fail), none is stale, every assertion holds"
+    gate: mcp-redteam-model-verdict
+    enforced: advisory
+    ci_producer: ".github/scripts/run-mcp-redteam-evals.py"
+    target_enforce_date: "2026-12-15"   # ADR-0144
+    blocked_on: "first owner live recording committed via evals/mcp-redteam/live.sh"
   adr_delivery_scripts:
     # An ADR's `## Delivery check` is the falsifier of its own `delivery-status`, and as prose
     # nobody runs it: ADR-0344 read `planned` while code for its decisions landed, found only by a
@@ -839,6 +850,18 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-delivery-scripts.sh"
     target_enforce_date: "2027-01-31"   # ADR-0144; enforce once two more ADRs carry an executable block
     blocked_on: "only ADR-0317 and ADR-0344 have a ```bash Delivery check today; a line whose tool the runner lacks (yq) is UNMEASURED, so enforcement waits until the blocks are written for the runner"
+  schedule_pause_switch:
+    # ADR-0389: stopping or pausing automation must never need a PR.
+    detect: [".github/workflows/*.yml with an `on.schedule` trigger"]
+    require:
+      - "each entry job (no needs:, or an if: with a status function) is gated on `github.event_name != 'schedule' || (vars.<WORKFLOW_ID>_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')`"
+      - "or the workflow is listed in the checker's EXCLUDED map with a reason (a control whose pause must stay a reviewed PR)"
+      - "an EXCLUDED entry naming no scheduled workflow is a finding"
+    gate: schedule-pause-switch
+    enforced: advisory
+    ci_producer: ".github/scripts/check-schedule-pause-switch.py"
+    target_enforce_date: "2027-02-28"   # ADR-0144; enforce once the exclusion list has had one review pass
+    blocked_on: "the exclusion list is a first classification; enforcing before a review pass would freeze it"
   requirements_traceability:
     # A functional-baseline catalogue in ADR prose has no traceability: 38 treasury items had to be
     # audited by hand to learn which existed. <service>/governance/requirements.yaml makes each item
@@ -1565,8 +1588,12 @@ four_eyes:
                                          # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
     - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                          # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
-                                         # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
-                                         # ROLE_OPERATOR/ROLE_ADMIN, no ROLE_SERVICE).
+                                         # separation. ONE documented M2M caller, deliberately paused (#16381/#16455):
+                                         # service-account-openbank-agent on POST /api/v3/sanctions/review, CLEAR only, as the
+                                         # four-eyes MAKER. Being paused is the point for that caller, so the GUARDRAIL below
+                                         # (no automated caller may be stalled) does not apply to it; it never holds
+                                         # sanctions.approval.decide. Every other caller is ROLE_OPERATOR/ROLE_ADMIN (no
+                                         # ROLE_SERVICE); /api/v1/sanctions/review stays human-only.
     # GUARDRAIL (issue #938 follow-up — found while wiring sca-service): four_eyes_required is
     # computed by ACTION NAME ALONE (rest.rego money_path_scopes + endswith verb match), with NO
     # awareness of the caller's identity. A verb is only safe to add here if EVERY real-world
@@ -1723,6 +1750,101 @@ four_eyes:
       - service-account-openbank-edge                              # scaGate before every money-path forward
       - service-account-openbank-services                          # delegation grant-accept, document-signing (#3734)
       - service-account-openbank-pension                           # ADR-0335: scope is DATA, see scoped_sca_consumers
+      - service-account-openbank-keycloak-mcp                      # ADR-0385 D3: connect ceremony only, see scoped_sca_consumers
+
+# ---------------------------------------------------------------------------------------
+# Four-eyes ENFORCEMENT in the deployed manifest (#15748, ADR-0155). `four_eyes` above decides
+# WHICH actions OPA flags `four_eyes_required`; that flag does nothing unless the service's
+# AuthorizeInterceptor runs with authz.four-eyes.enforce=true, whose code default is false. So a
+# service can own a four-eyes action, carry the policy, wire an ApprovalStore, and still execute
+# every flagged call on one operator — which is what the whole fleet did until this section.
+#
+# Gate `four-eyes-enforce-deployed` (.github/scripts/check-four-eyes-enforce.py, enforced): every
+# module that declares an @Authorize action the policy flags four-eyes (same scope/verb/action
+# logic as rest.rego, derived from the source, never listed by hand) must set the literal env
+# AUTHZ_FOUR_EYES_ENFORCE: "true" on every gitops workload running its image — OR appear in
+# `allowlist` below. The allowlist is a list of FACTS with a shelf life, so the gate fails on:
+#   - an entry whose `expires` date has passed (a lapsed exception is a violation, not a pass —
+#     the authz-enforce allowlist once kept accepting a date months after it lapsed);
+#   - an entry for a module that already enforces, or that owns no four-eyes action (stale);
+#   - an entry without `expires` + `reason`, or `expires` more than 120 days out (a far-future
+#     date is a permanent waiver spelled as a temporary one).
+# Expiry is STAGGERED in three waves by how hard a service is to bring under enforcement, so no
+# single date reddens every open PR: 2026-12-15 (flag flip + ApprovalStore wired; needs the admin-ui
+# checker workbench / maker retry), 2027-01-29 (no ApprovalStore wired yet), 2027-03-10 (machine or
+# customer callers that need `four_eyes.exemptions` or a policy split first). An entry within 14 days
+# of expiry prints a `::warning::` (never fails); a lapsed one fails.
+# `reason` is the concrete blocker found by the #15748 readiness analysis. Clear the blocker,
+# flip the env, delete the entry — in one PR, which the stale-entry check forces.
+four_eyes_enforcement:
+  tracking_issue: 15748
+  allowlist:
+    openbank-account-service:
+      expires: "2026-12-15"
+      reason: "account.freeze is human-only, but admin-ui has no checker workbench for the account approval queue (inbox lists it read-only) and the freeze UI does not retry with X-Approval-Id."
+    openbank-balance-service:
+      expires: "2027-03-10"
+      reason: "balance.credit/debit are granted to machines (service-balance-m2m, service-settlement-balance-move); enforcing would park settlement's balance moves. Needs four_eyes.exemptions for those identities or a distinct operator-only adjustment action."
+    openbank-billing-service:
+      expires: "2026-12-15"
+      reason: "billing.post/reverse: no admin-ui checker workbench for the billing approval queue and no maker retry with X-Approval-Id."
+    openbank-campaign-service:
+      expires: "2026-12-15"
+      reason: "campaign.activate (CampaignResource + AudienceResource): admin-ui activation does not retry with X-Approval-Id, so an activation parked at 202 could be approved but never executed from the UI."
+    openbank-clearing-service:
+      expires: "2026-12-15"
+      reason: "clearingBatch.settle: no admin-ui checker workbench for the clearing approval queue and no maker retry with X-Approval-Id."
+    openbank-consent-service:
+      expires: "2027-03-10"
+      reason: "consent.grant/revoke are granted to machines (service-consent-m2m-marketing, service-consent-m2m-credit, edge-service-consent); enforcing would park those automated flows. Needs four_eyes.exemptions for the verified identities."
+    openbank-delegation-service:
+      expires: "2027-03-10"
+      reason: "delegation.revoke/disclosure.release/reserve.release are granted to the edge M2M identity (edge-service-delegation) and the service wires no shared ApprovalStore; enforcing would 503 or park customer self-service."
+    openbank-domestic-payment:
+      expires: "2026-12-15"
+      reason: "domestic-payment.transitionStatus: no admin-ui checker workbench for the domestic-payment approval queue and no maker retry with X-Approval-Id."
+    openbank-fx-service:
+      expires: "2026-12-15"
+      reason: "fx.convert is human-only, but admin-ui has no checker workbench for the fx approval queue and no maker retry with X-Approval-Id."
+    openbank-interest-service:
+      expires: "2027-01-29"
+      reason: "interest.create/trigger: the service wires no ApprovalStore, so enforcing answers 503 on every operator interest write."
+    openbank-ledger-service:
+      expires: "2027-03-10"
+      reason: "ledger.reverse is called by transaction-service's payment saga compensation (service-transaction-ledger-write, service-ledger-reverse); enforcing would park compensation at 202. Policy fix first: four_eyes.exemptions for the per-service transaction identity (retire the shared-client reverse grant), plus an admin-ui ledger checker workbench."
+    openbank-lending-service:
+      expires: "2026-12-15"
+      reason: "lending.disburse/collateralRegister: no admin-ui checker workbench for the lending approval queue and no maker retry with X-Approval-Id."
+    openbank-party-service:
+      expires: "2026-12-15"
+      reason: "party.merge is human-only, but admin-ui has no merge flow that retries with X-Approval-Id and no checker workbench for the party approval queue."
+    openbank-pension-service:
+      expires: "2027-01-29"
+      reason: "pension.operator.transfer: the service wires no shared ApprovalStore, so enforcing answers 503 on every operator transfer."
+    openbank-product-catalog:
+      expires: "2027-01-29"
+      reason: "catalog.publish/publish-ir: no ApprovalStore wired (maker != checker is enforced in-service by the revision-approval flow); enforcing answers 503 on every publish."
+    openbank-sca-service:
+      expires: "2027-03-10"
+      reason: "device.revoke has a customer self-revocation path (device-self-revocation, ROLE_CUSTOMER) with no exemption; enforcing would park a customer revoking a lost device behind an operator approval."
+    openbank-sdd-service:
+      expires: "2027-01-29"
+      reason: "sdd.approve: the service wires no ApprovalStore, so enforcing answers 503 on every mandate confirmation."
+    openbank-sepa-instant:
+      expires: "2026-12-15"
+      reason: "sctInstPayment.recall: no admin-ui checker workbench for the sepa-instant approval queue and no maker retry with X-Approval-Id."
+    openbank-sepa-payment:
+      expires: "2026-12-15"
+      reason: "sepaPayment.transitionStatus: no admin-ui checker workbench for the sepa-payment approval queue and no maker retry with X-Approval-Id."
+    openbank-swift-service:
+      expires: "2026-12-15"
+      reason: "swift.send: no admin-ui checker workbench for the swift approval queue and no maker retry with X-Approval-Id."
+    openbank-transaction-service:
+      expires: "2027-03-10"
+      reason: "transaction.reverse is granted to sepa-payment's machine identity (service-sepa-payment-transaction-write); enforcing would park that automated reversal. Needs a four_eyes.exemptions entry for it."
+    openbank-treasury-service:
+      expires: "2027-01-29"
+      reason: "treasury.deal.settle/reverse: no shared ApprovalStore wired (deal approval is its own in-service four-eyes); enforcing answers 503 on settle and reverse."
 
 # ---------------------------------------------------------------------------------------
 # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)
@@ -1996,6 +2118,7 @@ dependencies:
         - openbank-ap2-service/
         - openbank-mcp-service/
         - openbank-communication-service/
+        - openbank-fetch-broker/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:
@@ -2024,7 +2147,8 @@ dependencies:
         - openbank-communication-service    # ADR-0285 D5 -- explicit, not a reasoning/acting agent
                                              # itself, but the ADR's own binding decision places it
                                              # "under ADR-0197 like the rest of that plane"
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
+        - openbank-fetch-broker             # ADR-0387 D9 -- agent-plane public-web fetch broker
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service'|':openbank-fetch-broker') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
@@ -3385,6 +3509,39 @@ enforcement_reachability:
         exists (#3615); ADR-0375 D1 retires the symbol instead, by moving the check into the
         ADR-0374 admission chain.
 
+# ADR-0375 D6 — exposure is delivered as a sealed artifact, never by decorating a live read.
+#
+# `DelegationGrant.exposure` (redactionRules, maxViews, watermark, allowDownload) is REFUSED on
+# every path that could create or revive authority, and that refusal is the DECLARED END STATE, not
+# a gap waiting to be closed: returning the original object bytes with a redaction or view-count
+# field merely echoed is a confidentiality defect that looks, from the grantor's screen, exactly
+# like an enforced control. A redacted, watermarked, view-counted share is a rendered sealed
+# artifact delivered as an `ExternalDisclosure`, whose view consumption is a locked
+# read-modify-write in one transaction — the atomicity a streaming route can never have.
+#
+# `referenced_in` is checked BOTH ways by check-delegation-exposure-sealed.py: a file that reads
+# grant exposure without an entry is a finding, and an entry whose file stopped referencing it is a
+# finding too. `role: enforcement` is refused outright — that is the one thing D6 forbids.
+delegation_exposure_delivery:
+  mechanism: external_disclosure
+  grant_level_exposure: refused
+  error_code: EXPOSURE_UNSUPPORTED
+  referenced_in:
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/domain/model/DelegationGrant.kt
+      role: model
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/DelegationService.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/persistence/entity/DelegationGrantEntity.kt
+      role: historical_audit
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/DelegationResource.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpClientGrantResolver.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/application/usecase/McpBalanceReadGrantCheck.kt
+      role: refusal
+    - path: openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/rest/dto/DelegationDtos.kt
+      role: historical_audit
+
 delegation_capability_enforcement:
   principle: >
     DelegationGrant.CAPABILITY_MATRIX says what a grantor may be OFFERED. Until this registry
@@ -3574,33 +3731,6 @@ delegation_capability_enforcement:
         ADR-0375 D7 correction. PUT /customer/v1/cards/{id}/controls toggles contactless, online,
         ATM and abroad — channels, not limits — and was gated on CAP_CARD_MANAGE_LIMITS. Now gated
         on CAP_CARD_MANAGE_CHANNELS. Same preset reasoning as CARD_MANAGE_STATUS.
-    - resource_type: PAYMENT
-      capability: OBJECT_READ
-      status: unenforced
-      issue: 3615
-      shared_capability: true
-      why: >
-        The matrix permits sharing a single payment; no route serves a shared payment to a grantee
-        (the edge's payment reads are owner-only IDOR guards). Measured: no production file names
-        both OBJECT_READ and PAYMENT. Scan-unverifiable because OBJECT_READ is enforced for
-        DOCUMENT — see scan_limit above.
-        ADR-0375 D5 gave DOCUMENT an ownership oracle and deliberately did NOT give one to PAYMENT:
-        a payment id resolves in no single service — six rails own payments and nothing maps an id
-        to its rail — so there is no owner to ask. The honest fix is to remove this pair from
-        CAPABILITY_MATRIX, which is a behaviour change (it refuses offers the app makes today) and
-        belongs with the offer-time refusal, not here.
-    - resource_type: STATEMENT
-      capability: OBJECT_READ
-      status: unenforced
-      issue: 3615
-      shared_capability: true
-      why: >
-        As PAYMENT/OBJECT_READ: statement-service has no delegation code, and no production file
-        names both OBJECT_READ and STATEMENT. It also has no oracle to build — measured
-        2026-11-12, every statement-service route is addressed by accountId and there is no
-        statement object carrying an id of its own, so a STATEMENT resourceId refers to nothing
-        the owning service can resolve. Remove from CAPABILITY_MATRIX with the refusal slice.
-
 readiness_attestations:
   principle: >
     openbank-libs/governance/attestations.yaml is the ONLY hand-entered input to the
@@ -3701,6 +3831,10 @@ authz:
     # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
     # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
     - card.details.read
+    # The queue of business customers under an ongoing sanctions-monitoring hold (#16028): who is
+    # being reviewed is itself sensitive (tipping-off). Granted to ROLE_KYC_REVIEWER by the matrix
+    # only; the generic operator/admin list rule must not reach it.
+    - kyb.monitoring.queue.list
   role_action_matrix:
     ROLE_OPERATOR:
       grant:
@@ -3886,6 +4020,7 @@ authz:
         - kyb.monitoring.queue.list        # #16028: ongoing-monitoring holds queue
         - kyb.monitoring.exit.propose      # #16028: four-eyes exit, maker
         - kyb.monitoring.exit.confirm      # #16028: four-eyes exit, checker (code refuses checker == maker)
+        - kyb.monitoring.exit.withdraw     # #16028: the proposing person withdraws their own pending exit proposal
     ROLE_AUDITOR:
       grant:
         - audit.trail.inspect
@@ -4067,6 +4202,15 @@ scoped_sca_consumers:
     purposes: [APPROVAL]
     approval_request_prefix: "pension-"
     adr: ADR-0335
+  # ADR-0385 D3 — the authorization server's withheld-code authenticator (Keycloak extension,
+  # openbank realm client `openbank-keycloak-mcp`, ROLE_API only). It raises AND spends connect
+  # challenges; sca-service refuses it any purpose but MCP_CLIENT_CONNECT at initiate
+  # (requireInitiateScope) and any challenge outside `mcp-connect:` at consume (ConsumerScope).
+  - principal: service-account-openbank-keycloak-mcp
+    actions: [scaChallenge.initiate, scaChallenge.consume]
+    purposes: [MCP_CLIENT_CONNECT]
+    approval_request_prefix: "mcp-connect:"
+    adr: ADR-0385
 
 # ADR-0335 D5/D6 — scoped payment initiators. Same shape as scoped_sca_consumers: the policy
 # (gen-domestic-payment-opa-bundle.sh, sdd_rest_ext.rego) reads `principal`, `service` and
@@ -4630,6 +4774,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/swift/infrastructure/client/ClearingSimulatorClient.kt"
+      - "src/main/kotlin/com/openbank/swift/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/swift/infrastructure/client/SanctionsServiceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4696,9 +4842,12 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/delegation/domain/model/ExternalDisclosure.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/BusinessSigningClients.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/DocumentDisclosureClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/client/McpConnectScaReceiptClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/PartyEligibilityClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ResourceOwnershipClient.kt"
       - "src/main/kotlin/com/openbank/delegation/infrastructure/client/ScaChallengeClient.kt"
+      - "src/main/kotlin/com/openbank/delegation/domain/model/PaymentProposal.kt"
+      - "src/main/kotlin/com/openbank/delegation/infrastructure/rest/PaymentProposalResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4777,6 +4926,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/account/application/usecase/SavingsProposalService.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/BalanceServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/PartyDirectoryClient.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ProductCatalogClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/SanctionsServiceClient.kt"
       - "src/main/kotlin/com/openbank/account/infrastructure/client/ScaChallengeClient.kt"
@@ -4787,6 +4937,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/account/infrastructure/client/PassportCommitmentAdapter.kt"
     cardholder: []
   openbank-balance-service:
     auth_crypto_payment:
@@ -4813,6 +4964,9 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/AccountServiceClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/client/McpBalanceGrantClient.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadIdentity.kt"
+      - "src/main/kotlin/com/openbank/balance/infrastructure/rest/McpBalanceReadResource.kt"
       - "src/main/kotlin/com/openbank/balance/infrastructure/client/LedgerTrialBalanceClient.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
@@ -5028,6 +5182,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/CatalogFosLoanAdapter.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
@@ -5044,6 +5199,10 @@ security_sensitive_paths:
     auth_crypto_payment:
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsChangePublisherImpl.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # #16455: the v3 review binds a four-eyes approval at the point of effect, and the guard
+      # refuses the agent maker before @Authorize runs.
+      - "src/main/kotlin/**/rest/SanctionsResourceV3.kt"
+      - "src/main/kotlin/**/rest/AgentReviewGuard.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
       - "src/main/kotlin/**/filter/**"
@@ -5330,3 +5489,85 @@ demo_only_flags:
       config_property: openbank.pension.stub-integrations.enabled
       reason: "Swaps the KYC, signature-verification (SCA), counterparty and fund-administration ports for stubs, so a signature check that never happened passes. %dev and %test only; unset in gitops."
       permitted_environments: [local]
+
+outgoing_payment_rails_screening:
+  # Every service that releases money to a counterparty outside the bank must screen the parties
+  # against the sanctions lists BEFORE release (ADR-0032, ADR-0353 D4): an outbound port whose
+  # interface name matches *Screening*Port, and a call site of the shared
+  # com.openbank.libs.fincrime.ScreeningPolicy so the verdict is the one fleet-wide copy.
+  # "Screening is expected upstream" is not an exemption: measured 2026-11-14, swift-service's
+  # docs said so while the upstream (transaction-service) screened nothing.
+  # Enforced by .github/scripts/check-rail-screening-port.py (gate rail-screening-port). Known
+  # gaps are baselined in .github/scripts/rail-screening-port-baseline.txt; a baselined service
+  # that becomes covered fails until its line is removed, so the baseline only shrinks.
+  services:
+    - openbank-domestic-payment
+    - openbank-sepa-payment
+    - openbank-sepa-instant
+    - openbank-fx-service
+    - openbank-swift-service
+    - openbank-sdd-service
+
+repository_root_layout:
+  gate: repository-root-layout
+  enforced: block
+  ci_producer: .github/scripts/check-repository-root.py
+  files:
+    - .dockerignore
+    - .editorconfig
+    - .gitattributes
+    - .gitignore
+    - .gitleaks.toml
+    - .gitleaksignore
+    - .pre-commit-config.yaml
+    - .release-please-manifest.json
+    - .trivyignore
+    - AGENTS.md
+    - ARCHITECTURE.md
+    - CITATION.cff
+    - CLAUDE.md
+    - CODEOWNERS
+    - CODE_OF_CONDUCT.md
+    - CONTRIBUTING.md
+    - DEPLOYMENT.md
+    - GOVERNANCE.md
+    - LICENSE
+    - NOTICE
+    - README.md
+    - RELEASE_NOTES.md
+    - REUSE.toml
+    - SECURITY.md
+    - SPONSORS.md
+    - SUPPORT.md
+    - TRADEMARKS.md
+    - build.gradle.kts
+    - codecov.yml
+    - gradle.properties
+    - gradlew
+    - release-please-config.json
+    - settings.gradle.kts
+  directories:
+    - .clusterfuzzlite
+    - .devcontainer
+    - .github
+    - .security
+    - .semgrep
+    - LICENSES
+    - build-logic
+    - ci
+    - config
+    - docs
+    - e2e
+    - evals
+    - fuzz
+    - gradle
+    - integrations
+    - openbank-admin-ui
+    - openbank-api-gateway
+    - openbank-contracts
+    - openbank-developer-portal
+    - openbank-document-renderer
+    - openbank-infra
+    - pacts
+    - perf
+    - scripts

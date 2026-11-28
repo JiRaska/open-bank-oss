@@ -73,16 +73,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          dir="$(mktemp -d)" || exit 1
+          trap 'rm -rf "${dir}"' EXIT
           failed=0
           while IFS= read -r line; do
             component="$(jq -r .component <<< "${line}")"
-            dir="${RUNNER_TEMP}/envelopes/${component}"
-            if ! gh run download "$(jq -r .run_id <<< "${line}")" -R "${GITHUB_REPOSITORY}" \
-                 -n "$(jq -r .artifact <<< "${line}")" -D "${dir}"; then
+            tested_sha="$(jq -r .tested_sha <<< "${line}")"
+            artifact_id="$(jq -er '.artifact_id | select(type == "number" and . > 0 and . == floor)' <<< "${line}")" || exit 1
+            # Bound archive disk use independently of the extractor's uncompressed limit.
+            if ! (ulimit -f 33792 && timeout --kill-after=5s 120s \
+                gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip") > "${dir}/artifact.zip"; then
               echo "::warning::envelope download failed for ${component}"; failed=$((failed + 1)); continue
             fi
+            if ! python3 .github/scripts/extract-test-intelligence-envelope.py --reconcile \
+                 "${dir}/artifact.zip" "${dir}/run.json" "${component}" "${tested_sha}" \
+                 "$(jq -r .run_id <<< "${line}")" "$(jq -r .run_attempt <<< "${line}")"; then
+              echo "::warning::envelope validation failed for ${component}"; failed=$((failed + 1)); continue
+            fi
             bash .github/scripts/publish-test-evidence.sh "${component}" \
-              "$(jq -r .tested_sha <<< "${line}")" "$(jq -r .image_sha <<< "${line}")" \
+              "${tested_sha}" "$(jq -r .image_sha <<< "${line}")" \
               "$(jq -r .equivalence <<< "${line}")" "${dir}/run.json" || failed=$((failed + 1))
           done < "${RUNNER_TEMP}/plan.jsonl"
           echo "publish failures: ${failed}"

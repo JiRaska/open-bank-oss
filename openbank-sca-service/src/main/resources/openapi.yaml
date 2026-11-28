@@ -16,7 +16,11 @@ info:
   # 1.15 -> 1.16 (#11588): additive verified makerActorKind on approval responses.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.17.0
+  # 1.17 -> 1.18 (ADR-0385 D3): additive — MCP_CLIENT_CONNECT purpose (initiate requires
+  # approvalRequestId `mcp-connect:<PAR request id>` + payloadSha256), a 403 on decision for a
+  # device enrolled < 72 h approving it, and its reserved-namespace consume refusal.
+  # 1.19.0 -> 1.20.0 (ADR-0385 D3): delegation-only receipt of consumed MCP connect approval.
+  version: 1.20.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -178,6 +182,27 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/sca/challenges/{id}/mcp-connect-receipt:
+    get:
+      tags: [SCA]
+      summary: Get a consumed MCP connect approval receipt
+      description: Available exclusively to the authenticated delegation-service machine identity.
+      operationId: getMcpConnectReceipt
+      parameters:
+        - $ref: '#/components/parameters/challengeId'
+      responses:
+        '200':
+          description: The persisted same-party, device-decided and consumed connect approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/McpConnectReceipt' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: Receipt storage is unavailable
 
   /api/v1/sca/challenges/{id}/verify:
     post:
@@ -367,13 +392,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/ScaChallengeResponse'
         '400':
-          description: Invalid request or challenge not approved
+          description: >-
+            Invalid request or challenge not approved. Only a still-pending challenge returns
+            SCA_CHALLENGE_PENDING. A final refusal uses VALIDATION_ERROR.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              examples:
+                pending:
+                  value: { code: SCA_CHALLENGE_PENDING, message: Challenge is not yet approved }
+                refused:
+                  value: { code: VALIDATION_ERROR, message: Challenge was not approved }
         '403':
           description: >-
             The challenge belongs to another party, or lies outside the caller's consumer scope
             (ADR-0335 D1): an APPROVAL challenge whose device-signed approvalRequestId begins
-            `pension-` is spendable only by pension-service, which may spend nothing else. A
-            refusal never burns the challenge.
+            `pension-` is spendable only by pension-service, which may spend nothing else; an
+            MCP_CLIENT_CONNECT challenge only by the authorization server's scoped consumer
+            (ADR-0385 D3). A refusal never burns the challenge.
         '404':
           description: Challenge not found
         '409':
@@ -415,7 +452,9 @@ paths:
         '401':
           description: Invalid device assertion
         '403':
-          description: Device is revoked or does not belong to the challenge party
+          description: >-
+            Device is revoked or does not belong to the challenge party, or (ADR-0385 D2.3) was
+            enrolled less than 72 h ago and tries to approve an MCP_CLIENT_CONNECT challenge.
         '404':
           description: Challenge or device not found
         '409':
@@ -471,6 +510,17 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    McpConnectReceipt:
+      type: object
+      required: [challengeId, partyId, decidedByPartyId, purpose, approvalRequestId, contextSha256, consumedAt]
+      properties:
+        challengeId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        decidedByPartyId: { type: string, format: uuid }
+        purpose: { type: string, const: MCP_CLIENT_CONNECT }
+        approvalRequestId: { type: string, pattern: '^mcp-connect:[A-Za-z0-9._~:-]{1,140}$' }
+        contextSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        consumedAt: { type: string, format: date-time }
     ApprovalResponse:
       type: object
       required: [id, action, status]
@@ -545,7 +595,7 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-                 DELEGATION_APPROVAL_GROUP, SAVINGS_WITHDRAW_APPROVAL, APPROVAL]
+                 DELEGATION_APPROVAL_GROUP, SAVINGS_WITHDRAW_APPROVAL, APPROVAL, MCP_CLIENT_CONNECT]
         preferredMethod:
           type: string
         dynamicLinkingData:
@@ -568,6 +618,8 @@ components:
       description: >-
         What the device signs (RTS Art. 5). APPROVAL requires approvalRequestId and
         payloadSha256; a payment approval also carries amount, currency and creditorIban.
+        MCP_CLIENT_CONNECT (ADR-0385 D3) requires approvalRequestId `mcp-connect:<PAR request id>`
+        and payloadSha256 over the canonical connect context, and carries nothing else.
       properties:
         amount: { type: string, nullable: true }
         currency: { type: string, nullable: true }

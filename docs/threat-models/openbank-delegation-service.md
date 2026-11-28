@@ -69,7 +69,15 @@ and require a human operator plus OPA; client applications do not receive a bank
    its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
    `delegation.disclosure.release` for that identity, never the shared backend client. Every
    unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
-10. delegation-service → private KYB authority listener (#10247). KYB requires a trusted client
+
+10. Keycloak, customer edge and balance-service → customer MCP consent and read-permit
+    APIs (ADR-0383, ADR-0385). Keycloak's verified service account alone stages and activates
+    a consent or asks for a balance-read permit, using distinct issuer actions and service
+    identities. The verified customer-edge service account forwards the customer party for
+    selecting accounts, listing connections and revoking them. The dedicated balance reader
+    can only recheck its live grant. Delegation reads the consumed SCA receipt over the configured
+    HTTPS client using the delegation-service workload credential. Consent endpoints default to disabled.
+11. delegation-service → private KYB authority listener (#10247). KYB requires a trusted client
     certificate and an OIDC bearer on 8443. The generated policy admits only the Delegation
     workload on that port and preserves existing KYB HTTP peers on 8157. Statutory collection
     remains disabled until the deployed KYB authority route and named bearer policy are verified.
@@ -233,6 +241,174 @@ narrowest of the six and deliberately does NOT ride the shared identity above.
   management applies its own current-mandate checks.
 
 ## Change log
+
+New entries are one file each in the openbank-delegation-service.d directory beside this document, named
+YYYY-MM-DD-slug.md and starting with a bold date. The block below is assembled from them by the
+change-log fragment generator (run the repo's regen-derived entrypoint), so never edit between the
+markers. Entries recorded before this section adopted fragments follow the block.
+
+<!-- changelog-fragments:begin (generated from openbank-delegation-service.d/ — do not edit between markers) -->
+
+<!-- changelog-fragments:end -->
+
+- **2026-11-23** — **Customer MCP consent, bound balance-read permit and proposal revocation**
+  (ADR-0383, ADR-0385, #16864).
+  - **Consent substitution or replay.** The issuer verifies the consumed SCA receipt against the
+    stored request, challenge, signed context hash, party, deciding party and expiry. Activation
+    rechecks ownership and atomically creates account-specific grants linked to the same party,
+    client, DPoP key and refresh family. The server owns the connection ID. The customer can only
+    select accounts it owns and revoke connections belonging to its verified party.
+  - **Reading after scope changes.** The balance-read permit requires the exact account and
+    balance capability on the active MCP grant, current account ownership and a first-use
+    issuer proof reference in PostgreSQL. The balance reader separately rechecks the live grant
+    before serving the account. The bound path requires the same connection ID throughout.
+  - **Proposal execution after revocation.** Revocation records the connection's revocation,
+    closes its grants and rejects pending proposals in one transaction. Proposal processing
+    checks the linked grant and locks it while applying the transition. Only a separately
+    authenticated customer decision can approve a proposal.
+  - **Residual boundary.** The issuer and edge remain trusted to attest their respective caller
+    contexts. A failed receipt, ownership or grant check closes the operation before issuance.
+
+- **2026-11-22** — **Payment-proposal idempotency: a 5xx is released, never stored** (ADR-0383 D6,
+  #16845). `PaymentProposalResource.idempotent` previously saved whatever answer the handler
+  returned under the reserved key; it now saves only a definitive (non-5xx) answer and releases the
+  reservation on a 5xx, exactly as it already did when the handler throws.
+  - **Denial of service via replay (repudiation of a customer's decision).** customer-edge sends a
+    FIXED key per proposal for reject (`mcp-proposal-reject-<id>`), so a stored transient failure
+    would have been replayed to every retry for the record's whole TTL and the customer could never
+    reject the proposal. A retry under the same key now re-executes the operation instead.
+  - **Replay safety of re-execution.** The handler path that returns a 5xx persists no idempotency
+    record, and re-execution is bounded by the store's own controls (dedupe on create, revision CAS
+    on every transition), so a retry cannot apply a transition twice. Definitive answers (2xx/4xx)
+    are still stored and replayed verbatim; a key reused for a different request is still 409.
+    Tested by `PaymentProposalIdempotencyTest`.
+
+- **2026-11-21** — **New ingress edge: mcp-service -> delegation-service** (ADR-0383 D3).
+  `delegation-service-ingress-allow-list` now admits the `platform` namespace, where mcp-service
+  runs, so it can call `POST /api/v1/delegations/mcp-client/resolve`. The edge is derived by
+  `gen-network-policies.py` from `QUARKUS_REST_CLIENT_DELEGATION_SERVICE_URL` in the mcp-service
+  manifest, never hand-written. The lookup is read-only (`McpClientGrantResolver` queries ACTIVE
+  `MCP_CLIENT` grants for one party/client/key triple and writes nothing) and authenticated: the
+  caller is mcp-service's own `m2m` identity, and a tokenless request must be refused 401. The pact
+  interaction in `pacts/openbank-mcp-service-openbank-delegation-service.json` states that
+  expectation but is NOT proof of it — a consumer mock answers whatever the pact says. Provider-side
+  proof lives with the route itself (#16793): `McpClientGrantIdentityGuardIT` drives it over HTTP
+  with no token (401), and the `@PactFolder` replay verifies the no-token interaction against the
+  real security layer (see the 2026-11-18 entry below).
+  Information disclosure is bounded by the triple: the party id comes from the verified customer
+  token and the key from its `cnf.jkt`, so the network edge alone exposes no other party's grants.
+  Residual: the namespace selector admits every pod in `platform`, not only mcp-service; the
+  endpoint's authn, not the NetworkPolicy, is the control that separates callers.
+
+- **2026-11-19** — **Customer MCP payment-proposal store** (ADR-0383 D6, #16590). New table
+  `delegation_payment_proposals` (V38), REST family `/api/v1/payment-proposals` and topic
+  `openbank.delegation.payment-proposal-events`. A proposal moves no money; it is executed only by
+  customer-edge, after the customer's own SCA, through the ordinary payment initiation path.
+  - **Elevation of privilege (MCP approves its own proposal).** Two disjoint caller halves, checked
+    in the resource by verified client identity (`ServiceAccountIdentity.isPrincipal`, #12448) AND
+    in `delegation_rest_ext.rego`: mcp-service may only `create`; the edge may only
+    `read/approve/reject/execution`; staff and the shared backend identity reach neither (veto at
+    the allow head). Tests: `PaymentProposalApiIT`, `delegation_rest_ext_test.rego`.
+  - **Spoofing a grant.** The grant is FOUND from (party, `azp`, `cnf.jkt`) among ACTIVE MCP_CLIENT
+    grants with `ACCOUNT_PROPOSE_PAYMENT` over the debtor account, never named by the caller.
+    Residual: mcp-service passes the party/client/key as body fields under its own M2M token, so a
+    compromised mcp-service could propose under any party that holds such a grant; a proposal still
+    needs that customer's SCA in the app. Binding the create to the exchanged customer token is a
+    follow-up.
+  - **Trust in mcp-service and the edge (stated, not verified).** The store does not re-verify
+    the `mcpClientId`/`keyThumbprint` mcp-service passes (it sees only mcp-service's service-account
+    token), nor the `paymentId` the edge records on execution (it sees only the edge's token; the
+    edge takes it from the payment service's create response). Both callers are pinned by verified
+    client identity and OPA; a lie from either can at worst attach a proposal to the wrong grant of
+    a party that holds one, or mislabel which payment executed it — never move money, which still
+    needs the customer's SCA at the edge and the payment service's own checks.
+  - **Tampering / TOCTOU.** The instruction columns and hash are immutable (entity
+    `updatable = false` plus the V38 trigger), the state graph is one-way at the database, DELETE
+    raises, TRUNCATE raises (statement trigger). The SHA-256 covers proposal id, party and every instruction field; approval and
+    execution both re-compare it, and a row whose hash does not describe its columns fails to load.
+  - **Stale authority.** A proposal is only as alive as its grant: reading or approving one whose
+    grant is no longer ACTIVE persists REJECTED first, and a grant write that leaves ACTIVE rejects
+    its PENDING proposals in the same transaction.
+  - **Display spoofing (D7).** Payee name and reference refuse Unicode Cc/Cf/Zl/Zp (bidi
+    overrides, zero-width, line separators), Cs (unpaired surrogates), Co and Cn, `<>[]` backtick
+    and `://`, and must be NFC (refused, never re-encoded).
+  - **Denial of service.** ≤10 open and ≤20 created per party per 24 h, decided under a per-party
+    advisory transaction lock; an open proposal identical in every instruction field from the same client and grant is
+    deduplicated; TTL 24 h (capped).
+  - **Repudiation.** Every transition writes an outbox event in the same transaction (data-
+    minimised: no IBAN/name/reference).
+  - Not in this slice: the push coalescing and VoP display of D6 (app/edge), an expiry sweep
+    (expiry is applied on read and at create).
+
+- **2026-11-18** — **`POST /api/v1/delegations/mcp-client/resolve`** (ADR-0383 D3, #16590), the lookup
+  the V34 `(grantor, azp, jkt)` index was built for. Read-only; a machine-only grant on a money-path
+  service.
+  - *Information disclosure.* The query filters in SQL on grantor party, client id, key thumbprint,
+    `grantee_type = 'MCP_CLIENT'` and `ACTIVE` (V34 partial index `idx_delegation_mcp_client_binding`),
+    so another customer's grant to the same client is never loaded; the resolver repeats every check
+    in code (thumbprint compared in constant time, in-window, non-exposure). The answer carries only
+    grant id, resource type/id, capabilities and `validTo` — no names, limits, approval policy,
+    thumbprint or other PII. An empty list is the refusal, so it cannot enumerate.
+  - *Elevation of privilege.* OPA admits only `service-account-openbank-mcp` (reason
+    `mcp-client-grant-resolve`), with `service_account == true` pinned explicitly — `machine_named`'s
+    legacy branch would otherwise admit a principal with no marker by name alone — and `client_id ==
+    openbank-mcp`. Every other principal is VETOED, so a staff ROLE_OPERATOR/ROLE_ADMIN token
+    (`operator-delegation-write`), `operator-read-any` and other service accounts cannot reach it.
+    The handler re-checks the verified client id in code and refuses a request carrying the
+    customer-party header, so an advisory PDP does not widen it.
+  - *Spoofing (unauthenticated caller).* The route carries `@RolesAllowed("ROLE_API")`, so Quarkus
+    refuses a tokenless request 401 before the handler runs. Before that, an anonymous call reached
+    the identity guard and got 403, the same answer as a wrong caller, and nothing showed the route
+    rejected it as unauthenticated. Control: `McpClientGrantIdentityGuardIT` drives the real route over
+    HTTP (no token 401; another service-account 403 with ROLE_API and with ROLE_OPERATOR; mcp-service 200).
+    Removing the annotation turned the no-token case red (403), as it did the pact replay below.
+  - *Evidence.* `opa test` (must-allow mcp; must-deny shared backend, edge, staff operator, renamed
+    machine, marker-less principal; each guard removed went red); `opa eval` on the regenerated
+    `delegation-opa-bundle`; `McpClientGrantResourceIT` over real HTTP and a real database (another
+    customer's grant never returned; non-mcp client and customer header 403; missing body and bad
+    thumbprint 400). The HTTP `@PactFolder` replay
+    (`DelegationMcpClientGrantPactFolderProviderVerificationTest`) starts verifying when mcp-service's
+    consumer pact lands with the S4 mcp-service PR; until then it has no pact to replay. It also
+    verifies the consumer's no-token interaction: an interaction whose expected status is 401 runs
+    with the test identity cleared, so the real security layer has to answer it, while every other
+    interaction stays authenticated as mcp-service.
+  - No write path changes: MCP_CLIENT grants stay dormant, so in practice the endpoint answers empty
+    until the connect flow ships. Rollback: revert; no schema change.
+
+- **2026-11-17** — **New grantee class `MCP_CLIENT`** (ADR-0383 D3). A grant may now name a
+  customer-admitted third-party MCP client as grantee instead of a party. Existing grants are
+  `PARTY` (V34 defaults the column), and their behaviour is unchanged. Elevation of privilege is
+  bounded in the aggregate, which is the only writer: an `MCP_CLIENT` grant may hold ONLY the
+  account reads (`ACCOUNT_READ_BALANCES`, `ACCOUNT_READ_TRANSACTIONS`, `ACCOUNT_VIEW_DETAILS`,
+  `ACCOUNT_DOWNLOAD_STATEMENTS`) and `ACCOUNT_PROPOSE_PAYMENT`. The set is an allow-list, so every
+  executing or managing capability (`ACCOUNT_INITIATE_PAYMENT`, every `*_MANAGE_*`,
+  `DELEGATION_MANAGE`, savings and card capabilities) is refused whatever the ceilings, and so is
+  any capability added to the vocabulary later until someone names it. Spoofing: the grant records
+  the client id (`azp`) and the DPoP key thumbprint (`cnf.jkt`) at grant time, and a DB CHECK pins
+  the shape so a half-bound MCP grant or a PARTY grant with client bindings cannot be stored. The
+  grantee id of an MCP client is derived from its `azp`, so there is no party for it to impersonate.
+  A PARTY grant may not use a name-based (version 3) UUID as grantee id, so an MCP client cannot
+  be smuggled in as a PARTY grant. An MCP_CLIENT grant is never accepted by a party; it is activated
+  by the future SCA-bound connect flow (ADR-0383 D1), and `accept()` refuses it before any SCA
+  challenge is spent. **Dormancy guard:** every write path in `DelegationService` refuses an
+  MCP_CLIENT grant (`MCP_CLIENT_GRANTEE_DORMANT`), and no lifecycle event can be constructed for one,
+  which also covers the lifecycle-approval executor and the expiration sweep. No new endpoint, caller
+  or privilege ships. Nothing creates an MCP_CLIENT grant yet, and the `(grantor, azp, jkt)` lookup
+  is indexed but not served.
+  Residual risks:
+  - **Event field.** The lifecycle events and the AsyncAPI contract (1.7.0) gain optional
+    `granteeType` (default PARTY) and `granteeClientId`. Today's consumers (account-service,
+    card-issuance-service, context-service) ignore unknown fields, so they would read an MCP grant
+    as a grant to a party with that id. The dormancy guard is what keeps that from happening, and it
+    may only be lifted after every consumer skips `granteeType != PARTY`.
+  - **Tampered row.** The DB pins the binding shape but cannot check the capability allow-list. A
+    row edited to give an MCP_CLIENT grant an executing capability fails closed on read: the
+    aggregate refuses it. The trade-off is availability, not authority: a list endpoint that
+    contains such a row answers 500 for that grantor or grantee until the row is corrected.
+  - **Key binding.** Until the triple lookup exists, enforcing the `jkt` binding depends on the
+    future caller.
+  Rollback: a forward migration dropping the three columns, after confirming there are no
+  `MCP_CLIENT` rows.
 
 - **2026-11-12** — **Document ownership read added as a sixth outbound edge** (ADR-0375 D5).
   `DocumentOwnershipRestClient` reads `GET /api/v1/documents/{id}/owner` on the NAMED `m2m`
@@ -441,3 +617,23 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+### Hosted MCP connection binding (ADR-0385)
+
+A bearer token must resolve to an active grant for the exact customer, client, approved connection and account. Hosted lookup matches only grants whose DPoP thumbprint is null; it cannot select a grant created with DPoP. Balance authorization is restricted to the dedicated issuer service account and requires a fresh proof reference and a current account ownership verdict. The resource endpoint refuses hosted requests without a connection ID. Revoking the connection invalidates its hosted grants and blocks refresh.
+
+The shared sandbox exposes a separate TLS 1.3 port on the internal Delegation Service for
+Keycloak and Balance workloads. The added cross-namespace rule is limited to those two pod
+identities. TLS authenticates the Delegation server. The issuer and reader still present
+distinct staff tokens and pass their existing action-specific authorization checks. The
+existing service and management listeners continue serving their current callers.
+
+The shared Keycloak issuer uses its dedicated MCP TLS context when calling this listener.
+It validates the Delegation service hostname and CA, then presents a staff token issued to
+the read issuer account. The explicit port 8443 policy admits the Keycloak and Balance pod
+identities. The authorization decision still requires the exact service account and a current
+customer grant.
+
+## Native MCP authorization handoff
+
+The private HTTPS listener admits only Customer Edge workload pods for the new app-facing authority calls. Keycloak and Customer Edge use distinct staff identities. Delegation stores the hash of a short-lived handoff and binds it to the exact guarded OAuth request and browser session. Claim and request registration commit together. A native proof must match the authenticated customer and the frozen account selection. The issuer consumes the evidence once and separately requires SCA before any OAuth code is released. A rollback disables native handoff and removes the additional Edge peer from the private listener.

@@ -5,9 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Activity, BarChart3, Dna, FlaskConical,
+  Activity, BarChart3, Dna, FlaskConical, MonitorCheck, Smartphone,
   Bot, Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useLanguage, type Language } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import {
@@ -29,11 +30,12 @@ import { decodeTestReadReply, type TestMatrixReport } from '@/lib/test-intellige
 import { TestAttentionList } from '@/components/testing/workspace/TestAttentionList'
 import { EvidenceFreshness } from '@/components/testing/EvidenceFreshness'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
+import { IdentifierConformancePanel } from '@/components/testing/IdentifierConformancePanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
 const LazyExpertEvidenceMatrix = dynamic(() => import('@/components/testing/workspace/ExpertEvidenceMatrix').then(module => module.ExpertEvidenceMatrix))
 
-type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
+type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance' | 'conformance'
 
 const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic']
 
@@ -743,6 +745,7 @@ export default function TestIntelligencePage() {
     { id: 'synthetic', label: t('Syntetika', 'Synthetics'), icon: <Timer size={13} /> },
     { id: 'clients', label: t('Client experience', 'Client experience'), icon: <Activity size={13} /> },
     { id: 'ai-assurance', label: t('AI assurance', 'AI assurance'), icon: <Bot size={13} /> },
+    { id: 'conformance', label: t('Shoda se specifikací', 'Spec conformance'), icon: <ShieldCheck size={13} /> },
   ]
 
   return <div className={workspaceStyles.page}>
@@ -752,7 +755,7 @@ export default function TestIntelligencePage() {
       icon={<FlaskConical size={19} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
       title={t('Test Intelligence', 'Test Intelligence')}
       subtitle={t('Co jsme ověřili, s jakým výsledkem a co potřebuje pozornost.', 'Understand what was tested, the outcome and what needs attention.')}
-      actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
+      actions={<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><Link href="/system/tests/mobile" className="btn btn-secondary btn-sm"><Smartphone size={13} aria-hidden="true" />{t('Jak testujeme appku', 'How we test the app')}</Link><Link href="/system/tests/web" className="btn btn-secondary btn-sm"><MonitorCheck size={13} aria-hidden="true" />{t('Jak testujeme portál', 'How we test the portal')}</Link><button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button></div>}
     />
     {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <TestIntelligenceWorkspace
       report={report}
@@ -764,7 +767,7 @@ export default function TestIntelligencePage() {
       renderRuns={openTest => <FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <div style={{ display: 'grid', gap: 16 }}>
         <label style={{ display: 'grid', gap: 6, maxWidth: 360 }}>{t('Podrobný pohled na důkazy', 'Detailed evidence view')}<select className="form-select" value={tab} onChange={event => setTab(event.target.value as Tab)}>{tabs.map(tabDef => <option key={tabDef.id} value={tabDef.id}>{tabDef.label}</option>)}</select></label>
         {tab === 'posture' && <Posture report={full} />}{tab === 'tests' && <TestCases report={full} onOpenTest={openTest} />}{tab === 'history' && <History report={full} />}{tab === 'execution' && <Execution report={full} />}{tab === 'runtime' && <RuntimeInfrastructure report={full} />}{tab === 'coverage' && <Coverage report={full} />}
-        {tab === 'contracts' && <Contracts report={full} />}{tab === 'mutation' && <Mutations report={full} />}{tab === 'performance' && <Performance report={full} />}{tab === 'synthetic' && <Synthetics report={full} />}{tab === 'clients' && <ClientExperiences report={full} />}{tab === 'ai-assurance' && <AiAssurance report={full} />}
+        {tab === 'contracts' && <Contracts report={full} />}{tab === 'mutation' && <Mutations report={full} />}{tab === 'performance' && <Performance report={full} />}{tab === 'synthetic' && <Synthetics report={full} />}{tab === 'clients' && <ClientExperiences report={full} />}{tab === 'ai-assurance' && <AiAssurance report={full} />}{tab === 'conformance' && <IdentifierConformancePanel evidence={full.identifierConformance} />}
         <details><summary>{t('Souhrny běhů a mapy všech vrstev', 'Run summaries and cross-layer maps')}</summary><TestOverviewPanel report={full} selectTab={setTab} /><AssuranceBoard report={full} selectTab={setTab} /><EvidenceGapQueue report={full} selectTab={setTab} /></details>
       </div>}</FullTestReportPanel>}
     /> : <div role="status" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný. Můžete jej zkusit obnovit.', 'The report is unavailable. You can try refreshing it.')}</div>}

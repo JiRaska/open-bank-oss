@@ -70,9 +70,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -99,8 +102,15 @@ def image_name(ref: str) -> str:
     return ref.split("@", 1)[0].rsplit("/", 1)[-1].split(":", 1)[0]
 
 
+def git_environment() -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1")
+    return env
+
+
 def git(root: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", root, *args], text=True, capture_output=True, check=check)
+    return subprocess.run(["git", "-C", root, *args], text=True, capture_output=True,
+                          check=check, env=git_environment())
 
 
 DUPLICATE = ("", "", "<duplicate>")   # one manifest pins the same image name to two different values
@@ -152,14 +162,16 @@ def count_subjects(root: str) -> int:
 
 
 def live_ref(root: str, branch: str) -> str | None:
-    """A ref naming the CURRENT tip of `branch`: origin/<branch> when present, else a depth-1 fetch."""
-    for ref in (f"refs/remotes/origin/{branch}",):
-        if git(root, "rev-parse", "--verify", "-q", ref, check=False).returncode == 0:
-            return ref
-    r = git(root, "fetch", "-q", "--depth=1", "origin", branch, check=False)
-    if r.returncode == 0:
-        return "FETCH_HEAD"
-    return None
+    """Resolve the current branch tip once, before subsequent reads or fetches."""
+    ref = f"refs/remotes/origin/{branch}"
+    resolved = git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    if resolved.returncode == 0:
+        return resolved.stdout.strip()
+    fetched = git(root, "fetch", "-q", "--depth=1", "origin", branch, check=False)
+    if fetched.returncode != 0:
+        return None
+    resolved = git(root, "rev-parse", "--verify", "-q", "FETCH_HEAD^{commit}", check=False)
+    return resolved.stdout.strip() if resolved.returncode == 0 else None
 
 
 def live_pins_api(repo: str, branch: str, path: str) -> dict[str, tuple[str, str, str]] | None:
@@ -199,7 +211,80 @@ def ancestry_local(root: str, old: str, new: str) -> str | None:
         return OK
     if git(root, "merge-base", "--is-ancestor", new, old, check=False).returncode == 0:
         return DOWNGRADE
+    # A NEGATIVE answer is only evidence in a complete history. In a shallow checkout (the gates run
+    # at fetch-depth 1 plus a few targeted fetches) both commits can be present as objects while the
+    # path between them is cut at the shallow boundary, so `--is-ancestor` answers "no" in BOTH
+    # directions for a plain forward move — which used to be reported as DIVERGED (#16696:
+    # ec4e56af -> 19698b6d, a forward move on main). Unproven is not diverged: defer to the API.
+    if is_shallow(root):
+        return None
     return DIVERGED
+
+
+def is_shallow(root: str) -> bool:
+    r = git(root, "rev-parse", "--is-shallow-repository", check=False)
+    return r.returncode != 0 or r.stdout.strip() != "false"   # cannot tell -> treat as incomplete
+
+
+def resolve_ancestry(root: str, repo: str, old: str, new: str,
+                     api: Callable[[str, str, str], str] | None = None,
+                     hydrate: Callable[[], bool] | None = None) -> str:
+    """Local history when it can PROVE the answer, else the compare API, else UNKNOWN (never DIVERGED)."""
+    local = ancestry_local(root, old, new)
+    if local is not None:
+        return local
+    if hydrate is not None and hydrate():
+        local = ancestry_local(root, old, new)
+        if local is not None:
+            return local
+    return (api or ancestry_api)(repo, old, new)
+
+
+def bounded_fetch(command: list[str], env: dict[str, str], timeout: float = 15) -> bool:
+    with subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                          env=env, start_new_session=True) as process:
+        try:
+            return process.wait(timeout=timeout) == 0
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            return False
+
+
+def hydrate_main_history(root: str, repo: str, main_sha: str) -> bool:
+    """Make one bounded fetch from the workflow checkout's HTTPS origin."""
+    if repo != os.environ.get("GITHUB_REPOSITORY") or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{40}", main_sha):
+        return False
+    expected = f"https://github.com/{repo}"
+    env = git_environment()
+    try:
+        top = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--show-toplevel"],
+            text=True, capture_output=True, timeout=3, check=False, env=env,
+        )
+        if top.returncode or pathlib.Path(top.stdout.strip()).resolve() != pathlib.Path(root).resolve():
+            return False
+        origin = subprocess.run(
+            ["git", "-C", root, "remote", "get-url", "--all", "origin"],
+            text=True, capture_output=True, timeout=3, check=False, env=env,
+        )
+        if origin.returncode or origin.stdout.splitlines() not in ([expected], [expected + ".git"]):
+            return False
+        return bounded_fetch(
+            ["git", "-C", root, "-c", "core.hooksPath=/dev/null",
+             "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+             "-c", "http.followRedirects=false", "fetch", "--quiet", "--no-tags",
+             "--no-recurse-submodules", "--no-write-fetch-head", "--refmap=",
+             "--deepen=256", "origin", main_sha],
+            env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def ancestry_api(repo: str, old: str, new: str) -> str:
@@ -366,9 +451,17 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
         print("::error::--base / PR_DIFF_BASE is required on a pull request")
         return 2
 
+    attempted = False
+
+    def try_hydrate() -> bool:
+        nonlocal attempted
+        if not ref or attempted or not is_shallow(root):
+            return False
+        attempted = True
+        return hydrate_main_history(root, repo, ref)
+
     def decide(old: str, new: str) -> str:
-        local = ancestry_local(root, old, new)
-        return local if local is not None else ancestry_api(repo, old, new)
+        return resolve_ancestry(root, repo, old, new, hydrate=try_hydrate)
 
     ref: str | None = None
     if live_pins is None or live_tree is None:
@@ -397,6 +490,12 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
             print(f"::notice::explicit revert: {image} {old[:8]} -> {new[:8]} is {verdict} ({why})")
         return 0
     for path, image, old, new, verdict in bad:
+        if verdict == UNKNOWN:
+            print(f"::error file={path}::{image}: {old[:8]} -> {new[:8]} is NOT_EVALUATED — ancestry could not be "
+                  f"determined (commit missing from the checkout and the compare API did not answer). This is NOT a "
+                  f"finding that the pin moved backward; the gate fails closed because it cannot show it did not. "
+                  f"Re-run the job; if it persists, check that both commits exist on {branch}. {why}.")
+            continue
         print(f"::error file={path}::{image}: {old[:8]} -> {new[:8]} is {verdict.upper()} — a deploy may never move a pin "
               f"backward from what main holds now. {why}. Re-dispatch auto-deploy for current main, or label the PR `{REVERT_LABEL}` "
               f"to make the revert explicit.")
@@ -587,6 +686,113 @@ def self_test() -> int:
             check("compare API error -> UNKNOWN", ancestry_api("o/r", "a" * 8, "b" * 8) == UNKNOWN)
         finally:
             subprocess.run = real_run
+        # #16696: a FORWARD move judged in a SHALLOW checkout. Both commits are present as objects, but
+        # the path between them crosses the shallow boundary, so `--is-ancestor` says no both ways.
+        g("config", "uploadpack.allowAnySHA1InWant", "true")
+        shallow = os.path.join(root, "shallow")
+        subprocess.run(["git", "clone", "-q", "--depth=1", "--branch", "main", f"file://{root}", shallow],
+                       check=True, capture_output=True, env=env)
+        for sha in (c2, c3, c1):
+            subprocess.run(["git", "-C", shallow, "fetch", "-q", "--depth=1", "origin", sha], check=True,
+                           capture_output=True, env=env)
+        check("shallow fixture really is shallow, with c2/c3 present but disconnected",
+              is_shallow(shallow) and git(shallow, "merge-base", "--is-ancestor", c2, c3, check=False).returncode != 0)
+        check("full history still answers locally: forward OK", ancestry_local(root, c2, c3) == OK)
+        check("full history: true backward is DOWNGRADE", ancestry_local(root, c3, c1) == DOWNGRADE)
+        check("full history: true divergence is DIVERGED", ancestry_local(root, c2, side) == DIVERGED)
+        check("shallow, unproven ancestry is NOT reported as DIVERGED locally", ancestry_local(shallow, c2, c3) is None,
+              str(ancestry_local(shallow, c2, c3)))
+        api_calls: list[tuple[str, str]] = []
+
+        def api_says(status: str) -> Callable[[str, str, str], str]:
+            def f(_repo: str, o: str, n: str) -> str:
+                api_calls.append((o, n))
+                return status
+            return f
+        check("shallow forward move resolved by the compare API passes (OK)",
+              resolve_ancestry(shallow, "o/r", c2, c3, api=api_says(OK)) == OK and api_calls == [(c2, c3)])
+        check("shallow true backward via API stays DOWNGRADE",
+              resolve_ancestry(shallow, "o/r", c3, c1, api=api_says(DOWNGRADE)) == DOWNGRADE)
+        check("shallow, API cannot answer -> UNKNOWN (never DIVERGED, never OK)",
+              resolve_ancestry(shallow, "o/r", c2, c3, api=api_says(UNKNOWN)) == UNKNOWN)
+        api_calls.clear()
+        check("full history never consults the API", resolve_ancestry(root, "o/r", c2, c3, api=api_says(UNKNOWN)) == OK
+              and api_calls == [])
+
+        fetch_head = pathlib.Path(shallow, ".git", "FETCH_HEAD")
+        original_fetch_head = fetch_head.read_bytes()
+        original_main = git(shallow, "rev-parse", "origin/main").stdout.strip()
+        api_calls.clear()
+
+        def hydrate_fixture() -> bool:
+            return bounded_fetch(
+                ["git", "-C", shallow, "fetch", "--quiet", "--no-write-fetch-head",
+                 "--refmap=", "--deepen=8", "origin", c3],
+                git_environment(),
+            )
+
+        check("failed bounded fetch falls back without a positive verdict",
+              resolve_ancestry(shallow, "o/r", c2, c3, api=api_says(UNKNOWN),
+                               hydrate=lambda: False) == UNKNOWN and api_calls == [(c2, c3)])
+        api_calls.clear()
+        check("real shallow history fetch proves the forward move locally",
+              resolve_ancestry(shallow, "o/r", c2, c3, api=api_says(UNKNOWN),
+                               hydrate=hydrate_fixture) == OK and not api_calls)
+        check("bounded fetch preserves pinned refs",
+              fetch_head.read_bytes() == original_fetch_head
+              and git(shallow, "rev-parse", "origin/main").stdout.strip() == original_main)
+
+        from unittest.mock import Mock, patch
+
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "Example/Repo"}), \
+             patch.dict(globals(), {"bounded_fetch": Mock()}) as patched:
+            check("file origin and non-top-level root never invoke hydration",
+                  not hydrate_main_history(shallow, "Example/Repo", c3)
+                  and not hydrate_main_history(os.path.join(shallow, ".git"), "Example/Repo", c3)
+                  and not patched["bounded_fetch"].called)
+
+        process = Mock(pid=12345)
+        process.wait.side_effect = [subprocess.TimeoutExpired("fixture", 1), -9]
+        manager = Mock()
+        manager.__enter__ = Mock(return_value=process)
+        manager.__exit__ = Mock(return_value=False)
+        with patch.object(subprocess, "Popen", return_value=manager) as spawn, \
+             patch.object(os, "killpg") as kill:
+            check("timeout kills and waits for the owned process group",
+                  not bounded_fetch(["git"], git_environment(), timeout=1)
+                  and spawn.call_args.kwargs["start_new_session"]
+                  and kill.call_args.args == (process.pid, signal.SIGKILL)
+                  and process.wait.call_count == 2)
+
+        hydrate_once = Mock(return_value=False)
+        compare = Mock(return_value=UNKNOWN)
+
+        def judge_fixture(_root, _base, decide, _live_pins, _live_tree):
+            check("both unresolved pin decisions remain UNKNOWN",
+                  decide(c1, c2) == UNKNOWN and decide(c2, c3) == UNKNOWN)
+            return []
+
+        with patch.dict(globals(), {
+            "live_ref": Mock(return_value=c3),
+            "ancestry_local": Mock(return_value=None),
+            "is_shallow": Mock(return_value=True),
+            "hydrate_main_history": hydrate_once,
+            "ancestry_api": compare,
+            "judge": judge_fixture,
+        }), contextlib.redirect_stdout(io.StringIO()):
+            run_gate(shallow, c3, "o/r", "1", "fixture", "pull_request")
+        check("run_gate hydrates at most once and independently falls back per pair",
+              hydrate_once.call_count == 1 and compare.call_count == 2)
+
+
+        # The unresolvable case is reported as NOT_EVALUATED, distinct from DIVERGED, and still fails.
+        pr(c3[:8])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gate(ancestry=lambda o, n: UNKNOWN)
+        out = buf.getvalue()
+        check("unresolvable ancestry fails closed with a distinct NOT_EVALUATED error",
+              rc == 1 and "NOT_EVALUATED" in out and "DIVERGED" not in out, out)
         # Push to main: no base, counts subjects, exits 0; PR without base: exit 2.
         pr(c3[:8]);   check("push with no base exits 0", gate(base="", event="push") == 0)
         check("pull_request with no base exits 2", gate(base="") == 2)

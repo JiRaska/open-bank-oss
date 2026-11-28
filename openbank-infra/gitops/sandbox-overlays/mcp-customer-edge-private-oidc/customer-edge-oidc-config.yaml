@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: customer-edge-mcp-oidc-tls
+  namespace: customer-edge
+data:
+  private-oidc.properties: |
+    quarkus.oidc.tls.tls-configuration-name=customer-edge-mcp-oidc
+    quarkus.tls.customer-edge-mcp-oidc.trust-store.pem.certs=/mnt/mcp-oidc-ca/ca.crt
+    quarkus.tls.customer-edge-mcp-oidc.protocols=TLSv1.3
+    quarkus.tls.customer-edge-mcp-oidc.reload-period=1h

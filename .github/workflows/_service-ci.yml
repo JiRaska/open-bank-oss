@@ -121,7 +121,17 @@ jobs:
     # Unset or empty variable => every build is hosted (the kill switch when the Mac is down).
     # Main's ref only (and no inputs.ref override): the pool also runs the train settle/publish jobs holding App
     # keys, so a dispatch on a branch must never put branch code on that host.
-    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'openbank-mini' || 'ubuntu-latest') }}
+    # PR_RUNNER_POOL (trial 2026-11-19, issue #16006): when set to an ALLOWLISTED self-hosted
+    # label, PR builds from branches of THIS repo build on that pool instead of the hosted runners,
+    # whose 20-job concurrency cap is what PR CI queues on (measured 2026-11-19: hosted p50 queue
+    # 42 min, saturated at 20-25 jobs). Fork PRs never route there, and only pull_request events
+    # do: push, schedule, dispatch and the context arm64 pilot keep their runners. The pool holds
+    # no GitHub credential (single-use JIT runners, one sysbox container per job). The variable is
+    # checked against a HARD-CODED allowlist (`openbank-pr` only) so that editing a repo variable
+    # can never route PR code onto a privileged label: `openbank-mini` carries the train App keys
+    # and `openbank-build` is the in-cluster ARC pool. Widening the list is a reviewed code change.
+    # Unset (or not allowlisted) = kill switch: every PR build is hosted again.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'openbank-mini' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["openbank-pr"]'), vars.PR_RUNNER_POOL) && vars.PR_RUNNER_POOL) || 'ubuntu-latest') }}
     timeout-minutes: 45
     # ADR-0363: a push to main enters `gradle-cache-writer` (branch policy: main only), the sole
     # holder of the cache write secret; every other event runs without an environment. The secret
@@ -217,7 +227,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: |
@@ -499,7 +509,9 @@ jobs:
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: openbank-build
-    timeout-minutes: 45
+    # ADR-0389 SAFE knob: repo var SERVICE_CI_CONTRACT_TIMEOUT_MINUTES overrides (positive integer minutes); unset = today's
+    # value. A non-numeric value makes fromJSON fail the job LOUDLY at start, never silently.
+    timeout-minutes: ${{ fromJSON(vars.SERVICE_CI_CONTRACT_TIMEOUT_MINUTES || '45') }}
     # Only this post-merge, trusted runner receives an OIDC token for its ECR cache access.
     permissions:
       contents: read
@@ -644,7 +656,7 @@ jobs:
         id: ecr_login
         if: ${{ steps.ecr_auth.outcome == 'success' }}
         continue-on-error: true
-        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+        uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
       - name: Pre-warm Testcontainers image cache via ECR
         continue-on-error: true
         env:
@@ -652,7 +664,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: |

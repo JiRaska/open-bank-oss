@@ -35,19 +35,21 @@ on:
     paths:
       - openbank-infra/docker/keycloak/**
       - openbank-infra/docker/litellm/**
+      - e2e/mcp-harness/**
       - .github/workflows/platform-images.yml
   push:
     branches: [main]
     paths:
       - openbank-infra/docker/keycloak/**
       - openbank-infra/docker/litellm/**
+      - e2e/mcp-harness/**
       - .github/workflows/platform-images.yml
   workflow_dispatch:
     inputs:
       image:
         description: Which image to rebuild
         type: choice
-        options: [all, keycloak, litellm]
+        options: [all, keycloak, litellm, mcp-harness]
         default: all
 
 permissions:
@@ -88,7 +90,8 @@ jobs:
           # name | context | ECR repository | ARG holding the upstream version | tag suffix
           ALL='[
             {"name":"keycloak","context":"openbank-infra/docker/keycloak","repo":"openbank-keycloak","version_arg":"KEYCLOAK_VERSION","suffix":"-optimized"},
-            {"name":"litellm","context":"openbank-infra/docker/litellm","repo":"openbank-litellm","version_arg":"LITELLM_VERSION","suffix":""}
+            {"name":"litellm","context":"openbank-infra/docker/litellm","repo":"openbank-litellm","version_arg":"LITELLM_VERSION","suffix":""},
+            {"name":"mcp-harness","context":"e2e/mcp-harness","repo":"openbank-mcp-harness","version_arg":"PLAYWRIGHT_VERSION","suffix":""}
           ]'
           case "$EVENT" in
             workflow_dispatch)
@@ -161,7 +164,7 @@ jobs:
 
       - name: ECR login
         if: github.event_name != 'pull_request'
-        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+        uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
 
       - name: Build + push
         id: push
@@ -301,7 +304,7 @@ jobs:
 
       - name: Mint a GitHub App installation token
         id: app_token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
@@ -341,7 +344,7 @@ jobs:
       - name: Open gitops PR
         id: gitops_pr
         if: steps.rewrite.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
         with:
           token: ${{ steps.app_token.outputs.token }}
           sign-commits: true

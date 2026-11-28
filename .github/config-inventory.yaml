@@ -1,0 +1,355 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CONFIG INVENTORY — every secret, variable and OpenBao key this repository CONSUMES, by NAME.
+# Never a value. Checked by .github/scripts/check-config-inventory.py (gate `config-inventory`):
+#   * a `secrets.X` / `vars.X` in a workflow, or an ExternalSecret remote key served by one of
+#     `openbao.stores`, that is not listed here fails the PR;
+#   * a name listed here that nothing reads fails too, so the file cannot outlive its consumers;
+#   * `unprovisioned` is the ONLY way to merge a consumer whose input does not exist yet, and it
+#     needs a reason, an issue and a `review_by` date — after which the gate fails again.
+# This file is a claim. `python3 .github/scripts/check-config-inventory.py --live` checks it
+# against GitHub (admin gh token) and the cluster's ExternalSecret readiness; run it after
+# provisioning anything, before moving a name out of `unprovisioned`.
+# Generated 2026-11-14 from the live repository/environment lists and ExternalSecret status.
+schema: 1
+github:
+  repository:
+    secrets:
+      - ADMIN_UI_E2E_PASSWORD
+      - AGENT_APP_ID
+      - AGENT_APP_PRIVATE_KEY
+      - AGENT_MERGE_RECORDER_CLIENT_ID
+      - AGENT_MERGE_RECORDER_CLIENT_SECRET
+      - GITOPS_APP_ID
+      - GITOPS_APP_PRIVATE_KEY
+      - GOVERNANCE_GH_PAT
+      - INFRACOST_API_KEY
+      - OPENBANK_APP_RO_TOKEN
+      - PACT_BROKER_PASSWORD
+      - PLATFORM_TOFU_APPLY_ROLE
+      - PLATFORM_TOFU_AWS_REGION
+      - PLATFORM_TOFU_PLAN_ROLE
+      - RULESET_AUDIT_TOKEN
+      - SYNTHETIC_OPERATOR_PASSWORD
+      - SYNTHETIC_OPERATOR_USERNAME
+    variables:
+      - ADMIN_UI_E2E_USERNAME
+      - ADMIN_UI_EVIDENCE_BUCKET
+      - ADMIN_UI_EVIDENCE_REGION
+      - ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN
+      - AGENT_MERGE_RECORDER_ISSUER
+      - AGENT_MUTATING_WORKERS_ENABLED
+      - AGENT_REVIEW_API_ENABLED
+      - AGENT_SERVICE_URL
+      - CI_ARTIFACT_MIRROR_ALIAS
+      - CI_ARTIFACT_MIRROR_ROLE_ARN
+      - DECEPTION_DRILL_ROLE_ARN
+      - DEPLOY_AFTER_SERVICES_CI_ENABLED
+      - DRILL_DECOY_URL
+      - DRILL_SSM_PARAM
+      - GITOPS_APP_ID
+      - GRADLE_CACHE_READ_PASSWORD
+      - GRADLE_CACHE_URL
+      - MERGE_TRAIN_RUNNER
+      - MINI_RUNNER_SERVICES
+      - PACT_BROKER_URL
+      - PACT_BROKER_USERNAME
+  environments:
+    gradle-cache-writer:
+      secrets:
+        - GRADLE_CACHE_WRITE_PASSWORD
+      variables:
+        []
+    merge-train-branch-update:
+      secrets:
+        - BRANCH_UPDATER_APP_ID
+        - BRANCH_UPDATER_PRIVATE_KEY
+      variables:
+        []
+    ruleset-evidence:
+      secrets:
+        - RULESET_EVIDENCE_APP_ID
+        - RULESET_EVIDENCE_APP_PRIVATE_KEY
+      variables:
+        []
+  unprovisioned:
+    - kind: secret
+      names: [BREAK_GLASS_APP_ID, BREAK_GLASS_APP_PRIVATE_KEY]
+      reason: "environment-scoped merge-train break-glass credential awaits owner setup; the workflow fails closed until then"
+      issue: 17006
+      review_by: 2026-12-21
+    - kind: variable
+      names: [AUTO_DEPLOY_MAX_PARALLEL, MERGE_TRAIN_API_RETRY_ATTEMPTS, MERGE_TRAIN_BATCH_SIZE, MERGE_TRAIN_DEPLOY_FIX_DAILY_CAP, MERGE_TRAIN_EXPEDITE_DAILY_CAP, MERGE_TRAIN_EXPEDITE_LANE, MERGE_TRAIN_HOTFIX_DAILY_CAP, MERGE_TRAIN_PREFETCH_BATCH, MERGE_TRAIN_RESERVATION_CEILING_S, MERGE_TRAIN_SPECULATIVE_STACK, MERGE_TRAIN_STALE_RED_CAP, MERGE_TRAIN_STRICT_AGING_MAX_HOLD_S, MERGE_TRAIN_STRICT_AGING_S, MERGE_TRAIN_STRICT_BATCH_CAP, MERGE_TRAIN_STRICT_JUDGE_BATCH_CAP, MERGE_TRAIN_URGENT_DAILY_CAP]
+      reason: "optional owner-tunable merge-train and auto-deploy knobs; unset means the reviewed workflow default applies, and merge-train.py range-validates any value"
+      issue: 16932
+      review_by: 2027-02-21
+    - kind: variable
+      names:
+        - TF_ARC_MIN_RUNNERS
+        - TF_ARC_MAX_RUNNERS
+        - TF_ARC_DEPLOY_MAX_RUNNERS
+        - TF_ARC_BATCH_MAX_RUNNERS
+        - TF_ARC_DR_MAX_RUNNERS
+      reason: "optional ADR-0389 runner-pool overrides for platform-tofu; unset by design means the variables.tf default applies, ranges enforced by tofu validation"
+      issue: 17006
+      review_by: 2027-02-21
+    - kind: variable
+      names: [PR_RUNNER_POOL]
+      reason: "opt-in PR build pool trial; unset is the kill switch (every PR build hosted) and only allowlisted labels are honoured"
+      issue: 16006
+      review_by: 2026-12-03
+    - kind: secret
+      names: [SECURITY_KPI_DEPENDABOT_READ_TOKEN]
+      reason: "repository-scoped Dependabot alerts read access awaits owner provisioning; only CVE Remediation degrades until then"
+      issue: 16492
+      review_by: 2026-12-16
+    - kind: secret
+      names:
+        - GLITCHTIP_AUTH_TOKEN
+        - AGENT_REVIEW_ANTHROPIC_API_KEY
+      reason: "optional; each consumer degrades by design without it (see the issue, one line per name)"
+      issue: 16206
+      review_by: 2027-02-15
+    - kind: secret
+      names:
+        - ALERTMANAGER_URL
+        - ALERTMANAGER_DIGEST_TOKEN
+        - ALERTMANAGER_DIGEST_SLACK_WEBHOOK
+      reason: "standing-critical digest schedule disabled; no read-only Alertmanager path reachable from Actions exists yet"
+      issue: 6432
+      review_by: 2027-01-15
+    - kind: variable
+      names:
+        - ALERT_DIGEST_READER_ROLE_ARN
+      reason: "ADR-0382 reader role for the in-cluster digest envelopes; the S3 step is skipped until the owner applies alert-digest.tf and sets it"
+      issue: 6432
+      review_by: 2027-01-15
+    - kind: variable
+      names:
+        - DEPLOY_DROPPED_PIN_HOURS
+      reason: "tuning knob for the dropped-pin watch; the workflow falls back to 6 hours, so unset is the intended default"
+      issue: 16701
+      review_by: 2027-02-15
+    - kind: variable
+      names:
+        - CODEQL_JAVA_ON_PR
+        - ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY
+      reason: "kill switch / opt-in flag; unset is the intended default"
+      issue: 16206
+      review_by: 2027-02-15
+    - kind: variable
+      names:
+        - PERF_ACCOUNT_ID
+        - PERF_ACCOUNT_URL
+        - PERF_BALANCE_URL
+        - PERF_CONSENT_URL
+        - PERF_CURRENCY
+        - PERF_DOMESTIC_PAYMENT_URL
+        - PERF_FX_BASE
+        - PERF_FX_QUOTE
+        - PERF_FX_URL
+        - PERF_GRANTEE_ID
+        - PERF_LEDGER_URL
+        - PERF_PARTY_ID
+        - PERF_SCA_CHALLENGE_ID
+        - PERF_SCA_URL
+        - PERF_SEPA_INSTANT_URL
+        - PERF_SEPA_PAYMENT_URL
+        - PERF_TRANSACTION_URL
+        - PERF_TXN_URL
+      reason: "perf baseline target URLs and fixture ids; the job refuses to run without them"
+      issue: 7311
+      review_by: 2027-01-31
+    - kind: secret
+      names:
+        - PERF_READ_TOKEN
+      reason: "least-privilege read identity for the perf baseline; created with the perf targets"
+      issue: 7311
+      review_by: 2027-01-31
+    - kind: variable
+      names:
+        - GATE_BUDGET_MULTIPLIER
+        - FLEET_LINT_TIMEOUT_MINUTES
+        - FLEET_LINT_STEP_TIMEOUT_MINUTES
+        - LIBS_BENCH_TIMEOUT_MINUTES
+        - SERVICE_CI_CONTRACT_TIMEOUT_MINUTES
+      reason: "ADR-0389 runtime tuning knobs; every consumer falls back to today's value, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-02-15
+    - kind: variable
+      names:
+        - APICURIO_REGISTRY_URL
+      reason: "schema registry apply waits on the registry rollout"
+      issue: 1916
+      review_by: 2027-01-31
+    - kind: variable
+      names:
+        - ADMIN_UI_ENGINES_NIGHTLY_SCHEDULE_PAUSED
+        - AGENT_ISSUE_WORKER_SCHEDULE_PAUSED
+        - AGENT_PR_STEWARD_SCHEDULE_PAUSED
+        - ALERT_NOISE_WEEKLY_SCHEDULE_PAUSED
+        - APP_STATUS_REFRESH_SCHEDULE_PAUSED
+        - AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED
+        - AUTO_UPDATE_ARMED_PRS_SCHEDULE_PAUSED
+        - BRANCH_CLEANUP_SCHEDULE_PAUSED
+        - CI_ARTIFACT_MIRROR_SCHEDULE_PAUSED
+        - DEPS_FRESHNESS_SCHEDULE_PAUSED
+        - DERIVED_ARTEFACT_AUTOHEAL_SCHEDULE_PAUSED
+        - FLEET_LINT_SCHEDULE_PAUSED
+        - INCIDENT_GATE_COVERAGE_SCHEDULE_PAUSED
+        - ISSUE_KIND_SCHEDULE_PAUSED
+        - SCHEDULES_PAUSED
+        - UPSTREAM_UNBLOCK_WATCH_SCHEDULE_PAUSED
+      reason: "ADR-0389 instant pause switches for scheduled workflows; unset (or anything but 'true') means the schedule runs, so unset is the intended default"
+      issue: 17006
+      review_by: 2027-05-21
+openbao:
+  # Stores backed by OpenBao. kafka-messaging-certs is the Kubernetes provider (Strimzi-issued
+  # Secrets in-cluster), not OpenBao, so it is out of scope.
+  stores:
+    - vault-kv
+    - vault-db
+  keys:
+    - account-service
+    - admin-ui
+    - agent-service
+    - alertmanager
+    - analytics-sink
+    - card-issuance
+    - ci-gate-health-puller
+    - cloud-finops
+    - control-liveness-sentinel
+    - copilot
+    - creds/account-db-vault-role
+    - creds/audit-db-vault-role
+    - creds/balance-db-vault-role
+    - creds/fx-db-vault-role
+    - creds/ledger-db-vault-role
+    - creds/ledger-pension-co-db-vault-role
+    - creds/notifications-db-vault-role
+    - creds/transaction-db-vault-role
+    - customer-edge-admin
+    - customer-edge-upstream
+    - customer-edge-webauthn
+    - delegation-disclosure-service
+    - devops-agent
+    - document-service-signing-seal
+    - flaky-test-hunter
+    - glitchtip
+    - goalert
+    - incentive-service
+    - keycloak-bootstrap
+    - keycloak-customers-realm-import
+    - keycloak-realm-import
+    - keycloak/account-service
+    - keycloak/agent-service
+    - keycloak/analytics-sink
+    - keycloak/billing-service
+    - keycloak/campaign-service
+    - keycloak/card-issuance-service
+    - keycloak/card-processing-service
+    - keycloak/clearing-service
+    - keycloak/copilot-service
+    - keycloak/delegation-service
+    - keycloak/document-service
+    - keycloak/domestic-payment
+    - keycloak/finrep
+    - keycloak/fx-service
+    - keycloak/interest-service
+    - keycloak/kyb-service
+    - keycloak/ledger-pension-co
+    - keycloak/lending-service
+    - keycloak/mcp-authority-tls
+    - keycloak/mcp-read-client-truststore
+    - keycloak/mcp-balance-client-trust
+    - keycloak/mcp-balance-delegation-trust
+    - keycloak/mcp-bound-read-server-trust
+    - keycloak/mcp-read-issuer
+    - keycloak/mcp-read-nonce
+    - keycloak/mcp-read-proof
+    - keycloak/mcp-service
+    - keycloak/mcp-service-customer-exchange
+    - keycloak/party-service
+    - keycloak/pension-fund-service
+    - keycloak/pension-service
+    - keycloak/sdd-service
+    - keycloak/sepa-instant
+    - keycloak/sepa-payment
+    - keycloak/settlement-service
+    - keycloak/standing-order-service
+    - keycloak/statement-service
+    - keycloak/swift-service
+    - keycloak/synthetic-catalog-read
+    - keycloak/synthetic-fx-read
+    - keycloak/synthetic-retail
+    - keycloak/tax-reporting-service
+    - keycloak/transaction-service
+    - keycloak/treasury
+    - langfuse
+    - litellm
+    - notification-service
+    - pact-broker
+    - pid-service
+    - pricing-console
+    - pricing-service
+    - temporal/db
+  unprovisioned:
+    - names: [keycloak/keycloak-mcp]
+      reason: "client secret of openbank-keycloak-mcp (ADR-0385 D3) is written by the owner when the client is created in the live realm; Keycloak's secret ref is optional and the MCP authenticator refuses every connect until then"
+      issue: 16667
+      review_by: 2027-01-31
+    - kind: openbao
+      names: [mcp-synthetic/runner]
+      reason: "The suspended runner needs the independently enrolled synthetic account, passkey and SCA fixture before enablement."
+      issue: 16617
+      review_by: 2027-02-22
+    - kind: openbao
+      names: [fetch-broker/browser-run]
+      reason: "optional JS renderer for the fetch broker (ADR-0387); without it the broker serves plain HTTP only and render: js hosts answer NOT_RENDERABLE"
+      issue: 16754
+      review_by: 2027-02-18
+    - kind: openbao
+      names:
+        - mcp-synthetic-sandbox/balance-mcp-oidc-trust
+        - mcp-synthetic-sandbox/balance-mcp-read-origins
+        - mcp-synthetic-sandbox/customer-edge-mcp-oidc-origins
+        - mcp-synthetic-sandbox/customer-edge-mcp-oidc-trust
+        - mcp-synthetic-sandbox/mcp-customer-oidc-origins
+        - mcp-synthetic-sandbox/mcp-customer-oidc-trust
+        - mcp-synthetic-sandbox/sandbox-keycloak-realm-import
+        - mcp-synthetic-sandbox/read-issuer-client-trust
+      reason: "Site-owned private MCP sandbox bootstrap, discovery and trust inputs. The sandbox overlays are dormant until the owner provisions and verifies the exact synthetic inputs."
+      issue: 16996
+      review_by: 2027-01-31
+# ExternalSecrets whose value an ESO generator draws in-cluster: no store key to provision, but
+# whoever else must hold the same value is named, so a rotation cannot forget them.
+generated:
+  - secret: platform/mcp-customer-store-valkey
+    generator: Password mcp-customer-store-valkey-password (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-valkey requirepass and mcp-service QUARKUS_REDIS_PASSWORD, both read from this Secret; no copy outside the cluster"
+  - secret: platform/mcp-customer-store-metrics
+    generator: Password mcp-customer-store-metrics-password (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-valkey `metrics` ACL user and its redis_exporter sidecar, both read from this Secret; no copy outside the cluster"
+  - secret: platform/mcp-customer-store-hmac
+    generator: Password mcp-customer-store-key-hmac (refreshPolicy CreatedOnce)
+    holders:
+      - "mcp-service MCP_CUSTOMER_KEY_HMAC_SECRET only; no copy outside the cluster"
+  - secret: observability/ci-metrics-ingest
+    generator: Password ci-metrics-ingest-token (refreshPolicy CreatedOnce)
+    holders:
+      - "GitHub secret CI_METRICS_TOKEN in JiRaska/openbank-app (copied by the owner, #16205)"
+  - secret: platform/mcp-service-account-ref
+    generator: Password mcp-service-account-ref-key (refreshPolicy CreatedOnce)
+    holders:
+      - "none outside the cluster: only mcp-service pods read it (accountRef HMAC key, #16678); rotation = delete the Secret and restart the pods"
+  - secret: platform/copilot-redis-exporter
+    generator: Password copilot-redis-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the copilot-redis Deployment (platform), `metrics` ACL user + redis_exporter sidecar"
+  - secret: ai-platform/langfuse-valkey-exporter
+    generator: Password langfuse-valkey-exporter-password (refreshPolicy CreatedOnce)
+    holders:
+      - "in-cluster only: the langfuse-valkey Deployment (ai-platform), `metrics` ACL user + redis_exporter sidecar"

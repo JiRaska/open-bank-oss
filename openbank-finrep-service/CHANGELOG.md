@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.2...finrep-service-v0.20.0) (2026-11-20)
+
+
+### Features
+
+* **finrep:** enable OpenTelemetry tracing + trace contract ([#16752](https://github.com/JiRaska/open-bank-oss/issues/16752)) ([621c287](https://github.com/JiRaska/open-bank-oss/commit/621c287c64c09f687c1010723cb5ed5c839cd011))
+
+## [0.19.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.1...finrep-service-v0.19.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **delegation,domestic-payment,finrep:** reload outbound mTLS client certificates ([#16413](https://github.com/JiRaska/open-bank-oss/issues/16413)) ([cbd1aeb](https://github.com/JiRaska/open-bank-oss/commit/cbd1aeb831abe581bfd0d317808ca6d49cbf3d11))
+
 ## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.19.0...finrep-service-v0.19.1) (2026-11-13)
 
 

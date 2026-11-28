@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+# Differential test of the shared identifier validators against python-stdnum (#16748).
+# Rationale lives in .github/scripts/identifier-differential.py's header.
+name: Identifier differential
+
+on:
+  pull_request:
+    paths:
+      - "openbank-libs-domain/src/main/kotlin/com/openbank/libs/identity/**"
+      - "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/account/**"
+      - "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/CurrencyCode.kt"
+      - "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+      - "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Portfolio.kt"
+      - "openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/SyntheticPan.kt"
+      - "**/IdentifierSpecConformanceTest.kt"
+      - ".github/scripts/check-identifier-validator-inventory.py"
+      - "openbank-libs-domain/src/test/resources/identifier-spec-vectors/**"
+      - ".github/scripts/identifier-differential.py"
+      - ".github/workflows/requirements/stdnum.txt"
+      - ".github/workflows/identifier-differential.yml"
+  push:
+    branches: [main]
+    paths:
+      - "openbank-libs-domain/src/main/kotlin/com/openbank/libs/identity/**"
+      - "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/account/**"
+      - "openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/CurrencyCode.kt"
+      - "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/domain/model/LegalEntityIdentifier.kt"
+      - "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Portfolio.kt"
+      - "openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/SyntheticPan.kt"
+      - "**/IdentifierSpecConformanceTest.kt"
+      - ".github/scripts/check-identifier-validator-inventory.py"
+      - "openbank-libs-domain/src/test/resources/identifier-spec-vectors/**"
+      - ".github/scripts/identifier-differential.py"
+      - ".github/workflows/requirements/stdnum.txt"
+      - ".github/workflows/identifier-differential.yml"
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: identifier-differential-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  differential:
+    name: Identifier validators vs python-stdnum
+    runs-on: ubuntu-latest
+    # measured 2026-11-19 over six runs of this job: 7 to 12 minutes (four modules compile, no cache write); 25 = ~2x the slowest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          java-version: "25"
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
+      - name: Install python-stdnum (hash-pinned)
+        run: python3 -m pip install --user --quiet --require-hashes -r .github/workflows/requirements/stdnum.txt
+      - name: Oracle self-test (a never-issued number stdnum accepts must come out invalid)
+        run: python3 .github/scripts/identifier-differential.py self-test
+      - name: Spec vectors agree with stdnum, or name the stricter rule
+        run: python3 .github/scripts/identifier-differential.py vectors --dir openbank-libs-domain/src/test/resources/identifier-spec-vectors
+      - name: Generate oracle verdicts (seed varies per run on schedule)
+        run: |
+          seed=16748
+          if [ "${{ github.event_name }}" = "schedule" ]; then seed="${{ github.run_id }}"; fi
+          python3 .github/scripts/identifier-differential.py generate --out "$RUNNER_TEMP/oracle.tsv" --seed "$seed" --count 20000
+      - name: Every module's validators agree with the vectors and the oracle
+        env:
+          IDENTIFIER_ORACLE: ${{ runner.temp }}/oracle.tsv
+        run: |
+          ./gradlew --continue --console=plain \
+            :openbank-libs-domain:test --tests '*IdentifierSpecConformanceTest' \
+            :openbank-kyb-service:test --tests '*IdentifierSpecConformanceTest' \
+            :openbank-treasury-service:test --tests '*IdentifierSpecConformanceTest' \
+            :openbank-card-issuance-service:test --tests '*IdentifierSpecConformanceTest'
+      - name: The differential actually ran in every module (a skipped test reads as green)
+        run: |
+          set -euo pipefail
+          for m in openbank-libs-domain openbank-kyb-service openbank-treasury-service openbank-card-issuance-service; do
+            f=""
+            for x in "$m"/build/test-results/test/TEST-*IdentifierSpecConformanceTest.xml; do f="$x"; done
+            if ! { [ -f "$f" ] && grep -q 'skipped="0"' "$f" && grep -q 'failures="0"' "$f" && grep -q 'IDENTIFIER_DIFFERENTIAL module=' "$f"; }; then
+              echo "::error::$m: conformance test missing, skipped, failed or ran no differential (${f:-no XML})"
+              exit 1
+            fi
+          done
+      - name: Write the identifier conformance matrix (with this run's verdicts)
+        if: always()
+        run: |
+          python3 .github/scripts/check-identifier-validator-inventory.py \
+            --matrix "$RUNNER_TEMP/identifier-conformance.json" --with-results \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Upload the identifier conformance matrix (Test Intelligence, ADR-0273)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: identifier-conformance
+          path: ${{ runner.temp }}/identifier-conformance.json
+          if-no-files-found: error

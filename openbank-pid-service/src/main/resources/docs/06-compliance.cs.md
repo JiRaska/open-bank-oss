@@ -11,7 +11,7 @@
 | **eIDAS** (Nař. (EU) 910/2014) + český bankID | Prokázání identity přes bankID (kvalifikovaná el. identifikace) | `verificationSource=BANKID`, externí id `BANKID_SUB`, `/sync/bankid` přijímá ověřené atributy |
 | **Český AML zákon 253/2008 + ZoB** | Due diligence klienta, záznam dokladů | `party_id_documents`, zacházení s rodným číslem, datová schránka |
 | **PSD2** (Nař. (EU) 2015/2366) | Identita podkládá SCA + consent rozhodnutí | identita party referencovaná `consent-service` / `sca-service`; bez přímého TPP přístupu zde |
-| **DORA** (Nař. (EU) 2022/2554) | Provozní odolnost | health probes, fault-tolerant outbox dispatcher, audit události, SLO, runbooky |
+| **DORA** (Nař. (EU) 2022/2554) | Provozní odolnost | health probes, audit události, SLO, runbooky |
 | **NIS2** | Síťová a informační bezpečnost | OIDC autentizace, bezpečnostní hlavičky (CSP/HSTS), in-cluster mTLS, audit log |
 | **České základní registry (ROB/ISZR, RUIAN)** | Autoritativní adresní / populační data | `/sync/rob`, externí id `ROB_AIFO`, `ruian_code` na adresách |
 
@@ -49,7 +49,6 @@
 |---|---|
 | Identita party + KYC/AML | 10 let (AMLD 6 čl. 40, český AML zákon) — kromě `PARTY_ERASED`, kdy se osobní údaje anonymizují ihned a zůstává jen zbytek řádku |
 | Doklady totožnosti | dle retence AML zákona |
-| řádky `pid_outbox` SENT | jen provozní, prunable |
 | Ponechaný klíč blokace podvodu (`RNX:`) a jeho rozhodnutí REJECT | do konce příslušné doby uchování podle AML (viz níže); **automatické mazání zatím neexistuje** |
 
 ### Ponechaný klíč blokace podvodu (`RNX:`)
@@ -71,7 +70,7 @@ Když je party vymazána, verifikační případ, který čtyři oči rozhodly R
 | čl. 5/6 | Řízení ICT rizik | hexagonální izolace, centralizované `openbank-libs` |
 | čl. 9 | Identifikace | `BuildInfo` (gitCommit, buildTime, version) v `/api/v1/info` |
 | čl. 10 | Detekce | metriky Micrometer/Prometheus, OpenTelemetry trasy |
-| čl. 11 | Reakce & obnova | fault-tolerant outbox (circuit breaker/retry/timeout), runbooky v `05-operations.md` |
+| čl. 11 | Reakce & obnova | runbooky v `05-operations.md` |
 | čl. 16 | Řízení incidentů | doménové události → audit-service (důkazy) |
 | čl. 28 | Riziko třetích stran | bankID / ROB jsou regulované národní systémy, ne third-party SaaS; žádná externí SaaS závislost v této službě |
 
@@ -109,7 +108,6 @@ Každá mutace vyšle doménovou událost do `party.events`; `audit-service` ji 
 - ✅ Rodné číslo šifrované at-rest, nikdy nevracíno, maskováno v logu
 - ✅ Unikátní `(id_type, id_value)` brání kolizi identity / duplicitnímu party
 - ✅ Bezpečnostní hlavičky: CSP `default-src 'self'`, HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy
-- ✅ Resilience: fault-tolerant outbox dispatcher (circuit breaker / retry / timeout / bulkhead)
 - ✅ Tajemství: dev placeholdery (`CHANGE_ME_LOCAL_DEV_ONLY`) musí být v prod přepsány přes Vault
 - ⚠️ Idempotence na mutacích: zatím bez cache `Idempotency-Key` (vytvoření deduplikováno na bankID `sub`) — evidované vylepšení
 - ⚠️ Dedup přes blind-index rodného čísla (skutečné párování jeden člověk = jeden party): položka roadmapy, neimplementováno

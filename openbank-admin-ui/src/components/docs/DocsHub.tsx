@@ -4,7 +4,7 @@
 
 'use client'
 import Link from 'next/link'
-import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar, Scale, QrCode } from 'lucide-react'
+import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar, Scale, QrCode, Bot } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
@@ -80,6 +80,18 @@ function buildSections(bpmnCount: number): HubSection[] {
       'A SPAYD the phone camera can read, with a choice among installed banking apps: the spayd:// format, the Android and iOS flow, and a non-breaking three-phase rollout',
     ],
     badge: 'SDK v0.2.0',
+    color: 'var(--accent-text)',
+    solid: 'var(--accent)',
+  },
+  {
+    href: '/docs/mcp-channel',
+    icon: <Bot size={22} />,
+    title: ['Kanál MCP pro zákazníky', 'Customer MCP channel'],
+    desc: [
+      'AI asistent zákazníka čte a navrhuje, zákazník schvaluje v aplikaci se SCA: tok krok za krokem, vrstvy obrany, galerie útoků a stav každé kontroly odvozený z repozitáře (ADR-0383)',
+      'The customer\'s AI assistant reads and proposes, the customer approves in the app with SCA: the step-by-step flow, defence layers, attack gallery and each control\'s status derived from the repository (ADR-0383)',
+    ],
+    badge: 'ADR-0383',
     color: 'var(--accent-text)',
     solid: 'var(--accent)',
   },

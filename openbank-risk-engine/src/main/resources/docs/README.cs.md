@@ -16,6 +16,8 @@ Tuto dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (D
 
 Všechna čtení visí na snapshot runu: `GET /api/v1/risk/snapshots/{id}/...` — `positions`, `instruments`, `cash-flows`, `irrbb`, `liquidity`, `liquidity-forecast`, `capital`, `min-reserves`, `limits`. Run, který není TIED_OUT, vrací 409; neznámý run nebo sada křivek vrací 404.
 
+Pro výpočet doběhu portfolia použijte `liquidity-forecast` s výslovně zadaným `curveSetId` a `includePlanned=false`. Výpočet použije zvolený snapshot bez aktuálně plánovaných treasury toků. Výchozí režim tyto toky zahrnuje.
+
 ## IRRBB (`GET /snapshots/{id}/irrbb`)
 
 Repricingová mezera, ΔEVE v šesti scénářích BCBS d368, ΔNII za 12 měsíců při paralelním posunu nahoru/dolů, nejhorší případ a předpoklady, ze kterých čísla vznikla.
@@ -123,3 +125,9 @@ zaúčtované ACTUAL obchody; plánované a hypotetické se ignorují. Zaúčtov
 sestavit, se vykáže jako mezera v datech, nikdy se tiše nevynechá. Požadavky na ocenění, citlivost a
 VaR mají omezenou velikost. Treasury čte seznam snímků a ocenění pod vlastní strojovou identitou;
 žádný jiný service-account tato čtení nemá.
+
+Risk Engine uchovává každou odlišnou přijatou revizi treasury cash flow a fixingu. Stávající čtení nadále vrací poslední stav. Historie začíná stavem zachyceným při migraci.
+
+Záznam vstupů plánování spojuje odsouhlasený snímek Risk Engine se sadou křivek stejného data a původu a s konkrétními revizemi treasury cash flow. Pozdější fixing je dostupný jako samostatná revize.
+
+Oprávnění pracovníci mohou uložit návrh vstupů přes `POST /api/v1/risk/planning/input-captures` zadáním ID snímku, sady křivek a revizí Treasury.

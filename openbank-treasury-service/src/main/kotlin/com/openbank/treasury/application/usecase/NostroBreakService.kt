@@ -17,6 +17,7 @@ import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.domain.model.BreakChanges
+import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroBreakAged
 import com.openbank.treasury.domain.model.NostroBreakBook
 import java.time.Clock
@@ -123,8 +124,11 @@ class NostroBreakService(
         val today = bankToday()
         return breakRepo.byIban(account, includeResolved)
             .sortedWith(compareBy({ it.firstSeenOn }, { it.bookingDate }, { it.breakKey }))
-            .map { NostroBreakView(it, it.ageBusinessDays(today), policy.isAged(it, today)) }
+            .map { view(it, today) }
     }
+
+    private fun view(b: NostroBreak, today: LocalDate) =
+        NostroBreakView(b, b.ageBusinessDays(today), policy.isAged(b, today))
 
     private fun nextOutOfWindow(candidates: List<UUID>): List<UUID> {
         if (candidates.size <= MAX_OUT_OF_WINDOW_STATEMENTS) return candidates

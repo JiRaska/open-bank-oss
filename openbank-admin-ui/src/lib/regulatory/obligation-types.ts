@@ -25,6 +25,8 @@ export interface RegulatoryObligation {
   applicability: string
   coverage: { status: CoverageStatus; reports: string[]; services: string[]; tracking: string | null }
   note: string | null
+  /** Control ids from compliance-controls.yaml that operate this duty (ADR-0379). */
+  controls?: string[]
 }
 
 export interface ObligationRegister {

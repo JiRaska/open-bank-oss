@@ -4,9 +4,12 @@
 import copy
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import re
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -48,6 +51,38 @@ class PackagedLibraryEvidenceTest(unittest.TestCase):
     def rejected(self, expected):
         with self.assertRaisesRegex(v.EvidenceError, expected):
             self.run_verifier()
+
+    def test_redacted_cli_preserves_success_and_failure(self):
+        sbom = self.root / "bom.json"
+        resolved = self.root / "resolved.json"
+        resolved.write_text(json.dumps(self.resolved))
+        command = [sys.executable, v.__file__, "--sbom", str(sbom),
+                   "--runtime-artifacts", str(resolved), "--quarkus-app", str(self.package)]
+
+        def run(*args):
+            return subprocess.run([*command, *args], capture_output=True, text=True, check=False)
+
+        sbom.write_text(json.dumps(self.sbom))
+        original = run()
+        redacted = run("--redact-failure")
+        self.assertEqual(original.returncode, 0)
+        self.assertEqual(redacted.returncode, original.returncode)
+        self.assertEqual(redacted.stdout, original.stdout)
+        self.assertEqual(json.loads(redacted.stdout), self.run_verifier())
+
+        self.component["hashes"][0]["content"] = "0" * 64
+        sbom.write_text(json.dumps(self.sbom))
+        original = run()
+        redacted = run("--redact-failure")
+        self.assertEqual(original.returncode, 1)
+        self.assertEqual(redacted.returncode, original.returncode)
+        self.assertEqual(redacted.stdout, "LIBRARY_HASH_MISMATCH\n")
+
+        sbom.unlink()
+        redacted = run("--redact-failure")
+        self.assertEqual(redacted.returncode, 1)
+        self.assertEqual(redacted.stdout, "INPUT_IO_ERROR\n")
+        self.assertEqual(redacted.stderr, "")
 
     def test_original_bytes_are_verified_without_filename_matching(self):
         result = self.run_verifier()

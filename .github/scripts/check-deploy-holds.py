@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import yaml
@@ -378,19 +379,67 @@ def strict_required_checks(rules, app_id=None):
                for c in rule["parameters"].get("required_status_checks") or [])
 
 
+# A single `gh api` blip must not redden an enforced gate on main (2026-11-14, run 43654847033):
+# retry transient signals only, inside the gate's 45 s budget, and still fail closed after that.
+PROTECTION_BACKOFF = (2, 5, 10)
+PROTECTION_TIMEOUT = 10
+PROTECTION_DEADLINE = 40
+TRANSIENT = re.compile(r"HTTP 5\d\d|rate limit|timed? ?out|timeout|connection (?:reset|refused)|"
+                       r"EOF|TLS handshake|temporarily unavailable", re.IGNORECASE)
+PERMANENT = re.compile(r"HTTP 40[134]\b|Not Found|Bad credentials|Resource not accessible", re.IGNORECASE)
+
+
+def _sanitise(stderr):
+    text = re.sub(r"(gh[opsu]_|github_pat_)[A-Za-z0-9_]+", "<redacted>", stderr or "")
+    text = " ".join(text.split())
+    return text[:300] or "<no stderr>"
+
+
+class ProtectionQuota(InvalidHold):
+    """Live branch rules could not be read because GitHub exhausted installation quota."""
+
+
+def read_live_protection(repo):
+    """Return the successful `gh api` result for main's rules; fail closed."""
+    started = time.monotonic()
+    attempts = len(PROTECTION_BACKOFF) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(["gh", "api", f"repos/{repo}/rules/branches/main"],
+                                    capture_output=True, text=True, timeout=PROTECTION_TIMEOUT, check=False)
+        except OSError as error:
+            raise InvalidHold(f"cannot read live main protection: {error}") from error
+        except subprocess.TimeoutExpired:
+            reason, transient = f"timed out after {PROTECTION_TIMEOUT}s", True
+        else:
+            if not result.returncode:
+                return result
+            reason = f"gh api exited {result.returncode}: {_sanitise(result.stderr)}"
+            if re.fullmatch(r"gh: API rate limit exceeded for installation\b[^\r\n]*"
+                            r"\(HTTP (?:403|429)\)", (result.stderr or "").strip()):
+                raise ProtectionQuota("cannot read live main protection: "
+                                      "GitHub installation API quota exhausted (not retried)")
+            transient = bool(TRANSIENT.search(result.stderr or "")) and not PERMANENT.search(result.stderr or "")
+        if not transient:
+            raise InvalidHold(f"cannot read live main protection (not retried): {reason}")
+        if attempt == attempts:
+            break
+        delay = PROTECTION_BACKOFF[attempt - 1]
+        if time.monotonic() - started + delay + PROTECTION_TIMEOUT > PROTECTION_DEADLINE:
+            break
+        print(f"::warning::live main protection read failed (attempt {attempt}/{attempts}): {reason}; "
+              f"retrying in {delay}s", file=sys.stderr)
+        time.sleep(delay)
+    raise InvalidHold(f"cannot read live main protection after {attempt} attempt(s): {reason}")
+
+
 def require_live_strict(root, base, repo):
     current = holds((root / RULES).read_text(encoding="utf-8"))
     previous = holds(at_base(root, base, RULES), allow_absent=True) if base else {}
     if not (current or previous):
         print("deploy holds: none; live strict check not needed")
         return
-    try:
-        result = subprocess.run(["gh", "api", f"repos/{repo}/rules/branches/main"],
-                                capture_output=True, text=True, timeout=30, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise InvalidHold(f"cannot read live main protection: {error}") from error
-    if result.returncode:
-        raise InvalidHold(f"cannot read live main protection: gh api exited {result.returncode}")
+    result = read_live_protection(repo)
     try:
         live_rules = json.loads(result.stdout)
     except json.JSONDecodeError as error:
@@ -571,6 +620,71 @@ def self_test():
                 pass
             else:
                 raise AssertionError("active hold passed without live strict checks")
+        # Issue: one transient `gh api` failure must not redden an enforced gate on main.
+        def fail(stderr, code=1):
+            return subprocess.CompletedProcess([], code, stdout="", stderr=stderr)
+        sleeps = []
+        with patch("subprocess.run", side_effect=[fail("gh: HTTP 502: Bad Gateway"), good]), \
+                patch("time.sleep", sleeps.append):
+            require_live_strict(root, None, "example/repo")
+        assert len(sleeps) == 1, f"transient failure retried {len(sleeps)} times, expected 1"
+        calls = []
+        def forbidden(*_a, **_k):
+            calls.append(1)
+            return fail("gh: Resource not accessible by integration (HTTP 403)")
+        with patch("subprocess.run", side_effect=forbidden), patch("time.sleep", sleeps.append):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold as error:
+                assert "HTTP 403" in str(error), f"403 stderr not surfaced: {error}"
+            else:
+                raise AssertionError("persistent 403 passed")
+        assert len(calls) == 1, f"403 was retried ({len(calls)} calls)"
+        quota = fail("gh: API rate limit exceeded for installation. Details (HTTP 403)")
+        with patch("subprocess.run", return_value=quota) as quota_read, \
+                patch("time.sleep", side_effect=AssertionError("installation quota was retried")):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold as error:
+                assert "installation API quota exhausted" in str(error)
+            else:
+                raise AssertionError("installation quota passed live protection")
+        quota_read.assert_called_once()
+        mixed_quota = fail(quota.stderr + "\ngh: Resource not accessible (HTTP 403)")
+        with patch("subprocess.run", return_value=mixed_quota) as mixed_read, \
+                patch("time.sleep", side_effect=AssertionError("mixed permission error was retried")):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except ProtectionQuota as error:
+                raise AssertionError("mixed permission error classified as quota only") from error
+            except InvalidHold:
+                pass
+            else:
+                raise AssertionError("mixed permission error passed live protection")
+        mixed_read.assert_called_once()
+
+        from contextlib import redirect_stderr, redirect_stdout
+        from io import StringIO
+
+        for local_result in (0, 1):
+            output = StringIO()
+            with patch(__name__ + ".require_live_strict", side_effect=ProtectionQuota("quota")), \
+                    redirect_stdout(output), redirect_stderr(StringIO()):
+                assert enforce_protection(root, None, "example/repo", local_result) == 1
+            assert (output.getvalue().splitlines() == ["GATE_VERDICT=NOT_EVALUATED"]) == (local_result == 0)
+
+        calls.clear()
+        def outage(*_a, **_k):
+            calls.append(1)
+            return fail("gh: HTTP 503: Service Unavailable")
+        with patch("subprocess.run", side_effect=outage), patch("time.sleep", lambda _s: None):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold as error:
+                assert "HTTP 503" in str(error), f"503 stderr not surfaced: {error}"
+            else:
+                raise AssertionError("exhausted retries passed")
+        assert len(calls) == 4, f"expected 4 attempts, got {len(calls)}"
         rule.write_text("deploy_holds:\n  services: {}\n")
         with patch("subprocess.run", side_effect=AssertionError("empty hold queried GitHub")):
             require_live_strict(root, None, "example/repo")
@@ -631,6 +745,17 @@ def approved_selftest(root, rule, manifest, original, base):
                    check=True)
 
 
+def enforce_protection(root, base, repo, local_result):
+    try:
+        require_live_strict(root, base, repo)
+    except ProtectionQuota as error:
+        print(f"::error::deploy hold check could not validate: {error}", file=sys.stderr)
+        if local_result == 0:
+            print("GATE_VERDICT=NOT_EVALUATED")
+        return 1
+    return local_result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -665,12 +790,12 @@ def main():
                 print(f"deploy holds: {len(entries)} service(s); push run has no PR diff")
                 drifted = report_approved_images(args.root.resolve(), entries)
                 if args.enforce_live_strict:
-                    require_live_strict(args.root.resolve(), None, args.repo)
+                    return enforce_protection(args.root.resolve(), None, args.repo, drifted)
                 return drifted
             raise InvalidHold("--base or PR_DIFF_BASE is required")
         result = check(args.root.resolve(), args.base)
         if args.enforce_live_strict:
-            require_live_strict(args.root.resolve(), args.base, args.repo)
+            return enforce_protection(args.root.resolve(), args.base, args.repo, result)
         return result
     except (InvalidHold, OSError, UnicodeError) as error:
         print(f"::error::deploy hold check could not validate: {error}", file=sys.stderr)

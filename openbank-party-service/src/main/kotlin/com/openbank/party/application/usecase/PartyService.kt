@@ -102,6 +102,14 @@ internal fun splitBirthDate(term: String): Pair<List<String>, String> {
 /** A party in either terminal state is outside the world a mandate describes (ADR-0284 D3). */
 private val MANDATE_INELIGIBLE = setOf(PartyStatus.CLOSED, PartyStatus.MERGED)
 
+/** kyb-service's evidenceRef shape: `kyb-case:<caseId>:signature:<ref>` (see KybCaseMandateRevocation). */
+private const val KYB_CASE_REF_PREFIX = "kyb-case:"
+
+/** `kyb-case:<caseId>:` for a kyb-case ref, null for any other provenance. */
+private fun kybCasePrefixOf(ref: String?): String? = ref
+    ?.takeIf { it.startsWith(KYB_CASE_REF_PREFIX) }
+    ?.let { KYB_CASE_REF_PREFIX + it.removePrefix(KYB_CASE_REF_PREFIX).substringBefore(':') + ":" }
+
 // #10911 phase 2: extends the libs-domain base so libs-runtime's Resource{NotFound,Conflict}
 // ExceptionMapper handles the response; default codes NOT_FOUND/CONFLICT match the deleted local
 // mappers' ErrorCode.NOT_FOUND.code / ErrorCode.CONFLICT.code byte for byte (see
@@ -254,7 +262,7 @@ class PartyService : PartyUseCase {
     private fun computeRcBlindIndex(taxId: String?): Pair<String?, Int?> {
         if (taxId == null) return null to null
         val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null to null
-        val rc = RodneCislo.parse(taxId)
+        val rc = RodneCislo.parse(taxId, clock)
         if (rc !is RodneCislo.Parsed) return null to null
         return BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical) to RC_KEY_VERSION
     }
@@ -263,7 +271,7 @@ class PartyService : PartyUseCase {
 
     override suspend fun resolvePartyByRc(cmd: ResolvePartyByRcCommand): Party? {
         val pepper = rcPepper.filter { it.isNotBlank() }.orElse(null) ?: return null
-        val rc = RodneCislo.parse(cmd.rawRc)
+        val rc = RodneCislo.parse(cmd.rawRc, clock)
         if (rc !is RodneCislo.Parsed) return null
         val index = BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), rc.canonical)
         return partyRepo.findByRcBlindIndex(index)
@@ -292,6 +300,13 @@ class PartyService : PartyUseCase {
         validateMandateThreshold(cmd.authority, cmd.requiredSignatures)
         val now = Instant.now(clock)
         val existing = mandateRepo.findActive(principal.id, agent.id, cmd.role.name)
+        // A kyb case must not adopt a mandate the signer already holds from elsewhere (a register
+        // extract, an operator, another case): relabelling its evidenceRef to this case would make
+        // KybCaseMandateRevocation revoke it when this case ends. Such a mandate keeps its own
+        // provenance; only a mandate this same case granted carries the case's ref.
+        val keepsOwnProvenance = existing != null &&
+            cmd.evidenceRef?.startsWith(KYB_CASE_REF_PREFIX) == true &&
+            existing.evidenceRef?.let { kybCasePrefixOf(it) } != kybCasePrefixOf(cmd.evidenceRef)
         val mandate = (
             existing ?: PartyMandate(
                 // ADR-0106: a durable, indexed identifier — UUIDv7 for insert locality, not a v4.
@@ -312,8 +327,8 @@ class PartyService : PartyUseCase {
             ).copy(
             authority = cmd.authority,
             requiredSignatures = cmd.requiredSignatures,
-            source = cmd.source,
-            evidenceRef = cmd.evidenceRef ?: existing?.evidenceRef,
+            source = if (keepsOwnProvenance) existing!!.source else cmd.source,
+            evidenceRef = if (keepsOwnProvenance) existing!!.evidenceRef else cmd.evidenceRef ?: existing?.evidenceRef,
             validTo = cmd.validTo,
             updatedAt = now,
         )
@@ -469,7 +484,7 @@ class PartyService : PartyUseCase {
         if (!query.namesOnly && birthDates.isEmpty()) {
             normalizeIdentifier(raw)?.let { id ->
                 val limit = query.limit.coerceIn(1, MAX_PAGE_SIZE)
-                val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
+                val byIndex = if (RodneCislo.isValid(raw, clock)) {
                     resolvePartyByRc(ResolvePartyByRcCommand(raw))
                 } else {
                     null

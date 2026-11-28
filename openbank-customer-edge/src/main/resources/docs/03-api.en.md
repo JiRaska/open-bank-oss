@@ -104,6 +104,10 @@ The edge enriches `debtorAccountNumber`/`debtorBankCode` (from the account's Cze
 
 The domestic rail accepts CZK only. Another currency returns `400 CURRENCY_NOT_ALLOWED` before account lookup, delegated spend reservation, or SCA; the `Idempotency-Key` remains available for a valid retry. A caller without debit authority receives the same `403` whether the account or a delegation exists, so this response does not reveal either.
 
+**Delegated payments and the spend reservation (#16000).** A delegate's payment first reserves its amount against the grant's cumulative ceiling in delegation-service. With `openbank.edge.delegated-payment-bound-create.enabled=false` (the default) the edge creates the payment on the ordinary domestic route and confirms the reservation as soon as the rail accepts it, so a payment later REJECTED or CANCELLED keeps the headroom consumed. With the switch on, the edge creates the payment on domestic-payment's reservation-bound route with the reservation's own `Idempotency-Key` and never confirms it: the payment's outcome settles the reservation in delegation-service, so a rejected payment gives the headroom back. A refused bind answers `409 PAYMENT_NOT_ACCEPTED`; the edge releases the reservation itself only when the rail's refusal proves nothing was bound and the reservation is not a replay, otherwise delegation-service settles it; a rail that is not ready yet is retried (bounded, honouring `Retry-After`) and then answers `503 PAYMENT_TEMPORARILY_UNAVAILABLE` with the reservation released (retry with a new key); a lost rail answer is `503 PAYMENT_STATUS_UNKNOWN` with the reservation kept (retry with the same key). Owner payments never change. Turn the switch on only after delegation-service's outcome consumer and the rail's bound route are live.
+
+**Withdrawn delegation on a bound create.** When the rail refuses a delegated bound create with `DELEGATION_AUTHORITY_WITHDRAWN` (the grant was revoked or suspended after the reservation), nothing was bound, so the edge releases the spend reservation exactly once, without retrying, and the customer receives the neutral `409 PAYMENT_NOT_ACCEPTED` with no delegation detail. A replayed reservation (`X-Idempotency-Replayed`) skips the release; delegation-service settles it.
+
 ### Start onboarding (anonymous)
 
 ```http
@@ -220,3 +224,42 @@ account, supply the original CZK `amount` when several grants cover the account.
 `FOUND` contains the durable `paymentId` and current `status`. `UNKNOWN` means the
 edge could not establish the original instruction. Keep the pending warning and never start a
 new payment from this result. This lookup consumes no SCA and sends no payment.
+
+## Payment symbols (#16748)
+
+`variableSymbol` and `specificSymbol` must be 1-10 ASCII digits and `constantSymbol` 1-4 (libs-domain `CzechPaymentSymbol`; KS matches the domestic-payment column); a blank value counts as absent. Anything else is refused with 400 before the request goes further.
+
+## In-app approval of MCP payment proposals (ADR-0383 D6)
+
+A connected MCP client can only propose a payment; the customer decides in the app. The routes are `GET /mcp-proposals`, `GET /mcp-proposals/{id}`, `POST /mcp-proposals/{id}/reject` and `POST /mcp-proposals/{id}/approve`. They answer only to the customer's own app session (`azp` `openbank-app`, no `act`); anything else gets 403. Proposals are read from delegation-service by the token party, and a store outage is a 503, never "not found".
+
+`approve` takes `{ "payloadSha256" }` (64 hex characters) and the `X-SCA-Challenge-Id` header. Before any challenge is spent the edge recomputes the canonical SHA-256 from the stored instruction and refuses with 409 when the proposal is not `PENDING` (or `APPROVED` with no payment yet), is expired, is malformed, has an invalid stored hash, or the supplied hash differs. The debtor account must belong to the customer.
+
+The SCA challenge must be an approval challenge whose dynamic linking covers amount, currency and payee plus `approvalRequestId` (`mcp-proposal:<id>`) and `payloadSha256`; no SCA exemption applies. Order: challenge consumed, then the store's approve, then the payment is created as the customer's own domestic or SEPA payment built only from the stored instruction. The payment `Idempotency-Key` is `mcp-proposal-<id>`, so a retry after a failed payment (fresh SCA required) replays and never pays twice. A created payment is then recorded on the proposal as executed.
+
+Audit events: `CUSTOMER_MCP_PROPOSAL_APPROVED` once the store approved, `CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED` when the payment exists but the store did not record the execution (the proposal still reads `APPROVED` until reconciled), and `CUSTOMER_MCP_PROPOSAL_REFUSED` for a refused approval.
+
+## MCP connection approval
+
+With the customer connect feature enabled, a personal first-party app session can read a
+pending connection review, select eligible owned accounts, list active connections, and
+revoke an owned connection. The review supplies the approved capability options and the
+selection is forwarded to Delegation over its internal authenticated route. Revocation
+uses the connection ID as the idempotency key across the Edge and Delegation boundary.
+
+The MCP connection request endpoints with the `-v2` suffix also return hosted approval requests. A hosted request without a DPoP key carries `parBinding: confidential_client`. The original request endpoints retain the DPoP response and selection behavior for existing app versions. Both variants enforce the authenticated customer's party ID.
+
+## Native passkey for MCP Connect V2
+
+The first-party app claims an opaque handoff at
+`POST /mcp/connect-requests-v2/native-handoff/claim`. After the account selection is fixed,
+`POST /mcp/connect-requests-v2/{requestRef}/native-passkey/begin` returns a short-lived
+WebAuthn challenge. Completing it at the matching `/native-passkey/complete` endpoint records
+the verified step in the bank authority and returns 204. The app still completes its separate
+SCA confirmation. Native Connect is disabled by default.
+
+When Native Connect is enabled, a customer's own native app session can list their
+connections at `GET /mcp/connections` and revoke one at `POST /mcp/connections/{connectionId}/revoke`.
+Edge derives the party from the authenticated app session. Delegation checks that the connection
+belongs to that party. A successful revocation returns 204, and a connection outside that party's
+scope returns 404. The same connection ID remains the idempotency key on retries.

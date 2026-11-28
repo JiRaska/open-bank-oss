@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.40.0...account-service-v0.41.0) (2026-11-23)
+
+
+### Features
+
+* **account,product-catalog:** pin immutable account booking context from passport receipts ([#16679](https://github.com/JiRaska/open-bank-oss/issues/16679)) ([35b4d0d](https://github.com/JiRaska/open-bank-oss/commit/35b4d0d5a2cc058bdb05182b2328a5786109b844))
+
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.39.1...account-service-v0.40.0) (2026-11-22)
+
+
+### Features
+
+* **lending:** enforce catalogue market scope at domestic application ([#16408](https://github.com/JiRaska/open-bank-oss/issues/16408)) ([8bc49c9](https://github.com/JiRaska/open-bank-oss/commit/8bc49c9dadafc7e859d4173f75914545d02331e0))
+
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.39.0...account-service-v0.39.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **account,agent,aml:** reload outbound mTLS client certificates ([#16411](https://github.com/JiRaska/open-bank-oss/issues/16411)) ([13b220e](https://github.com/JiRaska/open-bank-oss/commit/13b220ea13a8f2ab089bb698d6e36bbb0d1a01de))
+
 ## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.38.0...account-service-v0.39.0) (2026-11-13)
 
 

@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0385 D7 (amended P3): the committed customers realm, imported into the pinned Keycloak image,
+# must enforce MCP client admission end to end — PAR, PKCE S256, exact/loopback redirects, the
+# cookie-free fresh-passkey flow against a live SSO cookie, DPoP for Tier L, private_key_jwt at
+# token AND refresh for Tier H, offline refresh, rotation reuse revoking the family — and, with the
+# bank's Keycloak extension built from the Dockerfile's `extension-jar` stage, the withheld code
+# (ADR-0385 D3, against an in-process sca-service stub), the 72 h passkey floor and the refused
+# token exchange (#16667).
+name: Keycloak MCP client admission
+
+on:
+  pull_request:
+    paths:
+      - 'openbank-infra/gitops/components/keycloak/customers-realm-template.json'
+      - 'openbank-infra/docker/keycloak/Dockerfile'
+      - 'openbank-infra/docker/keycloak/extension/**'
+      - 'openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml'
+      - 'openbank-mcp-service/src/main/resources/mcp-clients/**'
+      - 'openbank-infra/e2e/keycloak_mcp_client_admission_test.py'
+      - '.github/workflows/keycloak-mcp-client-admission.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-infra/gitops/components/keycloak/customers-realm-template.json'
+      - 'openbank-infra/docker/keycloak/Dockerfile'
+      - 'openbank-infra/docker/keycloak/extension/**'
+      - 'openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml'
+      - 'openbank-mcp-service/src/main/resources/mcp-clients/**'
+      - 'openbank-infra/e2e/keycloak_mcp_client_admission_test.py'
+      - '.github/workflows/keycloak-mcp-client-admission.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-client-admission-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  admission:
+    name: MCP client admission against Keycloak
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Exercise the committed customers realm with a software passkey and synthetic clients
+        run: python3 openbank-infra/e2e/keycloak_mcp_client_admission_test.py

@@ -40,3 +40,22 @@ ed2bf55aedcbc9f9e99859b0d68f6c77351b9d03:pacts/openbank-sdd-service-openbank-acc
 # The current source constructs that alphabet from a character range; this fingerprint covers
 # only the original commit retained in the PR history, not any request data or credential.
 ae8c4ef2d25f3b238fcb3bb58d2456db84810edf:openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/UpstreamPathValues.kt:rod-cislo:18
+
+# FALSE POSITIVES (#16800): `keyThumbprint` in the mcp-service -> delegation-service resolve pact
+# held the RFC 7638 section 3.1 published example thumbprint (a public spec value, not a key; the
+# delegation-service tests on main use the same literal). It is a DPoP key thumbprint, not a
+# credential, and the pact now uses a low-entropy synthetic value (757039b72b). These two
+# fingerprints clear only the original WIP commit still walked by the PR-range scan.
+3c2d77bdf5a5d033fb3744bdc29672014e384884:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:17
+3c2d77bdf5a5d033fb3744bdc29672014e384884:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:86
+
+# FALSE POSITIVES (#16864): these historical Pact Idempotency-Key examples are the SHA-256
+# deduplication identifier of fixed synthetic inputs. The current examples use low-entropy hex.
+92471df492d5d652dd8127f20f7a0cffb20b2c9d:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:97
+92471df492d5d652dd8127f20f7a0cffb20b2c9d:pacts/openbank-mcp-service-openbank-delegation-service.json:generic-api-key:220
+
+# FALSE POSITIVE (#16623): iban-real matched the red-team corpus's synthetic attacker payee
+# (check digits 00, which no real IBAN can carry) in evals/mcp-redteam/scenarios.json. The value
+# was replaced in the source by a later commit on the same PR; this entry only clears the
+# historical commit that the per-PR BASE..HEAD scan still walks. It disappears from main on squash-merge.
+31d6bb473a77b50ea71f8d39e6d9692993a786cf:evals/mcp-redteam/scenarios.json:iban-real:11

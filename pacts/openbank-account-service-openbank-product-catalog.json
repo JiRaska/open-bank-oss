@@ -4,6 +4,67 @@
   },
   "interactions": [
     {
+      "description": "POST passport admission context for a consumed account-opening permit",
+      "providerStates": [
+        {
+          "name": "a consumed account-opening passport permit exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "binding": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "grantId": "0191c0de-0000-7000-8000-00000000c001",
+          "operation": "OPEN",
+          "operationId": "0191c0de-0000-7000-8000-00000000c002",
+          "partyId": "0191c0de-0000-7000-8000-00000000c003",
+          "revisionId": "0191c0de-0000-7000-8000-00000000c004"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/internal/passport-account-admissions/context"
+      },
+      "response": {
+        "body": {
+          "bankId": "0191c0de-0000-7000-8000-00000000c005",
+          "establishmentId": "0191c0de-0000-7000-8000-00000000c006",
+          "hostCountry": "SK",
+          "mode": "FOS"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST passport admission receipt for a consumed account-opening permit",
+      "providerStates": [
+        {
+          "name": "a consumed account-opening passport permit exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "binding": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "grantId": "0191c0de-0000-7000-8000-00000000c001",
+          "operation": "OPEN",
+          "operationId": "0191c0de-0000-7000-8000-00000000c002",
+          "partyId": "0191c0de-0000-7000-8000-00000000c003",
+          "revisionId": "0191c0de-0000-7000-8000-00000000c004"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/internal/passport-account-admissions/receipt"
+      },
+      "response": {
+        "status": 204
+      }
+    },
+    {
       "description": "GET product by id for an existing product",
       "providerStates": [
         {
@@ -121,6 +182,58 @@
       }
     },
     {
+      "description": "POST passport admission for an account opening under an approved FOS grant",
+      "providerStates": [
+        {
+          "name": "an approved FOS passport grant with live subject evidence exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "binding": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "grantId": "0191c0de-0000-7000-8000-00000000c001",
+          "operation": "OPEN",
+          "operationId": "0191c0de-0000-7000-8000-00000000c00c",
+          "partyId": "0191c0de-0000-7000-8000-00000000c003",
+          "revisionId": "0191c0de-0000-7000-8000-00000000c004"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/internal/passport-account-admissions"
+      },
+      "response": {
+        "status": 204
+      }
+    },
+    {
+      "description": "POST passport admission receipt for an operation that was never admitted",
+      "providerStates": [
+        {
+          "name": "no consumed passport permit exists for the operation"
+        }
+      ],
+      "request": {
+        "body": {
+          "binding": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "grantId": "0191c0de-0000-7000-8000-00000000c001",
+          "operation": "OPEN",
+          "operationId": "0191c0de-0000-7000-8000-00000000c0ff",
+          "partyId": "0191c0de-0000-7000-8000-00000000c003",
+          "revisionId": "0191c0de-0000-7000-8000-00000000c004"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/internal/passport-account-admissions/receipt"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
       "description": "GET product by an unknown id",
       "providerStates": [
         {
@@ -182,7 +295,7 @@
   ],
   "metadata": {
     "pact-jvm": {
-      "version": "4.7.3"
+      "version": "4.7.7"
     },
     "pactSpecification": {
       "version": "3.0.0"

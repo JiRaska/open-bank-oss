@@ -8,7 +8,7 @@ import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
-import com.openbank.kyb.application.port.`in`.CompleteExitCommand
+import com.openbank.kyb.application.port.`in`.ConfirmExitCommand
 import com.openbank.kyb.application.port.`in`.DecideMonitoringFindingCommand
 import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
@@ -16,11 +16,13 @@ import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.PrepareAgreementCommand
+import com.openbank.kyb.application.port.`in`.ProposeExitCommand
 import com.openbank.kyb.application.port.`in`.QuestionnairePrefill
 import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.`in`.WithdrawExitCommand
 import com.openbank.kyb.application.port.out.AgreementEntity
 import com.openbank.kyb.application.port.out.AgreementParty
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
@@ -51,6 +53,7 @@ import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.SignerStatus
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.security.sanitizeForLog
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
@@ -100,7 +103,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
     private val log = Logger.getLogger(BusinessOnboardingService::class.java)
 
     override suspend fun start(cmd: StartCaseCommand): BusinessOnboardingCase {
-        val identifier = LegalEntityIdentifier.of(cmd.scheme, cmd.identifier)
+        val identifier = LegalEntityIdentifier.of(cmd.scheme, cmd.identifier, clock)
         cases.findOpenByIdentifier(identifier)?.let { existing ->
             // The same person retrying is idempotent; another person starting the same entity joins
             // the open case as a would-be signer via invitation, never by opening a second case.
@@ -362,18 +365,24 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         log.infof(
             "kyb case %s: screening finding %s set to %s by %s",
             cmd.caseId,
-            cmd.subjectKey,
+            cmd.subjectKey.sanitizeForLog(),
             cmd.disposition,
-            cmd.operator,
+            cmd.operator.sanitizeForLog(),
         )
         return cases.update(disposed, null)
     }
 
     /**
      * One monitoring finding on an approved case is decided. Nothing an applicant can read
-     * changes, and nothing is published — unless this is the decision that makes an exit owed (the
-     * first confirmed sanctions match): then `BUSINESS_RELATIONSHIP_EXIT_REQUIRED` goes out, once,
-     * with the write that records the decision.
+     * changes and nothing is published — unless this decision cleared the last hold over an
+     * activation it kept pending: then the case becomes ACTIVE here and `completed` goes out with
+     * the write, exactly as party activation would have published it.
+     *
+     * A decision that makes an exit owed publishes NOTHING (#16028 item 4): `openbank.kyb.events`
+     * is the shared lifecycle topic, read by onboarding-service's customer-facing projection and
+     * landed by analytics-sink in a 10-year warehouse, and "the bank confirmed a sanctions match on
+     * this entity" belongs on neither. The owed exit is a stored fact (`monitoring_exit_owed_since`),
+     * which the operators' queue and the alert read; #15992 decides who acts on it and how.
      */
     override suspend fun decideMonitoringFinding(cmd: DecideMonitoringFindingCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
@@ -384,19 +393,39 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             cmd.caseId,
             cmd.findingId,
             cmd.disposition,
-            cmd.operator,
+            cmd.operator.sanitizeForLog(),
         )
-        val exitNowOwed = case.monitoring.exitOwedSince == null && decided.monitoring.exitOwedSince != null
-        return cases.update(decided, if (exitNowOwed) KybEvents.exitRequired(decided, now, cmd.operator) else null)
+        val activatedNow = case.status != CaseStatus.ACTIVE && decided.status == CaseStatus.ACTIVE
+        if (!activatedNow) return cases.update(decided, null)
+        return cases.update(decided, KybEvents.completed(decided, now)).also(::armTimers)
     }
 
-    /** The exit has been carried out: monitoring ends, and the same write withdraws the subjects. */
-    override suspend fun completeExit(cmd: CompleteExitCommand): BusinessOnboardingCase {
+    /** One reviewer proposes that the exit has been carried out. Nothing ends yet. */
+    override suspend fun proposeExit(cmd: ProposeExitCommand): BusinessOnboardingCase {
         val case = get(cmd.caseId)
-        val completed = case.exitCompleted(cmd.operator, cmd.evidence, Instant.now(clock))
-        log.infof("kyb case %s: exit recorded as completed by %s", cmd.caseId, cmd.operator)
-        return cases.update(completed, null)
+        val proposed = case.exitProposed(cmd.operator, cmd.evidence, entityPartyClosed(case), Instant.now(clock))
+        log.infof("kyb case %s: exit proposed by %s", cmd.caseId, cmd.operator.account.sanitizeForLog())
+        return cases.update(proposed, null)
     }
+
+    /** A different reviewer confirms it: monitoring ends, and the same write withdraws the subjects. */
+    override suspend fun confirmExit(cmd: ConfirmExitCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val confirmed = case.exitConfirmed(cmd.operator, cmd.evidence, entityPartyClosed(case), Instant.now(clock))
+        log.infof("kyb case %s: exit confirmed by %s", cmd.caseId, cmd.operator.account.sanitizeForLog())
+        return cases.update(confirmed, null)
+    }
+
+    /** The proposing person withdraws the pending exit proposal; recorded on the case and logged. */
+    override suspend fun withdrawExit(cmd: WithdrawExitCommand): BusinessOnboardingCase {
+        val withdrawn = get(cmd.caseId).exitWithdrawn(cmd.operator, Instant.now(clock))
+        log.infof("kyb case %s: exit proposal withdrawn by %s", cmd.caseId, cmd.operator.account.sanitizeForLog())
+        return cases.update(withdrawn, null)
+    }
+
+    /** Party-service's word, read at the moment of the decision; no entity party is no evidence. */
+    private suspend fun entityPartyClosed(case: BusinessOnboardingCase): Boolean =
+        case.entityPartyId?.let { parties.partyClosed(it) } ?: false
 
     override suspend fun listMonitoringHolds(page: Int, size: Int): List<BusinessOnboardingCase> =
         cases.listMonitoringHolds(page, size)
@@ -413,7 +442,11 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             try {
                 return activateOnce(entityPartyId)
             } catch (e: ConcurrentCaseUpdateException) {
-                log.infof("kyb case of entity party %s changed concurrently; re-reading (%s)", entityPartyId, e.message)
+                log.infof(
+                    "kyb case of entity party %s changed concurrently; re-reading (%s)",
+                    entityPartyId,
+                    e.message.sanitizeForLog(),
+                )
             }
         }
         activateOnce(entityPartyId)
@@ -424,6 +457,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         if (case.status.isTerminal) return
         val now = Instant.now(clock)
         val activated = case.entityPartyActivated(now)
+        if (activated === case) return
         val event = if (activated.status == CaseStatus.ACTIVE) KybEvents.completed(activated, now) else null
         cases.update(activated, event).also(::armTimers)
     }
@@ -434,7 +468,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         val now = Instant.now(clock)
         val abandoned = case.abandoned(now)
         cases.update(abandoned, KybEvents.abandoned(abandoned, now, actor))
-        log.infof("kyb case %s abandoned by %s after idling in %s", caseId, actor, expectedState)
+        log.infof("kyb case %s abandoned by %s after idling in %s", caseId, actor.sanitizeForLog(), case.status)
         return true
     }
 

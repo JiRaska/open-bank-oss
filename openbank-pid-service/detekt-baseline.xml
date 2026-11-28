@@ -13,13 +13,7 @@
     <ID>MagicNumber:IdentityResolutionService.kt$IdentityResolutionService$16</ID>
     <ID>MagicNumber:PartyRepositoryImpl.kt$PartyRepositoryImpl$12</ID>
     <ID>MagicNumber:PartyRepositoryImpl.kt$PartyRepositoryImpl$31</ID>
-    <ID>MagicNumber:PidOutboxDispatcher.kt$PidOutboxDispatcher$3000</ID>
-    <ID>MagicNumber:PidOutboxDispatcher.kt$PidOutboxDispatcher$30000</ID>
-    <ID>MagicNumber:PidOutboxRepositoryImpl.kt$PidOutboxRepositoryImpl$4000</ID>
-    <ID>MatchingDeclarationName:PidOutboxPort.kt$PidOutboxRepository : OutboxRepository</ID>
     <ID>SpreadOperator:PartyRepositoryImpl.kt$PartyRepositoryImpl$(where, *params.toTypedArray())</ID>
-    <ID>SwallowedException:PidOutboxDispatcher.kt$PidOutboxDispatcher$ex: Exception</ID>
-    <ID>TooGenericExceptionCaught:PidOutboxDispatcher.kt$PidOutboxDispatcher$ex: Exception</ID>
     <ID>TooManyFunctions:PartyRepositoryImpl.kt$PartyRepositoryImpl : PartyRepositoryPanacheRepository</ID>
     <ID>TooManyFunctions:PartyResource.kt$PartyResource</ID>
     <ID>TooManyFunctions:PartyService.kt$PartyService : CreatePartyUseCaseGetPartyUseCaseUpdatePartyUseCaseManageRelationshipUseCase</ID>

@@ -23,7 +23,9 @@ When `openbank.kyb.screening.enabled` is true, the service screens the entity, e
 - **A finding is decided under review, and the case is then approved by review.** A disposition is accepted only while the case is in `MANUAL_REVIEW`. A case that has ever had a finding, whatever was decided, goes to `MANUAL_REVIEW` at its last signature and is approved only by an operator resolving the review.
 - **A finding outlives its subject.** A subject that leaves the case is removed from the screening only if it was clear. One with a finding is kept, marked `current: false`, and counts until it is decided.
 - **The customer is not told what was found, or that a screen was the cause.** A finding adds nothing to `reviewReason`. On customer responses and on the review event an AML review reads `AML risk review before activation` whatever raised it; the flags from the customer's own answers are in the operator's `reviewReason`. The subjects, their outcomes and the owner source are in `Case.screening`, which is present only on operator responses.
-- **A retry replays.** Each screen carries one idempotency key per case and subject.
+- **A screen carries what the register says, besides the name.** The entity is sent with its registration country, so an entity registered in a listed jurisdiction is caught without a name match. A company that owns shares is sent with its filing country. A person is sent with the date of birth, nationality and country of residence the register lists, so a match on a common name can be confirmed or ruled out. These facts are taken from the register extract each time a subject is screened and are not stored with the screening. Trading names are not sent, because no register adapter provides them yet.
+- **Two people with one name are screened apart.** Subjects are keyed by name, so two listings under one name are merged only when they do not contradict each other; listings with a different country, date of birth or nationality are each screened under the same subject, and the worst answer decides it.
+- **A retry replays; changed facts are a new screen.** Each screen carries an idempotency key derived from the case, the subject and a digest of everything the screen sends, so a retry of the same screen replays while a screen with changed facts is screened again. A clearance in sanctions-service covers only a screen with the same facts.
 - **Unavailable is not clear.** A screen that cannot be obtained leaves the subject `PENDING`. The counter `openbank_kyb_screening_subjects_total{outcome}` reports `clear`, `pep`, `potential_hit`, `hit` and `unavailable`.
 
 The switch is off by default. With the switch on, the deployment must supply `SANCTIONS_SERVICE_URL` and a network path to sanctions-service; without them every business case stops at its last signature. While the switch is off the service logs a warning at start and stores no screening, so a case that was not screened never reads as screened.
@@ -65,3 +67,7 @@ signed the case's own agreement ceremony. A fixed quorum needs enough verified s
 the attested count and offices. Joint-all requires all register representatives.
 Delegation-service can verify that the exact source attestation remains current, including
 before KYB publishes its replacement to Party.
+
+## Operator logs
+
+Operator identities, screening subject identifiers and diagnostic exception text are sanitized before they enter operational logs. Control characters and Unicode line separators are replaced with underscores. Case records and emitted events retain their original values.

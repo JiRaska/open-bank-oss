@@ -12,10 +12,16 @@ import com.openbank.sca.domain.model.ReservedNamespace
  * Keycloak client_credentials identity `service-account-<clientId>` (rules.yaml: authz_policy).
  * Adding a scoped consumer is a reviewed code change here, pinned by ConsumerScopesTest, and must
  * match rules.yaml `scoped_sca_consumers` (ConsumerScopesRulesParityTest), which sca_rest_ext.rego reads.
+ *
+ * [ReservedNamespace.MCP_CONNECT] (ADR-0385 D3) is held by the authorization server's withheld-code
+ * authenticator alone: Keycloak's `openbank-keycloak-mcp` client (openbank realm, ROLE_API only).
+ * It may initiate and consume connect challenges and nothing else — the domain refuses it any
+ * other purpose at initiate (ScaService.requireInitiateScope) and at consume (ConsumerScope).
  */
 object ConsumerScopes {
     private val reserved: Map<String, ReservedNamespace> = mapOf(
         "service-account-openbank-pension" to ReservedNamespace.PENSION,
+        "service-account-openbank-keycloak-mcp" to ReservedNamespace.MCP_CONNECT,
     )
 
     /** The principals holding a reservation (held to rules.yaml by ConsumerScopesRulesParityTest). */

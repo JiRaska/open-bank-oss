@@ -298,11 +298,19 @@ NOT_PROBED = [
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://openbank-sandbox-test-evidence.s3.eu-north-1.amazonaws.com", "our own Test Intelligence evidence bucket (#13201); readable only through the cluster VPC endpoint, so a probe from CI cannot reach a verdict"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
+    ("https://mcp.open-bank.tech/customer/mcp", "canonical MCP resource identifier validated by Keycloak; issuer does not fetch it"),
+    ("https://chatgpt.com/oauth/client.json", "registered MCP OAuth client identifier; admission uses pinned client auth metadata"),
+    ("https://chatgpt.com/connector_platform_oauth_redirect", "registered OAuth callback handled by the user agent"),
+    ("https://claude.ai/api/mcp/auth_callback", "registered OAuth callback handled by the user agent"),
+    ("https://mcp-client.example/oauth/callback", "disabled reference MCP client callback on reserved example domain"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
     # Governance rules.yaml live source (governance-auditor / control-liveness-sentinel): this is
     # our own repo's file served by GitHub's CDN. The file itself is gate-enforced in-repo, and a
     # raw.githubusercontent probe measures GitHub, not the document.
     ("https://raw.githubusercontent.com/JiRaska/open-bank-oss", "our own repo's rules.yaml; the file is gate-enforced in-repo, an HTTP probe adds nothing"),
+    # fetch-broker's User-Agent contact string (ADR-0387 D6): descriptive, fetched by nobody —
+    # it identifies the client to the sites IT fetches, not a feed of ours.
+    ("https://github.com/JiRaska/open-bank-oss", "User-Agent contact string in fetch-broker config; never dereferenced by us"),
     # ADR-0284 public business registers. Both are PER-ENTITY lookup APIs, not documents: there is
     # no URL to fetch without an identifier, so a shape probe would have to invent a company to ask
     # about and would then be asserting that company's continued existence rather than the feed's

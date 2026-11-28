@@ -64,7 +64,7 @@ GITOPS = REPO / "openbank-infra" / "gitops"
 # metricsrc.emitted_names() cannot see -- it scans only openbank-*/src/main/**/*.kt.
 # The values come from the CI-generated security-kpis.json snapshot, never invented
 # in the route. The dependabot panel is expected to read "No data" until a
-# security-scoped METADATA_REFRESH_PAT unblocks the dependabot-alerts 403 -- the
+# read-only Actions credential unblocks the Dependabot alerts query -- the
 # emitter OMITS the series rather than faking a 0.
 KNOWN_UNEMITTED: dict[str, str] = {
     "OpenBank — Security KPIs#Snapshot age (weekly publisher)#openbank_security_kpi_generated_timestamp_seconds":

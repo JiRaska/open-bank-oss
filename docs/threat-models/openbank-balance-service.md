@@ -72,6 +72,34 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 - Four-eyes approval-decide endpoint: same role set as the gated actions (`OPERATOR`/`ADMIN`),
   plus a domain-level segregation-of-duties check (checker id != maker id) — see §4a.
 
+### Customer MCP balance reads (ADR-0383 D4)
+
+The dedicated internal GET route accepts a customers-realm balance token with one audience,
+one read scope, one account and one connection. Keycloak verifies the original customer DPoP
+evidence and live grant, then binds the downstream token to the MCP workload certificate.
+Balance-service compares the token thumbprint to the authenticated native TLS peer and checks
+current account ownership and grant status before returning any balance. The balance reader
+uses its own identity for the grant check. The application defaults to disabled. The shared
+sandbox enables the issuer and Balance on their private listeners for verification before
+publishing the customer MCP route. Balance still requires the current connection-bound grant
+and a token bound to the native TLS peer. The private transport and authorization checks
+remain mandatory when the public MCP route is enabled.
+
+| Threat | Control | Verification |
+|--------|---------|--------------|
+| A copied token is used from another workload | Native TLS peer validation and exact token certificate thumbprint | `McpBalanceReadIdentityTest` and the local MCP read journey |
+| Valid credentials are used for another account or connection | Exact scoped JWT claims, current owner lookup and live connection-bound grant check | `McpBalanceReadIdentityTest` and `McpClientGrantResolverTest` |
+| A token outlives a revocation | Check the grant on every balance read and deny when ownership or grant state is unavailable | The local MCP journey revokes the connection then verifies denial with the same access token and refresh family |
+| A read token reaches a money-moving route | Dedicated customer tenant and path, read-only scope and separate authorization for staff and payment routes | The dedicated grant and route contracts pin the issuer, audience, scope and account |
+
+Enablement requires a trusted workload certificate, approved routes and network policy, and
+tested issuer and grant availability. A read admitted before revocation may finish. The next
+read checks the current grant.
+
+The Balance reader calls Delegation's private TLS 1.3 listener and validates its DNS identity
+and configured CA. Delegation still requires the dedicated reader's staff token and authorizes
+the live grant check separately from the issuer's request to mint a read permit.
+
 ## 4. STRIDE analysis
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
@@ -522,3 +550,23 @@ traffic rather than widening it.
 ## 2026-11-14 - tax-reporting-service caller wired in the deployed manifest (#16074)
 
 The network policy now admits the `tax-reporting` namespace, and tax-reporting-service's manifest names `BALANCE_SERVICE_URL=http://balance-service.balances.svc:8103`. The read is the CRS/FATCA statement `asOf` balance under `service-account-openbank-tax-reporting` (ROLE_API), already admitted in `balance_rest_ext.rego`. **Residual risk, accepted and tracked:** balance-service has no private-CA mTLS listener, so this hop carries the bearer token in plaintext inside the cluster, like its five existing callers (customer-edge, agent, mcp, statements, payments). The new line is declared as V9.1 debt in `.github/asvs-l3-baseline.txt`. Retiring it means adding an 8443 client-auth-required, bearer-only listener (#16075). Mitigations in the meantime: the namespace-scoped ingress allow-list, an OPA decision pinned to the principal id, and a short-lived Keycloak token. A replayed token only reaches the reporting read it was issued for.
+
+## 2026-11-25 - Private TLS transport for MCP balance reads
+
+The shared sandbox adds a TLS 1.3 listener on TCP 8443 for MCP balance reads. The dedicated
+ingress policy selects only MCP service pods in the platform namespace. Balance requires a
+client certificate chained to the dedicated MCP client CA. MCP verifies the Balance server
+against its configured CA, and Balance uses separate trust material for the Delegation HTTPS
+connection. Certificate keys and nonce material are mounted or injected from managed Secrets.
+
+A client certificate authenticates the transport peer. Customer authorization still requires
+the application-level token and delegation checks. This rollout leaves the bound-read admission
+flags disabled and adds no public route. The legacy listener and its existing callers remain,
+so their recorded plaintext transport debt still applies. Missing or mismatched certificate
+material can interrupt the private path. Before activation, verify that the deployed listener
+rejects clients without the expected certificate and that the authenticated customer flow
+succeeds. Roll back through GitOps and keep admission disabled.
+
+## Shared Delegation authority listener
+
+The Delegation HTTPS listener also admits the Customer Edge workload for native MCP authorization handoff. Delegation separates the two call paths by the exact workload principals and permitted operations. Balance requests its grant checks over this private listener with the dedicated staff read identity. Rollback removes the Customer Edge peer without deleting the authority listener.

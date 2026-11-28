@@ -1,0 +1,44 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: balance-service
+  namespace: balances
+spec:
+  template:
+    spec:
+      containers:
+      - name: balance-service
+        env:
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+          value: /mnt/mcp-balance-server/tls.crt
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+          value: /mnt/mcp-balance-server/tls.key
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+          value: 1h
+        - name: QUARKUS_HTTP_SSL_PORT
+          value: '8443'
+        - name: QUARKUS_HTTP_SSL_PROTOCOLS
+          value: TLSv1.3
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+          value: /mnt/mcp-balance-client-trust/ca.crt
+        - name: BALANCE_MCP_ISSUER
+          valueFrom:
+            secretKeyRef:
+              name: balance-mcp-read-origins
+              key: issuer-url
+              optional: true
+        - name: BALANCE_MCP_SERVICE_OIDC_URL
+          valueFrom:
+            secretKeyRef:
+              name: balance-mcp-read-origins
+              key: staff-oidc-url
+              optional: true
+        - name: BALANCE_MCP_READER_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: balance-mcp-reader-oidc
+              key: BALANCE_MCP_READER_SECRET
+              optional: true
+        - name: QUARKUS_CONFIG_LOCATIONS
+          value: /mnt/msg-config/override.properties,/mnt/mcp-read-tls-config/runtime.properties

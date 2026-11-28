@@ -49,6 +49,20 @@ enum class DelegationCapability {
     DELEGATION_MANAGE,
 }
 
+/**
+ * ADR-0383 D3 — who the grantee is.
+ *
+ * [PARTY] is every grant that existed before this field: a person or business party holding the
+ * right. [MCP_CLIENT] is a customer-admitted third-party MCP client. It is a separate class, not a
+ * kind of party, because its permitted capability set is structurally narrower: it may read and it
+ * may PROPOSE a payment, and nothing it holds can execute or manage anything (see
+ * [DelegationGrant.MCP_CLIENT_PERMITTED_CAPABILITIES]).
+ */
+enum class DelegationGranteeType {
+    PARTY,
+    MCP_CLIENT,
+}
+
 /** ADR-0232 D1/D8 — generalizes account-service's SigningRule. */
 enum class ApprovalPolicy {
     SOLO,
@@ -86,6 +100,25 @@ data class DelegationGrant(
     val id: UUID = Ids.newId(),
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
+    /**
+     * ADR-0383 D3. Defaults to [DelegationGranteeType.PARTY] so every existing grant and caller is
+     * unchanged. For [DelegationGranteeType.MCP_CLIENT], [granteePartyId] is not a party: it is
+     * [mcpClientGranteeId] of [granteeClientId], a stable id derived from the client so the
+     * existing grantee-keyed lookups and indexes keep working without a nullable column.
+     */
+    val granteeType: DelegationGranteeType = DelegationGranteeType.PARTY,
+    /**
+     * ADR-0383 D3 — the OAuth client id (`azp`) of the admitted MCP client, recorded at grant time.
+     * Null for PARTY grants, required for MCP_CLIENT grants.
+     */
+    val granteeClientId: String? = null,
+    /**
+     * ADR-0383 D3 — the DPoP key thumbprint (`cnf.jkt`, RFC 9449/7638) bound at grant time. A grant
+     * is found from the triple (grantor, [granteeClientId], this value), never from an id the
+     * client supplies. Null for PARTY grants, required for MCP_CLIENT grants.
+     */
+    val granteeKeyThumbprint: String? = null,
+    val mcpConnectionId: UUID? = null,
     /**
      * Counterparty labels SNAPSHOTTED at offer time from the eligibility lookup this service
      * already performs (issue #3604). Deliberately part of the authorisation record rather than a
@@ -158,6 +191,50 @@ data class DelegationGrant(
         }
         require(validTo == null || validTo.isAfter(validFrom)) { "validTo must be after validFrom" }
         require(lifecycleRevision >= 0) { "lifecycleRevision must not be negative" }
+        require(mcpConnectionId == null || granteeType == DelegationGranteeType.MCP_CLIENT)
+        requireGranteeShape()
+    }
+
+    /**
+     * ADR-0383 D3. The capability rule is an ALLOW-list on purpose: a capability added to the
+     * vocabulary later is refused for an MCP client until someone decides, in a reviewed diff to
+     * [MCP_CLIENT_PERMITTED_CAPABILITIES], that it is safe there. No ceiling, approval policy or
+     * resource type can widen it.
+     */
+    private fun requireGranteeShape() {
+        when (granteeType) {
+            DelegationGranteeType.PARTY -> {
+                require(granteeClientId == null && granteeKeyThumbprint == null) {
+                    "client id and key thumbprint are only recorded for MCP_CLIENT grantees"
+                }
+                // A derived MCP grantee id is a name-based (version 3) UUID; no party id ever is.
+                // Refusing the version closes the one way to smuggle an MCP client in as a PARTY
+                // grant and inherit every PARTY capability.
+                require(granteePartyId.version() != NAME_BASED_UUID_VERSION) {
+                    "a PARTY grantee id must not be a name-based UUID (that shape is reserved for MCP clients)"
+                }
+            }
+            DelegationGranteeType.MCP_CLIENT -> {
+                val clientId = requireNotNull(granteeClientId) { "an MCP_CLIENT grant must record the client id (azp)" }
+                val jkt = granteeKeyThumbprint
+                require(jkt != null || mcpConnectionId != null) {
+                    "an MCP_CLIENT grant without a DPoP thumbprint must record its approved MCP connection"
+                }
+                require(clientId.isNotBlank() && clientId.length <= CLIENT_ID_MAX_LENGTH) {
+                    "MCP client id must be non-blank and at most $CLIENT_ID_MAX_LENGTH characters"
+                }
+                require(jkt == null || JKT_PATTERN.matches(jkt)) {
+                    "DPoP key thumbprint must be a base64url SHA-256 JWK thumbprint (43 characters)"
+                }
+                require(granteePartyId == mcpClientGranteeId(clientId)) {
+                    "an MCP_CLIENT grantee id must be derived from its client id"
+                }
+                val refused = capabilities - MCP_CLIENT_PERMITTED_CAPABILITIES
+                require(refused.isEmpty()) {
+                    "capabilities $refused are refused for an MCP_CLIENT grantee: it may only read and propose"
+                }
+            }
+        }
     }
 
     fun isActiveOn(now: OffsetDateTime): Boolean = status == DelegationStatus.ACTIVE &&
@@ -212,7 +289,16 @@ data class DelegationGrant(
         return amount.amount.compareTo(perTransactionLimit.amount) <= 0
     }
 
+    /**
+     * Acceptance model. A PARTY grant is accepted by its grantee under SCA. An MCP_CLIENT grant is
+     * NEVER accepted by a party: there is no party on the grantee side to accept it. It is
+     * activated by the SCA-bound connect flow in the bank app (ADR-0383 D1), which does not exist
+     * yet, so this refuses it explicitly rather than letting a generic grantee path activate it.
+     */
     fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant {
+        check(granteeType == DelegationGranteeType.PARTY) {
+            "an MCP_CLIENT grant is never accepted by a party; it is activated by the SCA-bound connect flow (ADR-0383 D1)"
+        }
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
         return copy(
             status = DelegationStatus.ACTIVE,
@@ -295,6 +381,69 @@ data class DelegationGrant(
     private fun nextLifecycleRevision(): Long = Math.addExact(lifecycleRevision, 1)
 
     companion object {
+        /**
+         * ADR-0383 D3 — the ONLY capabilities an MCP_CLIENT grantee may hold: the account reads and
+         * `account.propose-payment`. Everything else in the vocabulary — initiate-payment, every
+         * `*.manage-*`, `delegation.manage`, savings deposit/withdraw/propose-withdraw, card
+         * capabilities and object disclosure — is refused by omission.
+         */
+        val MCP_CLIENT_PERMITTED_CAPABILITIES: Set<DelegationCapability> = setOf(
+            DelegationCapability.ACCOUNT_READ_BALANCES,
+            DelegationCapability.ACCOUNT_READ_TRANSACTIONS,
+            DelegationCapability.ACCOUNT_VIEW_DETAILS,
+            DelegationCapability.ACCOUNT_DOWNLOAD_STATEMENTS,
+            DelegationCapability.ACCOUNT_PROPOSE_PAYMENT,
+        )
+
+        private const val NAME_BASED_UUID_VERSION = 3
+
+        /** Matches the `varchar(255)` of `grantee_client_id` in V34. */
+        const val CLIENT_ID_MAX_LENGTH = 255
+
+        /** RFC 7638 SHA-256 thumbprint, base64url without padding: 32 bytes -> 43 characters. */
+        private val JKT_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
+
+        /**
+         * The stable grantee id of an MCP client, derived from its `azp` (name-based UUID). Keeps
+         * `granteePartyId` non-null and unique per client without inventing a party for it.
+         */
+        fun mcpClientGranteeId(clientId: String): UUID =
+            UUID.nameUUIDFromBytes("openbank:mcp-client:$clientId".toByteArray(Charsets.UTF_8))
+
+        /**
+         * Resource types a NEW offer may name (ADR-0375 D5 + D6).
+         *
+         * `CAPABILITY_MATRIX` still lists PAYMENT and STATEMENT, and must: historical grants carry
+         * them, and this aggregate is how such a row is read back. What they may no longer be is
+         * OFFERED, and the reason is the two clauses together rather than the ownership oracle
+         * alone.
+         *
+         * D5 leaves PAYMENT and STATEMENT ownership `UNVERIFIABLE` by measurement — a statement is
+         * addressed by `(accountId, currency, legalSequence)` and has no route resolving its own
+         * id, and a payment id resolves in no single service across six rails. D6 then makes the
+         * rendered sealed artifact the ONE delivery mechanism for a shared object, and
+         * `ExternalDisclosureService.issue` requires `resourceType == DOCUMENT`. So even once an
+         * oracle existed, a grant over these two types could never be delivered: the mechanism
+         * refuses them by type.
+         *
+         * Nothing is lost. A statement already renders as a document
+         * (`/api/v1/statements/{accountId}/{currency}/{legalSequence}/document`), so sharing one
+         * with an outsider is a DOCUMENT grant over that artifact — which works end to end,
+         * oracle and atomic view counting included. Ongoing access to an account's statements is a
+         * different thing and has its own capability, `ACCOUNT_DOWNLOAD_STATEMENTS`.
+         *
+         * This turns a runtime refusal into a declared one. Offers already failed: the oracle
+         * answered UNVERIFIABLE and the service refuses to mint a grant over an unverified
+         * resource, so no working path changes — only the error a grantor sees, and the fact that
+         * the vocabulary now says so instead of discovering it per request.
+         */
+        val OFFERABLE_RESOURCE_TYPES = setOf(
+            DelegationResourceType.ACCOUNT,
+            DelegationResourceType.SAVINGS_GOAL,
+            DelegationResourceType.CARD,
+            DelegationResourceType.DOCUMENT,
+        )
+
         val OBJECT_RESOURCE_TYPES = setOf(
             DelegationResourceType.PAYMENT,
             DelegationResourceType.STATEMENT,

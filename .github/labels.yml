@@ -95,6 +95,12 @@ labels:
   - name: main-red
     color: "b60205"
     description: "main-red watch (#4019): one open issue per watched workflow, closed when main goes green."
+  - name: standing-red
+    color: "b60205"
+    description: "Standing-red sentinel: one issue per scheduled workflow that stays red; closed when green."
+  - name: standing-red-escalated
+    color: "b60205"
+    description: "Standing-red sentinel: the workflow stayed red 72h+ with its issue open."
   - name: flaky-test
     color: "fbca04"
     description: "Recorded by auto-retry-cancelled.yml (#4878): a re-run turned a real failure green."
@@ -172,6 +178,18 @@ labels:
   - name: "merge-priority:expedite"
     color: "b60205"
     description: "Owner-applied only: the merge train serves this PR first in its lane. Agents never apply it."
+
+  - name: "merge-priority:urgent"
+    color: "5319e7"
+    description: "Owner-applied only, capped per day: takes the strict reservation next tick. Agents never apply it."
+
+  - name: "merge-priority:hotfix"
+    color: "b60205"
+    description: "Owner-applied, daily cap, bound to one head: merges by native auto-merge when green. Never agents."
+
+  - name: "merge-priority:deploy-fix"
+    color: "5319e7"
+    description: "Owner-only, 1/day: lets a can-i-deploy-green gitops PR fix a main-red contract."
 
   - name: "merge-priority:repair"
     color: "d93f0b"

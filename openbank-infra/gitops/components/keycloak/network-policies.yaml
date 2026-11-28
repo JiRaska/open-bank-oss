@@ -107,6 +107,9 @@ spec:
               kubernetes.io/metadata.name: engagement
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: fetch-broker
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: finops-agent
         - namespaceSelector:
             matchLabels:
@@ -216,6 +219,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

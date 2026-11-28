@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sdd.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sdd.application.port.`in`.AmendMandateCommand
 import com.openbank.sdd.application.port.`in`.AmendMandateUseCase
@@ -40,8 +41,11 @@ import java.util.UUID
  * `sdd.collection.authorised` for the ledger/payment path to execute (§C).
  */
 @ApplicationScoped
-class SddMandateService(private val mandates: SddMandateRepository, private val outbox: SddOutbox) :
-    RegisterMandateUseCase,
+class SddMandateService(
+    private val mandates: SddMandateRepository,
+    private val outbox: SddOutbox,
+    private val screening: CollectionScreeningGate,
+) : RegisterMandateUseCase,
     ConfirmMandateUseCase,
     ManageMandateUseCase,
     AmendMandateUseCase,
@@ -97,7 +101,7 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
         transition(mandateId, "sdd.mandate.cancelled.v1") { MandateLifecycle.cancel(it) }
 
     override fun amend(mandateId: UUID, command: AmendMandateCommand): Uni<SddMandate> =
-        load(mandateId).flatMap { mandate ->
+        loadForUpdate(mandateId).flatMap { mandate ->
             val (field, oldValue) = currentValue(mandate, command.field)
             val amended = MandateLifecycle.amend(mandate, field, oldValue, command.newValue, clock())
             persist(applyField(amended, command), "sdd.mandate.amended.v1")
@@ -118,15 +122,44 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
                     if (mandate!!.lastCollectionDate == instruction.dueDate) {
                         return@flatMap Uni.createFrom().item(result)
                     }
-                    // Stamp the settled collection and emit for the downstream posting path.
-                    val stamped = MandateLifecycle.recordCollection(mandate, instruction.dueDate)
-                    mandates.save(stamped)
-                        .flatMap { saved -> outbox.append(collectionAuthorisedEvent(saved, instruction)).map { saved } }
-                        .map { result }
+                    // Sanctions gate (ADR-0032): debtor and creditor are screened BEFORE the
+                    // collection is stamped and released. A non-CLEAR verdict (or no verdict at
+                    // all) is a Reject, so no authorised event is emitted and no debit is booked.
+                    screening.screen(mandate, instruction).flatMap { held ->
+                        if (held != null) {
+                            Uni.createFrom().item(held)
+                        } else {
+                            recordScreenedCollection(mandate, instruction, controls)
+                        }
+                    }
                 }
                 else -> Uni.createFrom().item(result)
             }
         }
+
+    private fun recordScreenedCollection(
+        screened: SddMandate,
+        instruction: CollectionInstruction,
+        controls: DebtorControls,
+    ): Uni<AuthorisationResult> = mandates.findByIdForUpdate(screened.id).flatMap { current ->
+        val bound = current?.takeIf {
+            it.creditorIdentifier == instruction.creditorIdentifier && it.umr == instruction.umr
+        }
+        val decision = CollectionAuthorisationPolicy.authorise(bound, instruction, controls)
+        if (decision !is AuthorisationResult.Accept || bound == null) {
+            return@flatMap Uni.createFrom().item(decision)
+        }
+        if (bound.lastCollectionDate == instruction.dueDate) return@flatMap Uni.createFrom().item(decision)
+        if (bound.debtorName != screened.debtorName || bound.creditorName != screened.creditorName) {
+            return@flatMap Uni.createFrom().item(
+                AuthorisationResult.Reject("RR04", "Mandate parties changed during screening; retry the collection"),
+            )
+        }
+        val stamped = MandateLifecycle.recordCollection(bound, instruction.dueDate)
+        mandates.save(stamped)
+            .flatMap { saved -> outbox.append(collectionAuthorisedEvent(saved, instruction)) }
+            .map { decision }
+    }
 
     override fun assessRefund(mandateId: UUID, debitDate: LocalDate, asOf: LocalDate): Uni<RefundDecision> =
         load(mandateId).map { mandate ->
@@ -145,7 +178,11 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
     // --- helpers -------------------------------------------------------------------------------
 
     private fun transition(mandateId: UUID, eventType: String, f: (SddMandate) -> SddMandate): Uni<SddMandate> =
-        load(mandateId).flatMap { persist(f(it), eventType) }
+        loadForUpdate(mandateId).flatMap { persist(f(it), eventType) }
+
+    private fun loadForUpdate(mandateId: UUID): Uni<SddMandate> = mandates.findByIdForUpdate(mandateId).flatMap { m ->
+        if (m == null) Uni.createFrom().failure(MandateNotFoundException(mandateId)) else Uni.createFrom().item(m)
+    }
 
     private fun load(mandateId: UUID): Uni<SddMandate> = mandates.findById(mandateId).flatMap { m ->
         if (m == null) Uni.createFrom().failure(MandateNotFoundException(mandateId)) else Uni.createFrom().item(m)
@@ -172,20 +209,8 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
         AmendableField.SEQUENCE_TYPE -> m.copy(sequenceType = SequenceType.valueOf(cmd.newValue))
     }
 
-    private fun mandateEvent(m: SddMandate, eventType: String): OutboxMessage {
-        val payload = """
-            {"eventType":"$eventType",
-            "mandateId":"${m.id}",
-            "accountId":"${m.accountId}",
-            "creditorIdentifier":"${m.creditorIdentifier}",
-            "umr":"${m.umr}",
-            "scheme":"${m.scheme}",
-            "status":"${m.status}",
-            "sequenceType":"${m.sequenceType}",
-            "occurredAt":"${clock()}"}
-        """.trimIndent().replace("\n", "")
-        return OutboxMessage(UUID.randomUUID(), m.id, eventType, payload)
-    }
+    private fun mandateEvent(m: SddMandate, eventType: String): OutboxMessage =
+        mandateEventMessage(m, eventType, clock())
 
     private fun collectionAuthorisedEvent(m: SddMandate, i: CollectionInstruction): OutboxMessage {
         val eventType = "sdd.collection.authorised.v1"
@@ -213,3 +238,22 @@ class SddMandateService(private val mandates: SddMandateRepository, private val 
 
 /** Raised when a mandate id does not resolve. */
 class MandateNotFoundException(val mandateId: UUID) : RuntimeException("No SDD mandate $mandateId")
+
+/**
+ * The `sdd.mandate.*.v1` envelope on `openbank.sdd.event`. Shared by every mandate transition,
+ * including the idle-expiry sweep, so all mandate events keep one shape.
+ */
+internal fun mandateEventMessage(m: SddMandate, eventType: String, occurredAt: Instant): OutboxMessage {
+    val payload = """
+        {"eventType":"$eventType",
+        "mandateId":"${m.id}",
+        "accountId":"${m.accountId}",
+        "creditorIdentifier":"${m.creditorIdentifier}",
+        "umr":"${m.umr}",
+        "scheme":"${m.scheme}",
+        "status":"${m.status}",
+        "sequenceType":"${m.sequenceType}",
+        "occurredAt":"$occurredAt"}
+    """.trimIndent().replace("\n", "")
+    return OutboxMessage(Ids.newId(), m.id, eventType, payload)
+}

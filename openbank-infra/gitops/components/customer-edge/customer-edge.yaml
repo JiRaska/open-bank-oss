@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "659f0348d327f732"
+        openbank.tech/policy-checksum: "2368c958ddbe8525"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -108,7 +108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-0a26c26e@sha256:69d271cd2ef18721643113142bdcc447e8aaf21b076729d3f6ce62f790ca19af
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-0fe640e5@sha256:46d2310403fbd50ae052e2e778a209937796f96dc8997d6afe8eabef112493c5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -116,6 +116,15 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # glibc sizes its malloc arenas as 8 x ONLINE CPUs read from the host
+            # (/proc/cpuinfo), not from the cgroup quota: on Karpenter's 16-vCPU
+            # 4xlarge nodes that is 128 arenas of native memory against the same
+            # cgroup limit that fit on a 2-4 vCPU node, and the pod OOMKilled in
+            # startup warm-up (exit 137, no Java OOM — #16783, headroom raised in
+            # #16784). Cap the arenas; the JVM's own allocations do not go through
+            # glibc malloc.
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             - name: COMMUNICATION_SERVICE_URL
               # Same private CA trust chain as campaign and referral upstreams.
               value: https://communication-service.communication.svc:8443
@@ -246,6 +255,26 @@ spec:
             # gen-network-policies.py derives the ingress allow-list from DECLARED env URLs and an
             # undeclared caller does not exist as far as the generator is concerned. Every edge
             # -> delegation call timed out for as long as this line was missing.
+            - name: MCP_CONNECT_ENABLED
+              value: "true"
+            # Enable the private native handoff transport in the shared sandbox.
+            # Hosted OAuth client binding is managed separately in Keycloak.
+            - name: MCP_NATIVE_CONNECT_ENABLED
+              value: "true"
+            - name: EDGE_SANDBOX_MCP_NATIVE_AGE_EXCEPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: enabled
+                  optional: true
+            - name: EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: globalEnabled
+                  optional: true
+            - name: MCP_NATIVE_CONNECT_AUTHORITY_URL
+              value: https://delegation-service.delegation.svc:8443
             - name: DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
             # #10281 multi-signature hold on payments under X-Acting-For. Fail-closed (a policy that
@@ -433,7 +462,7 @@ spec:
               memory: 192Mi
             limits:
               cpu: 500m
-              memory: 384Mi
+              memory: 512Mi
         # OPA policy-decision sidecar (ADR-0034 D5). Serves data.openbank.rest.allow on
         # localhost:8181 — the default opa.url AuthorizeInterceptor queries for every
         # @Authorize CustomerEdgeResource endpoint. Without it, authz.enforce=true fails
@@ -472,6 +501,10 @@ spec:
             - name: opa-bundle
               mountPath: /bundle/rest.rego
               subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/customer_edge_rest_ext.rego
+              subPath: customer_edge_rest_ext.rego
               readOnly: true
             - name: opa-bundle
               mountPath: /bundle/agents.rego

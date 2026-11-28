@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  namespace: delegation
+  name: delegation-mcp-server-tls
+spec:
+  secretName: delegation-mcp-server-tls
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+  - delegation-service.delegation.svc
+  - delegation-service.delegation.svc.cluster.local
+  usages:
+  - server auth
+  - digital signature
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: 2160h
+  renewBefore: 720h
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: delegation-mcp-read-https-ingress
+  namespace: delegation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: delegation-service
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: balances
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: balance-service
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: iam
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: keycloak
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: customer-edge
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: customer-edge
+    ports:
+    - protocol: TCP
+      port: 8443

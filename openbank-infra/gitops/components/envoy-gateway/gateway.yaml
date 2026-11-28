@@ -125,7 +125,49 @@ spec:
       # drains), as the ingress-nginx controller's PDB.
       envoyPDB:
         minAvailable: 2
+  # The client certificate presented to every BackendTLSPolicy-targeted backend
+  # (edge-backend-client-tls.yaml). Inert until a BackendTLSPolicy exists; the first is the customer
+  # MCP route (#16847), whose backend pins this certificate's SAN.
+  backendTLS:
+    clientCertificateRef:
+      kind: Secret
+      name: edge-backend-client-tls
+      namespace: envoy-gateway-system
   telemetry:
+    accessLog:
+      settings:
+        # Keep the standard JSON fields and omit query parameters, including OAuth codes and state.
+        - format:
+            type: JSON
+            json:
+              start_time: "%START_TIME%"
+              method: "%REQ(:METHOD)%"
+              x-envoy-origin-path: "%PATH(NQ:ORIG_OR_PATH)%"
+              protocol: "%PROTOCOL%"
+              response_code: "%RESPONSE_CODE%"
+              response_flags: "%RESPONSE_FLAGS%"
+              response_code_details: "%RESPONSE_CODE_DETAILS%"
+              connection_termination_details: "%CONNECTION_TERMINATION_DETAILS%"
+              upstream_transport_failure_reason: "%UPSTREAM_TRANSPORT_FAILURE_REASON%"
+              bytes_received: "%BYTES_RECEIVED%"
+              bytes_sent: "%BYTES_SENT%"
+              duration: "%DURATION%"
+              x-envoy-upstream-service-time: "%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%"
+              x-forwarded-for: "%REQ(X-FORWARDED-FOR)%"
+              user-agent: "%REQ(USER-AGENT)%"
+              x-request-id: "%REQ(X-REQUEST-ID)%"
+              ":authority": "%REQ(:AUTHORITY)%"
+              upstream_host: "%UPSTREAM_HOST%"
+              upstream_cluster: "%UPSTREAM_CLUSTER%"
+              upstream_local_address: "%UPSTREAM_LOCAL_ADDRESS%"
+              downstream_local_address: "%DOWNSTREAM_LOCAL_ADDRESS%"
+              downstream_remote_address: "%DOWNSTREAM_REMOTE_ADDRESS%"
+              requested_server_name: "%REQUESTED_SERVER_NAME%"
+              route_name: "%ROUTE_NAME%"
+          sinks:
+            - type: File
+              file:
+                path: /dev/stdout
     metrics:
       # Stated explicitly: podmonitors.yaml scrapes this endpoint (:19001
       # /stats/prometheus) for the edge-5xx signal (#2677).
@@ -214,6 +256,22 @@ spec:
         certificateRefs:
           - kind: Secret
             name: copilot-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+    - name: https-mcp
+      protocol: HTTPS
+      port: 443
+      hostname: mcp.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: mcp-edge-tls
             namespace: platform
       allowedRoutes:
         namespaces:
@@ -394,6 +452,10 @@ spec:
   connection:
     connectionLimit:
       value: 500
+  # Hybrid post-quantum key exchange first, classical fallbacks after (#16292), duplicated
+  # from edge-security-headers for the same no-merge reason as the headers below.
+  tls:
+    ecdhCurves: [X25519MLKEM768, X25519, P-256]
   # Same edge security headers as the Gateway-wide policy below: a listener-scoped
   # ClientTrafficPolicy REPLACES the Gateway-scoped one for that listener (no merge), so
   # https-api must carry them itself or its locally generated responses lose them again.
@@ -424,6 +486,17 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: edge
+  # Hybrid post-quantum key exchange (#16292). Measured 2026-11-15 with OpenSSL 3.5 offering
+  # only X25519MLKEM768: every host on this Gateway answered `handshake failure`, while the
+  # CDN-served marketing and status sites negotiated it. TLS traffic recorded today could be
+  # decrypted by a future quantum computer ("harvest now, decrypt later"); a hybrid group is
+  # at least as strong as X25519 alone, so it is safe to prefer. X25519 and P-256 stay as
+  # fallbacks for clients without ML-KEM (older OpenSSL, older mobile TLS stacks), so no
+  # client loses access. Verify:
+  #   openssl s_client -connect <host>:443 -servername <host> -groups X25519MLKEM768 -tls1_3
+  #   -> "Negotiated TLS1.3 group: X25519MLKEM768"
+  tls:
+    ecdhCurves: [X25519MLKEM768, X25519, P-256]
   headers:
     lateResponseHeaders:
       set:

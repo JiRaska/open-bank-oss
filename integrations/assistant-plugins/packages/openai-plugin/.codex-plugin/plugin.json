@@ -1,0 +1,38 @@
+{
+  "name": "openbank",
+  "version": "0.1.2",
+  "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
+  "author": {
+    "name": "OpenBank contributors",
+    "url": "https://github.com/JiRaska/open-bank-oss"
+  },
+  "homepage": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins",
+  "repository": "https://github.com/JiRaska/open-bank-oss",
+  "license": "Apache-2.0",
+  "keywords": [
+    "banking",
+    "accounts",
+    "payments",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "OpenBank",
+    "shortDescription": "Ask about your accounts",
+    "longDescription": "Connect your personal OpenBank account to ask about the accounts you shared and their balances. The assistant can also draft a payment proposal. Nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. Data you ask about is sent to the assistant platform's provider. You can see and revoke every connected assistant in the OpenBank app.",
+    "category": "Finance",
+    "capabilities": [
+      "Read",
+      "Propose payments that you approve in the OpenBank app"
+    ],
+    "websiteURL": "https://www.open-bank.tech",
+    "defaultPrompt": [
+      "What is the balance of my main OpenBank account?",
+      "Which OpenBank accounts did I connect?",
+      "Propose a payment of 25 EUR from my OpenBank account."
+    ],
+    "brandColor": "#5658E6",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}

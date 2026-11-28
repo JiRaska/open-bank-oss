@@ -155,6 +155,7 @@ permissions:
 
 jobs:
   discover:
+    if: github.event_name != 'schedule' || (vars.AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')
     name: Find recent runs requiring reconciliation
     runs-on: ubuntu-latest
     # Hard ceiling shared by all HTTP retries and whole-snapshot rereads. Sustained
@@ -208,29 +209,59 @@ jobs:
           echo "mode=$mode created_range=$created_query updated_lookback_minutes=$lookback" >> "$GITHUB_STEP_SUMMARY"
           fetch_pages() {
             local workflow="$1" created_query="$2" output="$3"
-            local page=1 total expected dir
+            local page=1 total expected dir rc
             local -a page_files=()
-            dir=$(mktemp -d)
+            dir=$(mktemp -d "${output}.XXXXXX") || return $?
             # Fixed creation bounds make pagination stable; completion is filtered locally.
             # The API's 1,000-result search ceiling permits at most 10 pages of 100. Refuse
             # the ceiling before fetching page 2, rather than trusting --paginate to stop.
-            gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
-              -f per_page=100 -f page=1 -f "created=${created_query}" > "$dir/1.json"
-            total=$(jq -er '.total_count | select(type == "number" and . >= 0)' "$dir/1.json")
+            # gh_retry invokes this function in an `if`, which disables errexit
+            # throughout its body. Every failed read must return explicitly.
+            if gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+              -f per_page=100 -f page=1 -f "created=${created_query}" > "$dir/1.json"; then :; else
+              rc=$?; rm -rf "$dir"; return "$rc"
+            fi
+            if total=$(jq -ers '
+              if length == 1 and (.[0] | type == "object") then .[0].total_count
+              else error("expected one workflow-run response") end |
+              if type == "number" and . >= 0 and floor == . then
+                if . >= 1000 then 1000 else floor end
+              else error("invalid workflow-run total_count") end
+              ' "$dir/1.json"); then :; else
+              rc=$?; rm -rf "$dir"; return "$rc"
+            fi
             if (( total >= 1000 )); then
               echo "::error::${workflow} created-range search reached the 1,000-result ceiling" >&2
+              rm -rf "$dir"
               return 2
             fi
             expected=$(( (total + 99) / 100 ))
             (( expected >= 1 )) || expected=1
             page_files+=("$dir/1.json")
             for (( page=2; page<=expected; page++ )); do
-              gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
-                -f per_page=100 -f "page=${page}" -f "created=${created_query}" > "$dir/${page}.json"
+              if gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+                -f per_page=100 -f "page=${page}" -f "created=${created_query}" > "$dir/${page}.json"; then :; else
+                rc=$?; rm -rf "$dir"; return "$rc"
+              fi
+              if jq -es '
+                if length == 1 and (.[0] | type == "object") then true
+                else error("expected one workflow-run response") end
+                ' "$dir/${page}.json" > /dev/null; then :; else
+                rc=$?; rm -rf "$dir"; return "$rc"
+              fi
               page_files+=("$dir/${page}.json")
             done
-            jq -s '.' "${page_files[@]}" > "$output"
-            echo "workflow=$workflow runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"
+            if jq -s '.' "${page_files[@]}" > "$dir/pages.json"; then :; else
+              rc=$?; rm -rf "$dir"; return "$rc"
+            fi
+            if echo "workflow=$workflow runs=$total requests=$expected" >> "$GITHUB_STEP_SUMMARY"; then :; else
+              rc=$?; rm -rf "$dir"; return "$rc"
+            fi
+            # Publish only after all reads and JSON assembly succeeded. The
+            # existing flatten-pages check still owns completeness and drift.
+            if mv "$dir/pages.json" "$output"; then :; else
+              rc=$?; rm -rf "$dir"; return "$rc"
+            fi
             rm -rf "$dir"
           }
           for workflow in services-ci.yml security.yml dependency-submission.yml ci.yml; do
@@ -428,7 +459,9 @@ jobs:
   raise-issue:
     name: Raise issue on retry failure
     needs: [discover, retry]
-    if: ${{ failure() }}
+    if: >-
+      (github.event_name != 'schedule' || (vars.AUTO_RETRY_CANCELLED_SCHEDULE_PAUSED != 'true' && vars.SCHEDULES_PAUSED != 'true')) &&
+      (failure())
     runs-on: ubuntu-latest
     timeout-minutes: 5 # API calls only
     permissions:

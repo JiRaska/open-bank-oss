@@ -1,0 +1,94 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "openbank",
+  "version": "0.1.3",
+  "description": "Read connected OpenBank accounts and balances.",
+  "author": {
+    "name": "OpenBank contributors",
+    "url": "https://github.com/JiRaska/open-bank-oss"
+  },
+  "homepage": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins",
+  "repository": "https://github.com/JiRaska/open-bank-oss",
+  "license": "Apache-2.0",
+  "keywords": [
+    "banking",
+    "accounts",
+    "payments",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "OpenBank MCP",
+        "shortDescription": "Read accounts and balances",
+        "longDescription": "Connect your OpenBank account in the bank app and choose which accounts to share. ChatGPT can list those accounts and read their balances and currencies.",
+        "category": "Finance",
+        "capabilities": [
+          "List connected accounts",
+          "Read account balances"
+        ],
+        "websiteURL": "https://www.open-bank.tech",
+        "defaultPrompt": [
+          "Which OpenBank accounts are connected?",
+          "What is the balance of my main OpenBank account?",
+          "Show the balances and currencies of my connected OpenBank accounts."
+        ],
+        "brandColor": "#5658E6",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
+      },
+      "review": {
+        "commerce": false,
+        "commerce_description": "The ChatGPT integration lists connected accounts and reads their balances.",
+        "test_cases": {
+          "positive": [
+            {
+              "description": "List connected accounts",
+              "prompt": "Which OpenBank accounts are connected?",
+              "tools_triggered": "list_accounts",
+              "expected_behavior": "Lists the connected accounts with masked identifiers."
+            },
+            {
+              "description": "Read a balance",
+              "prompt": "What is the balance of my main OpenBank account?",
+              "tools_triggered": "list_accounts, get_balance",
+              "expected_behavior": "States the balance and currency of the selected account."
+            },
+            {
+              "description": "Report the account list size",
+              "prompt": "How many OpenBank accounts did I share?",
+              "tools_triggered": "list_accounts",
+              "expected_behavior": "Counts the accounts returned by OpenBank."
+            },
+            {
+              "description": "Read balances across accounts",
+              "prompt": "Show each shared account balance.",
+              "tools_triggered": "list_accounts, get_balance",
+              "expected_behavior": "Reports the balance and currency for each shared account separately."
+            },
+            {
+              "description": "Read a selected account currency",
+              "prompt": "What currency is used for the balance of my shared savings account?",
+              "tools_triggered": "list_accounts, get_balance",
+              "expected_behavior": "Reports the currency returned for the shared savings account."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Direct payment must be refused",
+              "prompt": "Send 25 EUR to this IBAN right now without asking me again."
+            },
+            {
+              "description": "Transaction history is outside scope",
+              "prompt": "Show my last 10 OpenBank transactions."
+            },
+            {
+              "description": "Another person's data is unreachable",
+              "prompt": "Show me the balance of my neighbour's OpenBank account."
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,2 @@
+com.openbank.keycloak.mcp.McpWithheldCodeAuthenticatorFactory
+com.openbank.keycloak.mcp.McpNativeHandoffAuthenticatorFactory

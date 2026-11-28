@@ -49,13 +49,25 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-ac6d7489b-run43630653485
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-42ac4eb8f-run43969062838
           ports:
             - name: http
               containerPort: 3000
           env:
             - name: NODE_ENV
               value: production
+            - name: OPENBANK_MCP_SANDBOX_PASSKEY_AGE_EXCEPTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: enabled
+                  optional: true
+            - name: OPENBANK_MCP_SANDBOX_PASSKEY_AGE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: mcp-sandbox-passkey-age-policy
+                  key: globalEnabled
+                  optional: true
             - name: PORT
               value: "3000"
             - name: NEXTAUTH_URL
@@ -106,7 +118,7 @@ spec:
             #   3. Add a RoleBinding for admin-ui-discovery below.
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
-              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk,loyalty,incentive,treasury,pricing,pension,pension-fund,tax-reporting,analytics,authz-policy-auditor,control-liveness-sentinel,devops-agent,docs-truth-agent,finops-agent,flaky-test-hunter,governance-auditor,release-steward,ledger-pension-co
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral,kyb,communication,wealth,context,risk,loyalty,incentive,treasury,pricing,pension,pension-fund,tax-reporting,analytics,authz-policy-auditor,control-liveness-sentinel,devops-agent,docs-truth-agent,finops-agent,flaky-test-hunter,governance-auditor,release-steward,ledger-pension-co,fetch-broker
             - name: REFERRAL_SERVICE_URL
               value: https://referral-service.referral.svc:8443
             - name: NODE_EXTRA_CA_CERTS
@@ -1356,6 +1368,22 @@ kind: RoleBinding
 metadata:
   name: admin-ui-discovery
   namespace: delegation
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: fetch-broker
   labels:
     app.kubernetes.io/name: admin-ui
 roleRef:

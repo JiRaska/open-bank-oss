@@ -13,6 +13,7 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseMonitoring
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.ExitCompletion
+import com.openbank.kyb.domain.model.ExitProposal
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
@@ -190,13 +191,20 @@ class BusinessOnboardingCaseRepositoryImpl(
         monitoringExitCompletedAt = case.monitoring.exitCompleted?.completedAt
         monitoringExitCompletedBy = case.monitoring.exitCompleted?.completedBy
         monitoringExitEvidence = case.monitoring.exitCompleted?.evidence
+        monitoringExitProposedAt = case.monitoring.exitProposal?.proposedAt
+        monitoringExitProposedBy = case.monitoring.exitProposal?.proposedBy
+        monitoringExitProposalEvidence = case.monitoring.exitProposal?.evidence
+        monitoringExitProposerPersonId = case.monitoring.exitProposal?.proposerPersonId
+        monitoringExitProposalExpiresAt = case.monitoring.exitProposal?.expiresAt
+        monitoringExitProposalWithdrawnBy = case.monitoring.exitProposal?.withdrawnBy
+        monitoringExitProposalWithdrawnAt = case.monitoring.exitProposal?.withdrawnAt
         monitoringSyncedVersion = syncedVersion
         updatedAt = case.updatedAt
     }
 
     private fun BusinessOnboardingCaseEntity.toDomain(findings: List<MonitoringFinding>) = BusinessOnboardingCase(
         id = caseId,
-        identifier = LegalEntityIdentifier.of(IdentifierScheme.valueOf(identifierScheme), identifierValue),
+        identifier = LegalEntityIdentifier.restore(IdentifierScheme.valueOf(identifierScheme), identifierValue),
         initiatorPartyId = initiatorPartyId,
         status = CaseStatus.valueOf(status),
         extract = extractJson?.let { KybJson.readExtract(it) },
@@ -215,6 +223,17 @@ class BusinessOnboardingCaseRepositoryImpl(
             findings,
             monitoringExitCompletedAt?.let { at ->
                 ExitCompletion(at, monitoringExitCompletedBy.orEmpty(), monitoringExitEvidence.orEmpty())
+            },
+            monitoringExitProposedAt?.let { at ->
+                ExitProposal(
+                    at,
+                    monitoringExitProposedBy.orEmpty(),
+                    monitoringExitProposalEvidence.orEmpty(),
+                    proposerPersonId = monitoringExitProposerPersonId,
+                    expiresAt = monitoringExitProposalExpiresAt,
+                    withdrawnBy = monitoringExitProposalWithdrawnBy,
+                    withdrawnAt = monitoringExitProposalWithdrawnAt,
+                )
             },
         ),
         version = version,

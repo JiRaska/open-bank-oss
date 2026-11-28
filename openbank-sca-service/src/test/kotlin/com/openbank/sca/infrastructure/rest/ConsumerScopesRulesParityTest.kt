@@ -5,6 +5,7 @@
 package com.openbank.sca.infrastructure.rest
 
 import com.openbank.sca.domain.model.ConsumerScope
+import com.openbank.sca.domain.model.ReservedNamespace
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
@@ -37,7 +38,14 @@ class ConsumerScopesRulesParityTest {
                     it.name
                 },
             ).containsExactlyInAnyOrderElementsOf(entry["purposes"] as List<String>)
-            assertThat(entry["actions"] as List<*>).containsExactly("scaChallenge.consume")
+            // Consume always; initiate only for a namespace that owns its purposes outright (MCP_CONNECT,
+            // whose consumer also raises its challenges — the domain refuses it any other purpose).
+            val actions = entry["actions"] as List<*>
+            if (namespace == ReservedNamespace.MCP_CONNECT) {
+                assertThat(actions).containsExactlyInAnyOrder("scaChallenge.initiate", "scaChallenge.consume")
+            } else {
+                assertThat(actions).containsExactly("scaChallenge.consume")
+            }
         }
     }
 

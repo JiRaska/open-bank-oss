@@ -86,7 +86,6 @@ BASELINE = {
     # openbank-party-service was wired instead of deleted (#4007): the lifecycle events now go
     # through party_outbox in the state-change transaction and the direct KafkaPartyEventPublisher
     # is gone. Removing an entry from this list is the definition of done for that service.
-    "openbank-pid-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
     # openbank-psd2-service is no longer a violation (#8510): the dead outbox apparatus was
     # deleted entirely (port/dispatcher/gauge/repository/entity/publisher, the psd2_outbox
     # table + sequence via V5, the psd2-events-out channel and the openbank.psd2.events

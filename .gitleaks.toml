@@ -45,6 +45,15 @@ id = "rod-cislo"
 description = "Possible Czech birth number (rodné číslo)"
 regex = '''\b\d{2}(?:0[1-9]|1[0-2]|2[1-9]|3[0-2]|5[1-9]|6[0-2]|7[1-9]|8[0-2])\d{2}/?\d{3,4}\b'''
 
+# Public Temurin release asset ID in the checksum-verified download fallback.
+[[rules.allowlists]]
+description = "Temurin 25 GitHub release asset ID"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^\.clusterfuzzlite/Dockerfile$''']
+regexes = ['''^665812068$''']
+
+
 # --- Allowlist ---
 
 [allowlist]
@@ -163,6 +172,14 @@ regexes = [
   '''123456-1234567890/0800''',
   # Sequential digit placeholder in UI demos (not a real rodné číslo)
   '''1234567890''',
+  # Descending-digit placeholder account number in consumer Pact fixtures
+  # (pacts/openbank-customer-edge-openbank-domestic-payment.json) — not a rodné číslo
+  '''9876543210''',
+  # MCP-proposal consumer pact (pacts/openbank-customer-edge-openbank-delegation-service.json):
+  # the Idempotency-Key fixtures are `mcp-proposal-<verb>-` + the c0ffee00-... placeholder UUIDs
+  # (never a real credential). Their length/entropy next to the word "Key" trips generic-api-key.
+  # Matches ONLY the c0ffee00 fixture-UUID shape, not the file path.
+  '''mcp-proposal-(approve|reject|execution)-c0ffee00-[0-9a-f-]{27,}''',
   # IBAN-fragment example in account-service OpenAPI spec (bank code 0800 +
   # placeholder account digits) — a public API-contract example, not a secret;
   # the 10-digit string trips the rod-cislo numeric heuristic.

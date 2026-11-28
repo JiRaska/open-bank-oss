@@ -6,6 +6,7 @@ package com.openbank.treasury.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.treasury.application.port.`in`.CashFlowUseCase
+import com.openbank.treasury.application.port.`in`.NostroBreakResolutionUseCase
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
 import com.openbank.treasury.application.port.`in`.NostroReconciliationUseCase
 import com.openbank.treasury.application.port.`in`.PortfolioStatementUseCase
@@ -26,6 +27,7 @@ import com.openbank.treasury.application.port.out.PortfolioStatementRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.usecase.BookCategories
 import com.openbank.treasury.application.usecase.CashFlowService
+import com.openbank.treasury.application.usecase.NostroBreakResolutionService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
 import com.openbank.treasury.application.usecase.PortfolioStatementService
@@ -96,6 +98,10 @@ class TreasuryServiceProducer {
         intentGrace: java.time.Duration,
         @ConfigProperty(name = "openbank.treasury.posting-intent.claim-batch", defaultValue = "100")
         claimBatch: Int,
+        fundingPort: com.openbank.treasury.application.port.out.FundingPort,
+        // #12115: on by default — a placement is booked only against a verified contra balance.
+        @ConfigProperty(name = "openbank.treasury.funding-check.enabled", defaultValue = "true")
+        fundingCheckEnabled: Boolean,
     ): TreasuryDealUseCase {
         // The grace's bound against the ledger timeouts is checked at BOOT by PostingIntentGraceCheck.
         return TreasuryDealService(
@@ -123,6 +129,10 @@ class TreasuryServiceProducer {
             maxResumeAge,
             intentGrace,
             claimBatch,
+            fundingPort.takeIf { fundingCheckEnabled },
+            com.openbank.treasury.application.port.out.FundingMeter { ccy ->
+                meters.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
+            },
         )
     }
 
@@ -220,6 +230,20 @@ class TreasuryServiceProducer {
         config.accounts(),
         BreakAlertPolicy(config.breakAlertAgeDays(), config.breakAlertMinAmount()),
         objectMapper,
+        clock,
+    )
+
+    /** ADR-0369: four-eyes manual resolution of breaks that will never match. */
+    @Produces
+    @ApplicationScoped
+    fun nostroBreakResolutionUseCase(
+        breaks: NostroBreakRepository,
+        config: NostroConfig,
+        clock: Clock,
+    ): NostroBreakResolutionUseCase = NostroBreakResolutionService(
+        breaks,
+        config.accounts(),
+        BreakAlertPolicy(config.breakAlertAgeDays(), config.breakAlertMinAmount()),
         clock,
     )
 }

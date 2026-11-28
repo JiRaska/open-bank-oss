@@ -7,7 +7,7 @@ plugins {
 }
 
 tasks.test {
-    // Quarkus and Testcontainers exhaust the default 512 MiB heap in the v2 outbox IT suite.
+    // Allow headroom for Quarkus and Testcontainers integration tests.
     maxHeapSize = "2g"
 }
 
@@ -18,7 +18,6 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.opentelemetry)
 

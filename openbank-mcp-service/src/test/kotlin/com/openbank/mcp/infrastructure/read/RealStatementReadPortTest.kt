@@ -43,36 +43,38 @@ class RealStatementReadPortTest {
 
     @Test
     fun `an exact legalSequence with currency calls the summary endpoint directly`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
-        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(internalId)))
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
+        val accounts = accountServiceStub(mapOf("CZ6508000000192000145399" to accountJson(internalId)))
         val statements = FakeStatementServiceClient(
             summaries = mapOf(Triple(internalId, "CZK", 3L) to statementJson(listOf("groceries" to null))),
         )
         val port = RealStatementReadPort(consent, accounts, statements)
 
-        val result = port.getStatementSummary(ctx, "CZ01", currency = "CZK", legalSequence = 3L)
+        val result = port.getStatementSummary(ctx, "CZ6508000000192000145399", currency = "CZK", legalSequence = 3L)
 
         assertThat(result.path("entries").single().path("category").asText()).isEqualTo("GROCERIES")
         assertThat(consent.lastRequest?.requiredScope).isEqualTo(ConsentScopes.STATEMENTS_READ)
-        assertThat(consent.lastRequest?.accountIban).isEqualTo("CZ01")
+        assertThat(consent.lastRequest?.accountIban).isEqualTo("CZ6508000000192000145399")
     }
 
     @Test
     fun `legalSequence without currency is a client error, not a silent guess`() {
         val port = RealStatementReadPort(
-            FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01")),
-            accountServiceStub(mapOf("CZ01" to accountJson(internalId))),
+            FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399")),
+            accountServiceStub(mapOf("CZ6508000000192000145399" to accountJson(internalId))),
             FakeStatementServiceClient(emptyMap()),
         )
 
-        assertThatThrownBy { port.getStatementSummary(ctx, "CZ01", currency = null, legalSequence = 3L) }
+        assertThatThrownBy {
+            port.getStatementSummary(ctx, "CZ6508000000192000145399", currency = null, legalSequence = 3L)
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test
     fun `omitting both resolves the most recently CLOSED period`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
-        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(internalId)))
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
+        val accounts = accountServiceStub(mapOf("CZ6508000000192000145399" to accountJson(internalId)))
         val periods = mapper.createArrayNode().apply {
             addObject().put("pocketCurrency", "CZK").put("legalSequenceNumber", 1L).put("status", "CLOSED")
             addObject().put("pocketCurrency", "CZK").put("legalSequenceNumber", 2L).put("status", "SUPERSEDED")
@@ -84,18 +86,40 @@ class RealStatementReadPortTest {
         )
         val port = RealStatementReadPort(consent, accounts, statements)
 
-        port.getStatementSummary(ctx, "CZ01", currency = null, legalSequence = null)
+        port.getStatementSummary(ctx, "CZ6508000000192000145399", currency = null, legalSequence = null)
 
         assertThat(statements.lastSummaryRequest).isEqualTo(Triple(internalId, "CZK", 4L))
     }
 
     @Test
+    fun `an accountId that is not a valid IBAN never reaches consent-service (#16628)`() {
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
+        val statements = FakeStatementServiceClient(emptyMap())
+        val port = RealStatementReadPort(consent, accountServiceStub(emptyMap()), statements)
+        listOf(
+            "CZ0000000000000000000000", // wrong checksum
+            "cz65 0800 0000 1920 0014 5398",
+            "CZ",
+            "CZ65" + "9".repeat(10_000),
+            "CZ6508000000192000\u00005399",
+            "CZ6508000000192000145399'; DROP TABLE accounts;--",
+            "../../../etc/passwd",
+            "00000000-0000-0000-0000-00000000000g",
+        ).forEach { garbage ->
+            assertThatThrownBy { port.getStatementSummary(ctx, garbage, "CZK", 1L) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(consent.lastRequest).`as`("consent-service was called for a garbage accountId").isNull()
+        assertThat(statements.summaryCalled).isFalse()
+    }
+
+    @Test
     fun `denies an account outside the granted consent scope before calling statement-service`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
         val statements = FakeStatementServiceClient(emptyMap())
         val port = RealStatementReadPort(consent, accountServiceStub(emptyMap()), statements)
 
-        assertThatThrownBy { port.getStatementSummary(ctx, "CZ99-not-granted", "CZK", 1L) }
+        assertThatThrownBy { port.getStatementSummary(ctx, "CZ8108000000192000145499", "CZK", 1L) }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("not within the granted consent scope")
         assertThat(statements.summaryCalled).isFalse()
@@ -103,16 +127,16 @@ class RealStatementReadPortTest {
 
     @Test
     fun `each entry gets a best-effort category, never crashing on an entry with no text`() {
-        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
+        val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ6508000000192000145399"))
         val statements = FakeStatementServiceClient(
             summaries = mapOf(
                 Triple(internalId, "CZK", 1L) to statementJson(listOf(null to null, "monthly fee" to null)),
             ),
         )
-        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(internalId)))
+        val accounts = accountServiceStub(mapOf("CZ6508000000192000145399" to accountJson(internalId)))
         val port = RealStatementReadPort(consent, accounts, statements)
 
-        val entries = port.getStatementSummary(ctx, "CZ01", "CZK", 1L).path("entries")
+        val entries = port.getStatementSummary(ctx, "CZ6508000000192000145399", "CZK", 1L).path("entries")
 
         assertThat(entries[0].path("category").asText()).isEqualTo("OTHER")
         assertThat(entries[1].path("category").asText()).isEqualTo("FEES")

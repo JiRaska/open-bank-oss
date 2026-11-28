@@ -46,6 +46,8 @@ KNOWN_UNCOVERED = {
     "infra-vuln-scanner": "scanner job, no inbound traffic",
     "ingress-nginx": "controller ConfigMaps only (the Helm app owns the workload), no pods of its own",
     "keycloak-realm-drift": "drift detector job, no inbound traffic",
+    "mcp-synthetic-sandbox": "foundation has no live workloads; hand-authored namespace default deny and exact opt-in peer policies",
+    "mcp-customer-route": "route-only (HTTPRoute + edge policies, ADR-0383), no workload; mcp-service's policy is generated into components/mcp",
     "kyverno": "admission controller — policy covered by its own helm chart",
     "openbao": "secrets backend, hand-authored policies (runbook 0005/0006)",
     "platform": "umbrella dir, hosts no single workload",
@@ -53,6 +55,7 @@ KNOWN_UNCOVERED = {
     "sbom-drift-scanner": "scanner job, no inbound traffic",
     "temporal": "workflow engine, hand-authored policies (temporal-network-policies.yaml)",
     "vpa-objects": "recommender CRDs, no pods of its own",
+    "alert-digest": "CronJob producer (ADR-0382), no inbound traffic; its hand-written policy denies all ingress",
     "volumeattachment-reaper": "CronJob actuator (API server only), no inbound traffic",
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "openbank",
+  "owner": {
+    "name": "OpenBank contributors",
+    "url": "https://github.com/JiRaska/open-bank-oss"
+  },
+  "description": "OpenBank assistant plugins (customer MCP channel, ADR-0383).",
+  "plugins": [
+    {
+      "name": "openbank",
+      "source": "./claude-code-plugin",
+      "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
+      "category": "finance"
+    }
+  ]
+}

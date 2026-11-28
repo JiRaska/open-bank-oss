@@ -49,7 +49,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sanctions-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "2cd9d53151b56cb5"
+        openbank.tech/policy-checksum: "411b82ba264f3bd4"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sanctions-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-893c4e64@sha256:94e3efa1eecb99ee389da0fc70317475c614ba36108bd471ddb293f45f978481
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-bd011ccf@sha256:f12e325bd03e50dbe32f95ebaabbc8f60ee2f2d95cabba08e81f829cc4970af2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -74,6 +74,10 @@ spec:
             # remains for existing callers until their independently reviewed migrations complete.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -157,6 +161,18 @@ spec:
             # in openbank.authz.decisions, none blocks) and restore the allowlist entry in
             # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
+              value: "true"
+            # Four-eyes ENFORCED (ADR-0155, #15748): sanctions.clear (deciding a screening hit,
+            # rules.yaml four_eyes.verbs `clear`) answers 202 + approvalId until a DIFFERENT
+            # operator approves it; the maker's retry carries X-Approval-Id (admin-ui /sanctions
+            # review form + checker queue). Makers: ROLE_OPERATOR/ADMIN humans, and ONE documented
+            # machine, service-account-openbank-agent on POST /api/v3/sanctions/review (CLEAR only,
+            # #16381), which holds no sanctions.approval.decide, so the checker is always a human.
+            # Screening callers are never paused (they call sanctions.create). With this "false" the
+            # agent path is refused outright (AgentReviewGuard), and AgentMachineGrantCharterAlignmentTest
+            # fails unless it is "true". Approvals live in the Redis above.
+            # Rollback: set "false". Gate: four-eyes-enforce-deployed.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
               value: "true"
             # Ongoing monitoring of registered subjects (ADR-0376): re-screens the monitored
             # registry against every committed list change (delta, every 60s, bounded per run)

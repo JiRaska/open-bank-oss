@@ -74,6 +74,7 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-11-19** — **Idle-expiry sweep enabled per environment, with an event and per-item isolation (ADR-0036 §B).** `MandateExpiryScheduler` moves `ACTIVE`/`SUSPENDED` mandates idle for 36+ months to `EXPIRED`. The code default stays `false`; the sandbox manifest sets `OPENBANK_SDD_EXPIRY_ENABLED=true`, so the kill switch is a manifest change, not a revert. Each mandate is expired in its own transaction (`MandateExpiryWriter`, `@WithTransaction`) that also appends `sdd.mandate.expired.v1` to `sdd_outbox` (an additive event type, same envelope as the other `sdd.mandate.*.v1` events), so downstream consumers learn of every expiry and the status change cannot commit without its event. **STRIDE-R:** the expiry is no longer a silent state change: the outbox event and the `openbank.sdd.mandate.expiry.expired` / `.failed` counters record it. **STRIDE-D / integrity:** one failing row is logged and counted and the sweep continues; before, the first failure aborted the run and left every later mandate unswept. **STRIDE-T:** no new endpoint, caller, credential or privilege; the sweep runs in-process on the existing cron. The first sandbox run was measured read-only on 2026-11-19: 1 of 100 live mandates qualifies. **Residual:** expiry is not reversed by switching the flag off; an `EXPIRED` mandate stays expired and a new mandate is needed. Rollback: set the env var to `false`.
 - **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the collection debit keeps its fields and `dueDate` is parsed to a date before sending (a non-ISO date is dead-lettered instead of earning a 400). A non-2xx answer arrives as an exception: 409 is still an idempotent success and any other status still throws `SddDebitFailedException` for dead-lettering. **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-sdd`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sdd_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; as a kernel (ADR-0327) repository since #11874 it is covered with no change of its own. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
@@ -257,3 +258,48 @@ change, so every allowed peer, port and direction is unchanged: no new caller, n
 listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
 carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
 traffic rather than widening it.
+
+## 2026-11-14 - Sanctions screening before a collection is released (ADR-0032, ADR-0353 D4)
+
+**Gap closed.** The service authorised a collection and emitted `sdd.collection.authorised.v1` (which
+books the debtor-side debit) without screening anyone. Neither name on the mandate reached
+sanctions-service, and no upstream screened it either. A mandate naming a listed creditor or debtor
+moved money.
+
+**Control.** `CollectionScreeningGate` runs after `CollectionAuthorisationPolicy` accepts, and before
+the collection is stamped or the event is written. It screens the mandate's debtor and creditor names
+through `POST /api/v1/sanctions/screen` and decides with the shared libs-fincrime `ScreeningPolicy`,
+the same copy sepa-payment, domestic-payment and fx use:
+
+- CLEAR / WHITELISTED: released as before.
+- BLOCK (HIT, ESCALATED, or POTENTIAL_HIT above 0.85): `REJECT` with EPC reason `RR04`, CRITICAL AML case.
+- REVIEW (POTENTIAL_HIT at or below 0.85): `REJECT` `RR04` ("held for sanctions review"), HIGH AML case.
+- sanctions-service unreachable after retry / breaker: `REJECT` `RR04` (fail-closed hold), MEDIUM case.
+  An unknown wire status parses as ESCALATED, never CLEAR.
+
+A held collection is never stamped, so the replay guard (keyed on the stamped collection date) does
+not swallow a re-presentation: it is screened again. Opening the AML case is best effort and never
+changes the verdict (`CollectionScreeningGateTest` proves a case-store outage still blocks).
+
+**New edges (STRIDE-S/E).** Two outbound calls on the existing named oidc-client `m2m`
+(`service-account-openbank-sdd`, ROLE_API only): sanctions `screen` (already granted to any service
+account by base `rest.rego`'s m2m sanctions screening), and `amlCase.create`, newly granted by identity
+in `aml_rest_ext.rego` and in aml-service's `AML_CASE_CREATE_MOVEMENT_SERVICES` (the two are pinned
+equal by `AmlCaseCreateCallerGuardTest`). aml-service is reached on its private-CA mTLS listener with
+the existing `sdd-internal-tls` client certificate. The regenerated ingress allow-lists admit the
+`sdd` namespace to sanctions-service (8123) and aml-service; sdd carries no egress policy. No new
+listener, no new data at rest.
+
+**Information disclosure.** The debtor and creditor names (already held here) are now sent to
+sanctions-service, and the matched entity and score to aml-service. Both are in-cluster compliance
+services that already receive the same data from the other rails.
+
+**Residual risks.**
+- The AML case's `partyId` carries the debtor ACCOUNT id, because sdd has no account-to-party lookup
+  grant yet (the shape sepa-payment fixed in #8505). It is logged as `aml.case.party_unresolved` so
+  those rows are identifiable. Follow-up: resolve the party through account-service.
+- A held collection is reported to the creditor bank as a rejection. A REVIEW that compliance later
+  clears needs the creditor to re-present the collection; there is no in-service release queue.
+- Screening is name-based (ADR-0032 scope note); aliases, country and date of birth are not sent.
+
+**Rollback.** Revert the commit. The gate disappears and collections release un-screened again.

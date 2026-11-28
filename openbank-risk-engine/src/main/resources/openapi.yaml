@@ -78,7 +78,9 @@ info:
   #        pv01 and var-99-1d.
   # 1.26.0 -> 1.26.1: documentation only — the pricing request's lag bounds (0 to 30 business days)
   #        are stated; no schema change.
-  version: 1.26.1
+  # 1.26.1 -> 1.27.0: optional includePlanned query parameter for snapshot-only runoff.
+  # 1.27.0 -> 1.28.0: bind explicitly selected source revisions to a planning input capture.
+  version: 1.28.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -107,6 +109,43 @@ security:
   - bearerAuth: []
 
 paths:
+  /api/v1/risk/planning/input-captures:
+    post:
+      tags: [Risk]
+      operationId: createPlanningInputCapture
+      summary: Record selected risk and Treasury source revisions for a draft plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [snapshotId, curveSetId, treasuryRevisionIds]
+              properties:
+                snapshotId: {type: string, format: uuid}
+                curveSetId: {type: string, format: uuid}
+                treasuryRevisionIds:
+                  type: array
+                  maxItems: 10000
+                  uniqueItems: true
+                  items: {type: integer, format: int64, minimum: 1}
+      responses:
+        '201':
+          description: Input capture recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: {type: string, format: uuid}
+        '400':
+          description: Missing, invalid or incompatible source revisions
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+
   /api/v1/risk/snapshots:
     get:
       tags: [Risk]
@@ -417,6 +456,13 @@ paths:
             minimum: 1
             maximum: 365
             default: 90
+        - name: includePlanned
+          in: query
+          required: false
+          description: Include live planned treasury deal flows. Set false for runoff based on the selected snapshot. The response then includes the planned-treasury-flows-excluded assumption.
+          schema:
+            type: boolean
+            default: true
       responses:
         '200':
           description: The run's liquidity forecast
@@ -425,7 +471,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/LiquidityForecast'
         '400':
-          description: Missing or malformed `curveSetId`, `horizonDays` outside 1..365, or a curve set for another as-of date
+          description: Missing or malformed `curveSetId`, `horizonDays` outside 1..365, a curve set for another as-of date, or invalid `includePlanned`
         '401':
           description: Unauthenticated
         '403':

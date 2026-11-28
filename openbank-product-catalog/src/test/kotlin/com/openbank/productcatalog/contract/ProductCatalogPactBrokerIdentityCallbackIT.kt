@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.contract
 
+import au.com.dius.pact.core.model.Interaction
 import au.com.dius.pact.provider.IConsumerInfo
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -74,6 +75,10 @@ class ProductCatalogPactBrokerIdentityCallbackIT {
         every { consumer.name } returns "openbank-pension-service"
         val context = mockk<PactVerificationContext>()
         every { context.consumer } returns consumer
+        // The verifier also reads the interaction description to scope the account-service identity.
+        val interaction = mockk<Interaction>()
+        every { interaction.description } returns "pension pact interaction"
+        every { context.interaction } returns interaction
         every { context.verifyInteraction() } answers { verify() }
         return context
     }

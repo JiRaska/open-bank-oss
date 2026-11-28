@@ -26,7 +26,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-communication-opa-bundle.sh.
-        openbank.tech/policy-checksum: "659f0348d327f732"
+        openbank.tech/policy-checksum: "cb212440942de552"
       labels:
         app.kubernetes.io/name: communication-service
         app.kubernetes.io/part-of: communication
@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: communication-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-548fa683@sha256:368e3fccd34631d7730557524e964064e9e8cf2f6d364ec4c6f80ae06c451368
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-4351e46e@sha256:1d9347837f4ec155f9d0339245c6cb41c8c948f11a5f41f934633294ef51c11c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -56,6 +56,10 @@ spec:
               value: "0.1"
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/communication-tls/tls.crt
+            # Re-read the pair cert-manager rewrites 15 days before expiry; without this the
+            # pod serves the old leaf until it expires (check-tls-certificate-reload.py).
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+              value: 1h
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/communication-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
@@ -73,6 +77,11 @@ spec:
                   key: password
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.communication.svc:6379
+            # Four-eyes ENFORCED (ADR-0285 D3, #15748). Already the application.yaml default; set
+            # here so the deployed state is stated in the manifest the four-eyes-enforce-deployed
+            # gate reads, not inferred from a code default a later edit could flip.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET

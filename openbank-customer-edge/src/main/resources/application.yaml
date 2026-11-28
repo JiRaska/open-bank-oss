@@ -8,6 +8,11 @@ quarkus:
   # Redis: pending-onboarding store for four-eyes auto-resume (ADR-0072).
   redis:
     hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
+    rate-limit:
+      hosts: ${quarkus.redis.hosts}
+      max-pool-size: 32
+      max-pool-waiting: 64
+      timeout: 1s
 
   http:
     port: 8128
@@ -132,6 +137,8 @@ openbank:
     opa-pdp-producer:
       enabled: true
   edge:
+    sandbox-mcp-native-age-exceptions: ${EDGE_SANDBOX_MCP_NATIVE_AGE_EXCEPTIONS:false}
+    sandbox-mcp-native-age-policy: ${EDGE_SANDBOX_MCP_NATIVE_AGE_POLICY:false}
     account-service-url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
     balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}
     audit-service-url: ${AUDIT_SERVICE_URL:https://audit-service.audit.svc:8443}
@@ -183,6 +190,9 @@ openbank:
     # Onboarding auto-resume (ADR-0072): when on, a four-eyes case decision replays the paused
     # onboarding (OnboardingResumeService consumes party.events). Off until verified end-to-end.
     identity-resume-enabled: ${IDENTITY_RESUME_ENABLED:false}
+    mcp-connect-enabled: ${MCP_CONNECT_ENABLED:false}
+    mcp-native-connect-enabled: ${MCP_NATIVE_CONNECT_ENABLED:false}
+    mcp-native-connect-authority-url: ${MCP_NATIVE_CONNECT_AUTHORITY_URL:}
     # Keycloak Admin API for setting the party_id user attribute after MATCH_EXISTING re-link
     # (issue #1270 PR3). client-secret supplied via OPENBANK_EDGE_KEYCLOAK_ADMIN_CLIENT_SECRET.
     keycloak-admin-url: ${KEYCLOAK_ADMIN_URL:http://keycloak.iam.svc:8080}

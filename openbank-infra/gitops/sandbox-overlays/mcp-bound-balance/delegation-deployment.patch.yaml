@@ -1,0 +1,25 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: delegation-service
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value:
+    name: https-native
+    containerPort: 8443
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-delegation-server
+    mountPath: /mnt/mcp-delegation-server
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-delegation-server
+    secret:
+      secretName: delegation-mcp-server-tls
+      items:
+      - key: tls.crt
+        path: tls.crt
+      - key: tls.key
+        path: tls.key

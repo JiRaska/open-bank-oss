@@ -12,6 +12,7 @@ import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.authz.Principal
 import com.openbank.mcp.application.McpCallAuditor
+import com.openbank.mcp.application.McpInputBounds
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.McpUntrustedData
 import com.openbank.mcp.application.PolicyFilteredToolCatalog
@@ -28,6 +29,7 @@ import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -81,6 +83,9 @@ import java.time.Duration
 @Path("/mcp")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
+// Two explicit entries (staff `handle`, customer `handleCustomer`) are the review-of-#17004 fix: the
+// branch is the matched resource, not a re-read path. Splitting the class would move that decision away.
+@Suppress("TooManyFunctions")
 class McpEndpoint(
     private val registry: McpToolRegistry,
     private val pdp: PolicyDecisionPoint,
@@ -110,11 +115,118 @@ class McpEndpoint(
     @Inject
     lateinit var toolsCatalog: PolicyFilteredToolCatalog
 
+    /** Customer-channel wiring. Plain endpoint unit tests leave this unset. */
+    @Inject
+    lateinit var customerDeps: CustomerChannelDeps
+
+    /** The current request (a request-scoped proxy) — `Authorization` scheme and `DPoP` proof. */
+    @Inject
+    lateinit var httpRequest: HttpServerRequest
+
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
+    private val throttle by lazy { McpThrottleSupport(auditor, metrics, rateLimiter) }
+
+    private val audienceRefusal by lazy { McpAudienceRefusal(throttle, metrics) }
+
+    private val customerBranch by lazy {
+        if (!::customerDeps.isInitialized || !::httpRequest.isInitialized) return@lazy null
+        val channel = customerDeps.channel
+        channel.admission?.let { admission ->
+            McpCustomerBranch(admission, customerDeps, shared = channel.sharedThrottles) {
+                customerDeps.clientAddress.key(httpRequest)
+            }
+        }
+    }
+
+    /**
+     * Refusals decided before any method runs, in order: the customer-channel branch (ADR-0383 D1 /
+     * ADR-0385 D1), then the RFC 8707 audience refusal (#16622). Null means dispatch normally.
+     *
+     * #16847 (owner decision 2026-11-21): the customer channel has its OWN root, [CUSTOMER_ROOT]
+     * ([CustomerMcpEndpoint], DPoP-only, 8443-only). The branch is chosen by WHICH RESOURCE matched
+     * ([handleCustomer] vs [handle]), never by re-reading the request path: a raw-path comparison let
+     * `/customer/mcp;a=b` or `/customer/%6dcp` reach [CustomerMcpEndpoint] and take the staff dispatch
+     * (review of #17004). [McpPathCanonicalFilter] refuses such paths outright. The branch runs only there, and there a token that
+     * is not a customers-realm token is refused rather than handed to the staff path. On `/mcp` the
+     * branch never runs; [CallerContextResolver] refuses a customers-realm token on the staff path.
+     */
+    private fun preDispatch(customer: Boolean, method: String, id: JsonNode, params: JsonNode): Response? =
+        if (customer) {
+            val branch = customerBranch
+            if (branch == null) {
+                Response.status(Response.Status.NOT_FOUND).build()
+            } else {
+                branch.handle(
+                    callerResolver.token,
+                    httpRequest.getHeader(AUTHORIZATION_HEADER),
+                    httpRequest.headers().getAll(DPOP_HEADER).orEmpty(),
+                    method,
+                    id,
+                    params,
+                )
+            }
+        } else {
+            staffPreDispatch(method, params)
+        }
+
+    /**
+     * #16590 defence in depth, as an ALLOWLIST (review of #17099). On the staff root an
+     * `Authorization` header, when present, must be exactly ONE header whose whole value is
+     * `Bearer <b64token>` (RFC 6750 §2.1: scheme case-insensitive, one SP, b64token, nothing else).
+     * Anything else is refused before the audience check: a DPoP-looking credential (or a
+     * customers-realm `iss` on a valid Bearer) gets the 401 that points at the customer root; every
+     * other shape (comma lists, tabs, double spaces, non-ASCII whitespace, other schemes, several
+     * headers, an unreadable header) is malformed, 400 `invalid_request`. FAIL CLOSED throughout.
+     */
+    private fun staffPreDispatch(method: String, params: JsonNode): Response? {
+        val authorization = authorizationHeaders() ?: return audienceRefusal.respondUnreadableCredential(method)
+        if (authorization.size > 1) return audienceRefusal.respondAmbiguousCredential(method)
+        val value = authorization.firstOrNull()
+        val customerCredential = callerResolver.presentsCustomerRealmToken() ||
+            (value != null && DPOP_LOOKING.containsMatchIn(value))
+        return when {
+            customerCredential -> audienceRefusal.respondCustomerOnStaffRoot(
+                method,
+                params,
+                if (customerBranch == null) {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_CHANNEL_OFF
+                } else {
+                    McpMetricsPort.CustomerRejectReason.CUSTOMER_ROOT_REQUIRED
+                },
+                callerResolver.token.getClaim<String?>("azp"),
+            )
+            value != null && !STAFF_BEARER.matches(value) -> audienceRefusal.respondMalformedCredential(method)
+            callerResolver.presentsForeignAudience() -> audienceRefusal.respond(method, params)
+            else -> null
+        }
+    }
+
+    /**
+     * Every `Authorization` header value, or null — refused by the caller (fail closed) — when the
+     * request is absent or reading it THROWS. `httpRequest` is CDI-injected on every served request
+     * (`@Inject` below the class header); only a hand-built instance lacks it.
+     */
+    @Suppress("TooGenericExceptionCaught") // any failure to read the header must refuse, never admit
+    private fun authorizationHeaders(): List<String>? {
+        if (!::httpRequest.isInitialized) return null
+        return try {
+            httpRequest.headers().getAll(AUTHORIZATION_HEADER).orEmpty()
+        } catch (e: Exception) {
+            log.warnf("refusing: Authorization header unreadable (%s)", e.javaClass.simpleName)
+            null
+        }
+    }
+
+    /** The staff root. Never runs the customer branch, whatever the request path says. */
     @POST
+    fun handle(body: JsonNode): Response = dispatch(body, customer = false)
+
+    /** The customer root's entry, called only by [CustomerMcpEndpoint]; never runs the staff audience path. */
+    fun handleCustomer(body: JsonNode): Response = dispatch(body, customer = true)
+
     @Suppress("ReturnCount")
-    fun handle(body: JsonNode): Response {
+    private fun dispatch(body: JsonNode, customer: Boolean): Response {
         val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
         val method = body.path("method").asText("")
         val params = body.path("params")
@@ -122,6 +234,34 @@ class McpEndpoint(
         // Bounded before it becomes a tag: `method` is a caller-supplied string on a public agent
         // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
         metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
+
+        // Fleet NUL rule (#5913, #16628): refused before the audience check and the customer branch, so
+        // no tool, consent call or audit write ever sees the raw value. The id is echoed only if it
+        // is NUL-free.
+        if (McpInputBounds.containsNul(body)) {
+            log.warn("refused JSON-RPC request containing U+0000")
+            metrics.inputRefused(McpMetricsPort.InputRefusal.NUL)
+            val safeId = body.path("id").takeUnless { it.isMissingNode || McpInputBounds.containsNul(it) }
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(
+                    McpResponse(
+                        id = safeId ?: NullNode.instance,
+                        error = McpError(McpErrorCode.INVALID_PARAMS, NUL_REFUSED),
+                    ),
+                )
+                .build()
+        }
+
+        // ADR-0383 D1 / ADR-0385 D1: while the customer channel is on, a call with no token gets the
+        // RFC 9728 401 and a customers-realm token is admitted (or refused) on its own branch — it
+        // never reaches the staff audience check, the agent/OBO resolver, or a staff tool.
+        // RFC 8707 / ADR-0383 D1 (#16622): a token issued for another resource is refused before
+        // any method runs, on every method. The tenant-wide `quarkus.oidc.token.audience` cannot do
+        // this, because /api/v1/mcp/sessions is called with the operator's own token, whose
+        // audience is not this server.
+        // The fleet NUL guard above runs FIRST, for both paths: no branch, refusal or audit sees a
+        // raw U+0000, and no response echoes one (review of #16721).
+        preDispatch(customer, method, id, params)?.let { return it }
 
         val result: Any = when (method) {
             "initialize" -> InitializeResult(
@@ -137,7 +277,7 @@ class McpEndpoint(
             "ping" -> mapOf("pong" to true)
             "tools/list" -> return handleToolsList(id)
             "tools/call" -> return handleToolCall(id, params)
-            else -> return error(id, McpErrorCode.METHOD_NOT_FOUND, "Method not found: $method")
+            else -> return error(id, McpErrorCode.METHOD_NOT_FOUND, "Method not found: ${McpInputBounds.echo(method)}")
         }
         return Response.ok(McpResponse(id = id, result = result)).build()
     }
@@ -156,6 +296,10 @@ class McpEndpoint(
         } catch (ex: Exception) {
             log.warnf("caller context resolution failed for tools/list: %s — denying", ex.message)
             null
+        }
+        // Throttle BEFORE any PDP call (ADR-0383 D5).
+        throttle.toolsListRefusal(ctx, registry.tools.size)?.let {
+            return error(id, RATE_LIMITED, "Rate limit exceeded: $it")
         }
         if (ctx == null) {
             runBlocking {
@@ -208,14 +352,15 @@ class McpEndpoint(
         return Response.ok(McpResponse(id = id, result = ToolsListResult(filtered.tools))).build()
     }
 
-    @Suppress("ReturnCount", "TooGenericExceptionCaught")
+    @Suppress("ReturnCount")
     private fun handleToolCall(id: JsonNode, params: JsonNode): Response {
         val startedAt = System.nanoTime()
-        val toolName = params.path("name").asText("")
+        // Bounded for every reflection below — response text, audit record and log line (#16628).
+        val toolName = McpInputBounds.echo(params.path("name").asText(""))
         val arguments = params.path("arguments").let { if (it.isMissingNode) mapper.createObjectNode() else it }
         // Argument KEY names only — the values are customer data and must never enter the audit
-        // trail (McpCallAuditor KDoc).
-        val argumentKeys = arguments.fieldNames().asSequence().sorted().toList()
+        // trail (McpCallAuditor KDoc); count and length are bounded (#16628).
+        val argumentKeys = McpInputBounds.auditKeys(arguments)
         // Bounded before it becomes a tag: an unmapped tool name is caller-supplied, so it is
         // reported as the single "unmapped" value rather than as itself (cardinality contract). The
         // audit event still carries the exact name — that is a per-call record, not a label.
@@ -224,8 +369,7 @@ class McpEndpoint(
         // Caller authentication (ADR-0195): the acting agent + presented consent come from the
         // validated OAuth token. A malformed agent token (e.g. no consent_id) fails CLOSED — a
         // money-adjacent surface never degrades to an unscoped identity.
-        val ctx = resolveCaller(toolName, argumentKeys)
-            ?: return toolError(id, "Authorization unavailable")
+        val ctx = resolveCaller().getOrElse { return unauthenticated(id, toolName, argumentKeys, it) }
 
         // Audit and meter together, at every terminal branch, so the aggregate can never disagree
         // with the per-call trail about what happened.
@@ -234,29 +378,103 @@ class McpEndpoint(
             decision: McpCallAuditor.Decision,
             result: AuditResult,
             reason: String? = null,
+            persist: Boolean = true,
         ) = runBlocking {
-            auditor.toolCallCompleted(
-                McpCallAuditor.ToolCall(
-                    agentId = ctx.agentId,
-                    consentId = ctx.consentId,
-                    tool = toolName,
-                    capability = capability,
-                    decision = decision,
-                    result = result,
-                    reason = reason,
-                    argumentKeys = argumentKeys,
-                    actChain = ctx.actChain,
-                    sessionId = ctx.sessionId,
-                ),
+            if (persist) {
+                auditor.toolCallCompleted(
+                    McpCallAuditor.ToolCall(
+                        agentId = ctx.agentId,
+                        consentId = ctx.consentId,
+                        tool = toolName,
+                        capability = capability,
+                        decision = decision,
+                        result = result,
+                        reason = reason,
+                        argumentKeys = argumentKeys,
+                        actChain = ctx.actChain,
+                        sessionId = ctx.sessionId,
+                    ),
+                )
+            }
+            metrics.toolCallCompleted(
+                toolTag,
+                decision,
+                result,
+                Duration.ofNanos(System.nanoTime() - startedAt),
+                // ADR-0384 D1: the channel the resolver's admitting branch recorded, never a claim.
+                McpMetricsPort.ChannelTags(ctx.channel),
             )
-            metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
+            // A PDP outage is DENIED + UNAVAILABLE: the platform failed to answer, so it is a server fault
+            // for an availability indicator even though no tool ran.
+            if (result == AuditResult.FAILURE || decision == McpCallAuditor.Decision.UNAVAILABLE) {
+                metrics.toolCallFailed(
+                    toolTag,
+                    McpMetricsPort.ToolFailureKind.of(reason, decision),
+                    McpMetricsPort.ChannelTags(ctx.channel),
+                )
+            }
         }
 
-        // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
+        // Throttle BEFORE any policy call or tool execution (ADR-0383 D5): a denied flood must not
+        // cost one PDP round trip per request. Every throttled request is metered; the audit trail
+        // keeps one row per caller per window (McpRateLimiter.shouldAuditThrottle), so a flood
+        // cannot become an unbounded audit-write amplifier.
         val capability = registry.capabilities[toolName]
+        val throttleReason = throttle.refusalReason(ctx.agentId)
+        if (throttleReason != null) {
+            val persist = throttle.callRefused(ctx.agentId)
+            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, throttleReason, persist)
+            return toolError(id, "Rate limit exceeded: $throttleReason")
+        }
+        try {
+            return authorizeAndExecute(
+                CallScope(id, toolName, arguments, ctx, capability) { c, d, r, why ->
+                    audit(c, d, r, why)
+                },
+            )
+        } finally {
+            rateLimiter.release(ctx.agentId)
+        }
+    }
+
+    /**
+     * No resolvable caller: bounded by the shared anonymous bucket BEFORE any audit or identity
+     * meter is written, so an unauthenticated flood costs neither. Within budget it is denied (and
+     * audited) as before.
+     */
+    private fun unauthenticated(id: JsonNode, toolName: String, keys: List<String>, cause: Throwable): Response {
+        throttle.anonymousCallRefusal(toolName, keys)?.let { return toolError(id, "Rate limit exceeded: $it") }
+        log.warnf("caller context resolution failed for %s: %s — denying", toolName, cause.message)
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
+        throttle.auditAnonymousCall(toolName, keys, "caller authentication failed")
+        return toolError(id, "Authorization unavailable")
+    }
+
+    /** Everything the PDP gate and tool run need for one admitted call, in one parameter. */
+    private class CallScope(
+        val id: JsonNode,
+        val toolName: String,
+        val arguments: JsonNode,
+        val ctx: ConsentContext,
+        val capability: String?,
+        val audit: (String?, McpCallAuditor.Decision, AuditResult, String?) -> Unit,
+    )
+
+    /** The PDP gate and the tool run; only reached once the caller is inside its throttle budget. */
+    // ReturnCount: each early return is one deny-by-default gate (unmapped, PDP outage, policy deny);
+    // TooGenericExceptionCaught: a PDP transport error of any type must fail closed.
+    @Suppress("ReturnCount", "TooGenericExceptionCaught")
+    private fun authorizeAndExecute(scope: CallScope): Response {
+        val id = scope.id
+        val toolName = scope.toolName
+        val arguments = scope.arguments
+        val ctx = scope.ctx
+        val capability = scope.capability
+        val audit = scope.audit
+        // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
         if (capability == null) {
             audit(null, McpCallAuditor.Decision.DENY, AuditResult.DENIED, "no capability mapping")
-            return toolError(id, "Tool not permitted: $toolName")
+            return toolError(id, "Tool not permitted: ${McpInputBounds.echo(toolName)}")
         }
 
         // Gate on the SHARED ADR-0034 PDP (input.action = the capability). The principal class
@@ -288,16 +506,6 @@ class McpEndpoint(
             val reason = decision.reason ?: "no matching allow rule"
             audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, reason)
             return toolError(id, "Denied by policy: $reason")
-        }
-
-        // Rate limit AFTER the PDP decision, so a denied caller cannot burn the acting agent's
-        // window, and BEFORE the tool executes, which is the fan-out into consent/account/balance/
-        // transaction-service this bounds (#2409). A throttled call is a DENY like any other: same
-        // audit event, same meter, so the aggregate cannot disagree with the trail.
-        val limit = rateLimiter.check(ctx.agentId)
-        if (limit != McpRateLimiter.Outcome.ALLOWED) {
-            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, limit.reason)
-            return toolError(id, "Rate limit exceeded: ${limit.reason}")
         }
 
         return execute(id, toolName, arguments, ctx) { result, reason ->
@@ -341,34 +549,18 @@ class McpEndpoint(
         ).build()
     }
 
-    // Resolve the caller's identity + consent, or audit the failure and return null (the caller
-    // then denies with "Authorization unavailable"). Fails closed on any resolution error.
+    // Resolve the caller's identity + consent; a failure is returned (not audited here) so the caller
+    // can spend the anonymous throttle BEFORE any audit or meter is written. Fails closed on any error.
     @Suppress("TooGenericExceptionCaught")
-    private fun resolveCaller(toolName: String, argumentKeys: List<String>): ConsentContext? = try {
-        resolveContext()
+    private fun resolveCaller(): Result<ConsentContext> = try {
+        Result.success(resolveContext())
     } catch (ex: Exception) {
-        log.warnf("caller context resolution failed for %s: %s — denying", toolName, ex.message)
-        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
-        runBlocking {
-            auditor.toolCallCompleted(
-                McpCallAuditor.ToolCall(
-                    agentId = "unknown",
-                    consentId = "none",
-                    tool = toolName,
-                    capability = null,
-                    decision = McpCallAuditor.Decision.UNAVAILABLE,
-                    result = AuditResult.DENIED,
-                    reason = "caller authentication failed",
-                    argumentKeys = argumentKeys,
-                ),
-            )
-        }
-        null
+        Result.failure(ex)
     }
 
     // ADR-0195 step 4: the phase-1 placeholder identity is REMOVED. The acting agent + consent come
     // ONLY from a validated OAuth token (CallerContextResolver) — no agent token is treated the same
-    // as a malformed one: resolveCaller's catch below denies, audits, and meters
+    // as a malformed one: unauthenticated() denies, audits, and meters
     // CallerIdentitySource.RESOLUTION_FAILED. ANONYMOUS_FALLBACK can no longer fire; it stays in the
     // enum as the historical record of the #2206 blocker this cutover closes — the metric that used
     // to track it now reads zero by construction, not because fallback traffic happened to taper off.
@@ -385,11 +577,31 @@ class McpEndpoint(
     private fun error(id: JsonNode, code: Int, message: String): Response =
         Response.ok(McpResponse(id = id, error = McpError(code, message))).build()
 
-    private companion object {
+    companion object {
+        /** The customer channel's own path root (#16847); literal in [CustomerMcpEndpoint]'s `@Path`. */
+        const val CUSTOMER_ROOT = "/customer/mcp"
+
+        /** JSON-RPC implementation-defined server error range (-32000..-32099): request throttled. */
+        private const val RATE_LIMITED = -32029
+
+        private const val DPOP_HEADER = "DPoP"
+        private const val AUTHORIZATION_HEADER = "Authorization"
+
+        /** RFC 6750 §2.1 `Bearer` credentials, whole value: one SP, b64token, nothing else. */
+        private val STAFF_BEARER = Regex("^[Bb][Ee][Aa][Rr][Ee][Rr] [A-Za-z0-9\\-._~+/]+=*$")
+
+        /**
+         * A value that STARTS with the DPoP scheme under any whitespace (Unicode included): the
+         * customer refusal (401). Other non-allowlisted values — comma lists among them — are 400.
+         */
+        private val DPOP_LOOKING = Regex("^[\\s\\p{Z}]*DPoP([\\s\\p{Z},]|$)", RegexOption.IGNORE_CASE)
+
+        private const val NUL_REFUSED = "Invalid params: U+0000 is not permitted in any string"
+
         /**
          * The JSON-RPC methods this server implements. Used ONLY to bound the `method` metric tag —
          * the dispatch itself is the `when` in [handle], which stays the single source of behaviour.
          */
-        val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
+        private val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
     }
 }

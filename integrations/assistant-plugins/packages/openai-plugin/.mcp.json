@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "openbank": {
+      "type": "streamable-http",
+      "url": "https://mcp.open-bank.tech/customer/mcp"
+    }
+  }
+}

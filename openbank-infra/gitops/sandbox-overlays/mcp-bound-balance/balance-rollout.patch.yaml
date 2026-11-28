@@ -1,0 +1,67 @@
+- op: test
+  path: /spec/template/spec/containers/0/name
+  value: balance-service
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value:
+    name: https-native
+    containerPort: 8443
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-balance-server
+    mountPath: /mnt/mcp-balance-server
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-balance-client-trust
+    mountPath: /mnt/mcp-balance-client-trust
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-delegation-trust
+    mountPath: /mnt/mcp-delegation-trust
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: mcp-read-tls-config
+    mountPath: /mnt/mcp-read-tls-config
+    readOnly: true
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-balance-server
+    secret:
+      secretName: balance-mcp-server-tls
+      items:
+      - key: tls.crt
+        path: tls.crt
+      - key: tls.key
+        path: tls.key
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-balance-client-trust
+    secret:
+      secretName: balance-mcp-client-trust
+      items:
+      - key: ca.crt
+        path: ca.crt
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-delegation-trust
+    secret:
+      secretName: balance-mcp-delegation-trust
+      items:
+      - key: ca.crt
+        path: ca.crt
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: mcp-read-tls-config
+    configMap:
+      name: balance-mcp-read-tls

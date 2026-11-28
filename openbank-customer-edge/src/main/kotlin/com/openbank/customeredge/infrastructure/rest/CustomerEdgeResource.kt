@@ -14,8 +14,10 @@ import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
 import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
+import com.openbank.customeredge.infrastructure.webauthn.nativeMcpAppOwner
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.domain.account.CzechPaymentSymbol
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.web.SyntheticTaintContext
@@ -47,6 +49,7 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.HexFormat
 import java.util.UUID
@@ -236,6 +239,29 @@ class CustomerEdgeResource(
     // (keyed by caseId) so OnboardingResumeService can replay it on the four-eyes decision.
     @ConfigProperty(name = "openbank.edge.identity-resume-enabled", defaultValue = "false")
     var identityResumeEnabled: Boolean = false
+
+    private var mcpConnectEnabled = false
+
+    @Inject
+    fun configureMcpConnect(
+        @ConfigProperty(name = "openbank.edge.mcp-connect-enabled", defaultValue = "false") enabled: Boolean,
+    ) {
+        mcpConnectEnabled = enabled
+    }
+
+    @field:ConfigProperty(name = "openbank.edge.mcp-native-connect-enabled", defaultValue = "false")
+    internal var mcpNativeConnectEnabled: Boolean = false
+
+    // #16000 part 4 (ADR-0249 D3 amendment): when on, a DELEGATED domestic payment is created
+    // through domestic-payment's reservation-bound route and its reservation is settled by the
+    // payment's outcome in delegation-service, not confirmed here on the rail's 2xx. Default off =
+    // the legacy create + confirm-on-2xx, byte for byte. Turn on only after the delegation outcome
+    // consumer and the rail's bound route are live (switch-on order in the threat model).
+    @field:ConfigProperty(name = "openbank.edge.delegated-payment-bound-create.enabled", defaultValue = "false")
+    var delegatedPaymentBoundCreateEnabled: Boolean = false
+
+    /** Back-off between bound-create retries; a seam so tests do not sleep. */
+    internal var boundCreateSleeper: (Long) -> Unit = { Thread.sleep(it) }
 
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
@@ -2812,10 +2838,12 @@ class CustomerEdgeResource(
         idempotencyKey: String?,
     ): SpendReservationOutcome {
         val grantId = debit.delegationId ?: return SpendReservationOutcome.NotDelegated
+        // Kept: the bound create must present the reservation's OWN key, which the rail compares.
+        val reservationKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString()
         val body = objectMapper.createObjectNode().apply {
             put("amount", amount)
             put("currency", currency)
-            put("idempotencyKey", idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString())
+            put("idempotencyKey", reservationKey)
             put("operationType", "DOMESTIC_PAYMENT")
         }
         val resp = runCatching {
@@ -2856,25 +2884,39 @@ class CustomerEdgeResource(
                     .build(),
             )
         }
-        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId))
+        // delegation-service answers 201 for a replay too and says so in this header. Absent means
+        // "cannot tell", which must be read as a replay: the bound path never releases one.
+        val replayed = resp?.getHeaderString("X-Idempotency-Replayed")?.trim()?.lowercase() != "false"
+        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId, reservationKey, replayed))
     }
 
     /**
-     * Settle a held reservation: [confirmed] keeps the headroom consumed, otherwise it comes back.
+     * The ONE place the edge settles a held reservation. [disposition] says how: CONFIRM keeps the
+     * headroom consumed, RELEASE gives it back, LEAVE_TO_OUTCOME does nothing here because the
+     * payment's terminal outcome settles it in delegation-service (#16000).
      *
-     * Every failure branch after a successful reserve must reach this with `confirmed = false`. A
-     * leaked reservation silently shrinks the delegate's ceiling until it expires, which is a
+     * Every failure branch after a successful reserve where the rail created nothing must reach
+     * this with RELEASE. A leaked reservation silently shrinks the delegate's ceiling, which is a
      * defect the customer experiences as their limit quietly shrinking for no stated reason.
      *
-     * "Confirmed" here means the instruction was ACCEPTED by the rail, not that it settled in
-     * clearing. Tracking true settlement would need an async outcome this synchronous route does
-     * not have; a payment that is accepted and later fails in clearing therefore leaves the
-     * headroom consumed. That over-counts rather than under-counts, which is the safe direction
-     * for a ceiling, and it is stated here rather than implied.
+     * LEGACY PATH ONLY (`openbank.edge.delegated-payment-bound-create.enabled=false`): CONFIRM
+     * means the instruction was ACCEPTED by the rail, not that it settled in clearing, so a payment
+     * that is accepted and later REJECTED/CANCELLED leaves the headroom consumed — an over-count,
+     * the safe direction for a ceiling. On the bound path this no longer holds: the edge never
+     * confirms, and the outcome releases a rejected payment's headroom. The legacy branch and this
+     * paragraph go together when a later cleanup PR removes the switch.
      */
-    private fun settleDelegatedSpend(reservation: SpendReservation?, customer: CustomerIdentity, confirmed: Boolean) {
+    private fun settleDelegatedSpend(
+        reservation: SpendReservation?,
+        customer: CustomerIdentity,
+        disposition: ReservationDisposition,
+    ) {
         if (reservation == null) return
-        val verb = if (confirmed) "confirm" else "release"
+        val verb = when (disposition) {
+            ReservationDisposition.CONFIRM -> "confirm"
+            ReservationDisposition.RELEASE -> "release"
+            ReservationDisposition.LEAVE_TO_OUTCOME -> return
+        }
         runCatching {
             upstream.post(
                 "$delegationServiceUrl/api/v1/delegations/${reservation.delegationId}" +
@@ -2977,11 +3019,24 @@ class CustomerEdgeResource(
     @Path("/domestic-payments")
     @Authorize(action = "customer.payments.initiate")
     @Blocking
-    @Suppress("LongMethod", "CyclomaticComplexMethod")
     fun createDomesticPayment(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response = initiateDomesticPayment(body, idempotencyKey, scaChallengeId)
+
+    /**
+     * The domestic initiation path, shared by the app's own route and the ADR-0383 D6 proposal
+     * approval. [scaBinding] can only ADD dynamic-linking fields the challenge must match
+     * (approvalRequestId + payloadSha256 for a proposal) and report whether the challenge was
+     * spent; it never removes or relaxes the gate.
+     */
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
+    internal fun initiateDomesticPayment(
+        body: String,
+        idempotencyKey: String?,
+        scaChallengeId: String?,
+        scaBinding: ProposalScaBinding? = null,
     ): Response {
         val customer = customer()
         // Read the debtor with Jackson (same last-wins semantics as the upstream) so the value we
@@ -3101,21 +3156,43 @@ class CustomerEdgeResource(
         // The challenge belongs to the INITIATOR (the delegate's own device), not to the account
         // holder — a delegate authenticates as themselves; the grant is what makes it their debit
         // to make. So `customer` here stays the delegate on the delegated path, deliberately.
-        scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let {
-            settleDelegatedSpend(reservation, customer, confirmed = false)
+        scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic", scaBinding)?.let {
+            settleDelegatedSpend(reservation, customer, ReservationDisposition.RELEASE)
             return it
         }
-        val resp = upstream.post(
-            "$domesticPaymentServiceUrl/api/v1/domestic-payments",
-            customer.partyId.toString(),
-            enriched,
-            idempotencyKey,
-        )
-        settleDelegatedSpend(
-            reservation,
-            customer,
-            confirmed = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL,
-        )
+        val created = if (reservation != null && delegatedPaymentBoundCreateEnabled) {
+            DelegatedBoundCreate.create(
+                upstream,
+                objectMapper,
+                domesticPaymentServiceUrl,
+                enriched,
+                reservation,
+                customer.partyId.toString(),
+                boundCreateSleeper,
+            )
+        } else {
+            val legacy = upstream.post(
+                "$domesticPaymentServiceUrl/api/v1/domestic-payments",
+                customer.partyId.toString(),
+                enriched,
+                idempotencyKey,
+            )
+            val accepted = legacy.statusInfo.family == Response.Status.Family.SUCCESSFUL
+            DelegatedCreate(legacy, if (accepted) ReservationDisposition.CONFIRM else ReservationDisposition.RELEASE)
+        }
+        settleDelegatedSpend(reservation, customer, created.disposition)
+        created.railRefusalCode?.let { code ->
+            // The customer got a neutral answer; the rail's own reason stays in the audit trail.
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = "payments.domestic",
+                result = "DENIED",
+                resourceId = debit.delegationId,
+                details = mapOf("reason" to "DELEGATED_BOUND_CREATE_REFUSED", "railCode" to code),
+            )
+        }
+        val resp = created.response
         // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
         // the money settled. Bind the created payment id to the session so the receiver's status poll
         // can reconcile true settlement, and only flip to PAID now if the create already reached the
@@ -3206,6 +3283,12 @@ class CustomerEdgeResource(
         val id = runCatching { UUID.fromString(paymentId) }.getOrNull()
             ?: return notFound("Payment not found")
         val resp = upstream.get("$domesticPaymentServiceUrl/api/v1/domestic-payments/$id", customer.partyId.toString())
+        if (resp.status in Response.Status.BAD_GATEWAY.statusCode..Response.Status.GATEWAY_TIMEOUT.statusCode) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(mapOf("error" to "Payment status temporarily unavailable"))
+                .build()
+        }
         if (resp.status != 200) return notFound("Payment not found")
         val payJson = (resp.entity as? String).orEmpty()
         val debtorAccountId = extractTextField(objectMapper, payJson, "debtorAccountId")
@@ -3213,6 +3296,402 @@ class CustomerEdgeResource(
             ?: return notFound("Payment not found")
         if (!ownsAccount(debtorAccountId, customer.partyId)) return notFound("Payment not found")
         return resp
+    }
+
+    // --- ADR-0385: customer review and selection for a pending connect ---
+
+    @GET
+    @Path("/mcp/connect-requests")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun listMcpConnectRequests(): Response = withMcpConnectCustomer { party ->
+        val response = upstream.get(mcpConnectRequestsUrl(), party.toString())
+        mcpConnectResult(response, CustomerMcpConnectRequests::class.java) { view ->
+            view.requests.all { it.partyId == party }
+        }
+    }
+
+    @GET
+    @Path("/mcp/connect-requests/{requestRef}")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun getMcpConnectRequest(@PathParam("requestRef") requestRef: String): Response =
+        withMcpConnectRequest(requestRef) { path, party ->
+            val response = upstream.getToService(delegationServiceUrl, path, emptyMap(), party.toString())
+            mcpConnectReviewResult(response, party, requestRef)
+        }
+
+    @POST
+    @Path("/mcp/connect-requests/{requestRef}/selection")
+    @Authorize(action = "customer.mcp-connect.select")
+    @Blocking
+    fun selectMcpConnectAccounts(
+        @PathParam("requestRef") requestRef: String,
+        selection: CustomerMcpConnectSelection?,
+    ): Response = withMcpConnectRequest(requestRef) { path, party ->
+        if (selection == null) {
+            badRequest("Account selection is required")
+        } else {
+            try {
+                selection.validateElements()
+            } catch (e: IllegalArgumentException) {
+                return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
+            }
+            val response = upstream.putToService(
+                delegationServiceUrl,
+                "$path/selection",
+                party.toString(),
+                objectMapper.writeValueAsString(selection),
+            )
+            mcpConnectReviewResult(response, party, requestRef)
+        }
+    }
+
+    @GET
+    @Path("/mcp/connect-requests-v2")
+    @Authorize(action = "customer.mcp-connect.read")
+    @Blocking
+    fun listMcpConnectRequestsV2(): Response = withMcpConnectCustomer { party ->
+        val response = upstream.get(mcpConnectRequestsUrl(includeHosted = true), party.toString())
+        mcpConnectResult(response, CustomerMcpConnectRequests::class.java) { view ->
+            view.requests.all { it.partyId == party }
+        }
+    }
+
+    @GET
+    @Path("/mcp/connect-requests-v2/{requestRef}")
+    @Authorize(action = "customer.mcp-native-connect.read")
+    @Blocking
+    fun getMcpConnectRequestV2(@PathParam("requestRef") requestRef: String): Response =
+        withMcpConnectRequest(requestRef, includeHosted = true) { path, party ->
+            val response = upstream.getToService(delegationServiceUrl, path, emptyMap(), party.toString())
+            mcpConnectReviewResult(response, party, requestRef)
+        }
+
+    @POST
+    @Path("/mcp/connect-requests-v2/{requestRef}/selection")
+    @Authorize(action = "customer.mcp-native-connect.select")
+    @Blocking
+    fun selectMcpConnectAccountsV2(
+        @PathParam("requestRef") requestRef: String,
+        selection: CustomerMcpConnectSelection?,
+    ): Response = withMcpConnectRequest(requestRef, includeHosted = true) { path, party ->
+        if (selection == null) {
+            badRequest("Account selection is required")
+        } else {
+            try {
+                selection.validateElements()
+            } catch (e: IllegalArgumentException) {
+                return@withMcpConnectRequest badRequest(e.message ?: "Invalid account selection")
+            }
+            val response = upstream.putToService(
+                delegationServiceUrl,
+                "$path/selection",
+                party.toString(),
+                objectMapper.writeValueAsString(selection),
+            )
+            mcpConnectReviewResult(response, party, requestRef)
+        }
+    }
+
+    @GET
+    @Path("/mcp/connections")
+    @Authorize(action = "customer.mcp-native-connect.connections.read")
+    @Blocking
+    fun listMcpConnections(): Response = withMcpConnectCustomer(allowNative = true) { party ->
+        val response = upstream.get(mcpConnectionsUrl(), party.toString())
+        mcpConnectResult(response, CustomerMcpConnections::class.java) { view ->
+            view.connections.all { it.partyId == party }
+        }
+    }
+
+    @POST
+    @Path("/mcp/connections/{connectionId}/revoke")
+    @Authorize(action = "customer.mcp-native-connect.connections.revoke")
+    @Blocking
+    fun revokeMcpConnection(@PathParam("connectionId") connectionId: UUID): Response {
+        val revokeUrl = "${mcpConnectionsUrl()}/$connectionId/revoke"
+        return withMcpConnectCustomer(allowNative = true) { party ->
+            val response = upstream.post(revokeUrl, party.toString(), "", idempotencyKey = connectionId.toString())
+            when (response.status) {
+                Response.Status.NO_CONTENT.statusCode -> Response.noContent().build()
+                Response.Status.FORBIDDEN.statusCode -> forbidden("MCP connect revocation is not permitted")
+                Response.Status.NOT_FOUND.statusCode -> notFound("MCP connection was not found")
+                else -> mcpConnectUnavailable()
+            }
+        }
+    }
+
+    private fun mcpConnectionsUrl(): String =
+        "$delegationServiceUrl/api/v1/delegations/mcp-connect/customer/connections"
+
+    private fun withMcpConnectCustomer(allowNative: Boolean = false, call: (UUID) -> Response): Response {
+        val response = when {
+            !mcpConnectEnabled -> notFound("MCP connect is unavailable")
+            this::requestHeaders.isInitialized && !requestHeaders.getHeaderString(ACTING_FOR_HEADER).isNullOrBlank() ->
+                forbidden("MCP connect requires the customer's own app session")
+            else -> (appSessionCustomer()?.partyId ?: nativeMcpConnectParty(allowNative))?.let(call)
+                ?: forbidden("MCP connect requires the customer's own app session")
+        }
+        return Response.fromResponse(response).header("Cache-Control", "no-store").build()
+    }
+
+    private fun nativeMcpConnectParty(allowNative: Boolean): UUID? =
+        if (allowNative && mcpNativeConnectEnabled) nativeMcpAppOwner(jwt, actingFor = null)?.partyId else null
+
+    private fun withMcpConnectRequest(
+        requestRef: String,
+        includeHosted: Boolean = false,
+        call: (String, UUID) -> Response,
+    ): Response = withMcpConnectCustomer(allowNative = includeHosted) { party ->
+        if (MCP_CONNECT_REQUEST_REF.matches(requestRef)) {
+            call("${mcpConnectRequestsPath(includeHosted)}/$requestRef", party)
+        } else {
+            badRequest("Invalid MCP connect request reference")
+        }
+    }
+
+    private fun mcpConnectRequestsUrl(includeHosted: Boolean = false): String =
+        "$delegationServiceUrl${mcpConnectRequestsPath(includeHosted)}"
+
+    private fun mcpConnectRequestsPath(includeHosted: Boolean): String {
+        val requests = if (includeHosted) "requests-v2" else "requests"
+        return "/api/v1/delegations/mcp-connect/customer/$requests"
+    }
+
+    private fun mcpConnectReviewResult(response: Response, party: UUID, requestRef: String): Response =
+        mcpConnectResult(response, CustomerMcpConnectReview::class.java) {
+            it.partyId == party && it.requestRef == requestRef
+        }
+
+    private fun <T : Any> mcpConnectResult(
+        response: Response,
+        type: Class<T>,
+        isExpectedReview: (T) -> Boolean,
+    ): Response = when (response.status) {
+        200 -> runCatching {
+            val view = requireNotNull(objectMapper.readValue(response.entity as String, type))
+            require(isExpectedReview(view))
+            Response.ok(view).build()
+        }.getOrElse { mcpConnectUnavailable() }
+        400 -> badRequest("Invalid MCP connect request")
+        403 -> forbidden("MCP connect request is not permitted")
+        404 -> notFound("MCP connect request was not found")
+        Response.Status.CONFLICT.statusCode -> Response.status(Response.Status.CONFLICT)
+            .entity(mapOf("error" to "MCP connect request is no longer selectable")).build()
+        else -> mcpConnectUnavailable()
+    }
+
+    private fun mcpConnectUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("error" to "MCP connect is temporarily unavailable")).build()
+
+    // --- ADR-0383 D6: payment proposals from a connected MCP client ---
+
+    /**
+     * The customer's open payment PROPOSALS — instructions a connected MCP client asked the bank to
+     * put in front of them. Nothing here has been paid. Each carries the exact canonical
+     * instruction, its payload hash and the approvalRequestId the app's SCA APPROVAL challenge must
+     * link, and the client that proposed it (the app labels it as theirs, never as the customer's).
+     */
+    @GET
+    @Path("/mcp-proposals")
+    @Authorize(action = "customer.mcp-proposals.read")
+    @Blocking
+    fun listMcpProposals(): Response {
+        val customer = appSessionCustomer() ?: return forbidden(MCP_PROPOSAL_APP_ONLY)
+        val party = customer.partyId.toString()
+        return upstream.get("$delegationServiceUrl/api/v1/payment-proposals?partyId=$party", party)
+    }
+
+    @GET
+    @Path("/mcp-proposals/{id}")
+    @Authorize(action = "customer.mcp-proposals.read")
+    @Blocking
+    fun getMcpProposal(@PathParam("id") id: UUID): Response {
+        val customer = appSessionCustomer() ?: return forbidden(MCP_PROPOSAL_APP_ONLY)
+        val party = customer.partyId.toString()
+        return upstream.get("$delegationServiceUrl/api/v1/payment-proposals/$id?partyId=$party", party)
+    }
+
+    @POST
+    @Path("/mcp-proposals/{id}/reject")
+    @Authorize(action = "customer.mcp-proposals.decide")
+    @Blocking
+    fun rejectMcpProposal(@PathParam("id") id: UUID): Response {
+        val customer = appSessionCustomer() ?: return forbidden(MCP_PROPOSAL_APP_ONLY)
+        val party = customer.partyId.toString()
+        val resp = upstream.post(
+            "$delegationServiceUrl/api/v1/payment-proposals/$id/reject",
+            party,
+            objectMapper.writeValueAsString(mapOf("partyId" to party)),
+            "mcp-proposal-reject-$id",
+        )
+        audit.emit(
+            eventType = "CUSTOMER_MCP_PROPOSAL_REJECTED",
+            partyId = party,
+            operation = "mcp-proposals.reject",
+            result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
+            resourceId = id.toString(),
+        )
+        return resp
+    }
+
+    /**
+     * Approve ONE proposal with full SCA and execute it as the customer's own payment.
+     *
+     * Order matters, and every step re-reads from the bank, never from the client or the model:
+     *  1. read the proposal from delegation-service (party-scoped) and RECOMPUTE its payload hash
+     *     from the returned instruction; it must equal the stored hash AND the hash the app sent
+     *     (what the device rendered and signed). Anything else is refused before SCA is touched.
+     *  2. initiate the payment through the SAME domestic/SEPA path the app uses, built only from
+     *     the stored instruction, whose settlement gate consumes the customer's single-use
+     *     challenge with dynamic linking over amount + payee PLUS `approvalRequestId`
+     *     (`mcp-proposal:<id>`) and `payloadSha256` — so a challenge signed for anything else, or
+     *     for another proposal, cannot release it. No SCA exemption applies on this path.
+     *  3. only once SCA was consumed, record APPROVED (hash CAS) and then the execution outcome. A
+     *     second approval of an APPROVED-but-unexecuted proposal is ACCEPTED by the store (that is
+     *     the retry path), so two concurrent approvals can both reach the payment call; what keeps
+     *     them to one payment is the payment idempotency key, which is the proposal id.
+     * mcp-service is not involved in any step; it cannot reach this route (app session only).
+     */
+    @POST
+    @Path("/mcp-proposals/{id}/approve")
+    @Authorize(action = "customer.mcp-proposals.decide")
+    @Blocking
+    @Suppress("ReturnCount", "LongMethod", "CyclomaticComplexMethod") // one ordered, audited sequence
+    fun approveMcpProposal(
+        @PathParam("id") id: UUID,
+        body: String?,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
+        val customer = appSessionCustomer() ?: return forbidden(MCP_PROPOSAL_APP_ONLY)
+        val party = customer.partyId.toString()
+        val suppliedHash = body?.let { extractTextField(objectMapper, it, "payloadSha256") }?.lowercase()
+            ?.takeIf { SHA256_HEX.matches(it) } ?: return badRequest("payloadSha256 is required")
+        val read = upstream.get("$delegationServiceUrl/api/v1/payment-proposals/$id?partyId=$party", party)
+        // Only an upstream 404 means "no such proposal for you"; an outage must not read as absence.
+        if (read.statusInfo.family == Response.Status.Family.SERVER_ERROR) return proposalStoreUnavailable()
+        if (read.status != Response.Status.OK.statusCode) return notFound("Proposal not found")
+        val proposal = CustomerMcpProposal.parse(objectMapper, (read.entity as? String).orEmpty())
+            ?: return notFound("Proposal not found")
+        proposal.refusalFor(customer.partyId, suppliedHash, OffsetDateTime.now(clock))?.let { code ->
+            return proposalRefused(party, id, code)
+        }
+        if (!ownsAccount(proposal.debtorAccountId, customer.partyId)) return forbidden("Debtor account is not yours")
+        val decision = objectMapper.writeValueAsString(
+            mapOf(
+                "partyId" to party,
+                "payloadSha256" to proposal.payloadSha256,
+            ),
+        )
+        // Order: SCA consumed (inside the gate) -> store approve CAS -> only then the payment.
+        val binding = ProposalScaBinding(
+            mapOf("approvalRequestId" to proposal.approvalRequestId, "payloadSha256" to proposal.payloadSha256),
+        ) {
+            val approved = upstream.post(
+                "$delegationServiceUrl/api/v1/payment-proposals/$id/approve",
+                party,
+                decision,
+                "mcp-proposal-approve-$id-${scaChallengeId?.trim()}",
+            )
+            if (approved.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+                null
+            } else if (approved.statusInfo.family == Response.Status.Family.SERVER_ERROR) {
+                // A transient store failure is retryable with a fresh SCA, not a conflict.
+                proposalStoreUnavailable()
+            } else {
+                proposalRefused(party, id, "PROPOSAL_STORE_REFUSED:${approved.status}")
+            }
+        }
+        // The idempotency key is the proposal id: a retry after a failed payment replays, never pays twice.
+        val idempotencyKey = "mcp-proposal-$id"
+        val created = when (proposal.operationType) {
+            "DOMESTIC_PAYMENT" ->
+                initiateDomesticPayment(proposal.domesticBody(objectMapper), idempotencyKey, scaChallengeId, binding)
+            "SEPA_PAYMENT" ->
+                initiateSepaPayment(proposal.sepaBody(objectMapper), idempotencyKey, scaChallengeId, binding)
+            else -> return proposalRefused(party, id, "PROPOSAL_MALFORMED")
+        }
+        if (!binding.storeApproved) return created // SCA refused or store refused: no payment was sent
+        // From here the customer's challenge is spent and the store says APPROVED: whatever happens
+        // next — including an exception while recording — the outcome is audited.
+        var paymentId: String? = null
+        var executed = false
+        try {
+            paymentId = if (created.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+                extractTextField(objectMapper, (created.entity as? String).orEmpty(), "id")
+            } else {
+                null
+            }
+            // A failed payment leaves the proposal APPROVED (retryable with a fresh SCA, idempotent
+            // by id); only a created payment is recorded as executed.
+            executed = paymentId?.let { pid ->
+                upstream.post(
+                    "$delegationServiceUrl/api/v1/payment-proposals/$id/execution",
+                    party,
+                    objectMapper.writeValueAsString(
+                        mapOf("partyId" to party, "payloadSha256" to proposal.payloadSha256, "paymentId" to pid),
+                    ),
+                    "mcp-proposal-execution-$id-$pid",
+                ).statusInfo.family == Response.Status.Family.SUCCESSFUL
+            } ?: false
+        } finally {
+            // A payment that exists but whose execution the store did not record is its own
+            // outcome: money moved and the proposal still reads APPROVED until reconciled. Each
+            // event type is a literal `eventType = "..."` so the event-contract gate can see it.
+            fun emitApproval(eventType: String) {
+                audit.emit(
+                    eventType = eventType,
+                    partyId = party,
+                    operation = "mcp-proposals.approve",
+                    result = if (executed) "SUCCESS" else "FAILURE",
+                    resourceId = id.toString(),
+                    details = mapOf(
+                        "paymentId" to paymentId,
+                        "payloadSha256" to proposal.payloadSha256,
+                        "mcpClientId" to proposal.mcpClientId,
+                        "executionRecorded" to executed.toString(),
+                    ),
+                )
+            }
+            if (paymentId != null && !executed) {
+                emitApproval(eventType = "CUSTOMER_MCP_PROPOSAL_EXECUTION_UNRECORDED")
+            } else {
+                emitApproval(eventType = "CUSTOMER_MCP_PROPOSAL_APPROVED")
+            }
+        }
+        return created
+    }
+
+    private fun proposalStoreUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("code" to "PROPOSAL_STORE_UNAVAILABLE", "error" to "Proposal store is temporarily unavailable"))
+        .type(MediaType.APPLICATION_JSON).build()
+
+    private fun proposalRefused(party: String, id: UUID, code: String): Response {
+        audit.emit(
+            eventType = "CUSTOMER_MCP_PROPOSAL_REFUSED",
+            partyId = party,
+            operation = "mcp-proposals.approve",
+            result = "DENIED",
+            resourceId = id.toString(),
+            details = mapOf("reason" to code),
+        )
+        return Response.status(Response.Status.CONFLICT)
+            .entity(mapOf("code" to code.substringBefore(':'), "error" to "Proposal cannot be approved"))
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Require the customer's own app session for MCP connect and proposal actions. Excludes
+     * delegated (`act`) tokens, other clients and business acting-for contexts.
+     */
+    private fun appSessionCustomer(): CustomerIdentity? {
+        // azp alone names the client; the audience is what only the bank app's own login carries
+        // (the openbank-edge audience mapper exists on the openbank-app client alone — an MCP
+        // client's token is audienced to mcp-service). Both, or no proposal access.
+        if (jwt.getClaim<Any?>("azp") != APP_CLIENT_ID || jwt.containsClaim("act")) return null
+        if (jwt.audience?.contains(EDGE_AUDIENCE) != true) return null
+        return customer().takeIf { it.actingFor == null }
     }
 
     // --- SEPA payments (cross-border / EUR-area credit transfer; initiate only) ---
@@ -3235,6 +3714,14 @@ class CustomerEdgeResource(
         body: String,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response = initiateSepaPayment(body, idempotencyKey, scaChallengeId)
+
+    /** SEPA counterpart of [initiateDomesticPayment]; same additive-only [scaBinding] rule. */
+    internal fun initiateSepaPayment(
+        body: String,
+        idempotencyKey: String?,
+        scaChallengeId: String?,
+        scaBinding: ProposalScaBinding? = null,
     ): Response {
         val customer = customer()
         val debtor = parseDebtorAccountId(objectMapper, body)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
@@ -3270,7 +3757,9 @@ class CustomerEdgeResource(
                 "payments.sepa",
             )?.let { return it }
         }
-        scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepa")?.let { return it }
+        scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepa", scaBinding)?.let {
+            return it
+        }
         val resp = upstream.post(
             "$sepaPaymentServiceUrl/api/v1/sepa-payments",
             customer.partyId.toString(),
@@ -5604,6 +6093,7 @@ class CustomerEdgeResource(
         currency: String?,
         creditor: String?,
         operation: String,
+        binding: ProposalScaBinding? = null,
     ): Response? {
         val challengeId = scaChallengeId?.let { runCatching { UUID.fromString(it.trim()) }.getOrNull() }
         if (challengeId == null) {
@@ -5627,7 +6117,10 @@ class CustomerEdgeResource(
             challengeId,
             customer.partyId.toString(),
             customer.human,
-            mapOf("amount" to amount, "currency" to currency, "creditor" to creditor),
+            // extraLinking is ADDED last and can never overwrite the payment fields: dynamic linking
+            // over amount + payee stays mandatory whatever a caller passes.
+            binding?.linking.orEmpty().filterKeys { it !in PAYMENT_LINKING_KEYS } +
+                mapOf("amount" to amount, "currency" to currency, "creditor" to creditor),
         )
         if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
             audit.emit(
@@ -5648,7 +6141,8 @@ class CustomerEdgeResource(
                 .type(MediaType.APPLICATION_JSON)
                 .build()
         }
-        return null
+        // ADR-0383 D6: the proposal's store CAS runs HERE — after SCA, before any payment is sent.
+        return binding?.challengeSpent()
     }
 
     /**
@@ -6008,6 +6502,12 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /** Dynamic-linking keys an additive caller may never supply (see [scaGate]). */
+        private const val APP_CLIENT_ID = "openbank-app"
+        private const val EDGE_AUDIENCE = "openbank-edge"
+        private val MCP_CONNECT_REQUEST_REF = Regex("^[0-9a-f]{64}$")
+        private const val MCP_PROPOSAL_APP_ONLY = "Proposals can only be viewed and approved in the bank app"
+        internal val PAYMENT_LINKING_KEYS = setOf("amount", "currency", "creditor", "partyId")
 
         private val CURRENCY_CODE = Regex("^[A-Z]{3}$")
 
@@ -6365,9 +6865,11 @@ class CustomerEdgeResource(
             out.put("creditorName", creditorName)
             out.put("amount", amount)
             out.put("currency", currency)
-            txt("variableSymbol")?.let { out.put("variableSymbol", it) }
-            txt("specificSymbol")?.let { out.put("specificSymbol", it) }
-            txt("constantSymbol")?.let { out.put("constantSymbol", it) }
+            // VS/SS 1-10 digits, KS 1-4 (libs-domain CzechPaymentSymbol). A malformed one throws
+            // inside runCatching, so the body reads as malformed (400) instead of being forwarded.
+            for (kind in CzechPaymentSymbol.entries) {
+                kind.normalise(txt(kind.fieldName))?.let { out.put(kind.fieldName, it) }
+            }
             txt("reference")?.let { out.put("messageForPayee", it) }
             out.put("priority", normalizeDomesticPriority(txt("priority")))
             mapper.writeValueAsString(out)
@@ -6871,7 +7373,14 @@ internal data class DebitAuthority(
 )
 
 /** Cumulative headroom held against a grant while one delegated payment is in flight (ADR-0249 D3). */
-internal data class SpendReservation(val delegationId: String, val reservationId: String)
+internal data class SpendReservation(
+    val delegationId: String,
+    val reservationId: String,
+    /** The key the reservation was taken under; the bound create must present it (#16000). */
+    val idempotencyKey: String,
+    /** True unless delegation-service said this reserve CREATED it; the bound path never releases a replay. */
+    val replayed: Boolean = true,
+)
 
 /**
  * The three ways asking for headroom can end. [NotDelegated] is not a failure — it is an owner

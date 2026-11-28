@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0353 D4: the shared screening vocabulary + ScreeningPolicy every outgoing rail uses.
+    implementation(project(":openbank-libs-fincrime"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
     implementation(project(":openbank-client-transaction"))
     testImplementation(project(":openbank-libs-testing"))
@@ -91,4 +93,11 @@ pitest {
 // account-service and case-coordinator do: nothing measures test heap fleet-wide.
 tasks.withType<Test>().configureEach {
     maxHeapSize = "1g"
+}
+
+// Quarkus test profiles retain distinct application classloaders in a reused worker.
+// Isolate SDD test classes to keep their heap and shutdown independent.
+tasks.named<Test>("test") {
+    maxParallelForks = 1
+    forkEvery = 1
 }

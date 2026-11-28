@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pid-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c9c29943c931bb7a"
+        openbank.tech/policy-checksum: "e5395642824a8d68"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pid-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-c9c04a42@sha256:d59c35c3ce05259dc417ec56c7b56781c04cec21430e21dab07ddb7364309d18
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-342c028c@sha256:64eb46cbc0164a52c3214d3ace2df05642db275cea4908bae2369973ee6284cd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -93,8 +93,8 @@ spec:
             # no-op after that).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            # Kafka broker for the outbox dispatcher (party-events-out → topic party.events,
-            # pid-events-out → topic openbank.pid.events). Strimzi bootstrap, mTLS port (ADR-0137).
+            # Kafka broker for party event publication and erasure consumption.
+            # Strimzi bootstrap, mTLS port (ADR-0137).
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: KAFKA_SECURITY_PROTOCOL

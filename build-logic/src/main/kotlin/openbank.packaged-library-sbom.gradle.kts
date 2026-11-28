@@ -2,25 +2,56 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import groovy.json.JsonOutput
+import org.cyclonedx.Version
+import org.cyclonedx.gradle.CyclonedxAggregateTask
+import org.cyclonedx.gradle.CyclonedxDirectTask
+import org.cyclonedx.model.Component
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
-// CycloneDX 2.x declares its destination as one @OutputDirectory. Give it its own
-// directory so it cannot claim Kover's verify.err or other report producers.
-val cyclonedxBomTask = tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
-    setIncludeConfigs(listOf("runtimeClasspath"))
-    setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
-    setProjectType("application")
-    setSchemaVersion("1.5")
-    setDestination(layout.buildDirectory.dir("reports/cyclonedx").get().asFile)
+// CycloneDX 3.x splits resolution (cyclonedxDirectBom, per project) from the published
+// SBOM (cyclonedxBom, aggregating this project and its subprojects). Both declare
+// per-file outputs; keep them under their own directory and export the exact files.
+tasks.named<CyclonedxDirectTask>("cyclonedxDirectBom") {
+    includeConfigs.set(listOf("runtimeClasspath"))
+    skipConfigs.set(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
+    projectType.set(Component.Type.APPLICATION)
+    schemaVersion.set(Version.VERSION_15)
+}
+val cyclonedxBomTask = tasks.named<CyclonedxAggregateTask>("cyclonedxBom") {
+    projectType.set(Component.Type.APPLICATION)
+    schemaVersion.set(Version.VERSION_15)
+    jsonOutput.set(layout.buildDirectory.file("reports/cyclonedx/bom.json"))
+    xmlOutput.set(layout.buildDirectory.file("reports/cyclonedx/bom.xml"))
+}
+
+// CycloneDX 3.x resolves artifact files through an EXTERNAL-only artifact view
+// (DependencyUtils.configureExternalArtifactView: componentFilter = ModuleComponentIdentifier),
+// so in-build project dependencies (:openbank-libs-*) are listed without any hashes. 2.x hashed
+// them. Restore that here from the same resolved runtimeClasspath artifact bytes, using the
+// algorithm set the plugin emits for external components. Inventory is never added or removed:
+// only an existing component whose purl project_path names a resolved project artifact gains
+// hashes, so verifyPackagedLibrarySbom still fails on a library missing from the SBOM.
+val sbomHashAlgorithms = linkedMapOf(
+    "MD5" to "MD5", "SHA-1" to "SHA-1", "SHA-256" to "SHA-256", "SHA-512" to "SHA-512",
+    "SHA3-256" to "SHA3-256", "SHA3-512" to "SHA3-512", "SHA-384" to "SHA-384", "SHA3-384" to "SHA3-384",
+)
+val sbomRuntimeArtifacts = configurations.named("runtimeClasspath")
+val projectArtifactFiles = providers.provider {
+    sbomRuntimeArtifacts.get().incoming.artifacts.artifacts.mapNotNull { artifact ->
+        val component = artifact.id.componentIdentifier as? ProjectComponentIdentifier
+        component?.let { it.projectPath to artifact.file }
+    }.groupBy({ it.first }, { it.second })
 }
 
 // Existing image/release consumers use reports/bom.{json,xml}. Export only those
 // exact files; a Copy task targeting reports/ would reintroduce directory ownership.
 val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     dependsOn(cyclonedxBomTask)
-    inputs.dir(cyclonedxBomTask.flatMap { it.destination }).withPropertyName("sbomDirectory")
-    inputs.property("outputFormat", cyclonedxBomTask.flatMap { it.outputFormat })
-    inputs.property("outputName", cyclonedxBomTask.flatMap { it.outputName })
+    inputs.files(cyclonedxBomTask.map { listOfNotNull(it.jsonOutput.orNull, it.xmlOutput.orNull) })
+        .withPropertyName("sbomFiles")
+    inputs.files(sbomRuntimeArtifacts.map { cfg ->
+        cfg.incoming.artifactView { componentFilter { it is ProjectComponentIdentifier } }.files
+    }).withPropertyName("projectRuntimeArtifacts")
     outputs.files(layout.buildDirectory.file("reports/bom.json"), layout.buildDirectory.file("reports/bom.xml"))
     onlyIf {
         val producer = cyclonedxBomTask.get()
@@ -29,17 +60,18 @@ val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     }
     doLast {
         val producer = cyclonedxBomTask.get()
-        val formats = when (producer.outputFormat.get()) {
-            "all" -> setOf("json", "xml")
-            else -> setOf(producer.outputFormat.get())
-        }
-        for (format in listOf("json", "xml")) {
+        val sources = mapOf("json" to producer.jsonOutput.orNull, "xml" to producer.xmlOutput.orNull)
+        for ((format, source) in sources) {
             val target = layout.buildDirectory.file("reports/bom.$format").get().asFile
-            if (format in formats) {
-                val source = producer.destination.get().resolve("${producer.outputName.get()}.$format")
-                check(source.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
+            if (source != null) {
+                val file = source.asFile
+                check(file.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
                 target.parentFile.mkdirs()
-                source.copyTo(target, overwrite = true)
+                if (format == "json") {
+                    target.writeText(withProjectLibraryHashes(file.readText(), projectArtifactFiles.get()))
+                } else {
+                    file.copyTo(target, overwrite = true)
+                }
             } else {
                 target.delete()
             }
@@ -47,6 +79,30 @@ val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
     }
 }
 cyclonedxBomTask.configure { finalizedBy(exportCycloneDxBom) }
+
+fun withProjectLibraryHashes(json: String, artifacts: Map<String, List<File>>): String {
+    @Suppress("UNCHECKED_CAST")
+    val bom = groovy.json.JsonSlurper().parseText(json) as MutableMap<String, Any?>
+    @Suppress("UNCHECKED_CAST")
+    val components = (bom["components"] as? List<MutableMap<String, Any?>>).orEmpty()
+    for (component in components) {
+        val purl = component["purl"] as? String ?: continue
+        val query = purl.substringAfter('?', "")
+        val projectPath = query.split('&').firstOrNull { it.startsWith("project_path=") }
+            ?.let { java.net.URLDecoder.decode(it.removePrefix("project_path="), Charsets.UTF_8) } ?: continue
+        val files = artifacts[projectPath] ?: continue
+        check(files.size == 1) { "Project $projectPath resolved to ${files.size} runtime artifacts; cannot hash the SBOM component" }
+        check(component["hashes"] == null) {
+            "CycloneDX already hashed project component $projectPath; drop withProjectLibraryHashes"
+        }
+        val bytes = files.single().readBytes()
+        component["hashes"] = sbomHashAlgorithms.map { (alg, jca) ->
+            linkedMapOf("alg" to alg, "content" to java.security.MessageDigest.getInstance(jca).digest(bytes)
+                .joinToString("") { "%02x".format(it) })
+        }
+    }
+    return JsonOutput.prettyPrint(JsonOutput.toJson(bom))
+}
 
 // Explicit deploy-build proof. Never attach to sbomAll: resolution-only inventory
 // must not assemble the fleet. This receipt covers original dependency JARs only;
@@ -93,12 +149,27 @@ tasks.register("verifyPackagedLibrarySbom") {
             }.sortedBy { it.getValue("projectPath") }
         val resolved = temporaryDir.resolve("resolved-runtime-projects.json")
         resolved.writeText(JsonOutput.toJson(artifacts))
-        val output = providers.exec {
+        val verification = providers.exec {
+            isIgnoreExitValue = true
             commandLine("python3", verifier.asFile.absolutePath,
                 "--sbom", operationalSbom.get().asFile.absolutePath,
                 "--runtime-artifacts", resolved.absolutePath,
-                "--quarkus-app", packagedApp.get().asFile.absolutePath)
-        }.standardOutput.asText.get()
+                "--quarkus-app", packagedApp.get().asFile.absolutePath,
+                "--redact-failure")
+        }
+        val result = verification.result.get()
+        val output = verification.standardOutput.asText.get()
+        if (result.exitValue != 0) {
+            val failureCode = output.trim()
+            val code = when (failureCode) {
+                "EVIDENCE_REJECTED", "LIBRARY_INVENTORY_MISMATCH", "LIBRARY_HASH_MISSING",
+                "LIBRARY_HASH_INVALID", "LIBRARY_HASH_MISMATCH", "PACKAGED_ARTIFACT_MISMATCH",
+                "INPUT_IO_ERROR", "INVALID_INPUT" -> failureCode
+                else -> "VERIFIER_FAILED"
+            }
+            logger.error("Packaged library SBOM verification failed for $path: $code")
+            result.assertNormalExitValue()
+        }
         receipt.parentFile.mkdirs()
         receipt.writeText(output)
     }

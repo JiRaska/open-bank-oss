@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.11.1...pid-service-v0.11.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **pid:** retire the unwired PID outbox channel ([#17157](https://github.com/JiRaska/open-bank-oss/issues/17157)) ([f03fc4c](https://github.com/JiRaska/open-bank-oss/commit/f03fc4c15ce5501e2124452079e4889a54325d5d))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.11.0...pid-service-v0.11.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **party:** reject a birth number whose birthdate is in the future (rule in libs RodneCislo, refs [#16748](https://github.com/JiRaska/open-bank-oss/issues/16748)) ([#16891](https://github.com/JiRaska/open-bank-oss/issues/16891)) ([d607303](https://github.com/JiRaska/open-bank-oss/commit/d6073034a1aae7f8e7e566dcfd938abac4bbe738))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.11...pid-service-v0.11.0) (2026-11-12)
 
 

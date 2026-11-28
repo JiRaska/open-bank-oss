@@ -45,7 +45,7 @@ Telling a customer that they are monitored or reported is the worst outcome here
 - **Erasure misses a case that does not name its party yet (information disclosure).** Erasure by party matched cases by party id, so a case still waiting for its party kept its reference, alert detail and matched entity, and the sweep later attached it to the erased party as it was. The erasure is recorded and the sweep applies the same anonymisation in the transaction that attaches the case; a per-party advisory lock serialises the two. The retention rule is unchanged: the row stays, the three fields are cleared. Residual: an unresolved case keeps its data until it resolves, and such a case names no party.
 - **A hold floods the review queue.** A rail requests a case for an unavailable control only after its own bounded re-evaluation, so an outage of minutes opens no case. An outage longer than that opens one case per payment submitted in it; the queue's capacity is the operational limit ADR-0374 names.
 - **Information disclosure.** The event carries no name. The case stores the party id, the account reference and, as alert detail, the reason codes and the evidence of the controls: statuses, scores and a matched list entry.
-- **Not delivered: four eyes on the decision.** A hold's case is a rail-opened `TRANSACTION_MONITORING` case and keeps the single-analyst decision of `AmlCaseService.updateDecision`; ADR-0374 D3 asks for a four-eyes decision. Until that exists one analyst can release a held payment. Open item before the chain is switched on in production.
+- **One analyst releases a held payment (elevation of privilege).** A case of origin `PAYMENT_HOLD_INTAKE` reaches `CLEARED` or `BLOCKED` only through a proposal by one analyst and a confirmation by a different one that restates the proposal's outcome (CLEAR or BLOCK) and reason (ADR-0374 point 3). The rule is in the `AmlCase` aggregate: `transitionTo` refuses those two statuses on such a case, so `PUT /decision`, the monitoring disposition path and any future caller answer 409. The confirmer must be a different PERSON than the proposer by the fleet maker-checker primitive (`Proposal.approveBy`): it compares the token's `person_id` claim (every staff account of one person carries the same value), fails closed when either side has none, and requires a second factor in the token's `amr`. A pending proposal cannot be replaced; only its proposer's person can withdraw it (`POST /hold-decision/withdrawal`), and it expires after 24 hours. The proposal writes no outbox row, so the rail, which acts only on `aml.case.status_changed.v1` with `newStatus` CLEARED or BLOCKED and `origin = PAYMENT_HOLD_INTAKE`, cannot release on it. A confirmation is written under a row lock and refused when the stored proposal differs from the one the confirmer read, so it cannot land on a replaced proposal. Both routes need `ROLE_COMPLIANCE` and a human staff token, because some realms give a service account that role. Residual: the control is only as good as the `person_id` binding, which an IdP admin assigns and the IdP cannot check for uniqueness per person (covered by admin-only edit, Keycloak admin events and joiner/mover review); a pod built before this change still decides a hold case in one step, so the intake (`AML_PAYMENT_HELD_CONSUMER_ENABLED`, off by default) must be switched on only when every pod runs this build; the OPA grants for the three new actions (propose, confirm, withdraw) are a separate governance change, and until it lands the routes are denied where `AUTHZ_ENFORCE=true`.
 
 ## Data
 
@@ -56,3 +56,26 @@ Monitoring tables hold party and account identifiers, amounts and decisions. Cla
 - Reduce case events for monitoring cases to identifier and state.
 - Build the `aml-no-customer-surface` gate.
 - Authenticated pack delivery (ADR-0354) instead of files in the image.
+
+## 2026-11-14 - swift-service added as an AML case opener
+
+`service-account-openbank-swift` is now a named `amlCase.create` caller. It is listed in
+`service-aml-case-create-m2m` (aml_rest_ext.rego) and in `AML_CASE_CREATE_MOVEMENT_SERVICES`, and
+maps to the source service `openbank-swift-service`. The new MT103 sanctions gate opens these cases
+on a hit, on a potential hit, or when screening is unavailable. **Spoofing:** it is identity-gated,
+like the four existing rails. ROLE_API alone still admits no other account. **Elevation:** the grant
+is `amlCase.create` only. `AmlCaseCreateCallerGuardTest` and the rego tests pin the set. Rollback:
+revert. swift's cases would then 403, and its verdicts would be unaffected because opening a case
+is best-effort.
+
+## 2026-11-18 - Monitoring currencies validated by CurrencyCode (#16748)
+
+`BookedMovement`, `AmountBand` and `CountFeatureDefinition` accepted any `[A-Z]{3}`. They now
+require `CurrencyCode.isCanonical`: an active ISO 4217 code with a minor unit, already upper-case.
+**Tampering / integrity:** a band or feature definition in a non-currency (`ABC`) or withdrawn one
+(`DEM`) would key a counter no real booking can reach, so a rule could read as configured while
+counting nothing. That is now refused when the definition is built. A ledger event with such a
+currency takes the existing rejected path (`IllegalArgumentException` → `outcome=rejected` → DLQ),
+the same one an empty currency already took. Ledger itself books only `CurrencyCode` values, so no
+real movement is affected. Test: `MonitoringCurrencyValidationTest` (red on the old regex).
+Rollback: revert.

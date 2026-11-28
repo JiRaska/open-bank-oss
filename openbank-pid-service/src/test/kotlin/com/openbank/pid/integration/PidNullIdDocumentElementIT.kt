@@ -32,7 +32,7 @@ class PidNullIdDocumentElementIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out", "pid-events-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

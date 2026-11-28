@@ -37,3 +37,28 @@ Configured values:
 - `max-size: 20`
 
 
+
+## JSON-RPC input bounds
+
+Every caller-supplied value on `POST /mcp` is bounded before it is reflected, audited or
+forwarded (`McpInputBounds`, #16628):
+
+- U+0000 anywhere in the decoded body (keys or values, any depth) → HTTP 400, JSON-RPC
+  `-32602`, before dispatch. Not audited; logged without the payload.
+- Tool names, unknown methods and invalid ids are echoed at most 64 characters, then
+  `...[truncated]`.
+- `list_transactions.limit`: integer in `1..200`, default `50` when absent; anything else
+  is `-32602`.
+- Audit `argument_keys`: at most 32 keys, each at most 64 characters.
+- `accountRef` on those tools must match `^acr_[A-Za-z0-9_-]{43}$` and resolve within the caller's own scope (#16678), or the call is `-32602`.
+- `accountId` on `get_balance` / `list_transactions` / `get_statement` must be a canonical IBAN (uppercase, no spaces; shape and libs-domain
+  mod-97) before consent-service is called; otherwise `-32602`.
+- Every NUL refusal increments `openbank.mcp.input_refused{reason="nul"}` (closed tag set).
+
+## Customer-channel shared store
+
+`mcp.customer.shared-store-timeout-ms` (250 ms) bounds every Valkey command of the customer channel's
+DPoP replay store and D5.3 budgets. A timeout, a refused connection or an unexpected reply answers
+**503** on that request and never admits it; the store is never bypassed for the per-pod fallback. The
+Valkey client has no readiness check (`quarkus.redis.health.enabled: false`), so a store outage takes
+the customer channel down without making the staff path unready.

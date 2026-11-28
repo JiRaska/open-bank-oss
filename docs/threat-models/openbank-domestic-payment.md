@@ -92,7 +92,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
-The v1 dispatcher claims rows from `domestic_payment_outbox` with an explicit mapped-column projection. This keeps the existing dispatcher available across additive schema expansion. The claim and acknowledgement semantics stay the same.
+Outbox v2 acknowledges `domestic_payment_outbox` rows only when a dispatcher owns the current claim token. A stale worker may still deliver an event, so downstream deduplication by event ID remains required. The compatibility rollout pauses all v1 dispatchers before v2 claims begin. The existing SENT retention and synthetic origin rules continue to apply.
 
 - **Idempotency-key required** — only an exact, actor-bound retry may replay the durable payment;
   changed or unverifiable legacy requests are rejected with 409.
@@ -1066,6 +1066,9 @@ reservation.
   bound path. The grant state and the account owner come from one lookup, before any write. A
   revoked grant, or one that does not cover the debtor account, is
   `409 DELEGATION_AUTHORITY_WITHDRAWN`, which writes no payment and leaves the reservation PENDING.
+  A retry of a payment already BOUND to the reservation, under the same idempotency key, skips
+  this step and takes the fingerprint-checked replay: revocation refuses the next debit, never
+  the report of one that already committed. A new key against a BOUND reservation is still decided.
   A lookup outage is a retryable `503`, never a refusal.
 
 ## 2026-11-11 - Label key domain rename (no reach change)
@@ -1127,3 +1130,75 @@ read capabilities not accepted for a debit, unavailable holds rather than refuse
 arguments taken from the snapshot and not the command. Falsified: removing the step fails all five;
 making unavailable read as a refusal fails exactly the one written for it.
 Rollback: revert the commit; no migration, no config, no new identity.
+
+## 2026-11-18 — Czech account validity and canonical IBAN construction (#16748)
+
+**Change.** On the owner create request, the delegated create request and business batch draft
+items, creditor and debtor coordinates were checked for presence and length only. An account no
+Czech bank can issue (one that fails the ČNB Decree 169/2011 mod-11 check, such as
+`1234567890/0800`) was accepted and carried to the scheme. The service also had three private IBAN
+builders, and none of them checked mod-11:
+
+- `SchemeGatewayAdapter.bbanToIban` fed the raw `prefix-base` string into its own mod-97 routine.
+  For a prefixed account such as `19-2000145399`, the `-` became a negative "digit", and the
+  `BigInteger` parse threw `NumberFormatException`. It did not produce a wrong IBAN. The activity
+  caught it as an ambiguous dispatch after claiming the dispatch marker, so the payment was held in
+  `VALIDATED` for good. A base longer than ten digits overflowed the BBAN.
+- `SettlementAdapter.toCzIban` (the in-house payee lookup) and `PaymentConfirmationMapper.toCzIban`
+  (the settled-payment confirmation) dropped the `-` and padded the digits into the 16-digit account
+  part. That put the prefix into the base slot: `19-19/0800` became an IBAN for account `1919`,
+  which is a different account. So the payee lookup asked about the wrong account, and the
+  confirmation named an account the payer never used.
+
+All three now go through one builder, `CzechDomesticIban`. It checks the shape, runs mod-11 on
+prefix and base (`openbank-libs-domain` `CzechAccountNumber.isValid`), lays the BBAN out as
+`bankCode(4)+prefix(6)+base(10)`, and builds the IBAN with the kernel `IbanCheckDigits.build`.
+That is the one ISO 7064 implementation, and it validates its result. The bank code is checked for
+four-digit shape only, because no registry of assigned ČNB codes exists here.
+
+One normalisation, `CzechDomesticIban.canonical`, serves the scheme, settlement and confirmation
+paths. It accepts the split form (`prefix-base`) or a stored CZ IBAN. For the IBAN form, it slices
+the BBAN into bank code, prefix and base and runs the same mod-11 check, because mod-97 alone does
+not prove the account is issuable.
+
+- **Tampering / integrity:** a mis-built IBAN names the wrong account, and nothing notices because
+  the IBAN itself passes mod-97. When the coordinates denote no issuable account, the scheme adapter
+  sends nothing. It returns the ISO reason the scheme would give (`AC01` IncorrectAccountNumber),
+  marked `transmitted = false`. The payment ends terminally `REJECTED` / `INVALID_ACCOUNT_NUMBER`,
+  and its audit detail reads "rejected before transmission". The scheme-dispatch marker the
+  activity claims before calling the adapter is cleared again, so `scheme_dispatched_at` never
+  claims a dispatch that did not happen. It is neither held as an ambiguous
+  dispatch nor re-driven forever. The settlement lookup skips such a creditor (booking debit-only).
+  The confirmation shows `number/bankCode` as entered instead of making up an IBAN.
+- **Spoofing / input validation:** an invalid account gets a 400 `VALIDATION_ERROR` naming the field
+  at the REST edge, before the Idempotency-Key is bound or anything persists.
+- **Denial of service:** none new; the check is pure arithmetic on ≤20 digits.
+- **Information disclosure:** the error names the field and bank code, never the account number.
+
+**Existing data and rollout.** The rule deliberately has no exemption for accounts issued before
+the generator enforced mod-11. Such an account gets a 400 on every domestic payment it originates
+and a terminal AC01 when it is the counterparty. So before this rule is enabled in an environment,
+any account-service account whose own number fails mod-11 must be closed or re-issued. Count them
+by reading `accounts.account_number` as the 24-character CZ IBAN, taking characters 9–14 as the
+prefix and 15–24 as the base, and applying the decree weights to each. The count must be 0 among
+non-closed accounts. Only the sandbox environment exists today, and the count must reach 0 again
+before rollout to any other environment.
+
+**Residual risk.** A payment already stored with a mod-11-invalid account is now rejected terminally
+before transmission, which is the intended fail-closed outcome. An unassigned but well-formed bank
+code still passes: the scheme answers it (`RC01`, which maps to `INVALID_BANK_CODE`).
+
+Tests:
+- `CzechDomesticIbanTest`: base and prefix mod-11 failures are rejected and valid neighbours are accepted.
+- `SchemeGatewayAdapterTest`: the prefix is kept; a mod-11 failure or an 11-digit base gets AC01
+  with `transmitted = false` and no client call.
+- `DomesticPaymentActivitiesImplTest`: AC01 leads to REJECTED with "rejected before transmission".
+- `SettlementAdapterTest`: `19-19` keeps its prefix, and a mod-11 creditor is not looked up.
+- `PaymentConfirmationMapperTest`: `19-19` keeps its prefix.
+- `DomesticPaymentDtosTest` and `BusinessPaymentBatchDraftValidationTest`: invalid accounts are refused.
+- `DomesticPaymentMoneyBoundaryIT`: an HTTP POST with an invalid account gets a 400 naming the
+  field, and nothing persists.
+
+Each of these fails against the code before it. One exception: `bbanToIban embeds bank codes` is a
+regression guard with a fixture update, not a new negative.
+Rollback: revert the commit; no migration, no config.

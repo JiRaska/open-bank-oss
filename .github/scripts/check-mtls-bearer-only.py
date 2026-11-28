@@ -104,16 +104,38 @@ def _matches_permission(pattern: str, path: str, *, conservative: bool = False) 
     return len(parts) == len(actual)
 
 
-def bearer_paths(flat: dict) -> list[str]:
+# Header-token mechanisms that never accept a client certificate as identity: the OIDC bearer
+# mechanism under its `Bearer` and its RFC 9449 `DPoP` authorization scheme (#16847: the customer MCP
+# channel's own root is DPoP-only, staff roots stay bearer).
+TOKEN_MECHANISMS = {"bearer", "dpop"}
+
+
+def uses_token_auth(flat: dict, name: str, module: str) -> bool:
+    key = f"{PERMISSION}.{name}."
+    mechanism = str(flat.get(key + "auth-mechanism", "")).strip().lower()
+    if mechanism in TOKEN_MECHANISMS:
+        return True
+    # CustomerOidcAuthentication delegates exclusively to Quarkus OIDC. Its
+    # scope is limited to the two configured customer MCP path patterns.
+    if module != "openbank-mcp-service":
+        return False
+    paths = set(_permission_paths(flat, name))
+    if mechanism == "customer-oidc":
+        return paths == {"/customer/mcp", "/customer/mcp/*"}
+    # HostedMcpAuthentication excludes certificate identity on this exact path.
+    # HostedCustomerMcpEndpoint independently verifies the hosted bearer grant before dispatch.
+    return mechanism == "hosted-mcp" and paths == {"/customer/hosted-mcp"}
+
+
+def bearer_paths(flat: dict, module: str = "") -> list[str]:
     names = {k[len(PERMISSION) + 1:].split(".")[0] for k in flat if k.startswith(PERMISSION + ".")}
     out = []
     for n in sorted(names):
-        mech = str(flat.get(f"{PERMISSION}.{n}.auth-mechanism", "")).strip().lower()
         # A GET-only bearer permission does not protect POST/PUT on the same resource root.
         # Class-level @Path inspection cannot prove which methods each resource serves, so
         # only a permission applying to every method can establish root-wide coverage.
         methods = str(flat.get(f"{PERMISSION}.{n}.methods", "")).strip()
-        if mech == "bearer" and not methods and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
+        if uses_token_auth(flat, n, module) and not methods and str(flat.get(f"{PERMISSION}.{n}.enabled", "true")).lower() != "false":
             out += [p for p in str(flat.get(f"{PERMISSION}.{n}.paths", "")).split(",") if p.strip()]
     return out
 
@@ -160,7 +182,7 @@ def _overlap_witness(pattern: str, root: str, probe: str) -> str | None:
     return "/" + "/".join(candidate)
 
 
-def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> list[str]:
+def overriding_permissions(flat: dict, roots: list[str], bearer: list[str], module: str = "") -> list[str]:
     """Find a more-specific unshared permission that could defeat broad bearer-only coverage."""
     names = {k[len(PERMISSION) + 1:].split(".")[0] for k in flat if k.startswith(PERMISSION + ".")}
     probe = "listener-auth-probe"
@@ -173,7 +195,7 @@ def overriding_permissions(flat: dict, roots: list[str], bearer: list[str]) -> l
             continue
         if str(flat.get(key + "shared", "false")).lower() == "true":
             continue
-        if str(flat.get(key + "auth-mechanism", "")).strip().lower() == "bearer":
+        if uses_token_auth(flat, name, module):
             continue
         # An unconditional deny does not authenticate a certificate or reach the API.
         if str(flat.get(key + "policy", "")).strip().lower() == "deny":
@@ -225,13 +247,13 @@ def resource_roots(module: str) -> list[str]:
     return sorted(set(roots))
 
 
-def findings_for(doc, roots: list[str]) -> list[str]:
+def findings_for(doc, roots: list[str], module: str = "") -> list[str]:
     out = []
     for name, flat in profiles(doc).items():
         ca = str(flat.get(CLIENT_AUTH, "")).strip().lower()
         if ca not in ("required", "request"):
             continue
-        patterns = bearer_paths(flat)
+        patterns = bearer_paths(flat, module)
         label = f"profile {name or '(default)'}"
         if not patterns:
             out.append(f"{label}: client-auth={ca} but no unrestricted permission sets auth-mechanism: bearer — "
@@ -240,7 +262,7 @@ def findings_for(doc, roots: list[str]) -> list[str]:
         uncovered = [r for r in roots if not any(_covers(p, r) for p in patterns)]
         if uncovered:
             out.append(f"{label}: bearer-only paths {patterns} do not cover resource roots {uncovered}")
-        overridden = overriding_permissions(flat, roots, patterns)
+        overridden = overriding_permissions(flat, roots, patterns, module)
         if overridden:
             out.append(f"{label}: more-specific non-bearer permissions can override bearer-only coverage: "
                        f"{overridden}")
@@ -254,7 +276,8 @@ def scan(root: str):
         module = f.split(os.sep + "src" + os.sep)[0]
         with open(f, encoding="utf-8") as fh:
             doc = yaml.safe_load(fh)
-        result[os.path.relpath(module, root)] = findings_for(doc, resource_roots(module))
+        module_name = os.path.relpath(module, root)
+        result[module_name] = findings_for(doc, resource_roots(module), module_name)
     return files, result
 
 
@@ -355,15 +378,41 @@ def self_test() -> int:
         "          bearer-only:\n            paths: /api/*\n            auth-mechanism: bearer\n"
         "          attached:\n            paths: /api/v1*\n            policy: authenticated\n"
     )
+    dpop_root = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /mcp,/mcp/*\n            auth-mechanism: bearer\n"
+        "          customer:\n            paths: /customer/mcp,/customer/mcp/*\n            auth-mechanism: DPoP\n"
+    )
     none = yaml.safe_load("quarkus:\n  http:\n    port: 8080\n")
     api = ["/api/v1/sca"]
+    customer_oidc = yaml.safe_load(yaml.safe_dump(dpop_root).replace("DPoP", "customer-oidc"))
+    hosted = yaml.safe_load(
+        '"%prod":\n  quarkus:\n    http:\n      ssl:\n        client-auth: required\n'
+        "      auth:\n        permission:\n"
+        "          bearer-only:\n            paths: /customer/hosted-mcp/*\n            auth-mechanism: bearer\n"
+        "          hosted:\n            paths: /customer/hosted-mcp\n            auth-mechanism: hosted-mcp\n"
+    )
     checks = [
+        ("hosted mechanism accepts only its exact MCP resource",
+         findings_for(hosted, ["/customer/hosted-mcp"], "openbank-mcp-service") == []
+         and len(findings_for(hosted, ["/customer/hosted-mcp"], "other-service")) == 1
+         and not uses_token_auth(
+             {f"{PERMISSION}.hosted.auth-mechanism": "hosted-mcp",
+              f"{PERMISSION}.hosted.paths": "/customer/hosted-mcp,/staff"},
+             "hosted", "openbank-mcp-service")),
         ("client-auth required without bearer-only flagged", len(findings_for(vuln, api)) == 1),
         ("client-auth request without bearer-only flagged", len(findings_for(request, api)) == 1),
         ("#12506 pattern passes", findings_for(fixed, api) == []),
         ("bearer-only not covering /ap2 root flagged", len(findings_for(fixed, ["/ap2/verify"])) == 1),
         ("inherited multi-path bearer-only passes", findings_for(inherited, ["/ap2/verify", "/api/v1/x"]) == []),
         ("auth-mechanism other than bearer flagged", len(findings_for(wrong_mech, api)) == 1),
+        ("a DPoP-only root next to a bearer root passes", findings_for(dpop_root, ["/mcp", "/customer/mcp"]) == []),
+        ("customer-oidc is accepted only on the MCP service",
+         findings_for(customer_oidc, ["/mcp", "/customer/mcp"], "openbank-mcp-service") == []
+         and len(findings_for(customer_oidc, ["/mcp", "/customer/mcp"], "other-service")) > 0),
+        ("a DPoP permission does not cover a root it does not list",
+         len(findings_for(dpop_root, ["/mcp", "/customer/mcp", "/api/v1/x"])) == 1),
         ("GET-only bearer permission does not protect POST", len(findings_for(get_only, api)) == 1),
         ("exact bearer permission leaves resource descendants open to certificate identity",
          len(findings_for(exact_root_only, api)) == 1 and

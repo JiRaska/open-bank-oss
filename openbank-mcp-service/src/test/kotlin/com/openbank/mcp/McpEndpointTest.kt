@@ -58,7 +58,8 @@ class McpEndpointTest {
         val stub = StubReads(mapper)
         val toolRegistry =
             McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
-        val caller = CallerContextResolver(jwt, oboEnabled, fakeSessionRepo())
+        val caller =
+            CallerContextResolver(jwt, oboEnabled, fakeSessionRepo(), customerIssuer = java.util.Optional.empty())
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -69,6 +70,7 @@ class McpEndpointTest {
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
         ).apply {
+            httpRequest = TestHttpRequests.withHeaders()
             metrics = McpMetricsAdapter(registry)
             rateLimiter = limiter
             toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, toolsListCacheTtlMs)
@@ -80,7 +82,7 @@ class McpEndpointTest {
      * window can, and every other test gets the production defaults (60/min) — well above the
      * handful of calls they each make.
      */
-    private val limiter = McpRateLimiter()
+    private val limiter = McpRateLimiter.withDefaults()
 
     // ── ADR-0226: every MCP event is stamped with its channel and delegation chain ──────────
 
@@ -118,7 +120,12 @@ class McpEndpointTest {
     @Test
     fun `an unparseable act claim degrades to a direct caller, never a denied call`() {
         val weirdJwt = TestJsonWebToken(
-            mapOf("sub" to "agent:test-agent", "consent_id" to TEST_CONSENT_ID, "act" to "not-a-map"),
+            mapOf(
+                "sub" to "agent:test-agent",
+                "aud" to "openbank-mcp-service",
+                "consent_id" to TEST_CONSENT_ID,
+                "act" to "not-a-map",
+            ),
         )
         val resp = body(
             endpoint(allowAll(), jwt = weirdJwt).handle(
@@ -132,6 +139,7 @@ class McpEndpointTest {
     private fun oboJwt() = TestJsonWebToken(
         mapOf(
             "sub" to "agent:test-agent",
+            "aud" to "openbank-mcp-service",
             "consent_id" to TEST_CONSENT_ID,
             "act" to mapOf("sub" to "agent-session:7f3a", "act" to mapOf("sub" to "mcp-cli")),
             "sid" to "sess-123",
@@ -149,6 +157,20 @@ class McpEndpointTest {
         )
         assertThat(resp.path("result").path("content").first().path("text").asText())
             .isEqualTo("Authorization unavailable")
+    }
+
+    @Test
+    fun `the tool-call series carries the channel the resolver admitted the caller on (ADR-0384 D1)`() {
+        endpoint(allowAll(), jwt = staffOboJwt(), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val byChannel = registry.find("openbank.mcp.tool_calls").counters()
+            .groupBy { it.id.getTag("channel") }
+            .mapValues { (_, c) -> c.sumOf { it.count() } }
+        assertThat(byChannel).containsEntry("operator", 1.0).containsEntry("agent", 1.0)
     }
 
     @Test
@@ -227,9 +249,7 @@ class McpEndpointTest {
         val variants = listOf(
             staffClaims - "azp",
             staffClaims - "jti",
-            staffClaims - "aud",
             staffClaims - "realm_access",
-            staffClaims + ("aud" to "some-other-service"),
         )
         variants.forEach { claims ->
             val resp = body(
@@ -239,6 +259,52 @@ class McpEndpointTest {
             )
             assertThat(resp.path("result").path("content").first().path("text").asText())
                 .isEqualTo("Authorization unavailable")
+        }
+    }
+
+    // #16622: an audience mark that is missing or names another resource is refused at the door with
+    // 401 (RFC 8707), before any tool or session lookup runs.
+    // #16622 x ADR-0383 D5: the audience refusal runs before the limiter, so a flood of
+    // foreign-audience tokens neither spends any rate window nor holds an in-flight slot.
+    @Test
+    fun `foreign-audience requests consume no limiter budget`() {
+        limiter.callsPerMinute = 1
+        limiter.anonymousCallsPerMinute = 1
+        limiter.maxInFlight = 1
+        val foreign = TestJsonWebToken(
+            mapOf("sub" to "agent:test-agent", "aud" to "some-other-service", "consent_id" to TEST_CONSENT_ID),
+        )
+        repeat(5) {
+            val e = endpoint(allowAll(), jwt = foreign)
+            assertThat(
+                e.handle(
+                    rpc(
+                        "tools/call",
+                        mapOf(
+                            "name" to "list_accounts",
+                            "arguments" to emptyMap<String, Any>(),
+                        ),
+                    ),
+                ).status,
+            )
+                .isEqualTo(401)
+            assertThat(e.handle(rpc("tools/list", emptyMap<String, Any>())).status).isEqualTo(401)
+        }
+        val resp = body(
+            endpoint(allowAll()).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            ).entity,
+        )
+        assertThat(resp.path("result").path("isError").asBoolean()).isFalse()
+    }
+
+    @Test
+    fun `a staff token without this server's audience is refused with 401`() {
+        listOf(staffClaims - "aud", staffClaims + ("aud" to "some-other-service")).forEach { claims ->
+            val resp = endpoint(allowAll(), jwt = TestJsonWebToken(claims), oboEnabled = true).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            )
+            assertThat(resp.status).isEqualTo(401)
         }
     }
 
@@ -580,6 +646,12 @@ class McpEndpointTest {
 
         assertThat(toolCalls("list_accounts", "UNAVAILABLE", "DENIED")).isEqualTo(1.0)
         assertThat(toolCalls("list_accounts", "DENY", "DENIED")).isEqualTo(1.0)
+
+        // Availability SLI input: the outage is a server fault; the policy DENY is not a failure at all.
+        assertThat(
+            registry.get("openbank.mcp.tool_call.failures").tag("kind", "error").counter().count(),
+        ).isEqualTo(1.0)
+        assertThat(registry.find("openbank.mcp.tool_call.failures").counters().sumOf { it.count() }).isEqualTo(1.0)
     }
 
     @Test
@@ -699,7 +771,13 @@ class McpEndpointTest {
     // A validated agent token (ADR-0195): sub carries the `agent:` prefix the shared
     // AuthorizeInterceptor/rego convention expects; consent_id is required by CallerContextResolver
     // (a present-but-blank/missing claim fails closed, not silently).
-    private fun testAgentJwt() = TestJsonWebToken(mapOf("sub" to "agent:test-agent", "consent_id" to TEST_CONSENT_ID))
+    private fun testAgentJwt() = TestJsonWebToken(
+        mapOf(
+            "sub" to "agent:test-agent",
+            "aud" to "openbank-mcp-service",
+            "consent_id" to TEST_CONSENT_ID,
+        ),
+    )
 
     private companion object {
         const val SECRET = "CZ6508000000192000145399"

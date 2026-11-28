@@ -74,9 +74,47 @@ Zápis do outboxu pro `DEVICE_ENROLLED` je záměrně **oddělená transakce** o
 
 ## Omezení spotřebitelé (ADR-0335 D1)
 
+Rezervace se odvozuje z OVĚŘENÉ identity servisního účtu
+(`ServiceAccountIdentity.verifiedPrincipalName`: `azp` svázané s `preferred_username`), nikdy ze
+zobrazovaného jména, a pravidlo OPA `service-sca-scoped-consumer` vyžaduje `service_account == true`
+a svázané `client_id` — osoba nebo volající bez příznaku, pojmenovaný jako omezený spotřebitel,
+nedostane nic.
+
 Každé spotřebování odvodí z principálu `ConsumerScope`. `service-account-openbank-pension` je
 `Reserved(PENSION)`: smí spotřebovat jen výzvu `APPROVAL`, jejíž zařízením podepsané
 `approvalRequestId` začíná `pension-`. Každý jiný principál je `General` a smí spotřebovat cokoli
 kromě tohoto jmenného prostoru. Odmítnutý pokus vrátí 403 ještě před compare-and-consume, takže výzvu
 nespálí. Rozsah deklaruje `rules.yaml: scoped_sca_consumers` a `ConsumerScopesRulesParityTest` drží
 kód v souladu. Flyway V17 rozšiřuje sloupec approval id.
+
+## Připojení MCP klienta (ADR-0385 D3)
+
+`MCP_CLIENT_CONNECT` je schválení v aplikaci, kterým zákazník připojí MCP klienta. Je vázané na
+jeden autorizační požadavek PAR.
+
+- **Vlastnictví jmenného prostoru.** `ReservedNamespace.MCP_CONNECT` vlastní tento účel celý:
+  každá výzva tohoto účelu patří do jmenného prostoru bez ohledu na podepsané id. `General` i
+  pension jsou odmítnuti (403) a odmítnutí výzvu nespálí. Prefix `mcp-connect:` je při inicializaci
+  odmítnut u všech ostatních účelů, takže žádný stávající účel do jmenného prostoru nevstoupí.
+- **Vazba.** Inicializace vyžaduje `approvalRequestId` = `mcp-connect:<id požadavku PAR>` a
+  `payloadSha256` nad kanonickým kontextem připojení (client_id, hostitel přesměrování, URL zdroje,
+  scopes, hash request_uri, expirace) a odmítá platební, dokumentová i karetní pole (400). Obě pole
+  jsou součástí idempotenčního klíče, takže dvě souběžná připojení dostanou dvě výzvy.
+- **Podepsaný tvar.** Zařízení podepisuje
+  `challengeId|decision|MCP_CLIENT_CONNECT|approvalRequestId|payloadSha256`, tedy tvar `APPROVAL`
+  s vlastním segmentem účelu výzvy. Spotřebování znovu porovná obě pole i stranu před jednorázovým
+  compare-and-set.
+- **Minimální stáří zařízení 72 h.** Zařízení zapsané před méně než 72 h nemůže připojení schválit
+  (403 při rozhodnutí, nic se nezaznamená). Zamítnutí je přijato. Polovina pravidla pro passkey patří
+  do autentikátoru v Keycloaku, ne sem.
+- **Jediný spotřebitel: autorizační server.** `service-account-openbank-keycloak-mcp` (autentikátor
+  zadrženého kódu v Keycloaku, realm openbank, jen ROLE_API) drží `MCP_CONNECT`; OPA mu povoluje jen
+  `scaChallenge.initiate` a `scaChallenge.consume`. Inicializaci `MCP_CLIENT_CONNECT` od JAKÉHOKOLI
+  jiného volajícího (obecný iniciátor jako edge, nebo pension) služba odmítne 403
+  `ScaInitiateScopeViolationException` a tento spotřebitel nesmí iniciovat nic jiného než
+  `MCP_CLIENT_CONNECT` v `mcp-connect:`. Chyby tvaru jsou stále nejprve 400.
+- **Čekání má vlastní odpověď.** Consume výzvy, o které zařízení ještě nerozhodlo, vrací 400 s
+  `code = SCA_CHALLENGE_PENDING`; zamítnutá, neúspěšná nebo zrušená výzva vrací dál
+  `VALIDATION_ERROR`. Autentikátor na první čeká a při čemkoli jiném relaci ukončí.
+- **Kanonický kontext.** `McpConnectContext` určuje bajty, nad kterými se počítá `payloadSha256`;
+  je bajt po bajtu vázán na fixture, kterou čtou i testy rozšíření Keycloaku.

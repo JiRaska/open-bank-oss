@@ -99,6 +99,10 @@ class ExceptionMappers {
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
+    fun nostroBreakNotFound(e: com.openbank.treasury.application.port.out.NostroBreakNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
     fun nostroAccountNotFound(e: NostroAccountNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
@@ -170,6 +174,11 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun correctionLimit(e: com.openbank.treasury.application.port.out.CorrectionLimitBreachedException): Response =
         error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
+    /** #12115: the contra account would not hold the placement — at booking, or under the locked re-measure. */
+    @ServerExceptionMapper
+    fun fundingExceeded(e: com.openbank.treasury.application.port.out.FundingExceededException): Response =
+        error(UNPROCESSABLE, "FUNDING_EXCEEDED", e.message)
 
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()

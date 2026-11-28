@@ -1,0 +1,21 @@
+{
+  "name": "openbank",
+  "displayName": "OpenBank",
+  "version": "0.1.2",
+  "description": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
+  "author": {
+    "name": "OpenBank contributors",
+    "url": "https://github.com/JiRaska/open-bank-oss"
+  },
+  "homepage": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins",
+  "repository": "https://github.com/JiRaska/open-bank-oss",
+  "license": "Apache-2.0",
+  "keywords": [
+    "banking",
+    "accounts",
+    "payments",
+    "mcp"
+  ],
+  "icon": "./assets/icon.png",
+  "documentationUrl": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins"
+}

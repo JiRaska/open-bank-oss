@@ -1,0 +1,22 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: delegation-service
+  namespace: delegation
+spec:
+  template:
+    spec:
+      containers:
+      - name: delegation-service
+        env:
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+          value: /mnt/mcp-delegation-server/tls.crt
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+          value: /mnt/mcp-delegation-server/tls.key
+        - name: QUARKUS_HTTP_SSL_CERTIFICATE_RELOAD_PERIOD
+          value: 1h
+        - name: QUARKUS_HTTP_SSL_PORT
+          value: '8443'
+        - name: QUARKUS_HTTP_SSL_PROTOCOLS
+          value: TLSv1.3

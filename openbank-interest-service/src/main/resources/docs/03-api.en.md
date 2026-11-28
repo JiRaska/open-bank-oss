@@ -109,7 +109,8 @@ Resources currently translate domain failures to a generic body:
 | 401 | missing / invalid token |
 | 403 | role missing for the endpoint |
 | 404 | rate config / remittance not found |
-| 500 | domain failure (recovered to `{error: ...}`) — e.g. no active rate config, no pending accruals |
+| 422 | no active rate config resolves for the requested accrual — the caller must configure a rate first (`RateConfigNotFound`); see `InterestAccrualCapitalizationE2E` |
+| 500 | domain failure (recovered to `{error: ...}`) — e.g. no pending accruals |
 
 > A unified RFC-9457 problem-detail body (`openbank-libs.api.ApiError`) is the platform direction; this service uses the simpler `{error}` shape in v1.
 

@@ -20,7 +20,7 @@ info:
   # the CRS/FATCA TIN boundary: the derived statuses and residencies WITH TINs, readable by
   # service-account-openbank-tax-reporting alone, audit-logged without TINs).
   # 1.30.0 -> 1.31.0: additive — verified statutory representation publication and inspection.
-  version: 1.31.0
+  version: 1.33.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -181,6 +181,137 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/parties/mcp-native-passkey-age-policy:
+    get:
+      operationId: getMcpNativePasskeyAgePolicy
+      summary: Read the active sandbox-wide native MCP passkey age rule
+      responses:
+        '200':
+          description: Active sandbox rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeAgeExceptionChange'
+        '403':
+          description: Sandbox mechanism disabled or interactive administrator required
+        '404':
+          description: No active rule
+    put:
+      operationId: putMcpNativePasskeyAgePolicy
+      summary: Record a time-limited sandbox-wide native passkey age rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeAgeExceptionChange'
+      responses:
+        '200':
+          description: Rule recorded in the audit log
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeAgeExceptionChange'
+        '400':
+          description: Invalid age, expiry, or reason
+        '403':
+          description: Sandbox mechanism disabled or interactive administrator required
+    delete:
+      operationId: revokeMcpNativePasskeyAgePolicy
+      summary: Revoke the sandbox-wide rule and append an audit record
+      responses:
+        '204':
+          description: Rule revoked
+        '403':
+          description: Sandbox mechanism disabled or interactive administrator required
+  /api/v1/parties/{partyId}/mcp-native-passkey-age-policy/effective:
+    parameters:
+      - $ref: '#/components/parameters/McpNativeAgePartyId'
+    get:
+      operationId: getEffectiveMcpNativePasskeyAgePolicy
+      summary: Resolve the active sandbox-wide rule for Customer Edge
+      responses:
+        '200':
+          description: Active rule; checked against current Party class and status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [minimumAgeMinutes, expiresAt]
+                properties:
+                  minimumAgeMinutes: {type: integer, minimum: 1, maximum: 4319}
+                  expiresAt: {type: string, format: date-time}
+        '403':
+          description: Only the Customer Edge workload is authorized
+        '404':
+          description: Sandbox mechanism disabled, no active rule, or party ineligible
+
+  /api/v1/parties/{partyId}/mcp-native-passkey-age-exception:
+    parameters:
+      - $ref: '#/components/parameters/McpNativeAgePartyId'
+    get:
+      operationId: getMcpNativePasskeyAgeException
+      summary: Read the active sandbox native MCP passkey age exception
+      responses:
+        '200':
+          description: Active synthetic party exception
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeAgeException'
+        '403':
+          description: Sandbox mechanism disabled, party ineligible, or interactive administrator required
+        '404':
+          description: No active exception for the eligible party
+    put:
+      operationId: putMcpNativePasskeyAgeException
+      summary: Record a time-limited sandbox exception for an active synthetic person
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpNativeAgeExceptionChange'
+      responses:
+        '200':
+          description: Exception and audit event recorded atomically
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpNativeAgeException'
+        '400':
+          description: Invalid age, expiry, reason, or party classification
+        '403':
+          description: Sandbox mechanism disabled or interactive administrator required
+    delete:
+      operationId: revokeMcpNativePasskeyAgeException
+      summary: Revoke the sandbox exception and append an audit record
+      responses:
+        '204':
+          description: Exception revoked
+        '403':
+          description: Sandbox mechanism disabled or interactive administrator required
+  /api/v1/parties/{partyId}/mcp-native-passkey-age-exception/effective:
+    parameters:
+      - $ref: '#/components/parameters/McpNativeAgePartyId'
+    get:
+      operationId: getEffectiveMcpNativePasskeyAgeException
+      summary: Resolve an active synthetic exception for Customer Edge
+      responses:
+        '200':
+          description: Active rule; checked against current Party class and status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [minimumAgeMinutes, expiresAt]
+                properties:
+                  minimumAgeMinutes: {type: integer, minimum: 1, maximum: 4319}
+                  expiresAt: {type: string, format: date-time}
+        '403':
+          description: Only the Customer Edge workload is authorized
+        '404':
+          description: No active eligible exception
   /api/v1/parties/{id}/pii-reveal:
     post:
       tags: [Parties]
@@ -928,6 +1059,11 @@ paths:
               schema: {type: string, enum: [no-store]}
 components:
   parameters:
+    McpNativeAgePartyId:
+      in: path
+      name: partyId
+      required: true
+      schema: {type: string, format: uuid}
     partyId:
       name: id
       in: path
@@ -945,6 +1081,21 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    McpNativeAgeExceptionChange:
+      type: object
+      required: [minimumAgeMinutes, expiresAt, reason]
+      properties:
+        minimumAgeMinutes: {type: integer, minimum: 1, maximum: 4319}
+        expiresAt: {type: string, format: date-time}
+        reason: {type: string, minLength: 1, maxLength: 240}
+    McpNativeAgeException:
+      allOf:
+        - $ref: '#/components/schemas/McpNativeAgeExceptionChange'
+        - type: object
+          required: [partyId]
+          properties:
+            partyId: {type: string, format: uuid}
+
     StatutoryRepresentationEvidence:
       type: object
       required: [caseId, attestationId, ruleTextHash, attestedAt, mode, requiredSignatures, requiredOffices, representatives]

@@ -1,0 +1,53 @@
+{
+  "$comment": "Answers for the claude.ai/directory/manage 'MCP connector' form, step by step (claude.com/docs/connectors/building/submission). Not uploaded as a file. Generated from listing.json.",
+  "1_connection": {
+    "universalUrl": "https://mcp.open-bank.tech/customer/mcp"
+  },
+  "2_tools": [
+    {
+      "name": "list_accounts",
+      "title": "List my accounts",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "get_balance",
+      "title": "Get account balance",
+      "readOnlyHint": true,
+      "destructiveHint": false
+    },
+    {
+      "name": "propose_payment",
+      "title": "Propose a payment",
+      "readOnlyHint": false,
+      "destructiveHint": false
+    }
+  ],
+  "3_listing": {
+    "serverName": "OpenBank",
+    "oneLiner": "Read connected OpenBank accounts and balances, and draft payment proposals that you approve yourself in the OpenBank app.",
+    "description": "Connect your personal OpenBank account to ask about the accounts you shared and their balances. The assistant can also draft a payment proposal. Nothing leaves your account until you open the OpenBank app and approve that exact proposal with strong customer authentication. Data you ask about is sent to the assistant platform's provider. You can see and revoke every connected assistant in the OpenBank app.",
+    "categories": [
+      "Finance"
+    ],
+    "documentationUrl": "https://github.com/JiRaska/open-bank-oss/tree/main/integrations/assistant-plugins",
+    "icon": "assets/icon.png",
+    "slug": "openbank"
+  },
+  "4_use_cases": {
+    "readsOrWrites": "both: reads, plus payment proposals that the customer approves in the bank app",
+    "prerequisites": "An OpenBank personal account and the OpenBank app with a registered passkey."
+  },
+  "6_authentication": {
+    "requirement": "Always required",
+    "method": "OAuth sign-in",
+    "oauthClient": "Anthropic-held client credentials (oauth_anthropic_creds) - ONLY under the ADR-0385 D1 client-secret exception: <= 6 months, owner risk acceptance, expiry enforced in the allowlist (invalid_client after); the default is private_key_jwt",
+    "redirectUri": "https://claude.ai/api/mcp/auth_callback",
+    "clientIdAndSecret": "OWNER enters these in the portal; never in this repository"
+  },
+  "7_data_handling": {
+    "api": "own first-party API",
+    "personalHealthData": false,
+    "sponsoredContent": false
+  }
+}

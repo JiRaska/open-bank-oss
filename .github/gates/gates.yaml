@@ -90,6 +90,25 @@ gates:
     run: |
       python3 .github/scripts/check-credential-expiry.py --coverage .github/workflows/date-driven-expiry-watch.yml
 
+  # The project does not own the old `openbank.io` domain; every key moved to `open-bank.tech/`
+  # (docs/runbooks/node-keys-open-bank-tech-migration.md), and old-prefix keys came back anyway
+  # because new manifests are copied from old ones. Only the four staged node keys are allowed,
+  # and only in the files that set or read them today. Markdown prose is exempt; fenced code
+  # blocks (the commands people paste) are not.
+  - id: no-openbank-io-keys
+    name: "no new keys under the unowned openbank.io prefix (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "Keys under a domain the project does not own kept reappearing after the open-bank.tech migration because nothing refused them. The scan covers every tracked code/config file and md code blocks, with an explicit allowlist for the four staged node keys in their current files."
+    review_after: "2027-05-19"
+    budget_seconds: 30
+    min_subjects: 1000
+    selftest: python3 .github/scripts/check-no-openbank-io-keys.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-openbank-io-keys.py"]
+    run: |
+      python3 .github/scripts/check-no-openbank-io-keys.py
+
   - id: apt-pin-verdicts-falsifiable
     name: "apt pin freshness verdicts stay reachable (#15483)"
     group: lint
@@ -747,6 +766,26 @@ gates:
     selftest_inputs: [".github/scripts/check-deploy-holds.py", ".github/scripts/merge-deploy-holds.py", ".github/scripts/test-conjunctive-holds.py", "openbank-libs/governance/rules.yaml"]
     run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
 
+  # ADR-0358: image pins live on the bot-owned deploy/sandbox branch. The branch carries no
+  # workflows, so a push there runs nothing; the contract is checked by the writer
+  # (publish-deploy-pin.py) before every write, and here against the live tip on every CI run.
+  # Contract: only pins/** changes, digest present, manifests are a verbatim copy of main at
+  # manifest_sha, every pinned sha is an ancestor of main, no sha moves backwards (rollback
+  # may move only the image), and a service under deploy_holds keeps its image. Before the
+  # owner bootstraps the branch the corpus is UNRESOLVED, which is not a pass.
+  - id: deploy-pin-branch-contract
+    name: "deploy/sandbox pins obey the ADR-0358 contract"
+    group: gitops
+    mode: enforced
+    min_subjects: 1  # the tip commit; UNRESOLVED until deploy/sandbox exists
+    budget_seconds: 60  # self-test builds a throwaway repo; live mode may unshallow main (blobless)
+    rationale: "Pins bypass PR review by design (ADR-0358); this contract is what keeps a direct write to deploy/sandbox from deploying a manifest or image main never had."
+    review_after: "2027-04-30"
+    selftest: python3 .github/scripts/check-deploy-pin-branch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-pin-branch.py", "openbank-infra/gitops/components/admin-ui/", "openbank-infra/gitops/components/aml/", "openbank-infra/gitops/components/ledger/", "openbank-infra/gitops/components/pension-fund/", ".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    run: bash .github/scripts/check-deploy-pin-branch-live.sh
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a
@@ -932,6 +971,42 @@ gates:
       # Falsified both ways: 4 findings / exit 1 on origin/main before the fix (arc_reaper's
       # alpine + three unmarked ARC helm values), 0 / exit 0 after. 8 self-test cases.
       python3 .github/scripts/check-tofu-image-pull-through.py --enforce
+
+  # A consumer merged against an input nobody provisioned fails days later, elsewhere, as an
+  # outage of the consumer: 2026-11-14 had five at once (ci-metrics-gateway 0 replicas ~70h,
+  # card-processing issuer-oidc ~44h, three workflows red every run). The inventory makes the
+  # reference and its provisioning one change; `--live` (operator machine) checks the claim.
+  - id: config-inventory
+    name: "every workflow secret/var and OpenBao ExternalSecret key is declared in .github/config-inventory.yaml (enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15
+    min_subjects: 200   # 445 workflow + ExternalSecret references on 2026-11-14
+    rationale: "An absent secret is an empty string and an absent OpenBao key is a valid ExternalSecret, so nothing fails at merge; the inventory forces the author to state, per name, provisioned or unprovisioned-with-issue-and-expiry, and fails on stale entries both ways (#16205, #16206)."
+    review_after: "2027-05-14"
+    selftest: python3 .github/scripts/check-config-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-config-inventory.py"]
+    run: |
+      python3 .github/scripts/check-config-inventory.py
+
+  # ADR-0389: pausing automation must never need a PR. Every schedule-triggered workflow gates
+  # its entry jobs on vars.<WORKFLOW_ID>_SCHEDULE_PAUSED and the global vars.SCHEDULES_PAUSED,
+  # or is listed in the checker's EXCLUDED map with the reason pausing it must stay reviewed.
+  - id: schedule-pause-switch
+    name: "every scheduled workflow carries an instant pause switch or a stated exclusion (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 15
+    min_subjects: 40    # 63 scheduled workflows on 2026-11-21
+    verified: "2026-11-21 — 0 findings; 15 switched, 48 excluded with reasons"
+    rationale: "A pause that needs a PR waits in the queue the runaway cron may be flooding; the gate makes a new scheduled workflow either carry the switch or state why pausing it must stay reviewed (#17006)."
+    review_after: "2027-05-21"
+    selftest: python3 .github/scripts/check-schedule-pause-switch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-schedule-pause-switch.py"]
+    run: |
+      python3 .github/scripts/check-schedule-pause-switch.py
 
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
@@ -1245,6 +1320,29 @@ gates:
       python3 .github/scripts/check-otel-exporter-endpoint.py --self-test
     run: |
       python3 .github/scripts/check-otel-exporter-endpoint.py
+  # #16292. cert-manager renews an internal leaf 15 days before expiry and rewrites the mounted
+  # Secret; Quarkus reads QUARKUS_HTTP_SSL_CERTIFICATE_FILES once at start unless a reload period
+  # is set. A pod that outlives the renewal window serves the old leaf until it expires while the
+  # Certificate, the Secret and the expiry metric all report a fresh one. 24 of 26 serving
+  # containers had no reload period on 2026-11-15. Per container, not per file. The same holds
+  # for the outbound identity: a named quarkus.tls.<name> config with a key-store needs its own
+  # reload-period (45 of 49 lacked one the same day).
+  - id: tls-certificate-reload
+    name: "mounted TLS certificates are reloaded, server and client side (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A renewed certificate that the process never re-reads is an outage on a timer that every
+      expiry signal reports as healthy, because they all measure the Secret, not the listener.
+    review_after: 2027-05-15
+    min_subjects: 60   # 26 serving containers + 49 named client TLS configs today (2026-11-15)
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-tls-certificate-reload.py"]
+    selftest: |
+      python3 .github/scripts/check-tls-certificate-reload.py --self-test
+    run: |
+      python3 .github/scripts/check-tls-certificate-reload.py
+
   - id: entity-column-names
     name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
     group: gitops
@@ -1327,7 +1425,7 @@ gates:
       a money-path service.
     review_after: 2027-04-17
     min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
-    budget_seconds: 29
+    budget_seconds: 31   # 31 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
     selftest_expect: pass
     selftest: |
@@ -1403,13 +1501,14 @@ gates:
   # sentinel guard removed because promtool's `time()` starts at the unix epoch and `time() - 0`
   # is therefore minutes, not the ~56 years a real never-backed-up cluster produces. ENFORCED.
   - id: promql-alert-unit-tests
-    name: "alert rules are unit-tested for what they PREVENT (enforced)"
+    name: "PromQL alert and canary controls are tested for their actual verdicts (enforced)"
     group: gitops
     mode: enforced
     rationale: >-
       A green promtool `check rules` proves a rule is well-formed, which is exactly the signal
       that was already green throughout every alerting defect recorded here -- #5736's rule was
       loaded, health=ok and promtool-clean for the whole 8h40m it failed to fire.
+      Strict canary queries distinguish missing coverage from health; existing active guards remain unchanged.
     review_after: "2027-02-28"
     min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
     # `install-promtool.sh` installs promtool at the version and sha256 pinned in
@@ -1423,6 +1522,13 @@ gates:
       - ".github/scripts/fetch-artifact.py"
       - "ci/artifacts.lock"
       - "openbank-infra/tests/promtool/run.sh"
+      - "openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml"
+      - "openbank-infra/gitops/components/argo-rollouts/strict-analysis-template.yaml"
+      - "openbank-infra/tests/canary/check.py"
+      - "openbank-infra/tests/canary/legacy-analysis-baseline.yaml"
+      - "openbank-infra/tests/canary/evaluate.go"
+      - "openbank-infra/tests/canary/go.mod"
+      - "openbank-infra/tests/canary/go.sum"
     selftest: |
       bash .github/scripts/install-promtool.sh
       # Prove the harness can FAIL: a test asserting an alert no rule defines must go red.
@@ -1444,12 +1550,14 @@ gates:
         exit 1
       fi
       echo "SELF-TEST PASS"
+      python3 openbank-infra/tests/canary/check.py --self-test
     run: |
       bash .github/scripts/install-promtool.sh
       n=$(find openbank-infra/tests/promtool -name '*_test.yaml' | wc -l)
       test "$n" -ge 2 || { echo "expected >=2 promtool test files, found $n"; exit 1; }
       echo "SUBJECTS=$n  # promtool test files"
       bash openbank-infra/tests/promtool/run.sh
+      python3 openbank-infra/tests/canary/check.py
 
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
@@ -1515,6 +1623,31 @@ gates:
       python3 .github/scripts/check-alert-window-vs-subject-period.py --self-test
     run: |
       python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
+
+  # Alert-rule hygiene ratchet (2026-11-14). The week's top flappers were the rules whose noise
+  # cannot be judged by reading them -- statistical bands and linear projections -- and none
+  # had been replayed against history before it shipped. New alerts need `for:` >= 1m (or a
+  # stated for_zero_reason), a runbook_url, and, for a stddev/predict_linear rule, a
+  # `backtest:` annotation from openbank-infra/scripts/alert-backtest.py. Existing gaps are
+  # baselined both ways, so the list only shrinks. ENFORCED.
+  - id: alert-rule-hygiene
+    name: "new alert rules carry for:, runbook and (statistical) a backtest (enforced)"
+    group: gitops
+    budget_seconds: 24   # 24 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
+    mode: enforced
+    rationale: >-
+      TrafficDropAnomaly, SpanLatencyTrendAnomaly and NodeDiskWillFillIn4h fired 16, 18 and 66
+      separate times in seven days with no outage, while a critical sat unacted for 70h amid
+      the noise. A 3-sigma band on near-flat synthetic traffic is narrower than sampling
+      jitter, which no reviewer can see in the YAML; only a replay against recorded history
+      can, so the rule must say it was replayed.
+    review_after: "2027-02-14"
+    min_subjects: 250   # 306 alert rules in gitops PrometheusRules on 2026-11-14
+    selftest_inputs: [".github/scripts/check-alert-rule-hygiene.py"]
+    selftest: |
+      python3 .github/scripts/check-alert-rule-hygiene.py --self-test
+    run: |
+      python3 .github/scripts/check-alert-rule-hygiene.py --enforce
 
   # A route prefix moves Alertmanager's WHOLE HTTP surface, /api/v2/alerts included, so a
   # hand-configured client pointed at the bare service URL posts every notification into a 404
@@ -2146,7 +2279,9 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
-    selftest_inputs: [".github/scripts/check-license-headers.py"]
+    # evals/ declared (#16623): the self-test walks every SPDX-headered source file, and
+    # evals/mcp-redteam added the first .sh/.js/.yaml under evals/, which the trace caught.
+    selftest_inputs: [".github/scripts/check-license-headers.py", "evals/"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -2250,8 +2385,11 @@ gates:
     group: supplychain
     mode: enforced
     rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
+    # #16788: a budget above the effective hard timeout (default 420 s) fails run-gates load().
+    # #16785 raises this gate's budget to 439 (1.5 x p95), so the kill must sit above it: 660 = 1.5 x 439.
+    timeout_seconds: 660
     review_after: "2027-05-03"
-    budget_seconds: 380
+    budget_seconds: 439   # 439 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: |
       set -e
       python3 .github/scripts/test-sbom-effective-model-guard.py
@@ -2306,7 +2444,7 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
-    budget_seconds: 180   # a real test suite
+    budget_seconds: 187   # a real test suite; 187 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
@@ -2842,6 +2980,48 @@ gates:
     run: |
       python3 .github/scripts/run-evals.py --require-recordings
 
+  # ADR-0383 D7 / #16617 layer 4 — MCP prompt-injection red-team pack, split in two so neither
+  # gate claims more than it measures. The deterministic server half is JUnit in
+  # openbank-mcp-service (PoisonedToolResultRedTeamTest).
+  #
+  # (1) ENFORCED: needs no model. Corpus <-> committed rendered fixture <-> scenarios.json <->
+  # generated promptfoo tests/tools agree, so a recording can only ever be about the bytes the
+  # server renders today. SUBJECTS = corpus items checked.
+  - id: mcp-redteam-fixture-integrity
+    name: "MCP red-team fixture integrity (ADR-0383 D7, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The model-in-the-loop pack replays a model against committed bytes; if the corpus, rendered fixture, scenarios or generated promptfoo files disagree, any verdict is about a server that no longer exists."
+    review_after: "2027-05-17"
+    budget_seconds: 30
+    # 85 corpus items today; the JUnit test pins the exact size.
+    min_subjects: 80
+    selftest: python3 .github/scripts/check-mcp-redteam-fixture-integrity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-redteam-fixture-integrity.py", ".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/check-mcp-redteam-fixture-integrity.py
+
+  # (2) ADVISORY (ADR-0144, rules.yaml: mcp_redteam_model_verdict): the model verdict. Until the
+  # owner commits a first live recording it evaluates NOTHING — it prints "model verdict: NOT
+  # MEASURED" and SUBJECTS=0, which is why it cannot be enforced yet. Once a recording exists it
+  # must cover every scenario (partial => fail); a moved scenario digest is STALE => fail.
+  - id: mcp-redteam-model-verdict
+    name: "MCP red-team model verdict (ADR-0383 D7, advisory)"
+    group: registry
+    mode: advisory
+    verified: "2026-11-17 — 0 of 45 scenarios evaluated: no recording committed (CI holds no model keys); self-test proves partial/stale/failing recordings fail"
+    rationale: "Whether a model given a poisoned tool result proposes an unrequested payment, fetches beyond the question or repeats an attacker URL can only be measured against a recorded model run; CI holds no keys."
+    review_after: "2026-12-15"
+    budget_seconds: 30
+    # 45 scenarios; today 0 are evaluated, so the floor reports it (advisory) until recorded.
+    min_subjects: 45
+    selftest: python3 .github/scripts/run-mcp-redteam-evals.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/run-mcp-redteam-evals.py"]
+    run: |
+      python3 .github/scripts/run-mcp-redteam-evals.py
+
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
   # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
@@ -3065,6 +3245,30 @@ gates:
     run: |
       python3 .github/scripts/check-agent-bounded-write-surface.py
 
+  # ADR-0387 (issue #16754): agents read the public web only through the fetch broker's
+  # `web.fetch` tool (resource read.public_web). The network layer cannot carry the host
+  # allowlist (aws-network-policy-agent matches CIDRs, not hostnames), so the charter is the
+  # control: explicit HTTPS hostnames, no write/execute next to web access, and the renderer
+  # credential mounted by the broker alone.
+  #
+  # ENFORCED. Pure python, one file read plus a gitops scan, <1 s. Falsified by effect on
+  # 2026-11-18: granting read.public_web to regulatory-obligations-watcher without a host list
+  # made it exit 1; the self-test covers wildcard, IP literal, scheme, upper case, write/execute
+  # tier, dead allowlist and a second secret mount.
+  - id: public-web-fetch
+    min_subjects: 15   # agent charters examined; 23 today (2026-11-18)
+    name: "public-web fetch bounded per charter (ADR-0387, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 30
+    rationale: "Fetched web content is untrusted and the host allowlist exists only in the application layer, so a wildcard host, a write tier beside web access or a second renderer-credential mount would each widen agent egress with nothing else to notice."
+    review_after: "2027-05-18"
+    selftest: python3 .github/scripts/check-public-web-fetch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-public-web-fetch.py"]
+    run: |
+      python3 .github/scripts/check-public-web-fetch.py
+
   - id: agent-model-parity
     name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
     group: registry
@@ -3139,18 +3343,6 @@ gates:
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
-  # The admin-ui compliance page renders 47 regulatory-conformance claims from a hardcoded
-  # literal. #2370 found it wrong in BOTH directions — GDPR rows marked `ok` citing columns
-  # that exist only in a Flyway migration, with nothing reading them — and #2667 corrected
-  # those rows BY HAND. The checker that stops them rotting again was written at the same
-  # time and then referenced from nowhere: no workflow, no manifest entry, and nothing in
-  # this repo iterates `.github/scripts/check-*` (this runner reads the manifest, not the
-  # directory). So it had never run once (#3240).
-  #
-  # ENFORCED, same reasoning as the two gates above: the claim is published to users, the
-  # evidence citation is mechanical, and advisory over a published claim means "the page
-  # says something the code does not support" is mergeable. Green on the current tree, and
-  # `--self-test` (added with this registration) proves the red is reachable.
   # ensure-ecr-repository.sh runs on the deploy path, which CI cannot exercise: it needs AWS
   # credentials and a real registry. What CAN regress silently is its CLASSIFICATION of the
   # registry's answer, and that is exactly what broke the first attempt — #3444 read AccessDenied
@@ -3370,6 +3562,39 @@ gates:
     run: |
       python3 .github/scripts/merge-train-stall-watch.py --check-declaration
 
+  - id: watch-outcome-declared
+    name: "every scheduled watch names its outcome CLEAN/FOUND/SKIPPED/UNREADABLE (ratchet, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline; reads workflow files and the scripts they invoke
+    review_after: "2027-05-14"
+    rationale: >-
+      2026-11-09..14 three watches were red for days on READ failures (a short page, a 409,
+      a moving index) while one subject they watched was genuinely red; one boolean carried
+      three answers, so the reds were ignored. A red watch must mean only "this watch is blind".
+      Re-examine when BASELINE is empty.
+    min_subjects: 5
+    selftest: |
+      python3 .github/scripts/check-watch-outcome.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-watch-outcome.py
+
+  - id: standing-red-sentinel-selftest
+    name: "standing-red sentinel: streak, dedupe, escalation and close logic falsified (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # offline fixtures plus a scan of the workflow tree
+    review_after: "2027-05-14"
+    rationale: >-
+      A scheduled workflow has no PR and no author, so its red reaches nobody. The sentinel is
+      the only reader of that lane for ~60 workflows; its state machine (open/refresh/reopen/
+      escalate/close, never close on an unreadable tick) must stay falsified.
+    min_subjects: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the sentinel's --self-test; three sabotages (streak, open, cancelled filter) each make it fail"
+    run: |
+      python3 .github/scripts/standing-red-sentinel.py --self-test
+
   - id: auto-deploy-red-watch-declaration
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry
@@ -3385,7 +3610,7 @@ gates:
     selftest: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml"]
+    selftest_inputs: [".github/scripts/detect-auto-deploy-stuck.py", ".github/workflows/auto-deploy-red-watch.yml", ".github/scripts/watch_outcome.py", ".github/scripts/deploy-window.py"]
     run: |
       python3 .github/scripts/detect-auto-deploy-stuck.py --check-declaration
 
@@ -3425,7 +3650,9 @@ gates:
     # Subjects are assertions, not files: the floor drops the day someone deletes a case.
     min_subjects: 78   # every case incl. the Gradle-distribution and GitHub-transient recognisers
     run: |
+      set -e
       bash .github/scripts/spot-kill-retry.sh --self-test
+      python3 .github/scripts/test_retry_job_inventory.py
 
   - id: dast-zap-coverage-selftest
     name: "DAST coverage verdict tells a scan from a non-scan (issue #12097, enforced)"
@@ -3450,13 +3677,15 @@ gates:
     mode: enforced
     selftest_exempt: >-
       is-a-test-suite — the run: below exercises the selector with eligible, irrelevant,
-      expired, and duplicate runs and asserts the exact retry and flake matrices.
+      expired, and duplicate runs and asserts the exact retry and flake matrices;
+      collector fixtures verify bounded retries and complete, single-object API pages.
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
     min_subjects: 33
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
+      python3 .github/scripts/test_reconcile_fetch_pages.py
 
   - id: gh-retry-selftest
     name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
@@ -3563,20 +3792,152 @@ gates:
     group: registry
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
+    # The synthetic self-test outgrew one gate: 753.9 s against a 750 s kill on #17083 (#17006).
+    # It is sharded (merge-train.py SELF_TEST_SHARDS) instead of given a longer kill: this gate runs
+    # shard 0/4 and merge-train-selftest-shard-{1,2,3} the rest, in other CI shards. Every shard
+    # asserts it saw every scenario marker once and ran exactly the ones it owns, and that no
+    # scenario leaves fixture state behind; --self-test-shard-plan (their run:) refuses a plan that
+    # drops a scenario from every shard, or a gates.yaml that misses, doubles or mis-sizes one.
     review_after: "2027-04-18"
-    budget_seconds: 302   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07; 302 = ceil(1.5 x p95 200.83 s over 30 main runs, gate-runtime-measurements.json)
+    # gate-observability-declarations ratchet: >= ceil(measured p95 329.76 s x 1.5) = 495 (n=30,
+    # max 335.89 s, gate-runtime-measurements.json). Kill at the pre-split 750 s, above the budget.
+    budget_seconds: 495
+    timeout_seconds: 750
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
-      python3 .github/scripts/merge-train.py --self-test
+      python3 .github/scripts/merge-train.py --self-test-shard 0/4
       python3 .github/scripts/test-merge-train-owner-approval.py
       python3 .github/scripts/test-merge-train-close-linked-issues.py
       python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
-    # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
-    # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
-    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
+    # The synthetic self-test's own inputs only (#17006). The cases that read the REAL tree (every
+    # workflow, check/test script and the Gradle/test sources at HEAD, #13750) moved to
+    # merge-train-real-tree-drift below, which runs on every pull request. Enumerated from what the
+    # self-tests open/execute (Python audit-hook trace) plus their git-object reads; CI's strace
+    # (OB_SELFTEST_TRACE=require) fails this gate if a read is missing. gates.yaml is universal.
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
+
+  - id: merge-train-selftest-shard-1
+    name: "merge-train synthetic self-test, shard 1/4 (#17006, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "Shard 1 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
+    min_subjects: 100   # 152 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 1/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-selftest-shard-2
+    name: "merge-train synthetic self-test, shard 2/4 (#17006, enforced)"
+    group: security
+    mode: enforced
+    rationale: "Shard 2 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
+    min_subjects: 100   # 152 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 2/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-selftest-shard-3
+    name: "merge-train synthetic self-test, shard 3/4 (#17006, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "Shard 3 of merge-train.py's synthetic self-test, split out of merge-train-declaration when the whole outgrew its 750 s kill (#17006); a scenario no shard runs fails every shard's partition check."
+    review_after: "2027-05-22"
+    budget_seconds: 495   # no measurement for this id yet; the same shard-sized workload as merge-train-declaration (shard 0/4), whose measured p95 329.76 s x 1.5 = 495
+    timeout_seconds: 750
+    min_subjects: 100   # 152 scenarios today (SUBJECTS of --self-test-shard-plan), 2026-11-22
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test-shard 3/4
+    selftest_expect: pass
+    selftest_inputs:
+      - .github/scripts/merge-train.py
+      - .github/scripts/merge_train_carrier.py
+      - .github/scripts/merge_pr_policy.py
+      - .github/scripts/test-merge-pr-policy.py
+      - .github/scripts/fixtures/
+      - .github/scripts/test-merge-train-main-red-freshness.py
+      - .github/scripts/test-merge-train-owner-approval.py
+      - .github/scripts/test-merge-train-close-linked-issues.py
+      - .github/scripts/e2e/merge-train-gates-yaml.test.py
+      - .github/scripts/check-security-checklist.py
+      - .github/scripts/regen-derived.sh
+      - .github/workflows/merge-train.yml
+      - .github/workflows/merge-train-owner-approval.yml
+      - .github/PULL_REQUEST_TEMPLATE.md
+      - .gitattributes
+    run: |
+      python3 .github/scripts/merge-train.py --self-test-shard-plan
+
+  - id: merge-train-real-tree-drift
+    name: "merge-train's privileged-gate-code drift guard holds on the real tree (#13750, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A new check or test script that judges a carrier, the ruleset or the merge machinery must stay strict (PRIVILEGED_GATE_CODE); the derivation reads every workflow and script, so it runs on every PR, split out of merge-train-declaration's slow synthetic self-test (#17006)."
+    review_after: "2027-05-22"
+    budget_seconds: 30   # 2.4 s wall locally, 2026-11-22
+    min_subjects: 9      # 9 real-tree cases today (key spread + CI receiver moved in, #17083 review), 2026-11-22
+    selftest_exempt: "is-a-test-suite - the run: IS merge-train.py's real-tree self-test, which fails when a carrier-judging script is missing from PRIVILEGED_GATE_CODE"
+    run: |
+      python3 .github/scripts/merge-train.py --real-tree-self-test
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
@@ -3837,16 +4198,6 @@ gates:
     run: |
       python3 .github/scripts/check-route-exports.py --enforce
 
-  - id: compliance-matrix
-    name: "compliance-page evidence citations (#2370, enforced)"
-    group: registry
-    min_subjects: 1000   # 2177 Kotlin sources observed
-    mode: enforced
-    selftest_inputs: [".github/scripts/check-compliance-matrix.py"]
-    selftest: |
-      python3 .github/scripts/check-compliance-matrix.py --self-test
-    run: |
-      python3 .github/scripts/check-compliance-matrix.py --enforce
 
   # docs/compliance/openssf-gold-gap.md feeds the OpenSSF BadgeApp form -- a public
   # attestation to a third party. It shipped scoring crypto_used_network/crypto_tls12 as
@@ -3982,6 +4333,25 @@ gates:
     selftest_inputs: [".github/scripts/gen-card-capability-matrix.py", "openbank-libs/governance/card-capabilities.yaml"]
     run: python3 .github/scripts/gen-card-capability-matrix.py --check
 
+  # A change log written newest-first makes every PR insert at the same line, so parallel PRs on
+  # one service always conflict. Opted-in documents assemble that section from one file per entry
+  # (docs/threat-models/<doc>.d/YYYY-MM-DD-<slug>.md); this gate holds the block between the markers
+  # to what the directory renders, and rejects malformed or orphaned fragments.
+  - id: changelog-fragments-drift
+    name: "change-log sections match their fragment directories (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.1s locally
+    # 2 documents opted in today (mcp-service, delegation-service). The floor stops a renamed
+    # directory or marker turning the drift check into a green no-op over zero documents.
+    min_subjects: 2
+    review_after: "2027-11-21"
+    rationale: "The change log is where a reviewer learns what a trust-boundary change did. A block that is hand-edited, or a fragment that never renders, makes the document disagree with the entries it claims to contain."
+    selftest: python3 .github/scripts/gen-changelog-fragments.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-changelog-fragments.py"]
+    run: python3 .github/scripts/gen-changelog-fragments.py --check
+
   # The regulatory obligations register (ADR-0367) starts from the LAW and maps each duty onto the
   # admin-ui report catalogue. The inventory it replaces was built from the code, so a duty with no
   # code (CEÚ, GSFT) was invisible to it. This gate keeps the two views joined: every catalogue
@@ -4003,6 +4373,27 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-regulatory-obligations.py"]
     run: python3 .github/scripts/check-regulatory-obligations.py
+
+  # GATE-REMOVED: compliance-matrix — guarded the hand-written COMPLIANCE_AREAS literal on /docs/compliance; ADR-0379 deletes the literal and `compliance-trace` replaces the guard.
+  # GATE-REMOVED: compliance-page-evidence — same literal, same reason (ADR-0379); `compliance-trace` keeps the literal from returning.
+  # The admin-ui compliance hub (ADR-0379) joins obligation -> control -> evidence at request time
+  # from three hand-authored YAML ids. A misspelt id fails nothing at runtime; the hub would quietly
+  # show an honest-looking gap. This gate resolves every edge (gate id, workflow file, ADR, path,
+  # control id) and keeps the deleted requirement literal from returning.
+  - id: compliance-trace
+    name: "compliance trace resolves: obligation -> control -> evidence (ADR-0379, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.3s locally
+    # 63 edges measured 2026-11-14 (55 evidence refs + 8 obligation links); half, so a renamed key
+    # turning the check into a green no-op over an empty catalogue goes red.
+    min_subjects: 30
+    review_after: "2027-11-14"
+    rationale: "The compliance hub is what compliance, other departments and auditors read as the platform's control posture. An edge that silently fails to resolve turns a real control into an apparent gap, or hides a gap behind evidence that does not exist."
+    selftest: python3 .github/scripts/check-compliance-trace.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-compliance-trace.py"]
+    run: python3 .github/scripts/check-compliance-trace.py --enforce
 
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
@@ -4839,7 +5230,8 @@ gates:
     group: api
     mode: enforced
     run: |
-      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test &&
+      bash .github/scripts/record-deployment-selection.sh --self-test
 
   # The deployed-record reconciler re-records a sandbox deployment once the version it needed has
   # been published (record-deployment is one-shot at gitops merge and races the fan-out's own
@@ -5425,6 +5817,19 @@ gates:
       python3 .github/scripts/test-check-service-build-results.py
     run: python3 .github/scripts/generate-service-ci-jobs.py --check
 
+  - id: assistant-plugin-packages
+    name: "Assistant package manifests match their generator and MCP contracts"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite — runs the package checker and its mutation suite"
+    rationale: "The standalone assistant packages have no Gradle build. Validate generated files and the hosted/shared MCP contracts directly."
+    review_after: "2027-06-01"
+    budget_seconds: 10
+    min_subjects: 13
+    run: |
+      python3 -B integrations/assistant-plugins/scripts/check.py
+      python3 -B integrations/assistant-plugins/scripts/check.py --selftest
+
   - id: service-ci-select-modules
     name: "Services CI module selection (self-test)"
     group: gitops
@@ -5432,7 +5837,7 @@ gates:
     selftest_exempt: "is-a-test-suite"
     rationale: "The detect step's logic moved out of services-ci.yml to get headroom under workflow-run-step-size; the self-test keeps the extracted selector falsifiable."
     review_after: "2027-04-23"
-    budget_seconds: 20
+    budget_seconds: 25   # 25 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     min_subjects: 4
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
@@ -5841,7 +6246,28 @@ gates:
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-event-contract-code-agreement.py", ".github/scripts/check-asyncapi-doc-discriminator.py"]
+    # The self-test mutates COPIES of these services' sources and contracts (build() in the script):
+    # a change there can move the fixture anchors, so the self-test must run on that PR, not first on
+    # main (#16599 left this gate UNFALSIFIED on main for 6 h; the reads were baselined, not declared).
+    selftest_inputs:
+      - .github/scripts/check-event-contract-code-agreement.py
+      - .github/scripts/check-asyncapi-doc-discriminator.py
+      - openbank-aml-service/src/main/
+      - openbank-contracts/openbank-aml-service/
+      - openbank-delegation-service/src/main/
+      - openbank-contracts/openbank-delegation-service/
+      - openbank-engagement-service/src/main/
+      - openbank-contracts/openbank-engagement-service/
+      - openbank-fraud-service/src/main/
+      - openbank-contracts/openbank-fraud-service/
+      - openbank-notification-service/src/main/
+      - openbank-contracts/openbank-notification-service/
+      - openbank-product-catalog/src/main/
+      - openbank-contracts/openbank-product-catalog/
+      - openbank-sanctions-service/src/main/
+      - openbank-contracts/openbank-sanctions-service/
+      - openbank-sca-service/src/main/
+      - openbank-contracts/openbank-sca-service/
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
 
@@ -5964,6 +6390,28 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: trace-contract-heap
+    name: "trace-contract modules declare an explicit test JVM heap (2026-11-18 OOMs, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      A *TraceContractIT boots its own Quarkus app under TraceContractProfile, so the module's
+      test fork carries a second augmentation and boot. At Gradle's default 512 MiB test heap
+      that measured as OutOfMemoryError (loyalty, copilot, referral red in CI on 2026-11-18;
+      referral hung 45 minutes when the instrumentation agent could no longer allocate and the
+      Kafka testcontainer never started). The fix is one line — tasks.test { maxHeapSize = "2g" }
+      (statement-service convention) — and each fixed module also needed an authored docs note
+      for the docs-freshness gate. Six modules are baselined under issue #16805; new occurrences
+      fail, covered entries are reported stale.
+    review_after: '2027-05-18'
+    min_subjects: 30
+    selftest: python3 .github/scripts/check-trace-contract-heap.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-trace-contract-heap.py"]
+    run: |
+      python3 .github/scripts/check-trace-contract-heap.py --root .
+
   - id: metric-name-prefix
     name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
     group: kotlin
@@ -6002,6 +6450,30 @@ gates:
     selftest_inputs: [".github/scripts/check-ledger-instance-switches.py"]
     run: |
       python3 .github/scripts/check-ledger-instance-switches.py --root .
+
+  # Recurred 3x on 2026-11-17 (#15663 transaction, #15665 domestic-payment, #15643 ledger): each
+  # outbox v2 PR needs dispatch paused through GitOps BEFORE its migration deploys, and that was
+  # only a runbook step, so an armed PR could merge into a mixed v1/v2 dispatcher window.
+  - id: outbox-v2-cutover-quiesced
+    name: "outbox v2 migration merges only while dispatch is paused on main (enforced)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 45   # gate 0.6s; self-test builds ~37 git fixtures in parallel, 26s measured on a loaded laptop
+    min_subjects: 20   # services carrying an outbox dispatch-enabled switch at HEAD (corpus, not PRs)
+    rationale: >-
+      A PR that adds the claim-fenced outbox v2 migration (claim_token on an outbox table) is safe
+      only if no pre-v2 dispatcher is live when it deploys. The pause is a GitOps change that must
+      already be on the base; a pause in the same PR is not live yet. Fails closed with no label
+      escape — the escape is merging the pause first. A re-enable PR adds no such migration, so it
+      is never a subject.
+    review_after: '2027-05-17'
+    selftest: python3 .github/scripts/check-outbox-v2-cutover-quiesced.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-v2-cutover-quiesced.py"]
+    run: |
+      python3 .github/scripts/check-outbox-v2-cutover-quiesced.py --base "${PR_DIFF_BASE}"
 
   - id: quoted-sequence-name-ratchet
     name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
@@ -6081,6 +6553,24 @@ gates:
     budget_seconds: 180
     run: |
       python3 .github/scripts/check-helm-values-keys.py
+
+  # Kubernetes drops null fields from a stored object, so an Application whose
+  # helm.valuesObject disables a chart default with `key: null` can never match its live copy,
+  # so the parent app is OutOfSync forever and the standing diff hides any real drift there.
+  # The string form `values: |` keeps nulls. Scans every Application under gitops/. ENFORCED.
+  - id: argocd-valuesobject-no-null
+    name: "Argo CD helm.valuesObject carries no null (permanent OutOfSync, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "A null in valuesObject is stripped when Kubernetes stores the Application, so desired never equals live and the parent app is OutOfSync forever, masking real drift; the values string keeps the null."
+    review_after: "2027-05-17"
+    selftest: python3 .github/scripts/check-argocd-valuesobject-null.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-argocd-valuesobject-null.py"]
+    min_subjects: 15   # Helm sources with a valuesObject under gitops/
+    budget_seconds: 30
+    run: |
+      python3 .github/scripts/check-argocd-valuesobject-null.py
 
   # #15216: ci/artifacts.lock is the one trust anchor for every external tool and chart CI
   # fetches; fetch-artifact.py accepts bytes from any tier only when they match its sha256.
@@ -6341,15 +6831,6 @@ gates:
     run: |
       python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}" --ratchet .github/gates/baselines/threat-model-test-evidence.txt
 
-  - id: compliance-page-evidence
-    name: "Compliance-page evidence (issue #2370, enforced)"
-    group: security
-    mode: enforced
-    selftest_inputs: [".github/scripts/check-compliance-evidence.py"]
-    selftest: |
-      python3 .github/scripts/check-compliance-evidence.py --selftest
-    run: |
-      python3 .github/scripts/check-compliance-evidence.py --enforce
 
   - id: scheduler-exercised-in-tests
     name: "Scheduler exercised in tests (issue #2204, enforced)"
@@ -6514,6 +6995,26 @@ gates:
     run: |
       python3 .github/scripts/check-authz-enforce-money-path.py . --enforce
 
+  # Four-eyes ENFORCED in the deployed manifest (#15748, ADR-0155). The policy flags an action
+  # four_eyes_required, but AuthorizeInterceptor acts on it only with authz.four-eyes.enforce=true
+  # (code default false), and on 2026-11-11 no manifest set it — every dual-control action ran on
+  # one operator. Subjects are derived from @Authorize sites with rest.rego's own scope/verb/action
+  # rule; an exception lives in rules.yaml four_eyes_enforcement.allowlist and FAILS the gate once
+  # expired, once stale (service already enforces), or when dated more than 120 days out.
+  - id: four-eyes-enforce-deployed
+    rationale: "A service that owns a four-eyes action but leaves AUTHZ_FOUR_EYES_ENFORCE unset executes every flagged money-path call on a single operator while the policy, approval store and inbox all read as a working control (#15748)."
+    review_after: "2027-02-15"
+    budget_seconds: 60   # ~6 s CPU locally (one gitops parse + a src/main walk); I/O-bound on a busy runner
+    min_subjects: 20   # 26 modules own a four-eyes @Authorize action today (2026-11-11)
+    name: "services owning a four-eyes action enforce it in the deployed manifest (enforced, #15748)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-four-eyes-enforce.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-four-eyes-enforce.py"]
+    run: |
+      python3 .github/scripts/check-four-eyes-enforce.py
+
   # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
   # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
   # silently and forever. finrep's FINREP/COREP shipped that way (#2403), and 39 sites across
@@ -6653,6 +7154,52 @@ gates:
     selftest_inputs: [".github/scripts/check-realm-template-importable.py"]
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # ADR-0385 D1: one MCP client allowlist drives BOTH mcp-service's tier admission and the
+  # customers-realm client config. This reads the two independently of the generator that writes
+  # the realm entries, so a hand edit of the template, a generator bug, or a declaration that
+  # drifts from the realm all fail: Tier H must be confidential with a pinned private_key_jwt key
+  # set (a client secret only under an unexpired, <= 6-month exception), Tier L must be DPoP-bound
+  # with loopback-only redirects, and every MCP client must be PAR + PKCE S256 + exact redirects,
+  # no direct/implicit/device grant or service account, bound to the cookie-free fresh-passkey
+  # flow. The live behaviour of the same config is proven by
+  # openbank-infra/e2e/keycloak_mcp_client_admission_test.py against Keycloak 26.8.1.
+  - id: mcp-client-realm-parity
+    name: "MCP client allowlist and customers realm agree on every tier (ADR-0385 D1, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 15
+    rationale: "ADR-0385 makes the tier a property of one server-side declaration, never a token claim; a realm client that drifted from it (a public hosted client, a local client without DPoP, a cookie alternative in the flow, an expired secret exception) would admit exactly the clients the ADR rejects, and nothing at runtime would say so."
+    review_after: "2027-05-17"
+    # One subject per declared MCP client (two reference clients today).
+    min_subjects: 2
+    selftest: python3 .github/scripts/check-mcp-client-realm-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-client-realm-parity.py", ".github/scripts/gen-mcp-realm-clients.py", "openbank-mcp-service/src/main/resources/mcp-client-allowlist.yaml", "openbank-infra/gitops/components/keycloak/customers-realm-template.json", "openbank-mcp-service/src/main/resources/mcp-clients/"]
+    run: |
+      python3 .github/scripts/gen-mcp-realm-clients.py --check
+      python3 .github/scripts/check-mcp-client-realm-parity.py
+
+  # Keycloak client secrets must name their OpenBao source (issue #3246). The import artifact
+  # Keycloak rebuilds from lives in OpenBao and is not derived from the template, so a client
+  # added to realm-template.json merges green and the nightly keycloak-realm-drift job goes red
+  # the next morning — twice in one week (2026-11-10, 2026-11-15). This makes the second step
+  # visible at PR time: a new placeholder client must state where its secret lives in
+  # keycloak-realm-import-secret-sources.yaml, and the finding names the operator follow-up. Static, no
+  # cluster or OpenBao read; the drift job stays the proof that the artifact was updated.
+  - id: realm-import-secret-sources
+    name: "Keycloak placeholder client secrets name their OpenBao source (issue #3246, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 15
+    rationale: "Two template-only client additions in one week merged green and left the OpenBao realm-import artifact without the client; only the next-day drift job noticed, and nothing at PR time said a second step existed."
+    review_after: "2027-02-15"
+    min_subjects: 40
+    selftest: python3 .github/scripts/check-realm-import-secret-sources.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-realm-import-secret-sources.py"]
+    run: |
+      python3 .github/scripts/check-realm-import-secret-sources.py
 
   # A bank-owned canary customer (ADR-0331) is safe in exactly one shape: a confidential
   # customers-realm client with no browser/password/implicit flow, a party_id mapper, and a
@@ -6855,6 +7402,26 @@ gates:
       # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
       # which is why the output is read and not the exit code.
       python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
+  - id: mcp-customer-channel-propose-only
+    name: "MCP REST clients are GET-only unless allow-listed (ADR-0383 D6, enforced)"
+    group: security
+    mode: enforced
+    rationale: "ADR-0383 D6 makes the customer MCP channel propose-only: MCP may create a proposal and the customer authorises it in the bank app. A tool-layer promise is not that rule; a REST client that can POST is the capability itself. Allow-list model, never keyword matching (a path-keyword draft failed open on camelCase routes, non-literal paths and unknown config keys), and fail-closed on anything the parser cannot read."
+    review_after: "2027-05-17"
+    verified: "2026-11-17 — self-test 26 cases. Known-positives: Allman-brace interfaces (bare and with a supertype; proven by the POST finding itself), a body-less header followed by non-declaration text, camelCase POST with no protected keyword, non-literal @Path, generic method, backtick method, POST inherited from a same-named interface in another package (FQCN), Java client, @RegisterRestClient on a non-interface (count mismatch), unknown method annotation, custom @HttpMethod, unresolvable supertype, supertype on the line after a trailing colon, bounded generic type parameter, where clause, a header that never closes, two funs on one line, a raw java.net.http client, an allow-listed method whose verb changed, an overload of an allow-listed method, a write in a generated API tag. Known-negatives: GET-only Kotlin and Java clients (with @POST in comments), an allow-listed POST, a write in a non-generated tag. Stale allow-list/baseline entries are findings. Self-test falsified (POST/PUT/PATCH/DELETE treated as safe -> self-test FAILED). Sabotage on the real tree (an @POST added to the payment read clients) exited 1."
+    budget_seconds: 30
+    min_subjects: 7
+    selftest: python3 .github/scripts/check-mcp-customer-channel-propose-only.py --self-test
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-mcp-customer-channel-propose-only.py"
+    run: |
+      # Subjects are DERIVED: every @RegisterRestClient interface under openbank-mcp-service/src/main
+      # (*.kt and *.java), and the annotation count must equal the parsed-client count. Any non-GET
+      # method, declared or inherited (supertypes by FQCN, generated openbank-client-* APIs from the
+      # provider openapi.yaml), is a finding unless allow-listed in the script. The inherited
+      # baseline may only shrink.
+      python3 .github/scripts/check-mcp-customer-channel-propose-only.py
   - id: value-movement-admission-coverage
     name: "every value-moving module is classified, and an instructed one binds the admission chain with a real FRAUD check (ADR-0377 D2, enforced)"
     group: kotlin
@@ -6869,6 +7436,20 @@ gates:
     selftest_inputs: [".github/scripts/check-value-movement-admission.py"]
     run: |
       python3 .github/scripts/check-value-movement-admission.py
+  - id: delegation-exposure-sealed
+    name: "grant-level exposure stays refused and is never enforced by decorating a live read (ADR-0375 D6, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 10   # 0.4s warm on a laptop, 196 .kt files read (2026-11-14)
+    rationale: "A redacted, watermarked or view-counted share returned as the ORIGINAL object bytes with the control merely echoed is a confidentiality defect that reads, from the grantor's screen, exactly like an enforced one. D6 makes the existing refusal the declared end state and names the sealed ExternalDisclosure as the mechanism; the obvious way to 'implement exposure' is one line in a read path, and that line is indistinguishable from progress in review. The subject set is derived by scanning delegation-service src/main, never listed, and the registry is checked both ways."
+    review_after: "2027-03-31"
+    verified: "2026-11-14 -- real tree: PASS, 5 referencing files all classified. Found the defect it was written for: ExternalDisclosureService.issue required grant.exposure, which the lifecycle can never produce on an ACTIVE grant, so the sealed mechanism D6 names was unreachable for every real grant behind a green unit test. Falsified seven ways, each restored: a new exposure reader -> UNCLASSIFIED; a declared file that stopped referencing it -> STALE; role `enforcement` -> refused outright; the two refusal functions deleted -> caught; the sealed path's row lock removed -> caught; customer-edge reading an exposure field -> caught; an undeclared rules.yaml block -> caught. Two must-NOT-fire controls: a comment-only mention in customer-edge and in delegation-service are not findings. Self-test: 9 named checks."
+    min_subjects: 4   # 5 referencing files derived today (2026-11-14)
+    selftest: python3 .github/scripts/check-delegation-exposure-sealed.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-delegation-exposure-sealed.py"]
+    run: |
+      python3 .github/scripts/check-delegation-exposure-sealed.py
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin
@@ -7016,6 +7597,22 @@ gates:
     selftest_inputs: [".github/scripts/check-workflow-gh-token.py"]
     run: |
       python3 .github/scripts/check-workflow-gh-token.py
+
+  - id: merge-train-break-glass
+    selftest_exempt: "is-a-test-suite — the break-glass validator's own must-pass/must-FAIL cases"
+    name: "merge-train break-glass refuses non-owner, red/missing/pending context, stale, draft, unarmed and hold-lifting PRs (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "The break-glass posts the one required status the train owns; if its validator stopped checking the other required contexts it would be a review bypass that still prints green. The suite includes the cases that must refuse, and --sabotage-context-check proves they detect a disabled context check (#17006)."
+    review_after: "2027-05-21"
+    budget_seconds: 10
+    min_subjects: 40   # 42 PASS cases today (2026-11-21)
+    run: |
+      rc=0
+      out=$(python3 .github/scripts/break_glass_check.py --self-test 2>&1) || rc=$?
+      printf '%s\n' "$out"
+      echo "SUBJECTS=$(printf '%s\n' "$out" | grep -c '^PASS')"
+      exit "$rc"
 
   - id: agent-pr-guard
     name: "agent PR guard (autonomous agents may not land protected paths, enforced)"
@@ -7763,7 +8360,7 @@ gates:
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
-    budget_seconds: 21
+    budget_seconds: 31   # 31 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
     selftest_expect: pass
     selftest_inputs:
@@ -7779,6 +8376,8 @@ gates:
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/scripts/shard-verification-modules.py"
       - ".github/workflows/admin-ui-deploy.yml"
+      - ".github/workflows/admin-ui-repin.yml"
+      - ".github/scripts/publish-deploy-pin.py"
       - ".github/workflows/auto-deploy.yml"
       - ".github/workflows/platform-images.yml"
     selftest: |
@@ -8157,6 +8756,26 @@ gates:
     run: |
       python3 .github/scripts/check-enum-reference-data.py --root .
 
+  - id: rail-screening-port
+    name: "outgoing rail sanctions screening port (rules.yaml outgoing_payment_rails_screening, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # <1s measured locally 2026-11-14
+    rationale: >-
+      Every outgoing payment rail must screen debtor and creditor against the sanctions lists
+      before release, through a *Screening*Port and the shared libs-fincrime ScreeningPolicy.
+      Measured 2026-11-14: swift-service and sdd-service had no screening at all while swift's
+      docs said screening was done upstream, and the upstream did none. Both are baselined while
+      their fix PRs land; a covered baselined rail fails, so the baseline only shrinks.
+    review_after: '2027-05-14'
+    verified: "2026-11-14 — origin/main ecbfaaa97b: 6 rails, 4 covered, swift+sdd baselined; copy of the tree with sepa-payment's ScreeningPorts.kt removed exits 1 naming openbank-sepa-payment; self-test covers missing port, missing policy, stale baseline, unknown module, empty list"
+    min_subjects: 3   # 6 rails measured 2026-11-14; half
+    selftest: python3 .github/scripts/check-rail-screening-port.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-rail-screening-port.py", ".github/scripts/rail-screening-port-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-rail-screening-port.py --root .
+
   # Real cache mutations run for build-logic changes and all main pushes. The
   # structural guard stays cheap for unrelated PRs (standard selftest_inputs policy).
   # Keep the Gradle self-test in supplychain, whose runner provisions/caches the
@@ -8167,7 +8786,7 @@ gates:
     name: "test cache excludes only source SHA while artifact provenance remains exact"
     group: supplychain
     mode: enforced
-    budget_seconds: 120
+    budget_seconds: 141   # 141 = ceil(1.5 x p95) per gate-runtime-measurements.json 2026-11-18
     run: python3 .github/scripts/check-test-provenance-cache.py
     selftest: |
       python3 .github/scripts/check-test-provenance-cache.py --self-test
@@ -8207,3 +8826,55 @@ gates:
     selftest_inputs: [".github/scripts/check-demo-only-flags.py"]
     run: |
       python3 .github/scripts/check-demo-only-flags.py --root .
+
+  # #16748. RodneCislo had 100% line coverage and a 68.8M-input fuzz run and still accepted
+  # never-issued birth-number classes, because every test was written from the same model as the
+  # code. The shared validators are now held to spec vectors + a python-stdnum differential test;
+  # a hand-rolled copy in a service is held to neither, and keeps the old bug when the shared one
+  # is fixed. This ratchet forbids NEW ad-hoc mod-97 / IBAN-regex / `[A-Z]{3}` currency checks
+  # outside openbank-libs-domain; the existing copies are baselined per file.
+  - id: identifier-validator-ratchet
+    name: "no new ad-hoc mod-97 / IBAN / currency validators outside libs-domain (#16748, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A copied identifier validator never sees the spec vectors or the stdnum differential test, so it can wrong-accept with full coverage; new copies must use the shared validator or java.util.Currency."
+    review_after: "2027-05-18"
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-identifier-validator-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-identifier-validator-ratchet.py"]
+    min_subjects: 2000   # 3563 Kotlin main sources scanned 2026-11-18
+    run: |
+      python3 .github/scripts/check-identifier-validator-ratchet.py
+
+  # #16748. The validator inventory is DERIVED from code: a source shaped like an identifier check
+  # (mod-97/mod-11/Luhn, IBAN/ISIN/currency regex, Currency.getInstance) must be a spec-vectored
+  # implementation, a shrink-only-baselined ad-hoc copy, or classified with a reason. A new
+  # validator without vectors fails here; so does a stale classification.
+  - id: identifier-validator-inventory
+    name: "every identifier validator has spec vectors or a stated reason (#16748, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "Spec vectors only protect the validators they name; deriving the inventory from code means a new validator cannot exist outside the conformance matrix while the matrix reads complete."
+    review_after: "2027-05-18"
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-identifier-validator-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-identifier-validator-inventory.py"]
+    min_subjects: 40   # 64 candidate sources derived 2026-11-18
+    run: |
+      python3 .github/scripts/check-identifier-validator-inventory.py
+
+  - id: repository-root-layout
+    name: "Repository root contains only declared entry points and Gradle modules"
+    group: lint
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 100
+    rationale: "Reject accidentally staged scratch files and unowned root directories, including force-added ignored output; keep module discovery aligned with Gradle."
+    review_after: "2027-04-03"
+    selftest: python3 .github/scripts/check-repository-root.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-repository-root.py"]
+    run: |
+      python3 .github/scripts/check-repository-root.py
