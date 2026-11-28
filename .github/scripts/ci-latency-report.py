@@ -23,6 +23,7 @@ import sys
 AGGREGATES = ("Admin UI", "Validate manifests", "all-green")
 EVENTS = {"push", "pull_request", "pull_request_target", "workflow_dispatch", "schedule", "workflow_run", "merge_group"}
 CONCLUSIONS = {"success", "failure", "cancelled", "timed_out", "action_required", "neutral", "skipped", "stale", "startup_failure"}
+CANCELLATION_OBSERVATIONS = ("empty_job_inventory", "no_recorded_start", "recorded_start", "unknown")
 METRICS = ("queue_seconds", "execution_seconds", "setup_seconds", "nonsetup_seconds", "attempt_start_to_verdict_seconds")
 
 
@@ -111,6 +112,19 @@ def summarize_values(values):
             "p95_seconds": known[max(0, math.ceil(len(known) * .95) - 1)] if known else None}
 
 
+def cancellation_observation(jobs):
+    """Describe the available job records, never infer replacement cause or runner wait."""
+    if jobs is None:
+        return "unknown"
+    if not jobs:
+        return "empty_job_inventory"
+    if any(timestamp(job.get("started_at")) is not None for job in jobs):
+        return "recorded_start"
+    if any("started_at" not in job or job["started_at"] is not None for job in jobs):
+        return "unknown"
+    return "no_recorded_start"
+
+
 def analyze(fixture, *, max_runs, aggregates=AGGREGATES):
     runs, attempts, jobs = fixture.get("workflow_runs"), fixture.get("attempts", {}), fixture.get("attempt_jobs")
     if not isinstance(runs, list) or not isinstance(attempts, dict) or not isinstance(jobs, dict):
@@ -132,6 +146,7 @@ def analyze(fixture, *, max_runs, aggregates=AGGREGATES):
         rows.append({"run_id": run["id"], "attempt": run["run_attempt"],
                      "event": event if event in EVENTS else "other",
                      "conclusion": conclusion if conclusion in CONCLUSIONS else "unknown",
+                     "cancellation_observation": cancellation_observation(batch) if conclusion == "cancelled" else None,
                      "jobs_unavailable": batch is None,
                      "jobs": [job_row(job, attempt, aggregates) for job in batch or []]})
     events = {}
@@ -144,6 +159,8 @@ def analyze(fixture, *, max_runs, aggregates=AGGREGATES):
                    for name in METRICS}
         events[event] = {"runs": len(selected), "jobs_unavailable_runs": sum(row["jobs_unavailable"] for row in selected),
                          "outcomes": dict(Counter(row["conclusion"] for row in selected)),
+                         "cancellation_observations": {kind: sum(row["cancellation_observation"] == kind for row in selected)
+                                                       for kind in CANCELLATION_OBSERVATIONS},
                          "executed_jobs": len(executed), "unexecuted_jobs": len(all_jobs) - len(executed),
                          "aggregate_jobs": sum(job["category"] == "aggregate" for job in executed), "metrics": metrics}
     return {"schema_version": 1, "sampled_runs": len(rows), "max_runs": max_runs,
@@ -153,7 +170,10 @@ def analyze(fixture, *, max_runs, aggregates=AGGREGATES):
                       "Setup uses a conservative step-name allowlist; nonsetup includes cleanup and overhead, not just tests.",
                       "Distributions weight jobs equally; aggregate latency is per aggregate job, not the full required-check DAG.",
                       "Missing, malformed or reversed timestamps are unknown, never zero. Unexecuted jobs are excluded.",
-                      "Only numeric identities and timing categories are retained; absent aggregates yield no verdict sample."],
+                      "Only numeric identities and timing categories are retained; absent aggregates yield no verdict sample.",
+                      ("Cancellation observations describe exact-attempt job records, not confirmed replacements or wait durations. "
+                       "An empty inventory differs from unavailable jobs; null starts differ from malformed or missing timestamps. "
+                       "A recorded start is not proof that a job executed (skipped jobs can carry timestamps).")],
             "events": events, "rows": rows}
 
 
@@ -222,6 +242,8 @@ def markdown(report):
     lines += ["", "Counts and limitations:", ""]
     for event, data in report["events"].items():
         lines.append(f'- {event}: {data["runs"]} runs, {data["executed_jobs"]} executed jobs, {data["unexecuted_jobs"]} unexecuted, {data["jobs_unavailable_runs"]} runs missing jobs; outcomes: {json.dumps(data["outcomes"], sort_keys=True)}.')
+        if data["outcomes"].get("cancelled", 0):
+            lines.append(f'- {event}: cancelled-attempt job observations: {json.dumps(data["cancellation_observations"], sort_keys=True)}.')
     lines.extend(f"- {note}" for note in report["notes"])
     return "\n".join(lines) + "\n"
 
