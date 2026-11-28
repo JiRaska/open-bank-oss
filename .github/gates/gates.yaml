@@ -3650,7 +3650,9 @@ gates:
     # Subjects are assertions, not files: the floor drops the day someone deletes a case.
     min_subjects: 78   # every case incl. the Gradle-distribution and GitHub-transient recognisers
     run: |
+      set -e
       bash .github/scripts/spot-kill-retry.sh --self-test
+      python3 .github/scripts/test_retry_job_inventory.py
 
   - id: dast-zap-coverage-selftest
     name: "DAST coverage verdict tells a scan from a non-scan (issue #12097, enforced)"
