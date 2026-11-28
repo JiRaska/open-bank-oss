@@ -171,8 +171,86 @@ with_retry() { # with_retry <label> <cmd...>  -> stdout of the successful call
 # Both branches query attempt 1 explicitly. `/actions/runs/<id>/jobs` returns the LATEST
 # attempt's jobs, so a concurrent manual re-run would make this inspect a different (possibly
 # green) attempt and silently decline.
+# Reuse only a complete, terminal attempt-1 inventory within THIS decision. The
+# current run attempt, PR head and quota remain separate uncached live reads.
+jobs_snapshot() {
+  local cache="${LOG_CACHE_DIR:?}/jobs-attempt-1.json"
+  local staging page total expected count response rc=0
+  [[ "${RUN_ID}" =~ ^[1-9][0-9]*$ ]] || return 1
+  if [ -f "$cache" ]; then
+    jq -e -s --arg repo "$GITHUB_REPOSITORY" --arg run "$RUN_ID" \
+      'length == 1 and (.[0] | .repository == $repo and .run_id == $run and .run_attempt == 1)' "$cache" >/dev/null || return 1
+    printf '%s\n' "$cache"
+    return 0
+  fi
+  staging="$(mktemp -d "${LOG_CACHE_DIR}/jobs.XXXXXX")" || return 1
+  total=0
+  expected=1
+  page=1
+  while [ "$page" -le "$expected" ]; do
+    response="$(gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100&page=${page}")" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # gh stderr already reaches the reset-aware classifier. Failed stdout is
+      # untrusted/possibly partial API data, never a diagnostic to echo.
+      rm -rf "$staging"; return "$rc"
+    fi
+    printf '%s\n' "$response" > "$staging/$page.raw"
+    # Ten pages is a hard safety bound, not permission to accept a truncated list.
+    if ! jq -e -s --arg run "$RUN_ID" '
+      def name_ok: type == "string" and length > 0 and (test("[\u0000-\u001f\u007f]") | not);
+      def terminal: IN("success", "failure", "neutral", "cancelled", "skipped",
+                       "timed_out", "action_required", "stale", "startup_failure");
+      if length != 1 then error("expected exactly one JSON document") else .[0] end |
+      if (type == "object" and
+      (.total_count | type == "number" and floor == . and . >= 0 and . <= 1000) and
+      (.jobs | type == "array" and length <= 100) and
+      all(.jobs[]; type == "object" and
+        (.id | type == "number" and floor == . and . > 0) and
+        (.run_id | tostring) == $run and .run_attempt == 1 and
+        .status == "completed" and (.name | name_ok) and (.conclusion | terminal) and
+        (.steps | type == "array") and
+        all(.steps[]; type == "object" and (.name | name_ok) and
+          .status == "completed" and (.conclusion | terminal) and
+          (.number | type == "number" and floor == . and . > 0))))
+      then .total_count |= floor else error("invalid terminal job inventory") end
+      ' "$staging/$page.raw" > "$staging/$page.json"; then
+      echo 'Incomplete or invalid original-attempt job inventory; refusing classification.' >&2
+      rm -rf "$staging"; return 1
+    fi
+    count="$(jq -r '.total_count | floor' "$staging/$page.json")"
+    if [ "$page" -eq 1 ]; then
+      total="$count"
+      expected=$(( (total + 99) / 100 ))
+      [ "$expected" -gt 0 ] || expected=1
+    elif [ "$count" -ne "$total" ]; then
+      echo 'Original-attempt job total changed between pages; refusing classification.' >&2
+      rm -rf "$staging"; return 1
+    fi
+    count=$(( total - (page - 1) * 100 ))
+    [ "$count" -le 100 ] || count=100
+    if ! jq -e --argjson count "$count" '.jobs | length == $count' "$staging/$page.json" >/dev/null; then
+      echo 'Original-attempt job page was truncated; refusing classification.' >&2
+      rm -rf "$staging"; return 1
+    fi
+    page=$(( page + 1 ))
+  done
+  if ! jq -e -s --arg repo "$GITHUB_REPOSITORY" --arg run "$RUN_ID" --argjson total "$total" '
+    [.[].jobs[]] as $jobs |
+    if ($jobs | length) != $total or ([$jobs[].id] | unique | length) != $total
+    then error("duplicate or missing original-attempt jobs")
+    else {repository:$repo, run_id:$run, run_attempt:1, total_count:$total, jobs:$jobs} end
+    ' "$staging"/*.json > "$staging/snapshot"; then
+    rm -rf "$staging"; return 1
+  fi
+  if ! mv "$staging/snapshot" "$cache"; then rm -rf "$staging"; return 1; fi
+  rm -rf "$staging"
+  printf '%s\n' "$cache"
+}
+
 jobs_query() { # jobs_query <jq>
-  gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" --jq "$1"
+  local snapshot
+  snapshot="$(jobs_snapshot)" || return $?
+  jq -r "$1" "$snapshot"
 }
 
 # A cancelled PR run can have executed steps because a newer push cancelled it, not because
@@ -665,16 +743,39 @@ self_test() {
 # way this stub was wrong on its first run, which showed up as two cases failing.
 echo "$*" | tr '\n' ' ' >> "${CALL_LOG}"; echo >> "${CALL_LOG}"
 n=$(( $(cat "${CALL_LOG}.n" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${CALL_LOG}.n"
-line="$(sed -n "${n}p" "${STUB_SCRIPT}")"
+position=$(( $(cat "${CALL_LOG}.position" 2>/dev/null || echo 0) + 1 ))
+line="$(sed -n "${position}p" "${STUB_SCRIPT}")"
+# Only the inventory endpoint is memoized. Skip its legacy scheduled rereads
+# when serving a DIFFERENT endpoint; repeated metadata/log responses stay intact.
+if [[ "$*" != *'/attempts/1/jobs?'* ]] && [ -f "${CALL_LOG}.inventory" ]; then
+  inventory="$(cat "${CALL_LOG}.inventory")"
+  while [ "$line" = "0|@${inventory}" ]; do
+    position=$(( position + 1 ))
+    line="$(sed -n "${position}p" "${STUB_SCRIPT}")"
+  done
+fi
+echo "$position" > "${CALL_LOG}.position"
 [ -n "${line}" ] || { echo "stub: no scripted answer for call ${n}: $*" >&2; exit 99; }
 out="${line#*|}"
 case "${out}" in
   @raw:*) cat "${FIXTURE_DIR}/${out#@raw:}.json"; exit "${line%%|*}" ;;
-  @*) prog="${!#}"          # the jq program is the last argument of `api ... --jq <prog>`
+  @*) if [[ "$*" == *'/attempts/1/jobs?'* ]]; then
+        [ ! -f "${CALL_LOG}.inventory" ] || { echo 'unexpected repeated inventory request' >&2; exit 99; }
+        [ "${line%%|*}" -ne 0 ] || printf '%s' "${out#@}" > "${CALL_LOG}.inventory"
+        # Legacy behavioral fixtures predate raw inventory reuse. Add transport
+        # identity fields, leaving their steps/conclusions unchanged.
+        jq --arg run "$RUN_ID" '
+          .jobs |= (to_entries | map(.value + {id:(.value.id // (.key + 1)),
+            run_id:($run | tonumber), run_attempt:1, status:"completed"} |
+            .steps |= (to_entries | map(.value + {number:(.key + 1), status:"completed"})))) |
+          .total_count=(.jobs | length)' "${FIXTURE_DIR}/${out#@}.json"
+        exit "${line%%|*}"
+      fi
+      prog="${!#}"          # the jq program is the last argument of `api ... --jq <prog>`
       jq -r "${prog}" "${FIXTURE_DIR}/${out#@}.json" || exit 1
       exit "${line%%|*}" ;;
 esac
-printf '%s\n' "${out}"
+if [ "${line%%|*}" -eq 0 ]; then printf '%s\n' "${out}"; else printf '%s\n' "${out}" >&2; fi
 exit "${line%%|*}"
 STUB
   chmod +x "${tmp}/gh"
@@ -892,7 +993,9 @@ FIX
     local name="$1" concl="$2" want_exit="$3" want_reruns="$4"; shift 4
     subjects=$(( subjects + 1 ))
     export CALL_LOG="${tmp}/calls" STUB_SCRIPT="${tmp}/script"
-    : > "${CALL_LOG}"; : > "${CALL_LOG}.n"; printf '%s\n' "$@" > "${STUB_SCRIPT}"
+    : > "${CALL_LOG}"; : > "${CALL_LOG}.n"
+    rm -f "${CALL_LOG}.position" "${CALL_LOG}.inventory"
+    printf '%s\n' "$@" > "${STUB_SCRIPT}"
     local rc reruns
     # Redirect and read $? — a pipeline would report the LAST command's status, not main's.
     set +e
@@ -1178,7 +1281,7 @@ FIX
   # The cap. Uncapped, this exact run IS re-run (the case above). With one download allowed, the
   # #9787 recogniser spends it on the first log, every later read is refused WITHOUT a call —
   # across the subshells each recogniser runs in — and the run is declined, never re-run.
-  LOG_READ_CAP=1 TRANSIENT_NOW_EPOCH=$(( ART_DONE + 3600 )) WANT_DECISION=no-spot-kill-signature WANT_CALLS=5 \
+  LOG_READ_CAP=1 TRANSIENT_NOW_EPOCH=$(( ART_DONE + 3600 )) WANT_DECISION=no-spot-kill-signature WANT_CALLS=2 \
   case_ "past the log-read cap the run is declined, and no further log is fetched" failure 0 0 \
     "0|@artifact-outage" "0|@artifact-outage" "0|@raw:log-artifact-create" \
     "0|@artifact-outage" "0|@artifact-outage"
@@ -1197,6 +1300,7 @@ FIX
   subjects=$(( subjects + 1 ))
   export CALL_LOG="${tmp}/calls" STUB_SCRIPT="${tmp}/script"
   : > "${CALL_LOG}"; : > "${CALL_LOG}.n"
+  rm -f "${CALL_LOG}.position" "${CALL_LOG}.inventory"
   printf '%s\n' "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" > "${STUB_SCRIPT}"
   set +e
   CONCLUSION=cancelled main > "${tmp}/out" 2>&1
