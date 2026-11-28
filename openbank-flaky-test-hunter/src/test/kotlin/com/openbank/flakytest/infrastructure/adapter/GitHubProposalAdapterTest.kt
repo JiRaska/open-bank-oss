@@ -19,7 +19,10 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -28,6 +31,10 @@ import java.time.Instant
 import java.util.Base64
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 
 /**
  * ADR-0031 D9 phase-3 proof: [GitHubProposalAdapter] round-tripped against a real in-JVM GitHub
@@ -48,10 +55,28 @@ class GitHubProposalAdapterTest {
     private var lastBaseRefRead: String? = null
     private var lastContentsQuery: String? = null
     private val objectMapper = ObjectMapper()
+    private val capturedLogs = mutableListOf<LogRecord>()
+    private val captureHandler = object : Handler() {
+        override fun publish(record: LogRecord) {
+            capturedLogs += record
+        }
+
+        override fun flush() = Unit
+        override fun close() = Unit
+    }
+    private val adapterLogger = Logger.getLogger(GitHubProposalAdapter::class.java.name)
+    private val failureBody = """{"message":"Bad credentials","debug":"response-body-canary"}"""
+
+    @BeforeEach
+    fun attachLogCapture() {
+        adapterLogger.level = Level.ALL
+        adapterLogger.addHandler(captureHandler)
+    }
 
     @AfterEach
     fun stop() {
         server?.stop(0)
+        adapterLogger.removeHandler(captureHandler)
     }
 
     private val eligibleFinding = FlakyTestFinding(
@@ -79,12 +104,17 @@ class GitHubProposalAdapterTest {
 
     /** Starts a minimal but contract-faithful GitHub REST API stub covering the five endpoints
      * the adapter calls in sequence for an eligible finding. */
-    private fun startGitHubStub(encodedContent: String = encodedSource("\n")): String {
+    private fun startGitHubStub(encodedContent: String = encodedSource("\n"), failingStage: String? = null): String {
+        fun status(stage: String, success: Int) = if (failingStage == stage) 401 else success
+
+        fun body(status: Int, success: String) = if (status in 200..299) success else failureBody
+
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         srv.createContext("/repos/test-owner/test-repo/git/ref/heads/") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
             lastBaseRefRead = ex.requestURI.path.substringAfter("/git/ref/heads/")
-            respond(ex, 200, """{"object":{"sha":"base-sha-123"}}""")
+            val status = status("get_base_sha", 200)
+            respond(ex, status, body(status, """{"object":{"sha":"base-sha-123"}}"""))
         }
         srv.createContext("/repos/test-owner/test-repo/contents/") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
@@ -94,11 +124,13 @@ class GitHubProposalAdapterTest {
                     val response = objectMapper.writeValueAsString(
                         mapOf("sha" to "file-sha-456", "content" to encodedContent),
                     )
-                    respond(ex, 200, response)
+                    val status = status("get_file", 200)
+                    respond(ex, status, body(status, response))
                 }
                 "PUT" -> {
                     lastCommitRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
-                    respond(ex, 200, """{"content":{"sha":"new-file-sha"}}""")
+                    val status = status("commit_file", 200)
+                    respond(ex, status, body(status, """{"content":{"sha":"new-file-sha"}}"""))
                 }
                 else -> respond(ex, 405, "{}")
             }
@@ -106,15 +138,17 @@ class GitHubProposalAdapterTest {
         srv.createContext("/repos/test-owner/test-repo/git/refs") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
             lastBranchRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
-            respond(ex, 201, """{"ref":"refs/heads/branch"}""")
+            val status = status("create_branch", 201)
+            respond(ex, status, body(status, """{"ref":"refs/heads/branch"}"""))
         }
         srv.createContext("/repos/test-owner/test-repo/pulls") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
             lastPullRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
+            val status = status("open_pr", 201)
             respond(
                 ex,
-                201,
-                """{"html_url":"https://github.com/test-owner/test-repo/pull/9001"}""",
+                status,
+                body(status, """{"html_url":"https://github.com/test-owner/test-repo/pull/9001"}"""),
             )
         }
         srv.start()
@@ -156,7 +190,12 @@ class GitHubProposalAdapterTest {
                 }
                 "POST" -> {
                     lastIssueRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
-                    respond(ex, createStatus, """{"html_url":"https://github.com/test-owner/test-repo/issues/4242"}""")
+                    val body = if (createStatus in 200..299) {
+                        """{"html_url":"https://github.com/test-owner/test-repo/issues/4242"}"""
+                    } else {
+                        failureBody
+                    }
+                    respond(ex, createStatus, body)
                 }
                 else -> respond(ex, 405, "{}")
             }
@@ -203,6 +242,61 @@ class GitHubProposalAdapterTest {
         adapter.allowedHosts = listOfNotNull(server?.let { "stub.test:${it.address.port};http;private" })
         adapter.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
         return adapter
+    }
+
+    private fun assertSafeFailureLog(stage: String, status: Int) {
+        val rendered = capturedLogs.joinToString("\n") { record ->
+            record.message + " " + record.parameters.orEmpty().joinToString(" ")
+        }
+        assertThat(rendered)
+            .contains("stage=$stage", "status=$status")
+            .doesNotContain("fine-grained-test-token", "response-body-canary", "Bad credentials")
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "get_file,1",
+        "get_base_sha,2",
+        "create_branch,3",
+        "commit_file,4",
+        "open_pr,5",
+    )
+    fun `a rejected PR stage logs its stage and status without credentials or response body`(
+        stage: String,
+        expectedRequests: Int,
+    ) {
+        val baseUrl = startGitHubStub(failingStage = stage)
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val prUrl = runBlocking { adapter.openProposalPr(eligibleFinding, "add-explicit-unit-return-type") }
+
+        assertThat(prUrl).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(expectedRequests)
+        assertSafeFailureLog(stage, 401)
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "ticket_lookup,503,1",
+        "ticket_create,422,2",
+    )
+    fun `a rejected ticket stage logs its stage and status without credentials or response body`(
+        stage: String,
+        status: Int,
+        expectedRequests: Int,
+    ) {
+        val baseUrl = if (stage == "ticket_lookup") {
+            startIssuesStub(getResponses = mapOf(1 to (status to failureBody)))
+        } else {
+            startIssuesStub(createStatus = status)
+        }
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(expectedRequests)
+        assertSafeFailureLog(stage, status)
     }
 
     @Test

@@ -11,11 +11,12 @@
 #   - VAULT_TOKEN: operator token s write na openbank/* (AWS Secrets Manager
 #     openbank/openbao/break-glass, klic root_token)
 #   - FLAKY_TEST_HUNTER_GITHUB_TOKEN: fine-grained PAT scoped na JiRaska/open-bank-oss,
-#     Contents: write + Pull requests: write (bounded agentni PR path, ADR-0168)
+#     Contents: write + Pull requests: write + Issues: write (bounded PR a human-ticket fallback,
+#     ADR-0168; Issues je nutne pro overeni duplicity i vytvoreni ticketu)
 set -euo pipefail
 
 : "${VAULT_TOKEN:?Set VAULT_TOKEN to an operator token with write access to openbank/*}"
-: "${FLAKY_TEST_HUNTER_GITHUB_TOKEN:?Set FLAKY_TEST_HUNTER_GITHUB_TOKEN to a fine-grained PAT (Contents+Pull requests: write) for JiRaska/open-bank-oss}"
+: "${FLAKY_TEST_HUNTER_GITHUB_TOKEN:?Set FLAKY_TEST_HUNTER_GITHUB_TOKEN to a fine-grained PAT (Contents, Pull requests and Issues: write) for JiRaska/open-bank-oss}"
 
 vault_kv_patch() {
   kubectl -n vault exec -i openbao-0 -- \

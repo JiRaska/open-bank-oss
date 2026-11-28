@@ -24,6 +24,10 @@ The proposal adapter uses `SafeHttpClient` for its configurable GitHub API URL. 
 
 Every request identifies the application with `User-Agent: openbank-flaky-test-hunter`. GitHub requires this header for reads as well as writes; a valid credential alone does not prevent a missing-header rejection.
 
+A non-2xx GitHub response produces one fixed diagnostic containing only the failed operation stage and numeric HTTP status. The stages distinguish file and base-ref reads, branch and file writes, PR creation, and ticket lookup or creation. The log deliberately excludes URLs, headers, credentials, request and response bodies, and exception text, so an authentication or permission failure is diagnosable without exposing the token or finding content.
+
+`openbank-infra/scripts/seed-flaky-test-hunter-github-token.sh` accepts a repository-scoped fine-grained PAT with Contents, Pull requests, and Issues write permissions. Issues access covers both the complete open-issue duplicate lookup and creation of the human-ticket fallback. After seeding, verify that the ExternalSecret refreshed and restart or otherwise recreate the writer pod so it reads the new value before another operator run.
+
 ## PR-path policy gate (ADR-0031 phase 3)
 
 Before any GitHub write — branch creation included — every PR-opening disposition passes `PrPathPolicyGate` in `DiagnoseAndProposeActivityImpl`. Two deny-by-default layers:
