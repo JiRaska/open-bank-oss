@@ -60,6 +60,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gatelib  # import after the path insert — checkers run as scripts from the repo root
+import clickhouse_replay_plan
 
 SQL_GLOB = "openbank-analytics-sink/src/main/resources/clickhouse/V*.sql"
 CONFIGMAP = "openbank-infra/gitops/components/analytics/clickhouse-init-configmap.yaml"
@@ -279,9 +280,13 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.self_test:
-        return self_test()
+        original = self_test()
+        import unittest
+        suite = unittest.defaultTestLoader.discover(str(Path(__file__).parent), pattern="clickhouse_replay_plan_test.py")
+        return int(original != 0 or not unittest.TextTestRunner().run(suite).wasSuccessful())
 
     errors, examined = check(Path(args.root))
+    errors.extend(clickhouse_replay_plan.check(Path(args.root)))
     # Printed on BOTH paths: a gate that found its corpus and then failed on it must not also read
     # as having lost it.
     gatelib.subjects(examined, "openbank_analytics objects across the DDL resources + ConfigMap")

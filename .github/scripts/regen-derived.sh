@@ -67,6 +67,7 @@ GENERATORS=(
   "adr-delivery-checks|python3 .github/scripts/gen-adr-delivery-checks.py|docs/adr/"
   "card-capability-matrix|python3 .github/scripts/gen-card-capability-matrix.py|openbank-libs/governance/card-capabilities.yaml"
   "release-registry|python3 .github/scripts/gen-release-registry.py --write|version.txt"
+  "clickhouse-replay|python3 .github/scripts/clickhouse_replay_plan.py --write|openbank-analytics-sink/src/main/resources/clickhouse/ .github/scripts/clickhouse_replay_plan.py openbank-infra/gitops/components/analytics/ci-gate-runs-schema-configmap.yaml openbank-infra/gitops/components/analytics/cloud-finops-schema-configmap.yaml openbank-infra/gitops/components/analytics/campaign-engagement-schema-configmap.yaml"
   "service-alert-rules|python3 openbank-infra/scripts/gen-service-alert-rules.py|openbank-infra/gitops/components/"
   "slo-dashboard|python3 .github/scripts/gen-slo-dashboard.py|pyrra-slo-money-path.yaml slo-dashboard-base.json"
   "mcp-realm-clients|python3 .github/scripts/gen-mcp-realm-clients.py|mcp-client-allowlist.yaml mcp-clients/"
@@ -97,6 +98,7 @@ DERIVED_OUTPUTS=(
   "docs/cards/capability-matrix.md"
   ".release-please-manifest.json"
   "release-please-config.json"
+  "openbank-infra/gitops/components/analytics/clickhouse-replay-configmap.yaml"
   "openbank-infra/gitops/components/observability/dashboard-openbank-slo.yaml"
   "openbank-infra/gitops/components/*/*-opa-bundle.yaml"
   "openbank-infra/gitops/components/*/*/*-opa-bundle.yaml"
@@ -151,6 +153,7 @@ selftest() {
     {
       ls .github/scripts/gen-*.py 2>/dev/null || true
       ls docs/adr/gen-index.sh 2>/dev/null || true
+      ls .github/scripts/clickhouse_replay_plan.py 2>/dev/null || true
     } | sort
   )
 
