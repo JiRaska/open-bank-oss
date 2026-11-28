@@ -39,6 +39,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check REST quota before optional work
+        id: api-reserve
+        uses: ./.github/actions/optional-api-reserve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
@@ -46,6 +52,7 @@ jobs:
         run: python3 .github/scripts/merge-train-stall-watch.py --self-test
 
       - name: Evaluate and keep the stall issue
+        if: steps.api-reserve.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The triggering run's settle log when it succeeded; otherwise the newest successful one.

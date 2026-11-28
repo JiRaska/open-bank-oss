@@ -70,6 +70,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check REST quota before optional work
+        id: api-reserve
+        uses: ./.github/actions/optional-api-reserve
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
@@ -94,6 +100,7 @@ jobs:
           esac
 
       - name: Name the blocker per lagging service
+        if: steps.api-reserve.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOY_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -129,6 +136,7 @@ jobs:
       # tracker whose lag has resolved (same lesson as deploy-drift-watch, measured
       # 2026-08-08: gating the close on drift left the last issue open forever).
       - name: Escalate code lag per service
+        if: steps.api-reserve.outputs.proceed == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

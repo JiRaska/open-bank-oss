@@ -1,0 +1,12 @@
+name: Optional GitHub API quota admission
+description: Defer optional work when its GitHub API token has insufficient REST core quota
+outputs:
+  proceed:
+    description: Whether the optional work may proceed
+    value: ${{ steps.reserve.outputs.proceed }}
+runs:
+  using: composite
+  steps:
+    - id: reserve
+      shell: bash
+      run: bash "${{ github.action_path }}/check.sh"
