@@ -103,12 +103,13 @@ class CatalogReferenceOfferingSeederIT {
             .body("id", equalTo(productId.toString()))
             .body("status", equalTo("ACTIVE"))
             .body("currency", equalTo("EUR"))
-        given().get(revisionPath).then().statusCode(200)
+        val published = given().get(revisionPath).then().statusCode(200)
             .body("id", equalTo(revisionId))
             .body("offeringId", equalTo(offeringId))
             .body("content.attributes.interest.annualRate", equalTo("0.025"))
             .body("content.prices[0].code", equalTo("MAINT"))
-            .body("content.prices[0].value", equalTo("2.00"))
+            .extract().jsonPath()
+        assertThat(published.getString("content.prices[0].value").toBigDecimal()).isEqualByComparingTo("2.00")
     }
 
     private fun depositDraft(): Pair<String, String>? = dataSource.connection.use { connection ->
