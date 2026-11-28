@@ -23,6 +23,11 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
 
     private enum InitialStage { BINDING, PAGE, AUTHORITY }
 
+    private enum PollRejection {
+        SESSION, AUTHORITY_OR_PAGE, RECEIPT_UNAVAILABLE, RECEIPT_CONTEXT, USER_LOOKUP,
+        USER_NOT_FOUND, USER_DISABLED, REQUIRED_ACTIONS, PARTY_MISMATCH, BROWSER_USER_MISMATCH
+    }
+
     @Override
     public void authenticate(AuthenticationFlowContext ctx) {
         var auth = ctx.getAuthenticationSession();
@@ -59,7 +64,7 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
         String handoffDigest = auth.getAuthNote(McpNotes.NATIVE_HANDOFF);
         if (auth.getAuthNote(McpNotes.BURNED) != null || handoffDigest == null
                 || (form != null && form.containsKey("cancel"))) {
-            refuse(ctx);
+            refusePoll(ctx, PollRejection.SESSION);
             return;
         }
         var issued = McpNativeHandoff.recover(form == null ? null : form.getFirst("handoff"), handoffDigest);
@@ -75,7 +80,7 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
             var binding = binding(ctx, auth, factory);
             poll(ctx, auth, factory.tokenAuthority(), binding, handoffDigest, issued);
         } catch (IOException | WriterException | RuntimeException e) {
-            refuse(ctx);
+            refusePoll(ctx, PollRejection.AUTHORITY_OR_PAGE);
         }
     }
 
@@ -98,7 +103,13 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
         }
         String digest = McpConnectContextV2.of(base, party, binding.parJkt(), accounts).payloadSha256();
         authority.attestNativeSelection(handoffDigest, binding, digest);
-        var receipt = authority.consumeNativeHandoff(handoffDigest, binding);
+        McpConnectAuthorityClient.NativeReceipt receipt;
+        try {
+            receipt = authority.consumeNativeHandoff(handoffDigest, binding);
+        } catch (IOException | RuntimeException e) {
+            refusePoll(ctx, PollRejection.RECEIPT_UNAVAILABLE);
+            return;
+        }
         if (receipt == null) {
             ctx.challenge(page(ctx, null));
             return;
@@ -109,12 +120,17 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
     private static void resolveUser(AuthenticationFlowContext ctx, AuthenticationSessionModel auth, String party,
                                     String digest, McpConnectAuthorityClient.NativeReceipt receipt) {
         var existing = ctx.getUser();
-        var user = ctx.getSession().users().getUserById(ctx.getRealm(), receipt.keycloakSubject());
-        if (!party.equals(receipt.partyId()) || !digest.equals(receipt.contextSha256()) || user == null
-                || !user.isEnabled() || user.getRequiredActionsStream().findAny().isPresent()
-                || !McpWithheldCodeAuthenticator.partyOf(user).map(party::equals).orElse(false)
-                || (existing != null && !existing.getId().equals(user.getId()))) {
-            refuse(ctx);
+        UserModel user;
+        PollRejection rejection;
+        try {
+            user = ctx.getSession().users().getUserById(ctx.getRealm(), receipt.keycloakSubject());
+            rejection = receiptRejection(existing, user, party, digest, receipt);
+        } catch (RuntimeException e) {
+            refusePoll(ctx, PollRejection.USER_LOOKUP);
+            return;
+        }
+        if (rejection != null) {
+            refusePoll(ctx, rejection);
             return;
         }
         ctx.setUser(user);
@@ -123,6 +139,26 @@ final class McpNativeHandoffAuthenticator implements Authenticator {
         auth.setAuthNote(McpNotes.PARTY_ID, party);
         auth.setAuthNote(McpNotes.NATIVE_PROOF, digest);
         ctx.success();
+    }
+
+    private static PollRejection receiptRejection(UserModel existing, UserModel user, String party, String digest,
+                                                   McpConnectAuthorityClient.NativeReceipt receipt) {
+        if (!party.equals(receipt.partyId()) || !digest.equals(receipt.contextSha256())) {
+            return PollRejection.RECEIPT_CONTEXT;
+        }
+        if (user == null) return PollRejection.USER_NOT_FOUND;
+        if (!user.isEnabled()) return PollRejection.USER_DISABLED;
+        if (user.getRequiredActionsStream().findAny().isPresent()) return PollRejection.REQUIRED_ACTIONS;
+        if (!McpWithheldCodeAuthenticator.partyOf(user).map(party::equals).orElse(false)) {
+            return PollRejection.PARTY_MISMATCH;
+        }
+        if (existing != null && !existing.getId().equals(user.getId())) return PollRejection.BROWSER_USER_MISMATCH;
+        return null;
+    }
+
+    private static void refusePoll(AuthenticationFlowContext ctx, PollRejection rejection) {
+        LOG.warnf("MCP native handoff rejected at stage=POLL reason=%s", rejection);
+        refuse(ctx);
     }
 
     private static McpNativeHandoff.Binding binding(AuthenticationFlowContext ctx, AuthenticationSessionModel auth,
