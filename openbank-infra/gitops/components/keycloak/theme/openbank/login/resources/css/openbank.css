@@ -168,3 +168,27 @@ button[aria-label*="password"] {
   border-color: rgba(220, 50, 50, 0.40);
   color: #ff9999;
 }
+
+/* Keycloak's shared standalone error page. */
+#kc-error-message {
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--ob-border);
+  border-inline-start: 3px solid #ff9999;
+  border-radius: 8px;
+  background: var(--ob-card);
+  color: var(--ob-text);
+  overflow-wrap: anywhere;
+}
+
+#kc-error-message .instruction {
+  color: inherit;
+  line-height: 1.5;
+}
+
+#kc-error-message > :last-child {
+  margin-bottom: 0;
+}
+
+#kc-error-message a {
+  text-decoration: underline;
+}
