@@ -2419,6 +2419,7 @@ gates:
       python3 .github/scripts/test-finrep-historical-workflow.py
       python3 .github/scripts/test-prove-finrep-historical-checkout.py
       bash .github/scripts/tests/test-retry-gradle-verification-cache.sh
+      bash .github/actions/optional-api-reserve/test-check.sh
   # A fixture that commits with no identity works on a Mac (git derives one) and fails on the
   # runner (#14697); one that does not neutralise signing fails the other way for anyone whose
   # global config signs. Measured 2026-11-03: 38 git fixtures under .github/scripts, 37 with an

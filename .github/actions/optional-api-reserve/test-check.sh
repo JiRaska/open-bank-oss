@@ -33,3 +33,25 @@ expect false '{"resources":{"graphql":{"limit":5000,"remaining":4000}}}'
 expect false unavailable
 expect false '{}' ''
 printf 'Optional API reserve: 9 cases passed\n'
+
+# Check the action boundary as well as check.sh: a misspelled env key would
+# otherwise make the deployed workflow defer even when the quota is healthy.
+python3 - <<'PY'
+from pathlib import Path
+import yaml
+
+for filename, job, api_step in (
+    ("deploy-code-lag-watch", "watch", "Name the blocker per lagging service"),
+    ("merge-train-stall-watch", "watch", "Evaluate and keep the stall issue"),
+    ("test-evidence-reconcile", "reconcile", "Resolve provable evidence per running image"),
+):
+    path = Path(".github/workflows") / (filename + ".yml")
+    steps = yaml.safe_load(path.read_text())["jobs"][job]["steps"]
+    reserve, = (step for step in steps if step.get("id") == "api-reserve")
+    caller, = (step for step in steps if step.get("name") == api_step)
+    assert reserve["uses"] == "./.github/actions/optional-api-reserve", filename
+    assert reserve["env"]["GH_TOKEN"] == caller["env"]["GH_TOKEN"], filename
+    assert steps.index(reserve) < steps.index(caller), filename
+    assert caller["if"] == "steps.api-reserve.outputs.proceed == 'true'", filename
+print("Optional API reserve: 3 workflow token bindings passed")
+PY

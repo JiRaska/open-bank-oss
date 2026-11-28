@@ -43,7 +43,7 @@ jobs:
         id: api-reserve
         uses: ./.github/actions/optional-api-reserve
         env:
-          GH_secrets.GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: gh-call-counter install
         continue-on-error: true
