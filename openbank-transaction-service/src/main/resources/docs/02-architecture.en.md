@@ -141,15 +141,15 @@ sequenceDiagram
   Note over TS: saga runs → COMPLETED/FAILED →<br/>second outbox row (Completed/Failed)
 
   loop @Scheduled every 5s (SKIP if running)
-    D->>DB: claimProcessable(batch 25)
+    D->>DB: claimWithTokens(batch 25)
     D->>K: publishWithResilience (CircuitBreaker + Retry + Timeout + Bulkhead)
-    D->>DB: markSent / markFailed
+    D->>DB: markClaimsSent / markClaimFailed
   end
 ```
 
 **Why outbox:** transactional consistency between the DB write and Kafka publish. At-least-once delivery; the dispatcher wraps each publish in SmallRye Fault Tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`) and never lets the scheduler crash.
 
-The dispatcher claims rows with an atomic PostgreSQL update. The claim returns the explicit fields mapped by the current outbox entity, including `synthetic`. Adding nullable columns to `transaction_outbox` therefore keeps this dispatcher compatible.
+Outbox v2 (ADR-0327) claims the oldest unsent event per aggregate. Independent aggregates dispatch concurrently. Acknowledgement requires the current claim token, failed sends back off, and exhausted rows move to `DEAD`. Delivery remains at least once and consumers deduplicate by event ID. The v2 cutover quiesces the previous dispatcher before activating the new one.
 
 ## Key ports
 
