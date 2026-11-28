@@ -5897,7 +5897,10 @@ gates:
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-clickhouse-ddl-in-configmap.py"]
+    selftest_inputs:
+      - .github/scripts/check-clickhouse-ddl-in-configmap.py
+      - .github/scripts/clickhouse_replay_plan.py
+      - .github/scripts/clickhouse_replay_plan_test.py
     run: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
 

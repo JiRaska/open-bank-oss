@@ -68,6 +68,21 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 - **GDPR erasure request:** `POST /api/v1/analytics/erasure`; expect either a crypto-shred or a documented refusal under statutory hold.
 - **Integrity challenge:** re-derive leaf hashes from `bronze_events` and verify they reproduce each `integrity_anchors.merkle_root` (authoritative copy in WORM/S3 Object Lock).
 
+## Warehouse schema replay
+
+The PostSync schema job consumes a generated statement plan, not the historical migration sequence.
+Regenerate it with `python3 .github/scripts/clickhouse_replay_plan.py --write` after changing SQL inputs.
+Tables and additive columns/indexes precede the final dependency-ordered view definitions. Views are
+reconciled with `CREATE OR REPLACE VIEW`, including correction of divergent manual definitions.
+The separate campaign supplement must match an exact historical definition and cannot overwrite the
+newer authoritative view. CI and FinOps keep their separate table ownership.
+
+Each statement commits independently. Replaying an interrupted plan is idempotent; on a mature
+catalog its prefixes preserve the final view definitions. An older-schema upgrade is incremental,
+not an atomic cutover. Rollback must retain the safe replay plan or stop schema replay while a
+reviewed forward correction is prepared; reverting to the historical replay job reintroduces the
+intermediate view downgrade. This plan does not delete tables or business rows.
+
 ## Follow-ups (TBD)
 
 - No checked-in `openapi.yaml` + contract test yet (see [03 — API](./03-api.md)).

@@ -68,6 +68,21 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 - **GDPR žádost o výmaz:** `POST /api/v1/analytics/erasure`; očekávej buď crypto-shred, nebo doložené odmítnutí pod zákonným hold.
 - **Integrity challenge:** přepočítej leaf hashe z `bronze_events` a ověř, že reprodukují každý `integrity_anchors.merkle_root` (autoritativní kopie ve WORM/S3 Object Lock).
 
+## Opakované aplikování schématu warehouse
+
+PostSync job používá generovaný plán příkazů místo historické posloupnosti migrací.
+Po změně SQL vstupů jej obnov příkazem `python3 .github/scripts/clickhouse_replay_plan.py --write`.
+Tabulky a doplnění sloupců/indexů předcházejí konečným definicím views v pořadí závislostí.
+`CREATE OR REPLACE VIEW` opravuje i ručně odchýlené definice. Samostatný campaign doplněk musí
+odpovídat přesné historické definici a nesmí přepsat novější autoritativní view.
+CI a FinOps zachovávají oddělené vlastnictví tabulek.
+
+Každý příkaz se potvrzuje samostatně. Přerušený plán lze idempotentně opakovat; na již aktuálním
+katalogu jeho prefixy zachovávají konečné definice views. Upgrade starého schématu je postupný,
+nikoli atomické přepnutí. Rollback musí zachovat bezpečný plán nebo zastavit jeho aplikování do
+připravení revidované dopředné opravy; návrat historického replay jobu obnoví dočasné starší views.
+Plán nemaže tabulky ani obchodní řádky.
+
 ## Follow-upy (TBD)
 
 - Zatím žádný verzovaný `openapi.yaml` + contract test (viz [03 — API](./03-api.md)).
