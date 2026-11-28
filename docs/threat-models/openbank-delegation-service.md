@@ -77,6 +77,10 @@ and require a human operator plus OPA; client applications do not receive a bank
     selecting accounts, listing connections and revoking them. The dedicated balance reader
     can only recheck its live grant. Delegation reads the consumed SCA receipt over the configured
     HTTPS client using the delegation-service workload credential. Consent endpoints default to disabled.
+11. delegation-service → private KYB authority listener (#10247). KYB requires a trusted client
+    certificate and an OIDC bearer on 8443. The generated policy admits only the Delegation
+    workload on that port and preserves existing KYB HTTP peers on 8157. Statutory collection
+    remains disabled until the deployed KYB authority route and named bearer policy are verified.
 
 ## Threats and mitigations
 
