@@ -3,7 +3,7 @@ kotlin = "2.4.21"
 quarkus = "3.40.1.2"
 quarkus-plugin = "3.40.1.2"
 # Transaction pilot only; other workers retain 1.25.1 until their versioned rollout.
-temporal = "1.40.0"
+temporal = "1.41.1"
 coroutines = "1.11.0"
 # 2.22.3 (Dependabot #158-#160; was 2.22.1 per #75): 2.22.0/2.22.1 carry GHSAs fixed by 2.22.2 — same
 # patch series Quarkus 3.37.2's BOM resolves jackson-databind/jackson-core to
@@ -15,7 +15,7 @@ jackson = "2.23.0"
 # 0.31.x switched ObjectConverter to the Jackson 3 "tools.jackson" fork, which conflicts
 # with Quarkus 3.37's Jackson 2.x (jackson-databind/jackson-core, pinned above); 0.28.5
 # is the newest release still on classic com.fasterxml.jackson.
-webauthn4j = "0.28.5.RELEASE"
+webauthn4j = "0.31.0.RELEASE"
 # JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
 # Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
 # hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.
@@ -53,7 +53,7 @@ ktlint-plugin = "14.2.0"
 # adapter. 2.29.52 is a recent stable 2.x pin at time of writing — verify/bump via
 # Dependabot rather than treating it as hand-curated forever. S3Presigner ships inside
 # this same `s3` artifact in SDK v2, so no separate presigner module is needed.
-aws-sdk = "2.59.1"
+aws-sdk = "2.59.5"
 # Handlebars.java, Apache-2.0 (ADR-0162 D2): the logic-less template engine behind
 # openbank-document-service's TemplateRenderPort. No custom helpers are ever registered
 # (see HandlebarsTemplateRenderer) — that is what keeps it free of arbitrary code

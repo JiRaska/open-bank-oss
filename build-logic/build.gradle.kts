@@ -50,7 +50,7 @@ dependencies {
     compileOnly("io.quarkus:quarkus-gradle-model:$quarkusVersion")
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:$cyclonedxVersion")
     // Public model-builder API; the existing Quarkus/CycloneDX runtime selects 3.9.16.
-    compileOnly("org.apache.maven:maven-model-builder:3.10.1")
+    compileOnly("org.apache.maven:maven-model-builder:3.10.2")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:$koverVersion")
     // Static analysis (SAST gate), applied fleet-wide by the openbank.static-analysis
     // convention plugin. Only ktlint is a Gradle plugin here — detekt is invoked as a
@@ -88,28 +88,28 @@ configurations.all {
         // Kover's coverage reporter otherwise resolves FreeMarker 2.3.32, vulnerable to template
         // path traversal (GHSA-27j2-h3m2-8237, fixed in 2.3.35). Build-time classpath only.
         force("org.freemarker:freemarker:2.3.35")
-        force("org.codehaus.plexus:plexus-utils:4.1.0")
+        force("org.codehaus.plexus:plexus-utils:4.2.0")
         force("com.fasterxml.jackson.core:jackson-databind:2.23.0")
         force("com.fasterxml.jackson.core:jackson-core:2.23.0")
         // Match the platform and runtime security floor across the complete Netty family.
-        force("io.netty:netty-buffer:4.2.20.Final")
-        force("io.netty:netty-codec-dns:4.2.20.Final")
-        force("io.netty:netty-codec-socks:4.2.20.Final")
-        force("io.netty:netty-resolver:4.2.20.Final")
-        force("io.netty:netty-transport:4.2.20.Final")
-        force("io.netty:netty-transport-classes-epoll:4.2.20.Final")
-        force("io.netty:netty-transport-classes-kqueue:4.2.20.Final")
-        force("io.netty:netty-transport-native-unix-common:4.2.20.Final")
-        force("io.netty:netty-codec:4.2.20.Final")
-        force("io.netty:netty-codec-http:4.2.20.Final")
-        force("io.netty:netty-codec-http2:4.2.20.Final")
-        force("io.netty:netty-codec-haproxy:4.2.20.Final")
-        force("io.netty:netty-common:4.2.20.Final")
-        force("io.netty:netty-handler:4.2.20.Final")
-        force("io.netty:netty-handler-proxy:4.2.20.Final")
-        force("io.netty:netty-resolver-dns:4.2.20.Final")
-        force("io.netty:netty-transport-native-epoll:4.2.20.Final")
-        force("io.netty:netty-transport-native-kqueue:4.2.20.Final")
+        force("io.netty:netty-buffer:4.2.21.Final")
+        force("io.netty:netty-codec-dns:4.2.21.Final")
+        force("io.netty:netty-codec-socks:4.2.21.Final")
+        force("io.netty:netty-resolver:4.2.21.Final")
+        force("io.netty:netty-transport:4.2.21.Final")
+        force("io.netty:netty-transport-classes-epoll:4.2.21.Final")
+        force("io.netty:netty-transport-classes-kqueue:4.2.21.Final")
+        force("io.netty:netty-transport-native-unix-common:4.2.21.Final")
+        force("io.netty:netty-codec:4.2.21.Final")
+        force("io.netty:netty-codec-http:4.2.21.Final")
+        force("io.netty:netty-codec-http2:4.2.21.Final")
+        force("io.netty:netty-codec-haproxy:4.2.21.Final")
+        force("io.netty:netty-common:4.2.21.Final")
+        force("io.netty:netty-handler:4.2.21.Final")
+        force("io.netty:netty-handler-proxy:4.2.21.Final")
+        force("io.netty:netty-resolver-dns:4.2.21.Final")
+        force("io.netty:netty-transport-native-epoll:4.2.21.Final")
+        force("io.netty:netty-transport-native-kqueue:4.2.21.Final")
     }
 }
 
