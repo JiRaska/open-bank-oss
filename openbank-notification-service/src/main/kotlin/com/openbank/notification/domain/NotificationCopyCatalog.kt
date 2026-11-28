@@ -105,6 +105,13 @@ object NotificationCopyCatalog {
         NotificationTemplate.SCA_APPROVAL ->
             "Approve your payment" to
                 "<p>${vars.v("detail").ifBlank { "You have a payment waiting for your approval." }}</p>"
+        NotificationTemplate.MCP_CONNECT_APPROVAL -> if (language == NotificationLanguage.CS) {
+            "Potvrďte připojení AI asistenta" to
+                "<p>Otevřete aplikaci OpenBank a zkontrolujte žádost o připojení AI asistenta.</p>"
+        } else {
+            "Review your AI assistant connection" to
+                "<p>Open the OpenBank app to review the AI assistant connection request.</p>"
+        }
         NotificationTemplate.MARKETING_PRODUCT_OFFER ->
             vars.v("offerTitle") to
                 "<h2>${vars.v("offerTitle")}</h2><p>${vars.v("offerText")}</p>" +

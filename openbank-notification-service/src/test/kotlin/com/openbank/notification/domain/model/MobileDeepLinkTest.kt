@@ -77,4 +77,14 @@ class MobileDeepLinkTest {
         assertThat(MobileDeepLink.isAllowed("openbank://delegationsX/$id")).isFalse()
         assertThat(MobileDeepLink.isAllowed("Openbank://delegations/$id")).isFalse()
     }
+
+    @Test
+    fun `an MCP link admits only an exact canonical request reference`() {
+        val reference = "ab".repeat(32)
+        val link = "openbank://mcp/connect/$reference"
+        assertThat(MobileDeepLink.isAllowed(link)).isTrue()
+        listOf("$link/", "$link?ref=other", "$link#handoff=secret", link.uppercase(), link.dropLast(1)).forEach {
+            assertThat(MobileDeepLink.isAllowed(it)).isFalse()
+        }
+    }
 }

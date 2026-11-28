@@ -39,4 +39,17 @@ class NotificationCopyCatalogTest {
         assertThat(NotificationCopyCatalog.render(t, pension, null))
             .isEqualTo(NotificationCopyCatalog.render(t, pension, NotificationLanguage.EN))
     }
+
+    @Test
+    fun `MCP approval copy is localized and describes a connection`() {
+        val mcp = NotificationTemplate.MCP_CONNECT_APPROVAL
+        assertThat(mcp.variables).isEmpty()
+        assertThat(mcp.category.name).isEqualTo("SECURITY")
+        assertThat(NotificationCopyCatalog.render(mcp, emptyMap(), NotificationLanguage.CS).first)
+            .isEqualTo("Potvrďte připojení AI asistenta")
+        assertThat(NotificationCopyCatalog.render(mcp, emptyMap(), NotificationLanguage.EN).first)
+            .isEqualTo("Review your AI assistant connection")
+        assertThat(NotificationCopyCatalog.render(NotificationTemplate.SCA_APPROVAL, emptyMap(), null).first)
+            .isEqualTo("Approve your payment")
+    }
 }

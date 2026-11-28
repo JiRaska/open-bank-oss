@@ -40,12 +40,14 @@ class NotificationModelTest {
         // +1 for DELEGATION_FIRST_USE and +1 for the reminder-only recertification task = 23.
         // +5 for the #10281 multi-signature approval templates = 28.
         // +6 pension notices and +1 owner-configured low-balance alert = 35.
-        assertThat(NotificationTemplate.values()).hasSize(35)
+        // +1 for the dedicated MCP Connect approval SECURITY notification.
+        assertThat(NotificationTemplate.values()).hasSize(36)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
             NotificationTemplate.WELCOME,
             NotificationTemplate.SCA_APPROVAL,
+            NotificationTemplate.MCP_CONNECT_APPROVAL,
             NotificationTemplate.MARKETING_PRODUCT_OFFER,
             NotificationTemplate.DELEGATION_OFFERED,
             NotificationTemplate.DELEGATION_ACCEPTED,

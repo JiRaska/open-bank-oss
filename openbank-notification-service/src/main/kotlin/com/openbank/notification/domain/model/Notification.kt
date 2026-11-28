@@ -58,6 +58,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
     /** Decoupled/push SCA — "you have a payment to approve" (#4). [detail] = the human summary. */
     SCA_APPROVAL(setOf("detail")),
 
+    /** Review an AI-assistant connection in the bank app. Carries no variable content. */
+    MCP_CONNECT_APPROVAL(emptySet()),
+
     /**
      * ADR-0200/0201 first-slice marketing template: a product/offer communication composed by
      * campaign-service from catalogue variables only. The closed variable schema is the ADR-0176 D4
@@ -189,6 +192,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             OTP_CODE,
             WELCOME,
             SCA_APPROVAL,
+            MCP_CONNECT_APPROVAL,
             MARKETING_PRODUCT_OFFER,
             DELEGATION_OFFERED,
             DELEGATION_ACCEPTED,
@@ -218,7 +222,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
      */
     val category: NotificationCategory
         get() = when (this) {
-            OTP_CODE, ACCOUNT_FROZEN, SCA_APPROVAL,
+            OTP_CODE, ACCOUNT_FROZEN, SCA_APPROVAL, MCP_CONNECT_APPROVAL,
             KYC_APPROVED, KYC_REJECTED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
@@ -304,6 +308,7 @@ data class NotificationRequest(
 object MobileDeepLink {
     private const val DELEGATION_DETAIL_PREFIX = "openbank://delegations/"
     private const val BUSINESS_APPROVAL_DETAIL_PREFIX = "openbank://business/approvals/"
+    private val mcpConnectLink = Regex("openbank://mcp/connect/[0-9a-f]{64}")
     private const val ENTITY_QUERY = "?entity="
 
     private val allowed = setOf(
@@ -317,7 +322,10 @@ object MobileDeepLink {
     fun isAllowed(value: String?): Boolean = value == null ||
         value in allowed ||
         isCanonicalDetail(value, DELEGATION_DETAIL_PREFIX) ||
-        isCanonicalBusinessApproval(value)
+        isCanonicalBusinessApproval(value) ||
+        isMcpConnect(value)
+
+    fun isMcpConnect(value: String): Boolean = mcpConnectLink.matches(value)
 
     /**
      * Builds the approval-detail link (#10281). With [entityPartyId] the app switches straight to
